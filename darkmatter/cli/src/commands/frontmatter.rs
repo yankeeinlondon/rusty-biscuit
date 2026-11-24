@@ -264,6 +264,7 @@ fn set_checked(
         summary: format!("`{}` was not set", path.as_written()),
         description: description_of(&md),
         source: None,
+        expression_origins: Default::default(),
     }
     .into())
 }
@@ -348,6 +349,7 @@ fn schema_failure(document: &Markdown, error: SchemaError) -> Report {
         summary: error.to_string(),
         description: description_of(document),
         source: Some(Box::new(error)),
+        expression_origins: Default::default(),
     }
     .into()
 }

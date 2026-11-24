@@ -5,9 +5,9 @@ When you set a frontmatter property on any file (spec, plan, review, log):
 
 - first read the file's current frontmatter
 - if the key already exists, **replace its value in place**; never add a second copy of the key
-    - this includes multi-line values (`|-` blocks such as `message_to_agent`): replace the whole old block, down to the next top-level key
+    - this includes multi-line values (`|-` blocks such as `message-to-agent`): replace the whole old block, down to the next top-level key
 - if the key does not exist, add it as a new top-level key just before the closing `---`
-    - never anchor an edit on a line inside `$schema:` (for example its `pipeline_step: number -> …` line); those lines describe the properties and are not the properties themselves
+    - never anchor an edit on a line inside `$schema:` (for example its `pipeline-step: number -> …` line); those lines describe the properties and are not the properties themselves
 - edit only the keys you were asked to set; never re-paste the frontmatter, or a run of its keys, to change one of them
 - do not use `md set` to write frontmatter: it reorders and re-indents the whole block
 

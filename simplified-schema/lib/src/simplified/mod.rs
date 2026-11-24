@@ -34,7 +34,8 @@ pub use definitions::{
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,
 };
 pub use cursor::{
-    SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
+    CompositionOperandPart, SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_composition_operand_cursor,
+    locate_composition_operand_cursor_in_scalar, locate_schema_declaration_cursor,
     locate_schema_declaration_cursor_in_scalar, locate_type_definition_cursor,
     locate_type_definition_cursor_in_scalar,
 };
@@ -51,25 +52,26 @@ pub use source::{
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
     locate_standalone_definition_failure,
     mapping_separator,
-    parse_property_definition_with_source, parse_schema_declaration_with_source,
+    parse_property_definition_with_source, parse_schema_declaration_with_source, parse_schema_table_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
 pub use source::locate_frontmatter_value;
 pub(crate) use source::{LocatedSchemaValue, parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
-    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
-    parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
+    NamespaceSchemaDocument, SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    parse_namespace_schema_document, parse_selected_standalone_schema_document, parse_standalone_schema_document,
+    parse_standalone_schema_document_with_mode,
 };
 pub use types::{
-    CallExample, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaShape,
+    CallExample, CompositionOperand, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, Extends, FunctionParameter,
+    FunctionParameters, FunctionType, InlineSpread, LOCAL_REFERENCE, ObjectComposition, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaShape,
     SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, TemplateConstraintKind, operands_verb,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;
 pub use yaml_scalar::{
     DecodedScalar, decode_alias_definition, decode_partial_scalar_at, decode_scalar,
-    decode_plain_scalar_node, decode_scalar_at, decode_scalar_node,
+    decode_plain_scalar_node, decode_scalar_at, decode_scalar_node, decode_scalar_node_prefix,
 };
 
 use indexmap::IndexMap;
@@ -99,6 +101,22 @@ pub enum SchemaDeclaration {
 /// grammar.
 pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
     parse_schema_declaration_located(value).map_err(SchemaError::from)
+}
+
+/// Parses one complete declaration whose outer mapping is a table of named
+/// declarations: a `types` table, or a `schema(mapping)` value.
+///
+/// Each entry is a named declaration, so `$extends` is an ordinary name,
+/// while `$constraints` and pattern keys are refused: a table has no object
+/// of its own for them to apply to. Every entry's mapping is read as a
+/// schema object, exactly as [`parse_schema_declaration`] reads one.
+///
+/// ## Errors
+///
+/// As [`parse_schema_declaration`], plus a [`SchemaError::Grammar`] for a
+/// `$constraints` or pattern key written directly in the table.
+pub fn parse_schema_table(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
+    parse_schema_declaration_located_as(value, MappingMode::Table).map_err(SchemaError::from)
 }
 
 /// A semantic failure from the shared schema parser together with the
@@ -134,6 +152,37 @@ impl From<DefinitionFailure> for SchemaError {
 pub(crate) fn parse_schema_declaration_located(
     value: &YamlValue,
 ) -> Result<SchemaDeclaration, DefinitionFailure> {
+    parse_schema_declaration_located_as(value, MappingMode::Object)
+}
+
+/// How the outer mapping of a declaration is read.
+///
+/// A schema object reserves `$extends` for composition. A standalone `types`
+/// table is a table of named declarations, where `$extends` is an ordinary
+/// key and the object-only `$constraints` and pattern keys are refused; only
+/// that outer mapping is a table, and every entry value is read as a schema
+/// object again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MappingMode {
+    /// A schema object mapping.
+    Object,
+    /// A `types` table of named declarations.
+    Table,
+}
+
+impl MappingMode {
+    /// The mode of the standalone carrier `key`: `types` is a table, and
+    /// every other carrier (`$schema`) a schema object.
+    pub(crate) fn of_carrier(key: &str) -> Self {
+        if key == "types" { Self::Table } else { Self::Object }
+    }
+}
+
+/// [`parse_schema_declaration_located`], reading the outer mapping in `mode`.
+pub(crate) fn parse_schema_declaration_located_as(
+    value: &YamlValue,
+    mode: MappingMode,
+) -> Result<SchemaDeclaration, DefinitionFailure> {
     let root = SchemaSourcePath::root();
     if let YamlValue::String(reference) = value {
         refuse_root_slot(reference, grammar::SlotPosition::Root, "<root>", &root)?;
@@ -141,7 +190,7 @@ pub(crate) fn parse_schema_declaration_located(
             .map(SchemaDeclaration::Reference)
             .map_err(DefinitionFailure::at(&root));
     }
-    let schema = parse_yaml_schema_located(value)?;
+    let schema = parse_yaml_schema_located_as(value, mode)?;
     if let SchemaRoot::Union(arms) = &schema {
         for (index, arm) in arms.iter().enumerate() {
             if let SchemaArm::FileRef(reference) = arm {
@@ -177,10 +226,19 @@ pub fn parse_yaml_schema(value: &YamlValue) -> Result<SchemaRoot, SchemaError> {
 pub(crate) fn parse_yaml_schema_located(
     value: &YamlValue,
 ) -> Result<SchemaRoot, DefinitionFailure> {
+    parse_yaml_schema_located_as(value, MappingMode::Object)
+}
+
+/// [`parse_yaml_schema_located`], reading a root mapping in `mode`. Root-union
+/// arms are always schema objects.
+fn parse_yaml_schema_located_as(
+    value: &YamlValue,
+    mode: MappingMode,
+) -> Result<SchemaRoot, DefinitionFailure> {
     let root = SchemaSourcePath::root();
     match value {
         YamlValue::Mapping(_) => Ok(SchemaRoot::Single(parse_schema_shape(
-            "<root>", value, 0, &root,
+            "<root>", value, 0, &root, mode,
         )?)),
         YamlValue::Sequence(items) => {
             let mut arms = Vec::with_capacity(items.len());
@@ -189,7 +247,7 @@ pub(crate) fn parse_yaml_schema_located(
                 let arm_path = root.union_arm(idx);
                 let arm = match item {
                     YamlValue::Mapping(_) => {
-                        SchemaArm::Inline(parse_schema_shape(&label, item, 0, &arm_path)?)
+                        SchemaArm::Inline(parse_schema_shape(&label, item, 0, &arm_path, MappingMode::Object)?)
                     }
                     YamlValue::String(s) => {
                         refuse_root_slot(s, grammar::SlotPosition::RootUnionArm, &label, &arm_path)?;
@@ -345,12 +403,14 @@ pub(crate) fn parse_property_definition_located(
 /// callers re-read the text before trusting it ([`crate::slots::unquoted_slot_hint`]).
 pub(crate) const NON_STRING_PROPERTY_NAME: &str = "property names must be strings";
 
-/// Parses one schema object whose structural path is `path`.
+/// Parses one schema object (or, in [`MappingMode::Table`], a `types`
+/// table) whose structural path is `path`.
 fn parse_schema_shape(
     context: &str,
     value: &YamlValue,
     nested_object_depth: usize,
     path: &SchemaSourcePath,
+    mode: MappingMode,
 ) -> Result<SchemaShape, DefinitionFailure> {
     let map = value.as_mapping().ok_or_else(|| {
         DefinitionFailure::at(path)(SchemaError::Grammar {
@@ -364,6 +424,7 @@ fn parse_schema_shape(
     let mut properties: IndexMap<String, PropertyDef> = IndexMap::with_capacity(map.len());
     let mut pattern_keys: Vec<types::PatternKeyDef> = Vec::new();
     let mut constraints: Vec<Constraint> = Vec::new();
+    let mut composition = None;
     for (key, val) in map {
         let key_str = key.as_str().ok_or_else(|| {
             DefinitionFailure::at(path)(SchemaError::Grammar {
@@ -378,12 +439,40 @@ fn parse_schema_shape(
         // matching. It is reserved only inside authored schema objects, so it
         // imposes no restriction on user frontmatter data.
         refuse_key_slot(key_str, context, path)?;
+        // A table has no object of its own for these to apply to: in a
+        // `types`-only document they would bind the payload root, and beside
+        // a `$schema` nothing reads them.
+        if mode == MappingMode::Table {
+            let construct = if key_str == "$constraints" {
+                Some("`$constraints`".to_string())
+            } else if types::PatternKey::is_pattern_key(key_str) {
+                Some(format!("pattern key `{key_str}`"))
+            } else {
+                None
+            };
+            if let Some(construct) = construct {
+                return Err(DefinitionFailure::at(&path.property(key_str))(SchemaError::Grammar {
+                    property: key_str.to_string(),
+                    message: format!(
+                        "a `types` table holds named declarations; {construct} belongs inside a declaration's object"
+                    ),
+                    span: 0..0,
+                    related: Vec::new(),
+                }));
+            }
+        }
         if key_str == "$constraints" {
             constraints.append(&mut parse_dollar_constraints(
                 context,
                 val,
                 &path.property(key_str),
             )?);
+            continue;
+        }
+        // `$extends` is reserved schema metadata too, in every schema object
+        // (quoted or not); a `types` table keeps it as a type name.
+        if key_str == "$extends" && mode == MappingMode::Object {
+            composition = Some(Box::new(types::ObjectComposition::Extends(parse_extends(val, &path.property(key_str))?)));
             continue;
         }
         // Pattern / dictionary keys (`<string>`, `<starting::…>`, …) collect
@@ -419,7 +508,60 @@ fn parse_schema_shape(
         properties,
         pattern_keys,
         constraints,
+        composition,
+        ..Default::default()
     })
+}
+
+/// The label a `$extends` operand's errors name.
+const EXTENDS: &str = "$extends";
+
+/// Parses the value of a `$extends` directive whose path is `path`: one
+/// operand string, or a nonempty sequence of them. A rejected carrier is
+/// attributed to `path`, a rejected item to its index under it.
+fn parse_extends(value: &YamlValue, path: &SchemaSourcePath) -> Result<types::Extends, DefinitionFailure> {
+    let carrier = |message: String| {
+        DefinitionFailure::at(path)(SchemaError::Grammar {
+            property: EXTENDS.into(),
+            message,
+            span: 0..0,
+            related: Vec::new(),
+        })
+    };
+    match value {
+        YamlValue::String(text) => grammar::parse_extends_operand(EXTENDS, text)
+            .map(types::Extends::Scalar)
+            .map_err(DefinitionFailure::at(path)),
+        YamlValue::Sequence(items) if items.is_empty() => {
+            Err(carrier("`$extends` needs at least one named object type; remove it or list a type".into()))
+        }
+        YamlValue::Sequence(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let item_path = path.union_arm(index);
+                match item {
+                    YamlValue::String(text) => {
+                        grammar::parse_extends_operand(EXTENDS, text).map_err(DefinitionFailure::at(&item_path))
+                    }
+                    other => Err(DefinitionFailure::at(&item_path)(SchemaError::Grammar {
+                        property: EXTENDS.into(),
+                        message: format!(
+                            "`$extends` item [{index}] must be a named object type string, got {}",
+                            describe_yaml(other)
+                        ),
+                        span: 0..0,
+                        related: Vec::new(),
+                    })),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(types::Extends::Sequence),
+        other => Err(carrier(format!(
+            "`$extends` must be a named object type or a nonempty list of them, got {}",
+            describe_yaml(other)
+        ))),
+    }
 }
 
 /// Parses a reserved `$constraints` metadata mapping (block-form object arity,
@@ -725,7 +867,7 @@ fn parse_mapping_atom(
             related: Vec::new(),
         }));
     }
-    let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path)?;
+    let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path, MappingMode::Object)?;
     // A block `required` / `generated` on a property's object means the same
     // as the postfix on that property, so it moves onto the atom where every
     // presence consumer (`is_required`, phase projection, lowering) reads it.

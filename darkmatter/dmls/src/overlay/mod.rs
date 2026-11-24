@@ -22,6 +22,7 @@ pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
 pub mod hosts;
+pub(crate) mod properties;
 pub mod named_types;
 pub mod references;
 pub mod registry;
@@ -150,6 +151,11 @@ fn file_failures(error: &SchemaError) -> FileFailures {
                 walk(source, out);
                 path
             }
+            // The operand's target file failed: its cause names the file.
+            SchemaError::CompositionReference { source, .. } | SchemaError::ComposedMember { source, .. } => {
+                walk(source, out);
+                return;
+            }
             SchemaError::SchemaDocument { path, .. } => path,
             _ => return,
         };
@@ -238,6 +244,10 @@ pub struct DocumentOverlay {
     /// [`DocumentContext::host_view`](crate::providers::DocumentContext::host_view)
     /// serves without selection.
     pub host: Option<Arc<hosts::HostView>>,
+    /// The slot worker's current observation of the document's eligible
+    /// whole-value properties ([`properties`]); `None` while none is
+    /// installed for this text, or the installed one is stale.
+    pub properties: Option<Arc<crate::slot_jobs::PropertyView>>,
 }
 
 /// How a template schema is being served to a request.
@@ -316,6 +326,7 @@ impl DocumentOverlay {
             yaml_document: None,
             slots: None,
             host: None,
+            properties: None,
         }
         .with_yaml(yaml)
     }
@@ -441,12 +452,14 @@ pub struct TriggerDiagnosticTransition {
 
 struct CachedSchema {
     key: u64,
-    /// Each dependency file with the xxHash of its bytes at assembly time. The
+    /// Each dependency file with the xxHash of its text at assembly time, its
+    /// open buffer's when one is open. The
     /// set covers the effective schema's dependencies (imports, examples, and the
     /// referenced `$schema` file itself), the extension-baseline files (each
     /// matched extension's own path and the types it imports), the files the
-    /// named-type catalog read, and — for a failed assembly — the schema files
-    /// its error names. A cache hit
+    /// named-type catalog read, every schema source the resolver read (named-type
+    /// and composition targets, transitively), and — for a failed assembly — the
+    /// schema files its error names. A cache hit
     /// additionally requires every entry to re-hash to the same value, so editing
     /// a referenced schema file, an imported types file, a referenced example, or
     /// a configured extension baseline invalidates the bundle even when the
@@ -458,6 +471,9 @@ struct CachedSchema {
     /// existed there at assembly. A hit also requires each to be unchanged, so
     /// creating a nearer candidate or deleting the selected one reselects.
     probes: Vec<(PathBuf, bool)>,
+    /// Every location the resolver probed during assembly, with whether a
+    /// file or open buffer was there, so creating a missing import refreshes.
+    searched: Vec<(PathBuf, bool)>,
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
     schema_references: Arc<SchemaReferenceFacts>,
@@ -483,6 +499,9 @@ struct FrontmatterSchema {
     /// The document's selected host, chosen with the outcome; `None` with
     /// no context.
     host: Option<Arc<hosts::HostView>>,
+    /// The slot worker's current observation of this text's eligible
+    /// properties.
+    properties: Option<Arc<crate::slot_jobs::PropertyView>>,
 }
 
 impl FrontmatterSchema {
@@ -496,6 +515,7 @@ impl FrontmatterSchema {
             key: None,
             slots: None,
             host: None,
+            properties: None,
         }
     }
 }
@@ -632,6 +652,7 @@ impl OverlayState {
                 key: schema_key,
                 slots: slot_status,
                 host,
+                properties: observed_properties,
             } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
@@ -699,6 +720,7 @@ impl OverlayState {
                 yaml_document: None,
                 slots: slot_status,
                 host,
+                properties: observed_properties.filter(|_| !stale),
             });
         }
 
@@ -764,6 +786,7 @@ impl OverlayState {
                         yaml_document: None,
                         slots: None,
                         host: None,
+                        properties: None,
                     });
                 }
                 // The selected definition's report owns the shape of a
@@ -796,6 +819,7 @@ impl OverlayState {
                             yaml_document: None,
                             slots: None,
                             host: None,
+                            properties: None,
                         });
                     }
                 }
@@ -859,6 +883,7 @@ impl OverlayState {
                     yaml_document: None,
                     slots: None,
                     host: None,
+                    properties: None,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -915,6 +940,7 @@ impl OverlayState {
                     yaml_document: None,
                     slots: None,
                     host: None,
+                    properties: None,
                 });
             }
         }
@@ -1457,10 +1483,12 @@ impl OverlayCache {
         // the key also carries the snapshot's state.
         let view = slots.view(path);
         let key = base_key ^ slot_key_part(view.generation);
+        let sources = self.triggers.source_buffers().clone();
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
-            && deps_unchanged(&cached.deps)
+            && yaml_document::deps_unchanged(&cached.deps, &sources)
             && probes_unchanged(&cached.probes)
+            && yaml_document::probes_unchanged(&cached.searched, &sources)
         {
             if matches!(cached.outcome, SchemaOutcome::Ready(Some(_))) {
                 validation_timing::note_assembly(true);
@@ -1474,6 +1502,7 @@ impl OverlayCache {
                 key: Some(key),
                 slots: cached.slots.clone(),
                 host: cached.host.clone(),
+                properties: current_properties(&view, base_key),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -1493,8 +1522,14 @@ impl OverlayCache {
             .as_ref()
             .map(|installed| &installed.hosts)
             .filter(|hosts| !hosts.is_empty());
-        let assembled = validation_timing::part(|| {
-            schema::assemble(path, text, config, workspace_roots, registry, registered, context, slot_use)
+        // Open buffers stand in for their files, as they do for a schema
+        // document's own resolution (`standalone_named_types`).
+        let (assembled, observed) = buffers::with(&sources, || {
+            observed::collect(|| {
+                validation_timing::part(|| {
+                    schema::assemble(path, text, config, workspace_roots, registry, registered, context, slot_use)
+                })
+            })
         });
         let (outcome, pins_missed, template_shape, template) = match assembled {
             Ok(bundle) => (SchemaOutcome::Ready(bundle.map(Arc::new)), false, None, None),
@@ -1535,8 +1570,12 @@ impl OverlayCache {
                 SchemaOutcome::Ready(None) => false,
             };
         let mut key = key;
-        let slot_status = templated.then(|| {
-            let demanded = slots.demand(path, base_key, pins_missed, || crate::slot_jobs::JobInputs {
+        // Eligible whole-value properties are observed by the slot worker
+        // too, so a document whose schema is no template still gets a job.
+        let property_sites = properties::sites_to_observe(text);
+        let observes = !property_sites.is_empty();
+        let demanded = (templated || observes)
+            && slots.demand_with(path, base_key, pins_missed, observes, || crate::slot_jobs::JobInputs {
                 uri: uri.clone(),
                 text: text.to_string(),
                 config: config.clone(),
@@ -1544,18 +1583,34 @@ impl OverlayCache {
                 registry: job_registry,
                 context: context.clone(),
                 buffers: self.triggers.source_buffers().clone(),
+                templated,
+                property_sites,
+                registered_hosts: registered.cloned(),
             });
-            if demanded {
-                key = base_key ^ slot_key_part(slots.view(path).generation);
-            }
-            SlotStatus {
-                refreshing: view.refreshing || demanded,
-                unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
-                template_shape,
-                template,
-            }
+        let view = if demanded {
+            let view = slots.view(path);
+            key = base_key ^ slot_key_part(view.generation);
+            view
+        } else {
+            view
+        };
+        let properties = current_properties(&view, base_key);
+        let slot_status = templated.then(|| SlotStatus {
+            refreshing: view.refreshing || demanded,
+            unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
+            template_shape,
+            template,
         });
-        let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
+        let named_types =
+            Arc::new(buffers::with(&sources, || frontmatter_named_types(text, path, &schema_roots, context)));
+        let searched = observed
+            .searched
+            .into_iter()
+            .map(|probe| {
+                let present = yaml_document::present(&probe, &sources);
+                (probe, present)
+            })
+            .collect();
         let schema_references =
             Arc::new(SchemaReferenceFacts::select(
                 text,
@@ -1582,14 +1637,15 @@ impl OverlayCache {
         // them.
         let registry_files: std::collections::HashSet<&Path> =
             registry_files.iter().map(PathBuf::as_path).collect();
-        let mut deps = collect_dep_hashes(&outcome, &named_types, &schema_references, &registry_files);
+        let mut deps =
+            collect_dep_hashes(&outcome, &named_types, &schema_references, &observed.read, &registry_files, &sources);
         // A YAML file directly in a schema root is the trigger registry's to
         // track; its change installs a new registry version.
         let host_files: Vec<PathBuf> = host_files
             .into_iter()
             .filter(|file| !(is_yaml_path(file) && file.parent().is_some_and(|folder| schema_roots.iter().any(|root| root == folder))))
             .collect();
-        deps.extend(hash_files(host_files.iter().chain(&host_probes)));
+        deps.extend(yaml_document::hash_files(host_files.iter().chain(&host_probes), &sources));
         let file_failures = match &outcome {
             SchemaOutcome::Failed(error) => file_failures(error),
             SchemaOutcome::Ready(_) => FileFailures::default(),
@@ -1603,6 +1659,7 @@ impl OverlayCache {
             key: Some(key),
             slots: slot_status,
             host: Some(host),
+            properties,
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -1610,6 +1667,7 @@ impl OverlayCache {
                 key,
                 deps,
                 probes,
+                searched,
                 outcome: schema.outcome.clone(),
                 named_types: Arc::clone(&schema.named_types),
                 schema_references: Arc::clone(&schema.schema_references),
@@ -1875,8 +1933,9 @@ fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
 /// (imports, examples, referenced `$schema` file), the extension-baseline
 /// files, the files the named-type catalog read, and each file a `$schema`
 /// reference selects (so editing, deleting, or repairing it refreshes a cached
-/// failure too), which may name the same file — dedup by path so each file is
-/// hashed once. The trigger envelopes and
+/// failure too), and each schema source the resolver `read`, which may name
+/// the same file — dedup by path so each file is hashed once, from its open
+/// buffer in `sources` when it has one. The trigger envelopes and
 /// payload files in `registry_files` are left out: the registry cache tracks
 /// them. A failed assembly has no
 /// bundle, so its edges come from the files its error names: without them a
@@ -1888,7 +1947,9 @@ fn collect_dep_hashes(
     outcome: &SchemaOutcome,
     named_types: &NamedTypeCatalog,
     schema_references: &SchemaReferenceFacts,
+    read: &std::collections::BTreeSet<PathBuf>,
     registry_files: &std::collections::HashSet<&Path>,
+    sources: &buffers::SourceBuffers,
 ) -> Vec<(PathBuf, u64)> {
     let mut paths: Vec<PathBuf> = match outcome {
         SchemaOutcome::Ready(Some(bundle)) => bundle
@@ -1903,8 +1964,9 @@ fn collect_dep_hashes(
     };
     paths.extend(named_types.dependencies().cloned());
     paths.extend(schema_references.selected().cloned());
+    paths.extend(read.iter().cloned());
     paths.retain(|path| !registry_files.contains(path.as_path()));
-    hash_files(paths.iter())
+    yaml_document::hash_files(paths.iter(), sources)
 }
 
 /// Hashes each distinct readable file once.
@@ -1923,7 +1985,8 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
 /// The schema files a resolution error names: the referenced schema that
 /// failed, an imported file that is malformed or unreadable, the namespace
 /// searched for an unknown name, the file defining a
-/// union a reference misuses, every file that authored a reference or a
+/// union a reference misuses or a type a composition cannot copy, every file
+/// that authored a reference, a composition operand, a copied member, or a
 /// conflicting constraint, and every file holding a reference of a cycle
 /// that never descends or the type it names.
 fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
@@ -1952,9 +2015,14 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
                 file(&site.source, out);
                 constraints.iter().for_each(|participant| file(&participant.origin.source, out));
             }
-            SchemaError::UnionReference { site, definition, .. } => {
+            SchemaError::UnionReference { site, definition, .. }
+            | SchemaError::InvalidCompositionTarget { site, definition, .. } => {
                 file(&site.source, out);
                 file(&definition.source, out);
+            }
+            SchemaError::CompositionReference { site, source, .. } | SchemaError::ComposedMember { site, source } => {
+                file(&site.source, out);
+                walk(source, out);
             }
             SchemaError::NonDescendingCycle { cycles } => {
                 for reference in cycles.iter().flatten() {
@@ -2030,28 +2098,34 @@ fn select_host(
     Arc::new(hosts::HostView::select(installed, &frontmatter, path, context))
 }
 
+/// The slot view's property observation when it describes the text keyed
+/// `base_key` and is current.
+fn current_properties(view: &crate::slot_jobs::SlotView, base_key: u64) -> Option<Arc<crate::slot_jobs::PropertyView>> {
+    view.properties.clone().filter(|_| view.installed_key == Some(base_key))
+}
+
 /// The part of a schema cache key a slot snapshot's state contributes.
 fn slot_key_part(generation: u64) -> u64 {
     generation.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
-/// The slot worker's resolution of a document's templates: the schema
-/// assembled with `session` resolving every template layer, in the job's
-/// captured inputs. The worker installs `session`, whose pinned snapshots
-/// requests then serve.
+/// The slot worker's assembly of a document's schema in the job's captured
+/// inputs: with `slots` resolving every template layer (a fresh session the
+/// worker then installs, whose pinned snapshots requests serve), serving an
+/// installed session's pins, or with no template. `registered_hosts` is the
+/// value request-side assembly selects the document's host with.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_slot_templates(
     path: &Path,
     text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     registry: Option<simplified_schema::triggers::TriggerRegistry>,
+    registered_hosts: Option<&Arc<darkmatter::config::registration::RegisteredHosts>>,
     context: &FileResolutionContext,
-    session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
-) -> Result<(), SchemaError> {
-    // The slot worker's job carries no registrations: a registered host's
-    // trigger layer is pinned through the request path's own assembly.
-    schema::assemble(path, text, config, workspace_roots, registry, None, context, schema::SlotUse::Resolve(session))
-        .map(|_| ())
+    slots: schema::SlotUse<'_>,
+) -> Result<Option<SchemaBundle>, SchemaError> {
+    schema::assemble(path, text, config, workspace_roots, registry, registered_hosts, context, slots)
         .map_err(|failure| failure.error)
 }
 
@@ -3536,5 +3610,122 @@ mod tests {
             deleted.schema_references.entries[0].selection.as_ref().unwrap().outcome,
             simplified_schema::resolve::SelectionOutcome::Missing { .. }
         ));
+    }
+
+    fn composition_overlay(state: &OverlayState, root: &Path, text: &str) -> DocumentOverlay {
+        let doc_path = root.join("doc.md");
+        state
+            .for_document(
+                &uri("file:///w/doc.md"),
+                text,
+                &doc_path,
+                &DmlsConfig::default(),
+                &[root.to_path_buf()],
+                &crate::context::test_support::resolution_for(&doc_path),
+            )
+            .unwrap()
+    }
+
+    /// `check` applied to the first composition failure of a failed outcome.
+    fn composition_failure<R>(overlay: &DocumentOverlay, check: impl FnOnce(&SchemaError) -> R) -> R {
+        fn find(error: &SchemaError) -> Option<&SchemaError> {
+            match error {
+                SchemaError::Aggregate { errors } => errors.iter().find_map(find),
+                SchemaError::ReferencedSchema { source, .. } => find(source),
+                SchemaError::CompositionReference { .. } | SchemaError::InvalidCompositionTarget { .. } => Some(error),
+                _ => None,
+            }
+        }
+        match &overlay.schema {
+            SchemaOutcome::Failed(error) => check(find(error).unwrap_or_else(|| panic!("no composition failure in {error}"))),
+            _ => panic!("expected a failed schema"),
+        }
+    }
+
+    /// A Markdown importer composing a file that does not exist yet reports
+    /// the lookup with its typed cause, and creating the file (on disk, or
+    /// as an unsaved buffer) reassembles the importer's schema.
+    #[test]
+    fn a_missing_composition_target_keeps_its_cause_and_its_appearance_refreshes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let text = "---\n$schema:\n  order: '{ ...base@./types.yaml, price: number }'\n---\n";
+        let state = OverlayState::default();
+
+        let missing = composition_overlay(&state, &root, text);
+        composition_failure(&missing, |error| {
+            let SchemaError::CompositionReference { operand, source, .. } = error else {
+                panic!("expected a composition lookup failure: {error:?}");
+            };
+            assert_eq!(operand, "base@./types.yaml");
+            assert!(
+                matches!(**source, SchemaError::NoMatch { .. } | SchemaError::Unresolved { .. }),
+                "the typed cause is kept: {source:?}"
+            );
+        });
+
+        // An unsaved buffer at the probed location counts as the file.
+        let types = root.join("types.yaml");
+        state.set_schema_buffer(&types, Some("$schema:\n  base: '{ id: string }'\n"));
+        let buffered = composition_overlay(&state, &root, text);
+        assert!(buffered.bundle().is_some(), "an unsaved target resolves");
+        assert!(buffered.named_types.get("./types.yaml").is_some(), "and is in the catalog");
+
+        // An unsaved edit to an ineligible definition fails again.
+        state.set_schema_buffer(&types, Some("$schema:\n  base: 'string[]'\n"));
+        let ineligible = composition_overlay(&state, &root, text);
+        composition_failure(&ineligible, |error| {
+            assert!(matches!(error, SchemaError::InvalidCompositionTarget { .. }), "{error:?}");
+        });
+
+        state.set_schema_buffer(&types, None);
+        assert!(matches!(composition_overlay(&state, &root, text).schema, SchemaOutcome::Failed(_)));
+        std::fs::write(&types, "$schema:\n  base: '{ id: string }'\n").unwrap();
+        assert!(composition_overlay(&state, &root, text).bundle().is_some(), "creating the file on disk refreshes");
+    }
+
+    /// An unsaved edit of an imported file that exists on disk is that
+    /// file's change for a Markdown importer, and closing the buffer goes
+    /// back to the file.
+    #[test]
+    fn an_unsaved_edit_of_a_composed_file_refreshes_the_importer() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let types = root.join("types.yaml");
+        std::fs::write(&types, "$schema:\n  base: '{ id: string }'\n").unwrap();
+        let text = "---\n$schema:\n  order:\n    $extends: [base@./types.yaml]\n---\n";
+        let state = OverlayState::default();
+        let saved = composition_overlay(&state, &root, text);
+        assert!(saved.bundle().is_some());
+        assert!(Arc::ptr_eq(&ready_bundle(&saved), &ready_bundle(&composition_overlay(&state, &root, text))), "unchanged stays cached");
+
+        state.set_schema_buffer(&types, Some("$schema:\n  base: number\n"));
+        composition_failure(&composition_overlay(&state, &root, text), |error| {
+            assert!(matches!(error, SchemaError::InvalidCompositionTarget { .. }), "{error:?}");
+        });
+        state.set_schema_buffer(&types, None);
+        assert!(composition_overlay(&state, &root, text).bundle().is_some(), "the file on disk again");
+    }
+
+    /// A target that fails inside its file keeps that file's located
+    /// failure through the composition error that wraps it.
+    #[test]
+    fn a_composition_target_file_failure_is_located_in_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(root.join("types.yaml"), "kind: schema\n$schema:\n  base: '{ id: string( }'\n").unwrap();
+        let text = "---\n$schema:\n  order:\n    $extends: base@./types.yaml\n    price: number\n---\n";
+        let overlay = composition_overlay(&OverlayState::default(), &root, text);
+        composition_failure(&overlay, |error| {
+            assert!(matches!(error, SchemaError::CompositionReference { .. }), "{error:?}");
+        });
+        let SchemaOutcome::Failed(error) = &overlay.schema else {
+            panic!("expected a failed schema");
+        };
+        assert!(
+            overlay.file_failures.contains_key(&root.join("types.yaml")),
+            "the target file's failure is located: {error:?} / {:?}",
+            overlay.file_failures.keys().collect::<Vec<_>>()
+        );
     }
 }

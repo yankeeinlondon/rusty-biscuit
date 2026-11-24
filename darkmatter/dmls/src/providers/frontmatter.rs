@@ -23,9 +23,11 @@ use darkmatter::markdown::schemas::{
 };
 use simplified_schema::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
-    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
+    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_scalar, decode_scalar_node_prefix,
     locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
-    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_type_definition_value,
+    locate_composition_operand_cursor, locate_composition_operand_cursor_in_scalar, locate_type_definition_cursor,
+    locate_type_definition_cursor_in_scalar,
+    parse_type_definition_value,
     parse_schema_declaration, flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -108,6 +110,11 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
     if !ast.contains_offset(offset) {
         return Vec::new();
     }
+    // A line an earlier scalar reaches is that scalar's text, not a key or
+    // a sequence item, however it looks.
+    if scalar_holders(ctx.text, offset).owner.is_some() {
+        return Vec::new();
+    }
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
@@ -147,6 +154,16 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
 /// never from searching the value text for a delimiter.
 fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
     let overlay = ctx.overlay?;
+    if let Some(value) = composition_value(ctx, overlay, offset) {
+        let state = match &value.continued {
+            Some(scalar) => locate_composition_operand_cursor_in_scalar(ctx.text, scalar, offset),
+            None => composition_operand_cursor(ctx.text, value.start, offset),
+        };
+        let items = state
+            .map(|state| type_definition_completions(ctx, state.token_span.start, offset, &state, NamedTypes::Offered))
+            .unwrap_or_default();
+        return Some(items);
+    }
     let cursor = match flow_cursor(ctx, offset) {
         Some((value_start, ancestors, key)) => SemanticValueCursor {
             value_start,
@@ -190,14 +207,213 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     Some(dedup_completions(items))
 }
 
+/// The YAML key of a schema object's composition directive.
+pub(super) const EXTENDS_KEY: &str = "$extends";
+
+/// The `$extends` value a completion cursor sits in.
+struct CompositionValue {
+    /// Document offset where the value (a scalar, a flow sequence, or one
+    /// block-sequence item) begins.
+    start: usize,
+    /// The scalar value or item up to the cursor, when the cursor's line
+    /// continues it from an earlier line; the operand is read through this
+    /// map rather than from the raw text at `start`.
+    continued: Option<DecodedScalar>,
+}
+
+/// The `$extends` value holding `offset`, when that `$extends` is the
+/// composition directive of a schema object rather than data or a type named
+/// `$extends`.
+///
+/// The value may continue onto the cursor's line from the one holding its
+/// key or sequence indicator: a flow sequence, or a scalar in any
+/// presentation (wrapped plain or quoted, quoted and not yet closed, literal
+/// or folded).
+fn composition_value(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<CompositionValue> {
+    let on_line = |start| CompositionValue { start, continued: None };
+    if let Some((value_start, ancestors, key)) = flow_cursor(ctx, offset) {
+        let ancestors: Vec<String> = ancestors.iter().map(|key| yaml_key(key)).collect();
+        return (yaml_key(&key) == EXTENDS_KEY && composes_at(overlay, &ancestors)).then_some(on_line(value_start));
+    }
+    if overlay_ast(ctx).is_some_and(|ast| !ast.contains_offset(offset)) {
+        return None;
+    }
+    // A block-valued flow sequence may continue onto later lines, whose
+    // items belong to the key above its bracket, not to the cursor's line.
+    if let Some(open) = crate::overlay::schema::block_flow_sequence_start(ctx.text, offset) {
+        return block_composition_value_start(ctx, overlay, open).filter(|start| *start == open).map(on_line);
+    }
+    let Some((holder_end, parent_indent)) = continued_line_holder(ctx.text, offset) else {
+        return block_composition_value_start(ctx, overlay, offset).map(on_line);
+    };
+    let start = block_composition_value_start(ctx, overlay, holder_end)?;
+    let scalar = decode_scalar_node_prefix(ctx.text, start, parent_indent, offset)?;
+    Some(CompositionValue { start, continued: Some(scalar) })
+}
+
+/// Where the `$extends` value holding `offset` begins, for a cursor in block
+/// context, read from the cursor's line; see [`composition_value`].
+fn block_composition_value_start(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<usize> {
+    let (line_start, prefix) = line_prefix(ctx.text, offset);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let trimmed = prefix.trim_start();
+    let ancestors: Vec<String> =
+        enclosing_path(ctx, offset, line_start, indent).iter().map(|key| yaml_key(key)).collect();
+    if let Some((key, partial)) = value_cursor(ctx, offset, line_start, trimmed) {
+        return (yaml_key(&key) == EXTENDS_KEY && composes_at(overlay, &ancestors))
+            .then(|| semantic_value_start(ctx, offset, line_start, partial.len()));
+    }
+    let item = trimmed.strip_prefix("- ").or((trimmed == "-").then_some(""))?;
+    let (last, object) = ancestors.split_last()?;
+    (last == EXTENDS_KEY && composes_at(overlay, object)).then(|| offset - item.trim_start().len())
+}
+
+/// Whether a mapping at the key path `object` is a schema object, where
+/// `$extends` composes: under a standalone `$schema` or an entry of its
+/// `types` table (the table itself names types), inside a frontmatter
+/// `$schema` declaration, or inside a value its schema types as a type
+/// definition or schema, except the outer mapping of a `schema(mapping)`
+/// value, which names types as a `types` table does.
+fn composes_at(overlay: &crate::overlay::DocumentOverlay, object: &[String]) -> bool {
+    match &overlay.schema_authoring {
+        SchemaAuthoringState::Standalone { .. } => match object.first().map(String::as_str) {
+            Some("$schema") => true,
+            Some("types") => object.len() > 1,
+            _ => false,
+        },
+        SchemaAuthoringState::Frontmatter(values) => {
+            if overlay.schema_key_is_reference() && object.first().map(String::as_str) == Some("$schema") {
+                return true;
+            }
+            let path: Vec<&str> = object.iter().map(String::as_str).collect();
+            semantic_owner_kinds(values, &path).is_some() && !holds_named_declarations(overlay, object)
+        }
+        SchemaAuthoringState::Inactive => false,
+    }
+}
+
+/// The operand cursor of a `$extends` value beginning at `value_start`: the
+/// value itself, or the flow-sequence item holding `offset`.
+fn composition_operand_cursor(text: &str, value_start: usize, offset: usize) -> Option<SchemaCursor> {
+    let start = if text.as_bytes().get(value_start) == Some(&b'[') {
+        flow_sequence_item_start(text, value_start, offset)?
+    } else {
+        value_start
+    };
+    locate_composition_operand_cursor(text.get(start..)?, start, offset)
+}
+
+/// Where the item of the flow sequence opened at `open` that holds `offset`
+/// begins, past leading blanks; `None` when the sequence closes first.
+///
+/// Items split at top-level commas by YAML's flow rules: a quote opens a
+/// scalar only where one may begin, nested brackets and quoted commas do not
+/// split, and a `#` after a blank comments out the rest of its line.
+fn flow_sequence_item_start(text: &str, open: usize, offset: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut item = open + 1;
+    let mut depth = 0usize;
+    let mut quote: Option<u8> = None;
+    let mut at_scalar_start = true;
+    let mut index = open + 1;
+    while index < offset {
+        let byte = *bytes.get(index)?;
+        match quote {
+            Some(b'\'') => {
+                if byte == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\'') {
+                        index += 1;
+                    } else {
+                        quote = None;
+                    }
+                }
+            }
+            Some(_) => {
+                if byte == b'\\' {
+                    index += 1;
+                } else if byte == b'"' {
+                    quote = None;
+                }
+            }
+            None => match byte {
+                b'\'' | b'"' if at_scalar_start => quote = Some(byte),
+                b'[' | b'{' => depth += 1,
+                b']' | b'}' => depth = depth.checked_sub(1)?,
+                b',' if depth == 0 => {
+                    item = index + 1;
+                    at_scalar_start = true;
+                    index += 1;
+                    continue;
+                }
+                b'#' if bytes.get(index.wrapping_sub(1)).is_some_and(u8::is_ascii_whitespace) => {
+                    index = text[index..offset].find('\n').map_or(offset, |end| index + end);
+                    continue;
+                }
+                _ => {}
+            },
+        }
+        at_scalar_start = quote.is_none()
+            && (matches!(byte, b'[' | b'{' | b',' | b':') || (at_scalar_start && byte.is_ascii_whitespace()));
+        index += 1;
+    }
+    // Blank lines and comments before the item are not part of it.
+    let mut rest = text.get(item..offset)?;
+    loop {
+        rest = rest.trim_start();
+        match rest.strip_prefix('#') {
+            Some(comment) => rest = comment.find('\n').map_or("", |end| &comment[end..]),
+            None => break,
+        }
+    }
+    Some(offset - rest.len())
+}
+
+/// A YAML mapping key as authored, decoded: quotes removed, and the `- ` of
+/// a block-sequence item that opens with this key dropped.
+pub(super) fn yaml_key(raw: &str) -> String {
+    let mut key = raw.trim();
+    while let Some(rest) = key.strip_prefix("- ") {
+        key = rest.trim_start();
+    }
+    decode_scalar(key).map_or_else(|| key.to_string(), |decoded| decoded.decoded().to_string())
+}
+
+/// The decoded key path from the document root to the value holding
+/// `offset`, through block and flow presentation alike and from any line the
+/// value continues onto; a sequence item adds no key.
+pub(super) fn authoring_key_path(ctx: &DocumentContext, offset: usize) -> Vec<String> {
+    if let Some((_, mut ancestors, key)) = flow_cursor(ctx, offset) {
+        ancestors.push(key);
+        return ancestors.iter().map(|key| yaml_key(key)).collect();
+    }
+    if let Some(anchor) = continued_value_anchor(ctx, offset) {
+        return authoring_key_path(ctx, anchor);
+    }
+    let (line_start, prefix) = line_prefix(ctx.text, offset);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let mut path = enclosing_path(ctx, offset, line_start, indent);
+    if let Some((key, _)) = value_cursor(ctx, offset, line_start, prefix.trim_start()) {
+        path.push(key);
+    }
+    path.iter().map(|key| yaml_key(key)).collect()
+}
+
 /// The semantic value a completion cursor sits in.
 struct SemanticValueCursor {
     /// Document offset where the value's authored text begins.
     value_start: usize,
     kinds: Vec<MetaSchemaKind>,
-    /// The decoded plain scalar the cursor continues onto a later line, when
-    /// no loaded model describes it; the cursor is read through this map
-    /// rather than from the raw text at `value_start`.
+    /// The scalar up to the cursor, when the cursor's line continues it from
+    /// an earlier line and no loaded model describes it; the cursor is read
+    /// through this map rather than from the raw text at `value_start`.
     continued: Option<DecodedScalar>,
 }
 
@@ -231,15 +447,17 @@ fn block_cursor(
 /// [`block_cursor`]'s line-based reading, for frontmatter and for standalone
 /// source no loaded model describes.
 ///
-/// A line that is neither a `key:` value nor a `- ` item may continue a plain
-/// scalar begun on an earlier line. The cursor then belongs to that scalar
-/// only when the shared plain-scalar decoder, run from the holder's value
-/// start, consumes the text up to the cursor.
+/// A line an earlier scalar reaches is that scalar's content, even when it
+/// looks like a `key:` value or a `- ` item; see [`continued_line_holder`]
+/// and [`continued_scalar_cursor`].
 fn line_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
 ) -> Option<SemanticValueCursor> {
+    if let Some(holder) = continued_line_holder(ctx.text, offset) {
+        return continued_scalar_cursor(ctx, overlay, offset, holder);
+    }
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
@@ -257,48 +475,83 @@ fn line_cursor(
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
         (offset, kinds)
     } else {
-        return continued_scalar_cursor(ctx, overlay, offset, line_start, indent);
+        return None;
     };
     Some(SemanticValueCursor { value_start, kinds, continued: None })
 }
 
-/// The semantic value whose plain scalar the cursor's line (starting at
-/// `line_start`, indented `indent`) continues.
+/// The semantic value whose scalar continues onto the line holding `offset`
+/// from the holder line [`continued_line_holder`] chose, given as that line's
+/// content end and the column of its block collection.
 ///
-/// Holder selection is a backward indentation scan, but whether the holder's
-/// value is a plain scalar that reaches the cursor is decided by
-/// [`decode_plain_scalar_node`] alone: same-line anchors and tags are skipped,
-/// while quoted and block scalars, collections, aliases, comments, empty
-/// values, and a dedented sibling do not continue.
+/// Whether the holder's value is a scalar that reaches the cursor is decided
+/// by the shared [`decode_scalar_node_prefix`] alone: plain, quoted (closed,
+/// or still open at the cursor), literal, and folded scalars continue, with
+/// same-line anchors and tags skipped, while collections, aliases, comments,
+/// empty values, a dedented sibling, and text past a closing quote do not.
 fn continued_scalar_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
-    line_start: usize,
-    indent: usize,
+    (holder_end, parent_indent): (usize, usize),
 ) -> Option<SemanticValueCursor> {
-    let (holder_end, parent_indent) = continued_scalar_holder(ctx.text, line_start, indent)?;
     let holder = line_cursor(ctx, overlay, holder_end)?;
-    let (scalar, _) = decode_plain_scalar_node(ctx.text, holder.value_start, parent_indent)?;
-    // A declaration arm reads the whole scalar as one token, so this succeeds
-    // exactly when the scalar reaches the cursor (or only blanks follow it).
-    locate_schema_declaration_cursor_in_scalar(ctx.text, &scalar, offset)?;
+    let scalar = decode_scalar_node_prefix(ctx.text, holder.value_start, parent_indent, offset)?;
     Some(SemanticValueCursor { continued: Some(scalar), ..holder })
 }
 
-/// The content end of the line holding the scalar that the line at
-/// `line_start` (indented `indent`) may continue, and the column of the block
-/// collection holding that value (its key, or the `-` of a sequence item), or
-/// `None` when no such line precedes it.
+/// A position on the earlier line where the value holding `offset` begins,
+/// when it is continued onto the cursor's line: the `[` opening a
+/// block-valued flow sequence that holds it, or the end of the holder line of
+/// a scalar the cursor's line continues; see [`continued_line_holder`].
+pub(super) fn continued_value_anchor(ctx: &DocumentContext, offset: usize) -> Option<usize> {
+    if let Some(open) = crate::overlay::schema::block_flow_sequence_start(ctx.text, offset) {
+        return Some(open);
+    }
+    continued_line_holder(ctx.text, offset).map(|(holder_end, _)| holder_end)
+}
+
+/// The content end of the line holding the scalar that continues onto the
+/// line holding `offset`, and the column of the block collection holding
+/// that value (its key, or the `-` of a sequence item): the
+/// [`ScalarHolders::owner`] when there is one, else the
+/// [`ScalarHolders::nearest`] for its caller to decode.
+fn continued_line_holder(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let holders = scalar_holders(text, offset);
+    holders.owner.or(holders.nearest)
+}
+
+/// The earlier lines that may hold the scalar the line holding `offset`
+/// continues, each as its content end and the column of its block collection
+/// (its key, or the `-` of a sequence item).
+struct ScalarHolders {
+    /// The holder whose value is a scalar that reaches `offset`, so the
+    /// cursor's line is that scalar's content however it looks.
+    owner: Option<(usize, usize)>,
+    /// The holder nearest the cursor's line, unless that line carries its
+    /// own key or sequence indicator or a comment line separates them; its
+    /// value may not reach `offset`.
+    nearest: Option<(usize, usize)>,
+}
+
+/// [`ScalarHolders`] for the line holding `offset`.
 ///
-/// The holder is the nearest earlier line indented less that carries a `key:`
-/// or `- ` indicator; less-indented lines without one are earlier
-/// continuations of the same scalar. Blank lines fold into the scalar, while a
-/// comment line ends it.
-fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<(usize, usize)> {
-    let mut needed = indent;
+/// The candidates are the earlier lines, each indented less than the last,
+/// that carry a `key:` or `- ` indicator. The owner is the outermost one
+/// whose value [`decode_scalar_node_prefix`] reads as a scalar reaching
+/// `offset`, so a `key:`-looking line inside a quoted or block scalar, the
+/// cursor's own or one passed on the way, is that scalar's content rather
+/// than a mapping entry. The scan ends at the first column-0 line.
+fn scalar_holders(text: &str, offset: usize) -> ScalarHolders {
+    let (line_start, prefix) = line_prefix(text, offset);
+    let trimmed = prefix.trim_start();
+    let own_indicator =
+        trimmed == "-" || trimmed.starts_with("- ") || mapping_separator(trimmed, false).is_some();
+    let mut needed = prefix.len() - trimmed.len();
     let mut end = line_start;
-    while end > 0 {
+    let mut holders = ScalarHolders { owner: None, nearest: None };
+    let mut commented = false;
+    while end > 0 && needed > 0 {
         let start = text[..end - 1].rfind('\n').map_or(0, |index| index + 1);
         let line = text[start..end - 1].trim_end_matches('\r');
         end = start;
@@ -307,28 +560,37 @@ fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Opti
         if trimmed.is_empty() {
             continue;
         }
+        // A comment ends a plain scalar but is content of a quoted or block
+        // one, which only the decoder below can tell apart.
         if trimmed.starts_with('#') {
-            return None;
+            commented = true;
+            continue;
         }
         if line_indent >= needed {
             continue;
         }
+        needed = line_indent;
         let mut value = trimmed;
         let mut holder_column = None;
         if let Some(after_dash) = value.strip_prefix("- ") {
             value = after_dash.trim_start();
             holder_column = Some(line_indent);
         }
-        if mapping_separator(value, false).is_some() {
+        if let Some(colon) = mapping_separator(value, false) {
             holder_column = Some(line.len() - value.len());
+            value = &value[colon + 1..];
         }
-        let Some(holder_column) = holder_column else {
-            needed = line_indent;
-            continue;
-        };
-        return Some((start + line.len(), holder_column));
+        let Some(holder_column) = holder_column else { continue };
+        let holder = (start + line.len(), holder_column);
+        if !own_indicator && !commented {
+            holders.nearest.get_or_insert(holder);
+        }
+        let value_start = start + line.len() - value.trim_start_matches([' ', '\t']).len();
+        if decode_scalar_node_prefix(text, value_start, holder_column, offset).is_some() {
+            holders.owner = Some(holder);
+        }
     }
-    None
+    holders
 }
 
 /// The `(value_start, ancestors, key)` a cursor inside a flow collection
@@ -501,6 +763,14 @@ pub(crate) fn type_definition_completions(
         // The file half of `Name@reference` names a schema file, not a type
         // keyword — the catalog must not leak into it.
         SchemaCursorRole::ImportReference { .. } => return Vec::new(),
+        // A composition operand names an object type, never a keyword, and
+        // its names come from this schema document alone.
+        SchemaCursorRole::CompositionOperand { part, operand_span } => {
+            if named_types == NamedTypes::Withheld {
+                return Vec::new();
+            }
+            return named_references::operand_completions(ctx, offset, state, part, operand_span);
+        }
         SchemaCursorRole::Type => {}
     }
 
@@ -847,6 +1117,10 @@ fn block_constraint_key_completions(
     };
     let (last, holder) = ancestors.split_last()?;
     meta_schema_kinds_for_line(overlay, holder, last, false)?;
+    // A table of named declarations refuses a `$constraints` key of its own.
+    if holds_named_declarations(overlay, holder) {
+        return Some(Vec::new());
+    }
     let on_root = match holder.split_last() {
         Some((key, parent)) => meta_schema_kinds_for_line(overlay, parent, key, false)
             .is_some_and(|kinds| kinds.contains(&MetaSchemaKind::Schema)),
@@ -879,6 +1153,23 @@ fn block_constraint_key_completions(
             })
             .collect(),
     )
+}
+
+/// Whether the mapping at `path` is a table of named declarations: a
+/// standalone document's `types`, or a frontmatter value typed
+/// `schema(mapping)`.
+fn holds_named_declarations(overlay: &crate::overlay::DocumentOverlay, path: &[String]) -> bool {
+    match &overlay.schema_authoring {
+        SchemaAuthoringState::Standalone { .. } => path == ["types"],
+        SchemaAuthoringState::Frontmatter(values) => values.iter().any(|value| {
+            value.table && {
+                let pointer = JsonPointer::parse(&value.pointer);
+                let segments = pointer.segments();
+                segments.len() == path.len() && segments.iter().zip(path).all(|(recorded, authored)| recorded.as_str() == authored)
+            }
+        }),
+        SchemaAuthoringState::Inactive => false,
+    }
 }
 
 /// The words every editor view uses for a property whose template type has
@@ -1850,7 +2141,35 @@ fn frontmatter_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     {
         return ctx_hover(ctx, entry);
     }
-    schema_hover(ctx, &path, entry)
+    let hover = schema_hover(ctx, &path, entry);
+    match path.as_slice() {
+        [FmPathSegment::Key(key)] => with_observed_preview(ctx, key, entry, hover),
+        _ => hover,
+    }
+}
+
+/// `hover` with a bounded preview of `key`'s observed value appended, when
+/// the slot worker's current observation holds one; the declared type the
+/// hover already shows stays first. A property with an observation but no
+/// schema hover gets the preview alone.
+fn with_observed_preview(ctx: &DocumentContext, key: &str, entry: &FmEntry, hover: Option<Hover>) -> Option<Hover> {
+    let Some(value) = ctx.overlay.and_then(|overlay| overlay.properties.as_deref()).and_then(|view| view.value(key)) else {
+        return hover;
+    };
+    let preview = format!("**Observed value**\n\n```json\n{}\n```", crate::overlay::properties::preview(value));
+    match hover {
+        Some(mut hover) => {
+            if let lsp_types::HoverContents::Markup(markup) = &mut hover.contents {
+                markup.value.push_str("\n\n");
+                markup.value.push_str(&preview);
+            }
+            Some(hover)
+        }
+        None => {
+            let span = entry.key_span.clone().unwrap_or_else(|| entry.value_span.clone());
+            markup_hover(ctx, span, preview)
+        }
+    }
 }
 
 fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
@@ -3430,6 +3749,9 @@ pub(crate) fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: Strin
 mod file_value_hover;
 mod named_references;
 mod schema_value_hover;
+
+#[cfg(test)]
+mod composition_tests;
 
 #[cfg(test)]
 mod sequence_tests;

@@ -1078,7 +1078,7 @@ pub(super) fn prepare_direct_with_prompt(
     options: PrepareOptions,
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, None)
+    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, None, false)
 }
 
 /// [`prepare_direct_with_prompt`] with an optional [`ResolvedIdentitySelector`].
@@ -1088,7 +1088,7 @@ pub(super) fn prepare_direct_with_prompt_selecting(
     prompt_source: PromptSource,
     select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, select)
+    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, select, false)
 }
 
 /// Chooses the launch identity a document's body renders with, from the
@@ -1240,9 +1240,9 @@ pub fn prepare_loop_seed(
 ) -> Result<PreparedComposition, CompositionError> {
     match mode {
         CompositionMode::ChainedDocument => {
-            prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Defer, None)
+            prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Defer, None, false)
         }
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Defer, None),
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Defer, None, None),
     }
 }
 
@@ -1258,8 +1258,8 @@ pub fn prepare_sequence_probe(
 ) -> Result<PreparedComposition, CompositionError> {
     options.defer_schema_verdict = true;
     match mode {
-        CompositionMode::ChainedDocument => prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Probe, None),
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Probe, None),
+        CompositionMode::ChainedDocument => prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Probe, None, false),
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Probe, None, None),
     }
 }
 
@@ -1377,12 +1377,50 @@ pub(super) fn prepare_values_on(
     })
 }
 
+/// Prepare an ordinary later pass of a document loop from its retained source,
+/// reaching no launch verdict ([`super::SchemaStage::SkipLaunchVerdict`]).
+///
+/// An inline pass reads the deliverable once, here, before any composition
+/// effect: those bytes are the pass's reconciliation baseline (what the
+/// provider must change), while the prompt, lifecycle, provenance, and schema
+/// come from the retained `source`.
+///
+/// ## Errors
+///
+/// [`CompositionError::InlineArtifactUnreadable`] when the inline deliverable
+/// cannot be read, and otherwise the errors of the mode's preparer.
+pub(super) fn prepare_loop_iteration(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+    prompt_source: PromptSource,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
+    match mode {
+        CompositionMode::ChainedDocument => {
+            prepare_direct_on(source, options, prompt_source, BodyCommands::Run, select, true)
+        }
+        CompositionMode::InlineFrontmatterPrompt => {
+            let baseline = std::fs::read_to_string(&source.resolved_path).map_err(|error| {
+                CompositionError::InlineArtifactUnreadable {
+                    path: source.resolved_path.clone(),
+                    source: error,
+                }
+            })?;
+            prepare_inline_on(source, options, BodyCommands::Run, select, Some(&baseline))
+        }
+    }
+}
+
 fn prepare_direct_on(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
     prompt_source: PromptSource,
     body_commands: BodyCommands,
     select: Option<&ResolvedIdentitySelector<'_>>,
+    // An ordinary later loop pass: Darkmatter applies defaults and coercion
+    // but reaches no verdict, without marking one pending.
+    skip_launch_verdict: bool,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     if let Some((key, replacement)) =
@@ -1414,7 +1452,9 @@ fn prepare_direct_on(
         ctx.env_mut().insert(key.clone(), value.clone());
     }
     let compose_request = prepared_request(
-        body_commands.apply(canonical_compose_options(source, &ctx, &options, None)),
+        body_commands
+            .apply(canonical_compose_options(source, &ctx, &options, None))
+            .with_deferred_schema_verdict(options.defer_schema_verdict || skip_launch_verdict),
         &options,
     )?;
     // Retain the caller's inputs so a later canonical preparation of this or a
@@ -1501,7 +1541,7 @@ pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_inline_on(source, options, BodyCommands::Run, None)
+    prepare_inline_on(source, options, BodyCommands::Run, None, None)
 }
 
 /// [`prepare_inline`] with an optional [`ResolvedIdentitySelector`].
@@ -1510,7 +1550,7 @@ pub(super) fn prepare_inline_selecting(
     options: PrepareOptions,
     select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_inline_on(source, options, BodyCommands::Run, select)
+    prepare_inline_on(source, options, BodyCommands::Run, select, None)
 }
 
 fn prepare_inline_on(
@@ -1518,7 +1558,13 @@ fn prepare_inline_on(
     options: PrepareOptions,
     body_commands: BodyCommands,
     select: Option<&ResolvedIdentitySelector<'_>>,
+    // An ordinary later loop pass's live deliverable bytes
+    // ([`prepare_loop_iteration`]); `None` takes the baseline from `source`.
+    // `Some` also skips the launch verdict, as `prepare_direct_on`'s flag does.
+    live_baseline: Option<&str>,
 ) -> Result<PreparedComposition, CompositionError> {
+    let skip_launch_verdict = live_baseline.is_some();
+    let baseline_text = live_baseline.unwrap_or(&source.original_text);
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
     if let Some((key, replacement)) =
@@ -1536,7 +1582,7 @@ fn prepare_inline_on(
     // write: a baseline the closure could never stamp must not reach a launch
     // or a preview. Passing says nothing about the document after the agent
     // edits it; the closure still validates and rolls back.
-    super::closure::rehearse_inline_baseline(&source.original_text, chrono::Utc::now()).map_err(
+    super::closure::rehearse_inline_baseline(baseline_text, chrono::Utc::now()).map_err(
         |source_error| CompositionError::InlineBaselineUnstampable {
             path: source.resolved_path.clone(),
             source: Box::new(source_error),
@@ -1567,7 +1613,9 @@ fn prepare_inline_on(
     // Retain the composed context so pre-flight shell resolution (C3) can build
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let compose_request = prepared_request(
-        body_commands.apply(canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch))),
+        body_commands
+            .apply(canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch)))
+            .with_deferred_schema_verdict(options.defer_schema_verdict || skip_launch_verdict),
         &options,
     )?;
     let mut input_layers = super::CallerInputLayers::from_options(&options);
@@ -1623,10 +1671,11 @@ fn prepare_inline_on(
     let prompt = format!("{header}\n\n{body}\n\n{guardrails}");
 
     // Capture pre-execution hash for closure
-    let original_hash = source.markdown.compute_hash(
-        MdHashKind::Simple,
-        &super::closure::inline_hash_options(),
-    );
+    let original_hash = match live_baseline {
+        None => source.markdown.compute_hash(MdHashKind::Simple, &super::closure::inline_hash_options()),
+        Some(text) => Markdown::from(text)
+            .compute_hash(MdHashKind::Simple, &super::closure::inline_hash_options()),
+    };
 
     let mut warnings = lifecycle_warnings;
     warnings.extend(report.warnings.iter().cloned().map(|mut warning| {
@@ -1654,7 +1703,7 @@ fn prepare_inline_on(
         selection_hints,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
             document_path: source.resolved_path.clone(),
-            original_document_text: source.original_text.clone(),
+            original_document_text: baseline_text.to_string(),
             original_hash,
         }),
         launch_schema,

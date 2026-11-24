@@ -12,7 +12,7 @@ description: |-
     > **Note:** if there is a `design.md` file in the feature/fix's directory then this will be assumed to
     > to be a technical design file which compliements the spec file.
 
-    > **Note:** if the plan doesn't specify a `start_phase` frontmatter property then we will initially assume **1** but as soon as the implementation's log file has been created it will become the more formal record
+    > **Note:** if the plan doesn't specify a `start-phase` frontmatter property then we will initially assume **1** but as soon as the implementation's log file has been created it will become the more formal record
 $schema:
     - plan: file(required;eager;match(**/*plan*.md))
       orchestrator: boolean -> boolean flag which when set to `true` will use an orchestrator strategy
@@ -50,7 +50,7 @@ log: |-
     }}
 phase: |-
     {{
-        frontmatter(log, "phase_completed") + 1 || frontmatter(plan, "starting_phase") || 1
+        frontmatter(log, "phase-completed") + 1 || frontmatter(plan, "starting-phase") || 1
     }}
 yolo: true
 initialize:

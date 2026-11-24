@@ -57,6 +57,43 @@ impl FileStore {
 
     // ── Manifest operations ────────────────────────────────────────
 
+    /// Reads at most `limit` bytes of the file at `path`, stopping one byte
+    /// past it: `Ok(None)` when it does not exist, an
+    /// [`io::ErrorKind::FileTooLarge`] error when it is longer than `limit`.
+    fn read_bounded(path: &Path, limit: u64) -> io::Result<Option<Vec<u8>>> {
+        use std::io::Read;
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let mut bytes = Vec::new();
+        file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(io::Error::new(io::ErrorKind::FileTooLarge, format!("{} is larger than {limit} bytes", path.display())));
+        }
+        Ok(Some(bytes))
+    }
+
+    /// [`Self::read_manifest`] reading at most `limit` bytes (see
+    /// [`Self::read_bounded`]), for a reader with a byte allowance.
+    pub fn read_manifest_bounded<T: DeserializeOwned>(&self, class: ArtifactClass, key: u64, limit: u64) -> io::Result<Option<T>> {
+        let path = self.manifest_path(class, key);
+        let Some(bytes) = Self::read_bounded(&path, limit)? else {
+            return Ok(None);
+        };
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("corrupt manifest at {}: {}", path.display(), e)))
+    }
+
+    /// [`Self::read_blob`] reading at most `limit` bytes (see
+    /// [`Self::read_bounded`]).
+    pub fn read_blob_bounded(&self, hash: u64, ext: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
+        Self::read_bounded(&self.blob_path(hash, ext), limit)
+    }
+
+
     /// Reads a manifest from the store.
     pub fn read_manifest<T: DeserializeOwned>(
         &self,

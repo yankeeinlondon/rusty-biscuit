@@ -10,6 +10,11 @@
 //! - The **string** layer (in `simplified::grammar`) parses each individual
 //!   type-and-constraint expression into a [`PropertyAtom`].
 //!
+//! An object that reuses other objects' members keeps that composition as
+//! authored in [`SchemaShape::composition`]: an [`ObjectComposition`] of
+//! inline [`InlineSpread`]s or a YAML [`Extends`] directive, each naming a
+//! [`CompositionOperand`].
+//!
 //! See `darkmatter/features/2026-05-11-schemas/spec.md` for the authoring
 //! reference.
 
@@ -55,12 +60,147 @@ pub struct SchemaShape {
     /// enclosing [`PropertyAtom`] instead; both surfaces desugar to the same
     /// canonical [`Constraint`] variants.
     pub constraints: Vec<Constraint>,
+
+    /// The authored object composition (`...Name` spreads in an inline body,
+    /// or a YAML `$extends` directive), kept as written for export, source
+    /// locations, and editor navigation. The literal and pattern members
+    /// above are only the members written in this object; resolution expands
+    /// the operands into them and clears this field, so a resolved shape
+    /// never carries it. `None` for an object without composition, which is
+    /// also omitted when serialized so prepared shapes keep their form.
+    /// Boxed so an ordinary shape (and every atom holding one) stays small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<Box<ObjectComposition>>,
+
+    /// Set only by resolution, on a shape it assembled from a composition:
+    /// where each member copied from another object was declared, so a
+    /// lowering failure inside one names its declaration. Never serialized,
+    /// and ignored by equality, so a composed object equals its handwritten
+    /// equivalent.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub composed_sites: ComposedSites,
+}
+
+/// The declarations of the members a resolved object copied through
+/// composition, by literal property name and by pattern-key position. See
+/// [`SchemaShape::composed_sites`].
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct ComposedSites(Option<std::sync::Arc<ComposedSiteTable>>);
+
+#[doc(hidden)]
+#[derive(Default)]
+pub struct ComposedSiteTable {
+    pub(crate) literals: IndexMap<String, super::SchemaReferenceSite>,
+    pub(crate) patterns: Vec<Option<super::SchemaReferenceSite>>,
+}
+
+impl ComposedSites {
+    pub(crate) fn new(table: ComposedSiteTable) -> Self {
+        Self((!table.literals.is_empty() || table.patterns.iter().any(Option::is_some)).then(|| std::sync::Arc::new(table)))
+    }
+
+    /// The declaration of the copied literal member `name`.
+    pub(crate) fn literal(&self, name: &str) -> Option<&super::SchemaReferenceSite> {
+        self.0.as_ref()?.literals.get(name)
+    }
+
+    /// The declaration of the copied pattern member at `index`.
+    pub(crate) fn pattern(&self, index: usize) -> Option<&super::SchemaReferenceSite> {
+        self.0.as_ref()?.patterns.get(index)?.as_ref()
+    }
+}
+
+// Transient lowering context, never part of what a shape means.
+impl PartialEq for ComposedSites {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for ComposedSites {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ComposedSites")
+    }
 }
 
 impl SchemaShape {
     /// Creates an empty `SchemaShape`.
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// How an object reuses the members of other named objects, in the syntax the
+/// author wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum ObjectComposition {
+    /// `...Name` spreads inside an inline object body, in source order.
+    Inline(Vec<InlineSpread>),
+    /// The YAML `$extends` directive of a schema object mapping. Its
+    /// operands apply before the mapping's own members, wherever the key
+    /// appears among them.
+    Extends(Extends),
+}
+
+impl ObjectComposition {
+    /// The operands in the order they apply.
+    pub fn operands(&self) -> Vec<&CompositionOperand> {
+        match self {
+            Self::Inline(spreads) => spreads.iter().map(|spread| &spread.operand).collect(),
+            Self::Extends(Extends::Scalar(operand)) => vec![operand],
+            Self::Extends(Extends::Sequence(operands)) => operands.iter().collect(),
+        }
+    }
+}
+
+/// The value of a `$extends` directive, keeping the authored YAML form.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum Extends {
+    /// `$extends: Name`.
+    Scalar(CompositionOperand),
+    /// `$extends: [A, B]` or a block sequence; never empty.
+    Sequence(Vec<CompositionOperand>),
+}
+
+/// One `...Name` spread of an inline object body.
+///
+/// The position is counted per member kind, because literal and pattern
+/// members keep separate order: the spread applies after the first
+/// `literals_before` entries of [`SchemaShape::properties`] and the first
+/// `patterns_before` entries of [`SchemaShape::pattern_keys`], and before the
+/// rest.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InlineSpread {
+    /// Literal members written before the spread.
+    pub literals_before: usize,
+    /// Pattern members written before the spread.
+    pub patterns_before: usize,
+    /// The composed object.
+    pub operand: CompositionOperand,
+}
+
+/// A named object whose members are composed into the receiving object.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositionOperand {
+    /// The named type, the text left of `@`.
+    pub name: String,
+    /// The text right of `@` (`this`, a file path, or an embedded name);
+    /// `None` for a bare name, which is the local reference `Name@this`
+    /// written without its suffix.
+    pub reference: Option<String>,
+}
+
+impl CompositionOperand {
+    /// The reference the named-type resolver looks up: the written one, or
+    /// [`LOCAL_REFERENCE`] for a bare name.
+    pub fn resolved_reference(&self) -> &str {
+        self.reference.as_deref().unwrap_or(LOCAL_REFERENCE)
     }
 }
 

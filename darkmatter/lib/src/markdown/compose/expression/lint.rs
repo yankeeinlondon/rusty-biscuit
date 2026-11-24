@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use simplified_schema::expression::ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{BinaryOp, Expr, ObjectEntry, SpannedExpr, SpannedExprKind, SpannedObjectEntry};
 use super::{ExpressionFinder, ExpressionLocation, Lexer, Token};
 use simplified_schema::expression::parser::parse_spanned;
 use crate::markdown::span::SourceSpan;
@@ -152,9 +152,11 @@ fn collect_flagged(
             }
         }
         SpannedExprKind::ObjectLiteral(entries) => {
-            for (key, value) in entries {
-                flag_literal(source, &key.span, &key.value, false, true, out);
-                collect_flagged(source, value, false, out);
+            for entry in entries {
+                if let SpannedObjectEntry::Field { key, .. } = entry {
+                    flag_literal(source, &key.span, &key.value, false, true, out);
+                }
+                collect_flagged(source, entry.value(), false, out);
             }
         }
         SpannedExprKind::UnaryNot(inner) | SpannedExprKind::UnaryMinus(inner) => {
@@ -433,7 +435,15 @@ fn substitute(expr: &SpannedExpr, replacements: &HashMap<usize, Expr>) -> Expr {
         SpannedExprKind::ObjectLiteral(entries) => Expr::ObjectLiteral(
             entries
                 .iter()
-                .map(|(key, value)| (key.value.clone(), substitute(value, replacements)))
+                .map(|entry| match entry {
+                    SpannedObjectEntry::Field { key, value } => ObjectEntry::Field {
+                        key: key.value.clone(),
+                        value: substitute(value, replacements),
+                    },
+                    SpannedObjectEntry::Spread { operand } => ObjectEntry::Spread {
+                        operand: substitute(operand, replacements),
+                    },
+                })
                 .collect(),
         ),
         SpannedExprKind::UnaryNot(inner) => Expr::UnaryNot(sub(inner)),

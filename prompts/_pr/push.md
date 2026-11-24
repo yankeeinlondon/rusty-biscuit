@@ -10,24 +10,24 @@ $schema:
     branch: string -> the name for the proposed branch when one has to be created (the checkout is on the base branch); derived from the commits when omitted
     title: string -> an optional pull request title; derived from the commits when omitted
     about: string -> optional context from the caller about what this work is
-    on_failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed
+    on-failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed
     committed: boolean -> whether `commit.md` already ran in this invocation (a proxy chain can visit it only once)
-on_failure: ask
+on-failure: ask
 committed: false
 log: "{{ replace_last(report, '.md', '.push.log') }}"
-commits_ahead: "$(git rev-list --count origin/{{base}}..HEAD)::timeout:30"
+commits-ahead: "$(git rev-list --count origin/{{base}}..HEAD)::timeout:30"
 # the pre-push hook can run silently for well over the default stream-silence window
 step_timeout: 90m
 timeout: 4h
 start:
-    - when: "number(commits_ahead, 0) == 0"
+    - when: "number(commits-ahead, 0) == 0"
       then:
           - set_frontmatter: ["{{ report }}", "status", "error"]
           - set_frontmatter: ["{{ report }}", "summary", "There was nothing to propose: HEAD has no commits that origin/{{ base }} lacks."]
           - message: "🤨  nothing to propose from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}: `HEAD` has no commits that `origin/{{base}}` lacks"
           - error: "`HEAD` has no commits that `origin/{{base}}` lacks, so there is nothing to open a pull request for"
-    - info: "proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}`; the pre-push hook runs the local test gates on this host ({{ctx.os}}) during the push"
-    - message: "🚦  proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}; local testing runs on this host ({{ctx.os}}) first"
+    - info: "proposing {{ commits-ahead }} commit(s) from `{{ctx.branch}}`; the pre-push hook runs the local test gates on this host ({{ctx.os}}) during the push"
+    - message: "🚦  proposing {{ commits-ahead }} commit(s) from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}; local testing runs on this host ({{ctx.os}}) first"
 success:
     - when: "frontmatter(report, 'status') == 'passed'"
       then:
@@ -59,7 +59,7 @@ success:
                 with:
                     base: "{{ base }}"
                     report: "{{ report }}"
-                    on_failure: "{{ on_failure }}"
+                    on-failure: "{{ on-failure }}"
                     committed: "{{ committed }}"
     - when: "frontmatter(report, 'status') == 'error'"
       then:
@@ -125,7 +125,7 @@ These facts were gathered immediately before this session started. Use them as g
 The work is on `{{ctx.branch}}`, which is not the base branch, so that is the branch to propose. Write `branch: {{ctx.branch}}` into the report frontmatter.
 ::end-block
 ::block when="ctx.branch == base"
-The checkout is on `{{base}}`, the branch the pull request targets, so the {{commits_ahead}} unpushed commit(s) listed above need a branch of their own. **Never push `{{base}}` itself.**
+The checkout is on `{{base}}`, the branch the pull request targets, so the {{commits-ahead}} unpushed commit(s) listed above need a branch of their own. **Never push `{{base}}` itself.**
 
 ::block when="branch"
 - Create the branch the caller named and move to it: `git switch -c {{branch}}`.

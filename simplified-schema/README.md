@@ -2,7 +2,7 @@
 
 The simplified schema was initially designed to provide a compact and ergonomic way for authors to create a JSON schema using YAML syntax. Today it not only provides _ergonomic_ modeling but now also has a much improved feature set including many features that plain old JSON Schema does not support. Simplified Schema retains the ability to be converted to JSON schema on demand (even if it might be lossy when the advanced features of simplified schema are employed).
 
-The simplified schema library is used by [Darkmatter](darkmatter/README.md), [Claudine](claudine/README.md), and the [DMLS](darkmatter/dmls/README.md) LSP to provide rich schema support to Frontmatter in Markdown documents as well as YAML files.
+The simplified schema library is used by [Darkmatter](../darkmatter/README.md), [Claudine](../claudine/README.md), and the [DMLS](../darkmatter/dmls/README.md) LSP to provide rich schema support to Frontmatter in Markdown documents as well as YAML files.
 
 In addition, the simplified schema _package area_ also include a simple CLI that allows for schema validation:
 
@@ -140,6 +140,7 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 ## Documentation
 
 - [Authoring a schema](./docs/topics/language/index.md): what a schema looks like, its main forms, the language reference, and its limitations.
+- [Objects and named types](./docs/topics/language/objects-and-named-types.md): nested objects, reusable and imported named types, and object composition, which copies one object's properties into another with `...name` or `$extends`.
 - [Conversion](./docs/topics/conversion.md): which almost-right values soft validation converts.
 - [Diagnostics](./docs/topics/diagnostics.md): typed errors, where each points, and where a schema came from.
 - [Selecting a schema file](./docs/topics/selecting-schema-files.md): which file a schema reference names, what was probed, where a missing file would be created, and whether the file is a valid `$schema` target.

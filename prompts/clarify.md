@@ -7,7 +7,7 @@ $schema:
     - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
       doc: file
 doc: "{{spec || design}}"
-doc_desc: |-
+doc-desc: |-
     {{
         spec
             ? "specification"
@@ -23,7 +23,7 @@ start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
 success:
-    say: "The {{ title_case( without_date(parent_dir(doc))) }} {{doc_desc}} has completed the clarification process is now complete in {{ ctx.area || ctx.repo }}"
+    say: "The {{ title_case( without_date(parent_dir(doc))) }} {{doc-desc}} has completed the clarification process is now complete in {{ ctx.area || ctx.repo }}"
     message: "The specification file `{{parent_dir(doc) + '/' + basename(doc) }}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
@@ -199,7 +199,7 @@ Your job is to follow these steps exactly:
         - set `status` to "finalized-spec"
         - set `clarified` to `true`
         - set `reviewed` to `true`
-        - set `needs_rulings` to a _boolean_ value based on whether there still remains rulings that are needed before planning and implementation are done
-            - if `needs_rulings` is set to `true` then you must add `required_rulings` frontmatter property as a list of the rulings that are still required.
-        - set `clarified_by` to `{{ctx.agent}}/{{ctx.model}}`
-        - set `review_note` to "the clarification process served as a review"
+        - set `needs-rulings` to a _boolean_ value based on whether there still remains rulings that are needed before planning and implementation are done
+            - if `needs-rulings` is set to `true` then you must add `required-rulings` frontmatter property as a list of the rulings that are still required.
+        - set `clarified-by` to `{{ctx.agent}}/{{ctx.model}}`
+        - set `review-note` to "the clarification process served as a review"

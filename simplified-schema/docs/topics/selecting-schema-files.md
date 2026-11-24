@@ -90,7 +90,7 @@ flowchart TD
 | `Found(path)` | the existing file the reference names | `path` |
 | `Missing { bare_name, creation }` | nothing exists at any probed location; `bare_name` is `true` only when the schema roots were searched | `creation`: `{first root}/{name}` for a bare name, else the reference's first planned candidate (beside the document for `./x.yaml`); `None` when the reference plans none |
 | `SiblingOnly { sibling, suggestion, creation }` | a bare name no root holds, while a file of that name is beside the document; `suggestion` is `./name` | `creation`, in the first root; `sibling` is the file the author probably meant |
-| `Failed(SelectionFailure)` | `Remote` for a URL (never fetched), or `Resolution` holding the `FileReferenceError` (a malformed reference, a missing anchor, a boundary violation, or a location that could not be checked) | none |
+| `Failed(SelectionFailure)` | `Remote` for a URL (never fetched), `Resolution` holding the `FileReferenceError` (a malformed reference, a missing anchor, a boundary violation, or a location that could not be checked), or `Bundle` holding the refusal of a [bundle scope](#resolving-inside-a-bundle) | none |
 
 The creation path is where a missing file *would* go; the selector never
 creates a file or folder. An editor can link to it so that following an
@@ -179,6 +179,74 @@ let resolved = buffers::guarded(only_types, || resolve_yaml_schema(&reference, b
 // a `$schema` or import other than `allowed` failed as unreadable, unopened
 ```
 
+### Resolving inside a bundle
+
+A host can ship schema files as a *bundle*: a folder of files plus a list of
+its members, each with bytes the host has already read and checked (for
+example against a digest in a manifest). While such a bundle is being
+prepared, nothing outside it may influence the result: not a file someone
+edited on disk after the check, not an editor buffer, not a schema root, and
+not a file that happens to sit in the folder without being listed.
+
+Build a `resolve::bundle::BundleSources` from the bundle root and the checked
+bytes, keyed by bundle-relative path written with `/`, then run the
+resolution inside `resolve::bundle::with(&sources, || ...)`:
+
+```rust
+use simplified_schema::resolve::bundle::{self, BundleSources};
+
+// `bytes` is a BTreeMap<String, Arc<[u8]>>: "schemas/shared.yaml" -> its bytes.
+let sources = BundleSources::on_disk(&bundle_root, bytes)?; // an installed bundle
+// let sources = BundleSources::embedded("claudine", bytes)?; // compiled into a binary
+
+let trigger = sources.path_of("schemas/composition.yaml").expect("a listed member");
+let (resolved, reads) = bundle::with(&sources, || {
+    resolve_yaml_schema(&reference, trigger.parent().unwrap(), &ctx, shipped)
+});
+// reads.served: members whose bytes were used; reads.attempted: every location a
+// reference resolved to; reads.missing: the unlisted ones inside the bundle
+```
+
+Inside the scope the bundle decides every reference first, before any
+location is probed or any file is opened. This covers `$schema` file targets
+(including a trigger's `$schema: ./payload.yaml`), `Name@file` imports,
+`$extends` and `...spread` operands, `example(file)` constraints, and the
+imports of a [template type](language/slots.md)'s returned definition:
+
+| The reference | Result |
+| --- | --- |
+| `./x.yaml` or `../x.yaml` that lands on a listed member | served from that member's checked bytes, never from the disk or a buffer |
+| `./x.yaml` that lands inside the bundle on an unlisted path | refused (`BundleRefusal::Unlisted`) without reading it; the path is added to `reads.missing` |
+| `../../x.yaml` that lands above the bundle root | refused (`BundleRefusal::Escapes`) |
+| a bare name (`x.yaml`), `&x`, `^x`, `@x`, `~/x`, `%./x`, an absolute path | refused (`BundleRefusal::NotRelative`): a bundle copied to another machine cannot rely on search roots, home, or where it was installed |
+| `https://…` | `SchemaError::RemoteUnsupported`, never fetched |
+| a host's built-in name, such as `Name@darkmatter:lifecycle` | resolved from the host's `ShippedSources` as always; built-ins are trusted inputs outside the bundle |
+
+A relative reference is resolved from the folder of the file that wrote it,
+so `base@../base.yaml` written in `schemas/lib/derived.yaml` names
+`schemas/base.yaml`. A refusal is `SchemaError::BundleBoundary`, naming the
+reference, the bundle, and the location it resolved to; inside an imported
+file it is wrapped in `SchemaError::ReferencedSchema` naming that file.
+
+An `example(./ex.yaml)` that names a listed member is also refused
+(`BundleRefusal::ExampleMember`) when that member is a standalone
+`kind: example` document, which a bundle may not carry. Any other member
+still faces the normal example envelope check, so it fails as
+`SchemaError::InvalidExample`.
+
+An installed bundle's members keep their real paths under the bundle folder,
+so diagnostics and `reads.missing` name files a host can watch. An embedded
+bundle uses the virtual root `<name>` (`<claudine>/schemas/shared.yaml`),
+which names no host file and is never looked up on the disk. Both follow the
+same rules.
+
+The scope is independent of a host's template read gate
+(`slots::TemplateReads`): a template type's returned import must be a listed
+member *and* be admitted by the gate. The scope also governs reads a host
+makes through `resolve::buffers::read`, so run a slot's own data-file reads
+outside it. `BundleSources` is plain `Send + Sync` data; the scope applies to
+the calling thread and is restored when `with` returns.
+
 ### As an error
 
 `SchemaFileSelection::into_result()` turns the selection into the same
@@ -192,6 +260,7 @@ consumes it:
 | `SiblingOnly` | `SchemaError::BareNameSiblingExists { reference, suggestion }` |
 | `Failed(Remote)` | `SchemaError::RemoteUnsupported` |
 | `Failed(Resolution(source))` | `SchemaError::Unresolved { reference, source }` |
+| `Failed(Bundle(boundary))` | `SchemaError::BundleBoundary { reference, boundary }` |
 
 Every error carries the trimmed reference. See
 [Diagnostics](./diagnostics.md#error-model) for the variants.

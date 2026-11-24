@@ -11,6 +11,14 @@
 //!   resolving it; a trigger without one, or with `$schema: null`, is
 //!   matcher-only and layers nothing. An empty carrier (`{}`, `[]`, blank
 //!   text) is an error, as in the trigger's definition.
+//! - `name:` (optional) — a kebab-case display label, never a reference.
+//! - `description:` (optional) — what the trigger is for.
+//! - `types:` (optional) — named types local to the trigger: its inline
+//!   `$schema` can name them, and no other file can import them. `{}` is
+//!   allowed.
+//!
+//! `name`, `description`, and `types` are read exactly: each must be written
+//! with its own YAML type, and an explicit `null` is refused (omit the key).
 //!
 //! `kind` decides whether a file claims the envelope. A missing `kind` or any
 //! other string is ordinary data; `trigger-schema`, the spelling before the
@@ -37,7 +45,23 @@ pub const ENVELOPE_KIND: &str = "schema-trigger";
 const RENAMED_KIND: &str = "trigger-schema";
 
 /// The recognized top-level keys of a schema-trigger envelope.
-const KNOWN_KEYS: &[&str] = &["kind", "match", "$schema"];
+const KNOWN_KEYS: &[&str] = &["kind", "name", "description", "match", "$schema", "types"];
+
+/// The pattern a trigger's or a `types`-only library's `name` must match:
+/// lowercase letters, digits, and inner single dashes, starting with a
+/// letter. The envelope definitions carry the same pattern.
+pub const NAME_PATTERN: &str = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
+
+/// Whether `name` is a valid display label ([`NAME_PATTERN`]).
+#[must_use]
+pub fn is_valid_name(name: &str) -> bool {
+    let mut segments = name.split('-');
+    let first_starts_with_letter = name.chars().next().is_some_and(|first| first.is_ascii_lowercase());
+    first_starts_with_letter
+        && segments.all(|segment| {
+            !segment.is_empty() && segment.chars().all(|char| char.is_ascii_lowercase() || char.is_ascii_digit())
+        })
+}
 
 /// A parsed `kind: schema-trigger` envelope.
 ///
@@ -50,6 +74,12 @@ pub struct TriggerEnvelope {
     pub conditions: MatchConditions,
     /// The raw `$schema:` value; `None` for a matcher-only trigger.
     pub payload: Option<YamlValue>,
+    /// The display label; diagnostics show it as `name (path)`.
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// The raw `types:` table, local to this trigger's payload; checked to
+    /// parse as a table of named types.
+    pub types: Option<YamlValue>,
 }
 
 /// Classifies and parses a `kind: schema-trigger` envelope from YAML source.
@@ -102,13 +132,14 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
     if !unknown.is_empty() {
         return Err(SchemaError::TriggerMatch {
             message: format!(
-                "schema-trigger envelope supports only `kind`, `match`, and `$schema`; found \
-                 unknown keys: {}",
+                "schema-trigger envelope supports only `kind`, `name`, `description`, `match`, `$schema`, \
+                 and `types`; found unknown keys: {}",
                 unknown.join(", ")
             ),
             span: None,
         });
     }
+    let labels = labels(map)?;
 
     // `match:` is required.
     let match_value = map
@@ -142,7 +173,61 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
     Ok(Some(TriggerEnvelope {
         conditions,
         payload,
+        name: labels.name,
+        description: labels.description,
+        types: labels.types,
     }))
+}
+
+/// A trigger's `name`, `description`, and `types`, as read exactly.
+struct Labels {
+    name: Option<String>,
+    description: Option<String>,
+    types: Option<YamlValue>,
+}
+
+/// Reads `map`'s labels and local types: each absent or written with its
+/// own YAML type, never `null`; a `name` matching [`NAME_PATTERN`]; a
+/// `types` mapping that parses as a table of named types.
+fn labels(map: &serde_yaml_ng::Mapping) -> Result<Labels, SchemaError> {
+    let present = |key: &str| -> Result<Option<&YamlValue>, SchemaError> {
+        match map.get(YamlValue::String(key.into())) {
+            None => Ok(None),
+            Some(YamlValue::Null) => Err(field_error(key, "must not be null; omit it instead".into())),
+            Some(value) => Ok(Some(value)),
+        }
+    };
+    let name = match present("name")? {
+        None => None,
+        Some(YamlValue::String(name)) if is_valid_name(name) => Some(name.clone()),
+        Some(YamlValue::String(name)) => {
+            return Err(field_error(
+                "name",
+                format!(
+                    "`{name}` is not a kebab-case name: lowercase letters, digits, and inner single dashes, \
+                     starting with a letter"
+                ),
+            ));
+        }
+        Some(other) => return Err(field_error("name", format!("must be a string, got {}", yaml_kind(other)))),
+    };
+    let description = match present("description")? {
+        None => None,
+        Some(YamlValue::String(description)) => Some(description.clone()),
+        Some(other) => return Err(field_error("description", format!("must be a string, got {}", yaml_kind(other)))),
+    };
+    let types = match present("types")? {
+        None => None,
+        Some(types @ YamlValue::Mapping(_)) => {
+            crate::simplified::parse_schema_table(types)
+                .map_err(|error| field_error("types", format!("is not a table of named types: {error}")))?;
+            Some(types.clone())
+        }
+        Some(other) => {
+            return Err(field_error("types", format!("must be a mapping of named types, got {}", yaml_kind(other))));
+        }
+    };
+    Ok(Labels { name, description, types })
 }
 
 /// Whether `payload` is a `$schema` carrier with no content: blank text, `{}`,
@@ -158,7 +243,9 @@ fn is_empty_carrier(payload: &YamlValue) -> bool {
 
 /// Checks the meaning of a `kind: schema-trigger` document a selected
 /// definition already accepted: its `match` grammar, `$path` globs, and the
-/// vacuous-trigger lint. The document's shape (its keys, whether `match` is
+/// vacuous-trigger lint, and the exact written forms of `name`,
+/// `description`, and `types`, whose explicit `null` the definition cannot
+/// refuse. The rest of the document's shape (its keys, whether `match` is
 /// present, the `$schema` carrier) is the definition's alone, so an unknown
 /// key or an absent `match` is not reported here; trigger discovery still
 /// loads a trigger with [`parse_trigger_envelope`].
@@ -167,6 +254,9 @@ fn is_empty_carrier(payload: &YamlValue) -> bool {
 ///
 /// As [`parse_trigger_envelope`] for the `match` payload.
 pub(crate) fn check_trigger_semantics(value: &YamlValue) -> Result<(), SchemaError> {
+    if let Some(map) = value.as_mapping() {
+        labels(map)?;
+    }
     match value.get("match") {
         Some(match_value) => match_semantics(match_value).map(|_| ()),
         None => Ok(()),

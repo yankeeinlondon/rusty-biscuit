@@ -206,13 +206,16 @@ fn named_field(error: &SchemaError) -> Vec<String> {
 }
 
 /// A schema source path as instance-path segments: a property is its name,
-/// a union arm its index (a root-union arm is a sequence item).
+/// a union arm its index (a root-union arm is a sequence item). A spread is
+/// text inside its object's scalar, not a YAML node, so the path ends at the
+/// scalar that holds it.
 fn source_path_segments(path: &SchemaSourcePath) -> Vec<String> {
     path.segments()
         .iter()
-        .map(|segment| match segment {
-            SchemaSourcePathSegment::Property(name) => name.clone(),
-            SchemaSourcePathSegment::UnionArm(index) => index.to_string(),
+        .map_while(|segment| match segment {
+            SchemaSourcePathSegment::Property(name) => Some(name.clone()),
+            SchemaSourcePathSegment::UnionArm(index) => Some(index.to_string()),
+            SchemaSourcePathSegment::Spread(_) => None,
         })
         .collect()
 }

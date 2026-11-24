@@ -215,6 +215,21 @@ loop:
 - **When the action runs.** It changes state only when another pass is
   coming.
 - **Running zero times** needs `skip` in `initialize`, or a task `when:`.
+- **What a later pass reads.** The loop keeps the document its first pass
+  was judged from (after `initialize`, when it declares one) and composes
+  every later pass from it, with new `loop.*` values, `set` writes, and a
+  fresh working-tree `ctx`. An edit to the document's own file during the
+  run reaches only the next run, a `retry` or `resume` (which read the file
+  for that attempt; the next ordinary pass returns to the kept document), or
+  a new sequence task. Carry values with `set` or `action`, and read
+  agent-updated state explicitly, such as
+  `until: "frontmatter('progress.md', 'done') == true"` (this works on the
+  document's own file too); a bare property of the document reads the kept
+  copy and never sees the agent's edit. Under `inline-compose`
+  the file is also the deliverable: each pass compares the agent's result
+  with the file as that pass found it, so a pass that leaves it unchanged
+  fails with *document not updated* and keeps the earlier pass's edit.
+  Examples: `claudine/docs/topics/flow-control/looping.md#what-each-pass-reads`.
 
 ## Old spellings you may meet
 

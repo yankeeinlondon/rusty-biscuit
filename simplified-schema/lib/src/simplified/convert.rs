@@ -47,8 +47,9 @@ use indexmap::IndexMap;
 
 use super::alphanumeric::AlphanumericOptions;
 use super::definitions::{DefKey, DefinitionOuter, DefinitionTable, definition_pointer};
+use super::source::SchemaReferenceSite;
 use super::types::{
-    Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
+    Constraint, Extends, ObjectComposition, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
     SimplifiedType, Slot, TupleType, TypeExpr,
 };
 use crate::numeric::json_number;
@@ -1478,6 +1479,7 @@ fn object_body_from_shape(
     default_additional: Value,
     defs: Lowering<'_>,
 ) -> Result<Map<String, Value>, SchemaError> {
+    reject_unresolved_composition(context, shape)?;
     let mut properties = Map::new();
     let mut required = Vec::new();
     let mut errors = Vec::new();
@@ -1487,7 +1489,9 @@ fn object_body_from_shape(
         } else {
             format!("{context}.{prop_name}")
         };
-        match property_def_to_schema(&qualified_name, def, defs.for_property(context, prop_name)) {
+        match property_def_to_schema(&qualified_name, def, defs.for_property(context, prop_name))
+            .map_err(|error| composed_member_error(error, shape.composed_sites.literal(prop_name)))
+        {
             Ok((prop_schema, is_required)) => {
                 if defs.lists_required(def, is_required) {
                     required.push(Value::String(prop_name.clone()));
@@ -1512,14 +1516,19 @@ fn object_body_from_shape(
     let literal_names: Vec<&str> = shape.properties.keys().map(String::as_str).collect();
     let mut catch_all: Option<Value> = None;
     let mut pattern_properties = Map::new();
-    for pk in &shape.pattern_keys {
+    for (index, pk) in shape.pattern_keys.iter().enumerate() {
+        let site = shape.composed_sites.pattern(index);
         match &pk.key {
             PatternKey::CatchAll => {
-                catch_all = Some(pattern_value_schema(context, &pk.def, defs)?);
+                catch_all = Some(
+                    pattern_value_schema(context, &pk.def, defs).map_err(|error| composed_member_error(error, site))?,
+                );
             }
             other => {
-                let emitted = emitted_pattern_property(context, other, &literal_names)?;
-                let value_schema = pattern_value_schema(context, &pk.def, defs)?;
+                let emitted =
+                    emitted_pattern_property(context, other, &literal_names).map_err(|error| composed_member_error(error, site))?;
+                let value_schema =
+                    pattern_value_schema(context, &pk.def, defs).map_err(|error| composed_member_error(error, site))?;
                 pattern_properties.insert(emitted, value_schema);
             }
         }
@@ -1583,16 +1592,63 @@ fn emitted_pattern_property(
     key: &PatternKey,
     literal_names: &[&str],
 ) -> Result<String, SchemaError> {
+    // The catch-all lowers to `additionalProperties`, never here.
+    let emitted = emitted_pattern_key(key, literal_names).expect("catch-all handled before patternProperties");
+    validate_emitted_pattern(context, key, &emitted)?;
+    Ok(emitted)
+}
+
+/// The `patternProperties` key a non-catch-all [`PatternKey`] lowers to in
+/// an object whose literal keys are `literal_names`, unvalidated; `None` for
+/// the catch-all, which lowers to `additionalProperties`. Two pattern keys
+/// with the same emitted key are one key of the lowered object, which is
+/// how composition decides that a later pattern replaces an earlier one.
+pub(crate) fn emitted_pattern_key(key: &PatternKey, literal_names: &[&str]) -> Option<String> {
     let core = match key {
         PatternKey::Starting(prefix) => format!("^{}", regex::escape(prefix)),
         PatternKey::Ending(suffix) => format!("{}$", regex::escape(suffix)),
         PatternKey::Pattern(re) => re.clone(),
-        // The catch-all lowers to `additionalProperties`, never here.
-        PatternKey::CatchAll => unreachable!("catch-all handled before patternProperties"),
+        PatternKey::CatchAll => return None,
     };
-    let emitted = wrap_literal_exclusion(&core, literal_names);
-    validate_emitted_pattern(context, key, &emitted)?;
-    Ok(emitted)
+    Some(wrap_literal_exclusion(&core, literal_names))
+}
+
+/// Refuses a shape that still carries its authored composition: its
+/// operands are expanded only by resolution, and lowering it as written
+/// would silently drop their members.
+fn reject_unresolved_composition(context: &str, shape: &SchemaShape) -> Result<(), SchemaError> {
+    let Some(composition) = shape.composition.as_deref() else {
+        return Ok(());
+    };
+    let (position, operand) = match composition {
+        ObjectComposition::Inline(spreads) => ("[...0]", &spreads[0].operand),
+        ObjectComposition::Extends(Extends::Scalar(operand)) => (".$extends", operand),
+        ObjectComposition::Extends(Extends::Sequence(operands)) => (".$extends[0]", &operands[0]),
+    };
+    let written = match &operand.reference {
+        Some(reference) => format!("{}@{reference}", operand.name),
+        None => operand.name.clone(),
+    };
+    Err(SchemaError::Convert {
+        property: format!("{context}{position}"),
+        message: format!(
+            "the object composes `{written}`, which is not resolved; resolve the schema's named types \
+             before lowering it"
+        ),
+    })
+}
+
+/// `error`, raised while lowering a member copied through composition from
+/// `site`, wrapped to name that declaration. A failure already attributed
+/// to a deeper copied member keeps that attribution.
+fn composed_member_error(error: SchemaError, site: Option<&SchemaReferenceSite>) -> SchemaError {
+    match (site, error) {
+        (_, error @ SchemaError::ComposedMember { .. }) | (None, error) => error,
+        (Some(site), SchemaError::Aggregate { errors }) => SchemaError::Aggregate {
+            errors: errors.into_iter().map(|error| composed_member_error(error, Some(site))).collect(),
+        },
+        (Some(site), error) => SchemaError::ComposedMember { site: site.clone(), source: Box::new(error) },
+    }
 }
 
 /// Wraps an emitted regex with a start-anchored negative lookahead that

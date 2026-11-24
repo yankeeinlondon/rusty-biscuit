@@ -33,11 +33,11 @@ Several red tests frequently share one cause (for example two drift tests pinned
 
 ### Decide where each repair belongs
 
-The branch being proposed is not automatically the branch a repair belongs on. For every problem that needs a change to the repository, record a `fix_branch`:
+The branch being proposed is not automatically the branch a repair belongs on. For every problem that needs a change to the repository, record a `fix-branch`:
 
 - `branch` and `working-tree` problems are repaired on `{{branch}}`.
 - A `base` problem is not this pull request's to repair. Its fix belongs on its own branch cut from `{{base}}`, so that it can merge ahead of this work; name that branch (for example `fix/<short-topic>`). Say plainly in `summary` that the pull request stays blocked until that fix reaches `{{base}}` and this branch picks it up.
-- An `environment` problem has no `fix_branch`. Say what the caller has to change on the host instead.
+- An `environment` problem has no `fix-branch`. Say what the caller has to change on the host instead.
 
 ### Do not fix anything
 
@@ -48,7 +48,7 @@ This stage diagnoses; it does not repair. Do not edit source, tests, fixtures, o
 `issue` is the entire briefing a fixing agent will receive, and that agent will not have your session. Make it self-contained:
 
 - the branch being proposed, its `HEAD` SHA, and the base
-- each distinct problem: the failing tests it accounts for, the root cause, the attribution with its evidence, the introducing commit when known, and the `fix_branch` the repair belongs on
+- each distinct problem: the failing tests it accounts for, the root cause, the attribution with its evidence, the introducing commit when known, and the `fix-branch` the repair belongs on
 - the exact commands that reproduce each failure
 - anything you ruled out, so the fixing agent does not repeat it
 - constraints the fix must respect (for example "the fixture must be re-derived from the shipped prompt, keeping only the documented removals")

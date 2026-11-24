@@ -1,5 +1,6 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
-use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
+use sniff::filesystem::git::{CommitLink, ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
 
 use super::{TextOutput, format_number, relative_path};
@@ -430,19 +431,18 @@ fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
+    commit_links: Option<&HashMap<String, CommitLink>>,
 ) -> Vec<String> {
     let mut status_items: Vec<String> = Vec::new();
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
-    // `git.recent` is newest-first. Commit links come from the library, which
-    // links a commit only when a local remote-tracking ref contains it; a
-    // lookup failure renders the commits unlinked rather than failing the report.
-    let commits: Vec<_> = git.recent.iter().take(history_count).collect();
-    let shas: Vec<&str> = commits.iter().map(|commit| commit.sha.as_str()).collect();
-    let links = sniff::filesystem::git::commit_links_at(&git.repo_root, &shas).unwrap_or_default();
-
-    for (index, commit) in commits.iter().enumerate().rev() {
-        let commit_url = links.get(index).and_then(|link| link.commit_url.as_deref());
+    // `git.recent` is newest-first. Links were captured by the library, keyed
+    // by full SHA; rendering never reads the repository, and a commit without
+    // a captured URL renders its hash unlinked.
+    for commit in git.recent.iter().take(history_count).rev() {
+        let commit_url = commit_links
+            .and_then(|links| links.get(&commit.sha))
+            .and_then(|link| link.commit_url.as_deref());
         status_items.push(format_commit_line(commit, verbose, commit_url));
     }
 
@@ -790,6 +790,7 @@ pub fn render_git_section(
     compact: bool,
     target_branch: Option<&str>,
     target_worktree: Option<(&str, &str)>,
+    commit_links: Option<&HashMap<String, CommitLink>>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
@@ -811,7 +812,7 @@ pub fn render_git_section(
     writeln!(out, "{}", status_title).unwrap();
     out.push('\n');
 
-    let status_items = build_git_status_items(git, history_count, verbose);
+    let status_items = build_git_status_items(git, history_count, verbose, commit_links);
 
     // Render status items as list
     if !status_items.is_empty() {
@@ -1239,16 +1240,11 @@ pub fn render_repo_root(result: &sniff::SniffResult) -> String {
 }
 
 /// Pure helper: returns whether the current package area has uncommitted
-/// changes, or `None` when the area cannot be resolved.
+/// changes, or `None` when the area cannot be resolved or its changes were not
+/// observed ([`sniff::filesystem::repo::area_changed_paths`]).
 ///
-/// Checks all dirty/untracked files against the area prefix, not just
-/// package-scoped files. JSON and text/exit-code call sites both consume this.
-///
-/// Pulls dirty paths from `git.file_changes` (always populated) plus the
-/// diff-rich `git.status.dirty` / `git.status.untracked` arrays (deep mode
-/// only). Without the `file_changes` source, non-deep callers would always
-/// see `false` because `status.dirty`/`status.untracked` are empty unless
-/// `--refresh-remotes` is set.
+/// Checks all changed files against the area, not just package-scoped files.
+/// JSON and text/exit-code call sites both consume this.
 pub(crate) fn current_package_area_is_dirty(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
@@ -1258,38 +1254,8 @@ pub(crate) fn current_package_area_is_dirty(
     let dir = resolve_dir(base_dir);
     let area = repo.package_area_for_dir(&dir)?;
     let git = fs.git.as_ref()?;
-
-    // Without computed status (identity-only request) dirtiness is
-    // indeterminate, so return `None` like the other missing-data early exits.
-    let status = git.status.as_ref()?;
-    let has_dirty = status
-        .dirty
-        .iter()
-        .map(|d| d.filepath.to_str().unwrap_or(""))
-        .chain(
-            status
-                .untracked
-                .iter()
-                .map(|u| u.filepath.to_str().unwrap_or("")),
-        )
-        .chain(
-            git.file_changes
-                .iter()
-                .map(|fc| fc.path.to_str().unwrap_or("")),
-        )
-        .any(|path| {
-            if area.is_empty() {
-                // Root area: dirty if file is not inside any non-root area
-                !repo.packages.as_ref().is_some_and(|pkgs| {
-                    pkgs.iter()
-                        .any(|p| !p.package_area.is_empty() && path.starts_with(&p.package_area))
-                })
-            } else {
-                path.starts_with(area)
-            }
-        });
-
-    Some(has_dirty)
+    let paths = sniff::filesystem::repo::area_changed_paths(repo, area, git)?;
+    Some(!paths.is_empty())
 }
 
 /// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise.
@@ -1303,27 +1269,13 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
     }
 }
 
-/// Returns true if a file path has a source code extension.
-///
-/// Delegates to the shared library helper.
-fn is_source_code_file(path: &str) -> bool {
-    sniff::filesystem::path_kind::is_source_code_path(Path::new(path))
-}
-
 /// Pure helper: returns `(has_changes, count, area_name)` for the current
-/// package area, or `None` when the area cannot be resolved.
+/// package area, or `None` when the area cannot be resolved or its changes were
+/// not observed.
 ///
-/// JSON consumers only need the boolean. The text/verbose path uses the count
-/// and area name to print a human-readable summary.
-///
-/// ## Notes
-///
-/// Pulls dirty paths from `git.file_changes` (always populated) plus the
-/// diff-rich `git.status.dirty` / `git.status.untracked` arrays (deep mode
-/// only). Without the `file_changes` source, non-deep callers would always
-/// see a count of `0` because `status.dirty`/`status.untracked` are empty
-/// unless `--refresh-remotes` is set. This mirrors the same chain used by
-/// [`current_package_area_is_dirty`].
+/// `count` is the number of distinct changed source files in the area. JSON
+/// consumers only need the boolean. The text/verbose path uses the count and
+/// area name to print a human-readable summary.
 pub(crate) fn package_area_source_code_change_count(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
@@ -1333,37 +1285,9 @@ pub(crate) fn package_area_source_code_change_count(
     let dir = resolve_dir(base_dir);
     let area = repo.package_area_for_dir(&dir)?;
     let git = fs.git.as_ref()?;
-
-    // Without computed status (identity-only request) the change count is
-    // indeterminate, so return `None` like the other missing-data early exits.
-    let status = git.status.as_ref()?;
-
-    let count = status
-        .dirty
-        .iter()
-        .map(|d| d.filepath.to_str().unwrap_or(""))
-        .chain(
-            status
-                .untracked
-                .iter()
-                .map(|u| u.filepath.to_str().unwrap_or("")),
-        )
-        .chain(
-            git.file_changes
-                .iter()
-                .map(|fc| fc.path.to_str().unwrap_or("")),
-        )
-        .filter(|path| {
-            let in_area = if area.is_empty() {
-                !repo.packages.as_ref().is_some_and(|pkgs| {
-                    pkgs.iter()
-                        .any(|p| !p.package_area.is_empty() && path.starts_with(&p.package_area))
-                })
-            } else {
-                path.starts_with(area)
-            };
-            in_area && is_source_code_file(path)
-        })
+    let count = sniff::filesystem::repo::area_changed_paths(repo, area, git)?
+        .into_iter()
+        .filter(|path| sniff::filesystem::path_kind::is_source_code_path(path))
         .count();
 
     Some((count > 0, count, area.to_string()))
@@ -1420,7 +1344,6 @@ mod tests {
     };
     use sniff::filesystem::repo::Package;
     use sniff::filesystem::{TitleSource, UpdatedSource};
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn make_package(name: &str, area: &str, depends_on: &[&str]) -> Package {
@@ -1537,7 +1460,7 @@ mod tests {
                 },
             ]);
 
-            let items = build_git_status_items(&git, 10, 0);
+            let items = build_git_status_items(&git, 10, 0, None);
 
             let last = items.last().expect("at least one status item");
             assert!(last.starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
@@ -1563,6 +1486,66 @@ mod tests {
             assert!(untracked_index < conflicted_index);
         }
 
+        /// Captured links are matched by full SHA: two commits sharing the
+        /// displayed seven-character prefix must not borrow each other's URL,
+        /// and rendering must not read the repository (`/repo` does not exist).
+        #[test]
+        fn captured_links_match_full_ids_and_rendering_reads_no_repository() {
+            let linked = format!("abcdef1{}", "1".repeat(33));
+            let unlinked = format!("abcdef1{}", "2".repeat(33));
+            let mut git = make_git_info(vec![]);
+            let template = git.recent[0].clone();
+            git.recent = vec![
+                CommitInfo {
+                    sha: linked.clone(),
+                    message: "feat: newest".to_string(),
+                    ..template.clone()
+                },
+                CommitInfo {
+                    sha: unlinked.clone(),
+                    message: "fix: oldest".to_string(),
+                    ..template
+                },
+            ];
+            let url = format!("https://github.com/o/r/commit/{linked}");
+            let links = HashMap::from([(
+                linked.clone(),
+                CommitLink { remote: Some(true), commit_url: Some(url.clone()) },
+            )]);
+
+            let collector = sniff::performance::PerformanceCollector::new_shared();
+            let (items, section) =
+                sniff::performance::with_current_collector(Some(collector.clone()), || {
+                    (
+                        build_git_status_items(&git, 10, 0, Some(&links)),
+                        render_git_section(&git, 10, 0, false, None, None, Some(&links)),
+                    )
+                });
+
+            assert_eq!(items.len(), 2);
+            assert!(items[0].contains("oldest"), "oldest first: {items:?}");
+            assert!(items[0].starts_with("[<dim><i>abcdef1</i></dim>]"), "{}", items[0]);
+            assert!(!items[0].contains("href"), "{}", items[0]);
+            assert!(items[1].contains("newest"), "{}", items[1]);
+            assert!(
+                items[1].starts_with(&format!("[<a href=\"{url}\"><b>abcdef1</b></a>]")),
+                "{}",
+                items[1]
+            );
+            assert_eq!(section.matches("abcdef1").count(), 2, "{section}");
+
+            let snapshot = collector.snapshot(std::time::Duration::ZERO);
+            assert!(
+                snapshot.counters.values().all(|count| *count == 0),
+                "rendering did Git work: {:?}",
+                snapshot.counters
+            );
+
+            let unlinked_items = build_git_status_items(&git, 10, 0, None);
+            assert!(unlinked_items.iter().all(|item| !item.contains("href")));
+            assert_eq!(build_git_status_items(&git, 0, 0, Some(&links)), Vec::<String>::new());
+        }
+
         #[test]
         fn compact_git_status_omits_meta_section() {
             let git = make_git_info(vec![FileChange {
@@ -1573,7 +1556,7 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true, None, None);
+            let output = render_git_section(&git, 10, 0, true, None, None, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
@@ -1583,7 +1566,7 @@ mod tests {
         #[test]
         fn git_status_headers_use_double_underline_markup() {
             let git = make_git_info(vec![]);
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
             // The header is produced via Prose with <b><uu>Status</uu></b>.
             // In a TTY with double-underline support this renders as \x1b[4:2m;
             // otherwise it degrades to regular underline or plain text.  We
@@ -1615,7 +1598,7 @@ mod tests {
             git.in_worktree = true;
             git.current_branch = Some("feature".to_string());
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
             let lines: Vec<&str> = output.lines().collect();
 
             // Find section headers (they contain the rendered header text)
@@ -1732,7 +1715,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("main:"),
@@ -1784,7 +1767,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -1815,7 +1798,7 @@ mod tests {
             git.current_branch = Some("main".to_string());
             git.in_worktree = false;
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 !output.contains("Worktrees"),
@@ -1878,7 +1861,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("login-fix"),
@@ -2126,7 +2109,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -2168,7 +2151,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:") && !output.contains("main:"),
@@ -2202,7 +2185,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("main:"),
@@ -2238,7 +2221,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -2516,16 +2499,17 @@ mod tests {
         use super::*;
         use sniff::SniffResult;
         use sniff::filesystem::FilesystemInfo;
-        use sniff::filesystem::git::types::DirtyFile;
         use sniff::filesystem::repo::types::RepoInfo;
 
-        fn make_dirty_file(path: &str) -> DirtyFile {
-            DirtyFile {
-                filepath: PathBuf::from(path),
-                absolute_filepath: PathBuf::from(format!("/repo/{path}")),
-                diff: String::new(),
-                last_local_commit: String::new(),
-                origin_commit: None,
+        /// An unstaged modification as an ordinary (patch-free) request
+        /// reports it: in `file_changes` only, never in `status.dirty`.
+        fn modified(path: &str) -> FileChange {
+            FileChange {
+                path: PathBuf::from(path),
+                status: FileStatus::Modified,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
             }
         }
 
@@ -2568,8 +2552,7 @@ mod tests {
         fn dirty_packages_returns_empty_when_not_monorepo() {
             let packages = vec![make_package("alpha", "alpha", &[])];
             let repo = make_repo(packages, false);
-            let mut git = make_git_info(vec![]);
-            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            let git = make_git_info(vec![modified("alpha/src/main.rs")]);
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2591,8 +2574,7 @@ mod tests {
             packages[1].relative = "area-b/beta".to_string();
 
             let repo = make_repo(packages, true);
-            let mut git = make_git_info(vec![]);
-            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            let git = make_git_info(vec![modified("area-a/alpha/src/main.rs")]);
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2609,8 +2591,7 @@ mod tests {
             packages[1].relative = "area-b/beta".to_string();
 
             let repo = make_repo(packages, true);
-            let mut git = make_git_info(vec![]);
-            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            let git = make_git_info(vec![modified("area-a/alpha/src/main.rs")]);
             let result = build_result(repo, git);
 
             let areas = select_dirty_package_area_names(&result, &[], None, None);
@@ -2627,11 +2608,10 @@ mod tests {
             packages[1].relative = "area-b/beta".to_string();
 
             let repo = make_repo(packages, true);
-            let mut git = make_git_info(vec![]);
-            git.status.as_mut().unwrap().dirty = vec![
-                make_dirty_file("area-a/alpha/src/main.rs"),
-                make_dirty_file("area-b/beta/src/lib.rs"),
-            ];
+            let git = make_git_info(vec![
+                modified("area-a/alpha/src/main.rs"),
+                modified("area-b/beta/src/lib.rs"),
+            ]);
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &["@area-a".to_string()], None, None);
@@ -2747,8 +2727,21 @@ mod tests {
             }
         }
 
+        /// A deep-request result: every dirty path is in `file_changes` and,
+        /// with its patch, in `status.dirty`, so a path must count once.
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
-            let mut git = make_git_info(vec![]);
+            let mut git = make_git_info(
+                dirty_paths
+                    .iter()
+                    .map(|path| FileChange {
+                        path: PathBuf::from(path),
+                        status: FileStatus::Modified,
+                        action: FileAction::Modified,
+                        lines_added: 1,
+                        lines_removed: 0,
+                    })
+                    .collect(),
+            );
             git.repo_root = repo.root.clone();
             git.status.as_mut().unwrap().dirty =
                 dirty_paths.iter().map(|p| dirty_file(p)).collect();
@@ -2812,7 +2805,7 @@ mod tests {
             assert!(super::packages::dirty_package_names(&result).is_empty());
 
             // Status-oriented renderers must produce output without panicking.
-            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = render_git_section(git, 10, 1, false, None, None, None);
             let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 
@@ -2978,6 +2971,78 @@ mod tests {
             .expect("area should resolve");
             assert!(!has);
             assert_eq!(count, 0);
+        }
+
+        /// `area-a` must not claim `area-ab`, which shares its spelling but
+        /// not its directory.
+        #[test]
+        fn current_package_area_ignores_a_sibling_sharing_the_area_prefix() {
+            let repo = make_repo(vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-ab", &[]),
+            ]);
+            let file_changes = vec![FileChange {
+                path: PathBuf::from("area-ab/beta/src/lib.rs"),
+                status: FileStatus::Untracked,
+                action: FileAction::Created,
+                lines_added: 0,
+                lines_removed: 0,
+            }];
+            let result = build_result_with_file_changes(repo, file_changes);
+            let alpha = PathBuf::from("/repo/area-a/alpha");
+
+            assert_eq!(current_package_area_is_dirty(&result, Some(&alpha)), Some(false));
+            let (has, count, _area) =
+                package_area_source_code_change_count(&result, Some(&alpha)).unwrap();
+            assert!(!has);
+            assert_eq!(count, 0);
+        }
+
+        /// A dirty status without collected file changes (a request below
+        /// `include_file_changes`) is indeterminate, not clean.
+        #[test]
+        fn current_package_area_is_indeterminate_without_file_changes() {
+            let repo = make_repo(vec![make_package("alpha", "area-a", &[])]);
+            let mut result = build_result_with_file_changes(repo, vec![]);
+            let git = result.filesystem.as_mut().unwrap().git.as_mut().unwrap();
+            git.status.as_mut().unwrap().is_dirty = true;
+            let alpha = PathBuf::from("/repo/area-a/alpha");
+
+            assert_eq!(current_package_area_is_dirty(&result, Some(&alpha)), None);
+            assert_eq!(package_area_source_code_change_count(&result, Some(&alpha)), None);
+            assert!(super::packages::dirty_package_names(&result).is_empty());
+        }
+
+        /// The verbose listing reads `file_changes`; the patch-only
+        /// `status.dirty` / `status.untracked` arrays only add diff text.
+        #[test]
+        fn verbose_filesystem_section_lists_ordinary_file_changes() {
+            let repo = make_repo(vec![make_package("alpha", "area-a", &[])]);
+            let file_changes = vec![
+                FileChange {
+                    path: PathBuf::from("area-a/alpha/src/lib.rs"),
+                    status: FileStatus::Both,
+                    action: FileAction::Modified,
+                    lines_added: 1,
+                    lines_removed: 1,
+                },
+                FileChange {
+                    path: PathBuf::from("area-a/alpha/src/new.rs"),
+                    status: FileStatus::Untracked,
+                    action: FileAction::Created,
+                    lines_added: 0,
+                    lines_removed: 0,
+                },
+            ];
+            let result = build_result_with_file_changes(repo, file_changes);
+            let fs = result.filesystem.as_ref().unwrap();
+
+            let output = super::repo::render_filesystem_section(fs, 1, None, false);
+
+            let dirty = output.find("Dirty files:").expect(&output);
+            let untracked = output.find("Untracked files:").expect(&output);
+            assert!(output[dirty..untracked].contains("area-a/alpha/src/lib.rs"));
+            assert!(output[untracked..].contains("area-a/alpha/src/new.rs"));
         }
     }
 

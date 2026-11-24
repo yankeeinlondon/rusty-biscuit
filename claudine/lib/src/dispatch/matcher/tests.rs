@@ -335,3 +335,42 @@ fn inline_callbacks_compile_as_expression_matchers() {
         assert!(matches!(RuntimeMatcher::compile(source), Some(RuntimeMatcher::Expression { .. })), "{source}");
     }
 }
+
+/// The variant a matcher source compiles to, for comparing two sources.
+fn compiled_kind(source: &str) -> Option<std::mem::Discriminant<RuntimeMatcher>> {
+    RuntimeMatcher::compile(source).as_ref().map(std::mem::discriminant)
+}
+
+#[test]
+fn object_spread_operand_condition_qualifies_matcher_even_when_overwritten() {
+    // The later `k` replaces the operand's only key, but the operand is still
+    // evaluated, so its comparison makes the source condition-grade.
+    let source = "{ ...{ k: tool_name == 'Bash' }, k: tool_name }";
+    assert!(matches!(RuntimeMatcher::compile(source), Some(RuntimeMatcher::Expression { .. })));
+    assert_eq!(compiled_kind(source), compiled_kind("{ k: tool_name == 'Bash' }"));
+}
+
+#[test]
+fn object_spread_operand_bare_variable_is_judged_like_a_direct_variable() {
+    for source in ["{ ...tool_name, k: tool_name }", "{ ...{ k: tool_name }, k: tool_name }"] {
+        assert!(
+            !matches!(RuntimeMatcher::compile(source), Some(RuntimeMatcher::Expression { .. })),
+            "{source}"
+        );
+        assert_eq!(compiled_kind(source), compiled_kind("{ k: tool_name }"), "{source}");
+    }
+}
+
+#[test]
+fn object_spread_operand_variable_is_read_at_match_time_even_when_overwritten() {
+    // Only the spread operand reads `tool_name`, and spreading a string fails,
+    // so a failed match proves the operand was looked up.
+    let source = "{ ...tool_name, k: 1 }";
+    let matcher = RuntimeMatcher::compile(source);
+    assert!(matches!(matcher, Some(RuntimeMatcher::Expression { .. })));
+
+    let bash = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
+    let absent = tool_meta(AgenticEvent::SessionStart, None);
+    assert!(!matches(matcher.as_ref(), &bash), "spreading the string `Bash` must fail the match");
+    assert!(matches(matcher.as_ref(), &absent), "an absent operand spreads nothing");
+}

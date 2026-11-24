@@ -15,6 +15,9 @@ types:
     match-payload: match-expression | match-expression[]
 $schema:
     kind: literal(schema-trigger; required) -> the document kind that claims this definition
+    name: string(pattern('^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$')) -> a kebab-case display label shown beside the file's path; unique within its schema root; never a reference
+    description: string -> what the trigger is for
     match: match-payload(required) -> the conditions that select a document (one expression, or a list that must all hold)
     $schema: schema(not-empty) -> the schema applied to matching documents; omit it for a matcher-only trigger
+    types: schema(mapping) -> named types local to this trigger; its `$schema` can name them, other files cannot import them
     $constraints: { closed: true }

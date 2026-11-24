@@ -6,10 +6,12 @@
 //!
 //! ## Recognition
 //!
-//! Three envelopes are recognized, by content alone:
+//! Four envelopes are recognized, by content alone:
 //!
 //! - **Tagged**: a YAML mapping containing `kind: schema`.
 //! - **YamlSchema**: a YAML mapping containing `kind: yaml-schema`.
+//! - **NamespaceSchema**: a YAML mapping containing `kind: namespace-schema`,
+//!   read by [`parse_namespace_schema_document`].
 //! - **Pure** (informal): any other YAML mapping that has `$schema` and only
 //!   keys [`StandaloneSchemaEnvelope::admits_top_level_key`] admits for it.
 //!
@@ -18,7 +20,7 @@
 //! A recognized envelope is then **admitted** by validating it against its
 //! definition, compiled into the library ([`crate::envelope`]): a tagged or
 //! informal document against `schema.yaml`, a `yaml-schema` against
-//! `yaml-schema.yaml`. The definitions own every structural rule (closed key
+//! `yaml-schema.yaml`, a `namespace-schema` against `namespace-schema.yaml`. The definitions own every structural rule (closed key
 //! set, a usable `$schema` or `types` present, `types` a mapping, metadata
 //! types, no empty metadata or `types` table); this module keeps only the
 //! rules that need the parsed document: category entry grammar, duplicate
@@ -85,20 +87,33 @@ pub enum StandaloneSchemaEnvelope {
     /// metadata and `types` namespace as [`Tagged`](Self::Tagged), but it is
     /// applied to documents by their `kind`, never referenced.
     YamlSchema,
+    /// A document containing `kind: namespace-schema`: one host namespace
+    /// (an expression global) declared for a host's catalog. It is never a
+    /// `$schema` target or a `Name@file` import source, and its `types` are
+    /// private to it.
+    NamespaceSchema,
 }
 
 impl StandaloneSchemaEnvelope {
     /// Whether this envelope admits `key` at the top level of its mapping.
     ///
-    /// Every envelope admits `$schema`, `types`, `description`, and
-    /// `categories`; only [`Tagged`](Self::Tagged) and
-    /// [`YamlSchema`](Self::YamlSchema) admit `kind`. Recognition and editor
-    /// lexical claims read it to decide whether an untagged mapping is the
-    /// informal envelope; a recognized envelope's keys are then judged by
+    /// Every envelope admits `$schema`, `types`, and `description`; every
+    /// envelope but [`NamespaceSchema`](Self::NamespaceSchema) admits
+    /// `categories`, and every tagged one admits `kind`.
+    /// [`Tagged`](Self::Tagged) also admits `name` and
+    /// [`NamespaceSchema`](Self::NamespaceSchema) `namespace`. Recognition and
+    /// editor lexical claims read it to decide whether an untagged mapping is
+    /// the informal envelope; a recognized envelope's keys are then judged by
     /// its definition ([`crate::envelope`]).
     pub fn admits_top_level_key(self, key: &str) -> bool {
-        matches!(key, "$schema" | "types" | "description" | "categories")
-            || (self != Self::Pure && key == "kind")
+        match key {
+            "$schema" | "types" | "description" => true,
+            "categories" => self != Self::NamespaceSchema,
+            "kind" => self != Self::Pure,
+            "name" => self == Self::Tagged,
+            "namespace" => self == Self::NamespaceSchema,
+            _ => false,
+        }
     }
 
     /// The `kind` value that claims this envelope, `None` for the informal
@@ -108,6 +123,7 @@ impl StandaloneSchemaEnvelope {
             Self::Pure => None,
             Self::Tagged => Some("schema"),
             Self::YamlSchema => Some("yaml-schema"),
+            Self::NamespaceSchema => Some("namespace-schema"),
         }
     }
 }
@@ -145,6 +161,10 @@ pub struct StandaloneSchemaDocument {
     pub exports_schema: bool,
     /// The top-level `description` string, `None` when absent or `null`.
     pub description: Option<String>,
+    /// The display label of a `types`-only `kind: schema` library, `None`
+    /// when it declares none. It is never a reference: imports name the
+    /// file by path.
+    pub name: Option<String>,
     /// The shared declaration product for the envelope payload: an inline
     /// schema (mapping or root-union sequence) or a syntax-checked whole-file
     /// reference. Without an explicit export, a tagged `types` table is the payload.
@@ -345,6 +365,11 @@ fn parse_standalone(
         Admission::Skip => std::borrow::Cow::Owned(crate::envelope::document_json(&recognized, path)?),
     };
     let envelope = recognized.envelope;
+    check_written_labels(&recognized, source, path)?;
+    let name = match envelope {
+        StandaloneSchemaEnvelope::Tagged => metadata.get("name").and_then(serde_json::Value::as_str).map(str::to_string),
+        _ => None,
+    };
     let payload_key = recognized.payload_key();
     let Some(payload) = recognized.payload() else {
         return Err(schema_document_error(path, "the envelope has neither a `$schema` nor a `types` value"));
@@ -404,6 +429,7 @@ fn parse_standalone(
         envelope,
         exports_schema: payload_key == "$schema",
         description,
+        name,
         declaration: parsed.value,
         source_map: parsed.source_map,
         local_types,
@@ -481,6 +507,7 @@ pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
     let envelope = match map.get("kind").and_then(YamlValue::as_str) {
         Some("schema") => StandaloneSchemaEnvelope::Tagged,
         Some("yaml-schema") => StandaloneSchemaEnvelope::YamlSchema,
+        Some("namespace-schema") => StandaloneSchemaEnvelope::NamespaceSchema,
         // An informal document is claimed only by a usable `$schema`; with a
         // null one it is ordinary YAML, as with none.
         _ if map.get("$schema").is_some_and(|value| !value.is_null())
@@ -508,14 +535,11 @@ impl From<UndecodedSource> for String {
     }
 }
 
-/// Whether `source` is a YAML mapping claiming `kind: yaml-schema`, read
-/// leniently on an error path: a target or import naming such a file is
-/// refused as selected by `kind` even when its envelope is malformed.
-pub(crate) fn claims_yaml_schema(source: &str) -> bool {
-    matches!(
-        recognize_standalone(source),
-        Ok(Some(RecognizedStandalone { envelope: StandaloneSchemaEnvelope::YamlSchema, .. }))
-    )
+/// The envelope `source` claims, read leniently on an error path: a target
+/// or import naming a `kind: yaml-schema` or `kind: namespace-schema` file is
+/// refused for its kind even when its envelope is malformed.
+pub(crate) fn claimed_envelope(source: &str) -> Option<StandaloneSchemaEnvelope> {
+    recognize_standalone(source).ok().flatten().map(|recognized| recognized.envelope)
 }
 
 /// The error for an envelope its definition rejects, in this order:
@@ -666,6 +690,151 @@ pub(crate) fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAt
         }
         TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
     }
+}
+
+/// Refuses the written forms of the labels and local tables the library
+/// reads exactly, which the definitions cannot refuse because an optional
+/// property admits `null`: a `name` on a `kind: schema` document must be a
+/// string, and a namespace schema's `description` and `types` are not
+/// `null`. Located at the authored value.
+fn check_written_labels(recognized: &RecognizedStandalone, source: &str, path: &Path) -> Result<(), SchemaError> {
+    let map = recognized.mapping();
+    let refused = |key: &str, message: String| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: format!("`{key}`: {message}"),
+        source: None,
+        span: top_level_value_span(source, key),
+    };
+    match recognized.envelope {
+        StandaloneSchemaEnvelope::Tagged => match map.get("name") {
+            None | Some(YamlValue::String(_)) => Ok(()),
+            Some(other) => Err(refused("name", format!("must be a kebab-case string, got {}", yaml_kind(other)))),
+        },
+        StandaloneSchemaEnvelope::NamespaceSchema => {
+            for key in ["description", "types"] {
+                if map.get(key).is_some_and(YamlValue::is_null) {
+                    return Err(refused(key, "must not be null; omit it instead".into()));
+                }
+            }
+            Ok(())
+        }
+        StandaloneSchemaEnvelope::Pure | StandaloneSchemaEnvelope::YamlSchema => Ok(()),
+    }
+}
+
+/// The byte range, in `source`, of top-level key `key`'s value, cut to its
+/// first line; `None` when the text cannot be located.
+pub(crate) fn top_level_value_span(source: &str, key: &str) -> Option<crate::span::SourceSpan> {
+    let positions = crate::PositionMap::deferred(std::sync::Arc::from(source));
+    let range = positions.byte_range(&crate::yaml_documents::locating_problem(&[key.to_string()]))?;
+    let text = &source[range.clone()];
+    Some(match text.find(['\n', '\r']) {
+        Some(newline) => range.start..range.start + text[..newline].trim_end().len(),
+        None => range,
+    })
+}
+
+/// The YAML type name `value` is shown as in a refusal.
+pub(crate) fn yaml_kind(value: &YamlValue) -> &'static str {
+    match value {
+        YamlValue::Null => "null",
+        YamlValue::Bool(_) => "boolean",
+        YamlValue::Number(_) => "number",
+        YamlValue::String(_) => "string",
+        YamlValue::Sequence(_) => "sequence",
+        YamlValue::Mapping(_) => "mapping",
+        YamlValue::Tagged(_) => "tagged-value",
+    }
+}
+
+/// A parsed `kind: namespace-schema` document: one host namespace, read
+/// passively for a host's global catalog.
+///
+/// Its `$schema` is the namespace's value, always one object, and its
+/// `types` are private to it: no other file can import them, and the file
+/// is never a `$schema` target. Reserved-name checks on
+/// [`namespace`](Self::namespace) belong to the host.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamespaceSchemaDocument {
+    /// Path of the document supplied by the caller; the import base and
+    /// diagnostic origin of the payload.
+    pub path: PathBuf,
+    /// The declared global, exactly as written.
+    pub namespace: String,
+    /// The top-level `description`.
+    pub description: Option<String>,
+    /// The `$schema` object, unresolved; empty for `$schema: {}`.
+    pub schema: SchemaShape,
+    /// Authored spans of `schema`, relative to the `$schema` mapping.
+    pub source_map: SchemaSourceMap,
+    /// The file's private named types, `None` when it declares none.
+    pub local_types: Option<SchemaShape>,
+    /// Authored spans of `local_types`, relative to the `types` mapping.
+    pub local_type_source_map: Option<SchemaSourceMap>,
+}
+
+/// Admits and parses a `kind: namespace-schema` document against
+/// `namespace-schema.yaml`.
+///
+/// `Ok(None)` when `source` does not claim `kind: namespace-schema`.
+///
+/// ## Errors
+///
+/// As [`parse_standalone_schema_document`]: text that is not YAML, an
+/// envelope its definition rejects (a missing `namespace` or `$schema`, a
+/// `$schema` that is not a mapping, an unknown key), a `description` or
+/// `types` written as `null`, and a payload or `types` definition the
+/// grammar rejects.
+///
+/// ## Side-effect freedom
+///
+/// Reads no files and resolves no imports.
+pub fn parse_namespace_schema_document(
+    source: &str,
+    path: impl AsRef<Path>,
+) -> Result<Option<NamespaceSchemaDocument>, SchemaError> {
+    let path = path.as_ref();
+    if claimed_envelope(source) != Some(StandaloneSchemaEnvelope::NamespaceSchema) {
+        // Text that is not YAML is reported as the standalone parser does.
+        return parse_standalone_schema_document(source, path).map(|_| None);
+    }
+    let Some(recognized) = recognize_standalone(source).ok().flatten() else {
+        return Ok(None);
+    };
+    let Some(document) = parse_standalone_schema_document(source, path)? else {
+        return Ok(None);
+    };
+    let StandaloneSchemaDocument { declaration, source_map, local_types, local_type_source_map, description, .. } =
+        document;
+    // The definition's `schema(required)` admits a reference or a root union
+    // too; `schema(mapping)` would read the value as a table of named types.
+    let SchemaDeclaration::Schema(SchemaRoot::Single(schema)) = declaration else {
+        return Err(SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: "`$schema`: a namespace's value must be written as one mapping, not a reference or a list".into(),
+            source: None,
+            span: top_level_value_span(source, "$schema"),
+        });
+    };
+    // Admission converts a number to text; a namespace is compared exactly,
+    // so only a written string is one.
+    let Some(YamlValue::String(namespace)) = recognized.mapping().get("namespace") else {
+        return Err(SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: "`namespace`: must be a string".into(),
+            source: None,
+            span: top_level_value_span(source, "namespace"),
+        });
+    };
+    Ok(Some(NamespaceSchemaDocument {
+        path: path.to_path_buf(),
+        namespace: namespace.clone(),
+        description,
+        schema,
+        source_map,
+        local_types,
+        local_type_source_map,
+    }))
 }
 
 fn schema_document_error(path: &Path, message: impl Into<String>) -> SchemaError {

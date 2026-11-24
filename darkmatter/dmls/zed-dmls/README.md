@@ -48,15 +48,23 @@ zed-dmls/
 The settings override is first because it is the only step that works for
 **single-file worktrees**: opening a lone file outside the current project gives
 Zed no directory to load a shell environment from, so `which` searches a bare
-PATH and misses a `~/.cargo/bin` install. Pin the absolute path to cover it:
+PATH and misses a `~/.cargo/bin` install. Pin the path to cover it:
 
 ```json
 {
   "lsp": {
-    "dmls": { "binary": { "path": "/absolute/path/to/dmls" } }
+    "dmls": { "binary": { "path": "~/.cargo/bin/dmls" } }
   }
 }
 ```
+
+Zed applies your user settings to remote (SSH) projects too, so an absolute
+path such as `/Users/me/.cargo/bin/dmls` breaks every project on a host whose
+home directory differs. Write the path relative to the home directory instead:
+a leading `~`, `$HOME`, or `${HOME}` is expanded against the environment of the
+host the project lives on (`HOME`, or `USERPROFILE` on Windows), so one setting
+works on every host. Zed starts the binary without a shell, so no other shell
+syntax is expanded.
 
 Per-platform release asset names (see the release recipe `just dist` in
 `darkmatter/justfile`):
@@ -121,8 +129,8 @@ just zed-doctor
 ```
 
 After installing the binary, `install-dmls` recompiles `extension.wasm` from
-`src/lib.rs` (`just zed-wasm`; a host without the `wasm32-wasip2` target warns
-and keeps the committed module) and stages this directory when Zed's data
+`src/lib.rs` (`just zed-wasm`; a host without the `wasm32-wasip2` target, which
+the root `just init` installs, warns and keeps the committed module) and stages this directory when Zed's data
 directory exists. Staging copies it (including the bundled `extension.wasm`)
 to a stable per-user location and points Zed's `extensions/installed/dmls`
 link at it, repairing a dangling link from a removed worktree. Exit status `3`

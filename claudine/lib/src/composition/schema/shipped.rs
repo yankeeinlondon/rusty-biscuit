@@ -49,7 +49,7 @@ pub const OWNER: &str = "claudine";
 /// Claudine's preparation revision. Increment it whenever code changes what
 /// the shipped sources prepare to (a record's shape, or how the bundle or the
 /// host catalog is prepared), then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 4;
+pub const PREPARATION_REVISION: u32 = 5;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "claudine/lib/generated/shipped.json";

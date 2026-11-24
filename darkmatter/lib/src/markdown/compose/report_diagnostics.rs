@@ -247,12 +247,15 @@ pub fn config_error_diagnostics(error: &crate::config::load::ConfigError) -> Vec
 
 /// A finding a configuration load recorded without failing (the missing
 /// user file, a permissions error, an omitted registration) as warnings: one
-/// per located problem, or one naming the file when it has none.
+/// per located problem, or one naming the file when it has none. The created
+/// user file ([`crate::config::load::CONFIG_CREATED_CODE`]) is info.
 pub fn config_notice_diagnostics(notice: &crate::config::load::ConfigDiagnostic) -> Vec<Diagnostic> {
     if notice.problems.is_empty() {
+        let severity =
+            if notice.code == crate::config::load::CONFIG_CREATED_CODE { Severity::Info } else { Severity::Warning };
         return vec![Diagnostic {
             source: Some(DiagnosticSource::file_only(Some(notice.file.clone()))),
-            ..unlocated(notice.code, Severity::Warning, notice.message.clone())
+            ..unlocated(notice.code, severity, notice.message.clone())
         }];
     }
     notice
@@ -352,32 +355,48 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
 }
 
 /// The records of `leaf`, the deepest Darkmatter error of a failure.
+///
+/// A schema problem on a property one whole-value `{{ … }}` produced is
+/// placed at that expression ([`ExpressionProjector`]), and a direct load's
+/// problem also names its data file position.
 fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
     match leaf {
-        MarkdownError::SchemaValidationFailed { path, problems, .. } if !problems.is_empty() => problems
-            .iter()
-            .map(|problem| Diagnostic {
-                code: problem.code.diagnostic_code().to_string(),
-                severity: Severity::Error,
-                message: problem.message.clone(),
-                source: match problem.line {
-                    Some(line) => Some(DiagnosticSource {
-                        line: Some(line as usize),
-                        column: problem.column.map(|column| column as usize),
-                        ..DiagnosticSource::file_only(named(path))
-                    }),
-                    None => file_only(named(path)),
-                },
-                expected_type: None,
-                actual_type: None,
-                span: None,
-                iteration_path: IterationPath::empty(),
-                reference_details: None,
-                data_location: None,
-                grants_needed: None,
-                schema_default: problem.default.as_ref().map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
-            })
-            .collect(),
+        MarkdownError::SchemaValidationFailed { path, problems, expression_origins, .. } if !problems.is_empty() => {
+            let mut projector = ExpressionProjector::new(expression_origins);
+            problems
+                .iter()
+                .map(|problem| {
+                    let expression = projector.project(problem);
+                    let authored = expression.as_ref().and_then(|expression| expression.span.as_ref());
+                    let source = match (authored, problem.line) {
+                        (Some(span), _) => Some(DiagnosticSource::at(named(path), span.line(), span.column())),
+                        (None, Some(line)) => Some(DiagnosticSource {
+                            line: Some(line as usize),
+                            column: problem.column.map(|column| column as usize),
+                            ..DiagnosticSource::file_only(named(path))
+                        }),
+                        (None, None) => file_only(named(path)),
+                    };
+                    Diagnostic {
+                        code: problem.code.diagnostic_code().to_string(),
+                        severity: Severity::Error,
+                        message: problem.message.clone(),
+                        source,
+                        expected_type: None,
+                        actual_type: None,
+                        span: authored.map(crate::markdown::AuthoredSpan::range),
+                        iteration_path: IterationPath::empty(),
+                        reference_details: None,
+                        data_location: expression.and_then(|expression| expression.data),
+                        grants_needed: None,
+                        schema_default: problem
+                            .default
+                            .as_ref()
+                            .map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
+                    }
+                })
+                .collect()
+        }
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
         MarkdownError::SchemaValidationFailed { path, source: Some(source), .. }
             if let Some(records) = source.downcast_ref::<simplified_schema::SchemaError>().and_then(|schema| template_diagnostics(schema, path)) =>
@@ -535,8 +554,9 @@ fn data_records(record: Diagnostic, error: &DataError) -> Vec<Diagnostic> {
             let data_location = DataLocation { file: identity.read_set_entry(), pointer, line, column, byte_offset };
             vec![Diagnostic { data_location: Some(data_location), ..record }]
         }
-        DataError::ContractMismatch { identity, format, written, failure, text, table } => {
-            let mismatch = Mismatch { file: identity.read_set_entry(), written, text, table: table.as_ref() };
+        DataError::ContractMismatch { identity, format, written, failure, text, table, wrapped } => {
+            let mismatch =
+                Mismatch { file: identity.read_set_entry(), written, text, table: table.as_ref(), wrapped: *wrapped };
             contract_records(record, &mismatch, *format, failure)
         }
         _ => vec![record],
@@ -549,6 +569,8 @@ struct Mismatch<'a> {
     written: &'a str,
     text: &'a str,
     table: Option<&'a TabularSource>,
+    /// The root was a scalar wrapped in a one-element array.
+    wrapped: bool,
 }
 
 impl Mismatch<'_> {
@@ -578,7 +600,8 @@ fn contract_records(
         .located_failures()
         .into_iter()
         .map(|violation| {
-            let place = locator.place(&violation.failure.path, violation.actual == ActualKind::Missing);
+            let source = source_path(&violation.failure.path, mismatch.wrapped);
+            let place = locator.place(source, violation.actual == ActualKind::Missing);
             let detail = violation.failure.to_string();
             let detail = match violation.failure.reason {
                 FailureReason::NoOptionAccepts { .. } => cut_union_detail(&detail),
@@ -595,9 +618,12 @@ fn contract_records(
             } else {
                 violation.expected.to_string()
             };
+            // A wrapped scalar's pointers name the document, not the array.
+            let pointer =
+                if mismatch.wrapped { simplified_schema::coercion::json_pointer(source) } else { violation.pointer };
             let data_location = DataLocation {
                 file: mismatch.file.clone(),
-                pointer: Some(violation.pointer),
+                pointer: Some(pointer),
                 line: place.position.map(|(line, _)| line),
                 column: place.position.map(|(_, column)| column),
                 byte_offset: None,
@@ -620,6 +646,118 @@ fn contract_records(
         records.push(Diagnostic { message: mismatch.message(format_args!("{more} not listed")), ..record });
     }
     records
+}
+
+/// Where a destination schema problem's value came from, when a whole-value
+/// expression produced its top-level property.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProblemExpression {
+    /// The expression's authored span, the problem's primary location.
+    pub(crate) span: Option<crate::markdown::AuthoredSpan>,
+    /// The value's position in the data file, for a direct load whose value
+    /// the problem's path names; `None` for a derived value, a value a schema
+    /// default supplied, and a path the loaded value does not hold.
+    pub(crate) data: Option<DataLocation>,
+}
+
+/// The data-file position of each of `problems` (destination schema
+/// problems of top-level properties) whose property `origins` records as a
+/// direct load, in the problems' order; `None` where no position is proven.
+/// The same projection composition's records use, so an editor names the
+/// same place.
+pub fn data_locations(
+    problems: &[simplified_schema::ValidationProblem],
+    origins: &std::collections::BTreeMap<String, crate::markdown::ExpressionMetadata>,
+) -> Vec<Option<DataLocation>> {
+    let mut projector = ExpressionProjector::new(origins);
+    problems.iter().map(|problem| projector.project(problem).and_then(|projected| projected.data)).collect()
+}
+
+/// Projects the problems of one schema failure onto the expressions that
+/// produced their properties, with one [`SourceLocator`] per property's
+/// source. The structured records and the status block both use it, so they
+/// name the same positions.
+pub(crate) struct ExpressionProjector<'a> {
+    origins: &'a std::collections::BTreeMap<String, crate::markdown::ExpressionMetadata>,
+    locators: std::collections::HashMap<&'a str, SourceLocator<'a>>,
+}
+
+impl<'a> ExpressionProjector<'a> {
+    pub(crate) fn new(origins: &'a std::collections::BTreeMap<String, crate::markdown::ExpressionMetadata>) -> Self {
+        Self { origins, locators: std::collections::HashMap::new() }
+    }
+
+    /// The expression that produced `problem`'s property, or `None` when no
+    /// whole-value expression did.
+    ///
+    /// The data position follows the loader's convention: the problem's path
+    /// without its property, read as keys and indexes against the loaded
+    /// value; a missing member at its parent; an unknown member at the member
+    /// itself; a wrapped scalar's element at the document root.
+    pub(crate) fn project(&mut self, problem: &simplified_schema::ValidationProblem) -> Option<ProblemExpression> {
+        use simplified_schema::ValidationProblemKind;
+        use simplified_schema::coercion::{PathSegment, json_pointer};
+        let (key, rest) = problem.instance_path.segments().split_first()?;
+        let (key, metadata) = self.origins.get_key_value(key.as_str())?;
+        let data = metadata.load.as_deref().filter(|_| problem.default.is_none()).and_then(|load| {
+            let mut segments = typed_segments(&metadata.value, rest)?;
+            let missing = problem.kind == ValidationProblemKind::Missing;
+            match (missing, &problem.property, &problem.offending_property) {
+                (true, Some(property), _) => segments.push(PathSegment::Key(property.clone())),
+                (false, _, Some(unknown)) => segments.push(PathSegment::Key(unknown.clone())),
+                (true, None, _) => return None,
+                (false, _, None) => {}
+            }
+            let source = source_path(&segments, load.wrapped);
+            let locator = self
+                .locators
+                .entry(key.as_str())
+                .or_insert_with(|| SourceLocator::new(load.format, &load.text, load.table.as_ref()));
+            let place = locator.place(source, missing);
+            Some(DataLocation {
+                file: load.identity.read_set_entry(),
+                pointer: Some(json_pointer(source)),
+                line: place.position.map(|(line, _)| line),
+                column: place.position.map(|(_, column)| column),
+                byte_offset: None,
+            })
+        });
+        Some(ProblemExpression { span: metadata.span.clone(), data })
+    }
+}
+
+/// `pointer`'s segments as the keys and indexes of `value`, or `None` when
+/// `value` does not hold that path.
+fn typed_segments(value: &serde_json::Value, pointer: &[String]) -> Option<Vec<simplified_schema::coercion::PathSegment>> {
+    use simplified_schema::coercion::PathSegment;
+    let mut node = value;
+    let mut segments = Vec::with_capacity(pointer.len());
+    for segment in pointer {
+        match node {
+            serde_json::Value::Array(items) => {
+                let index: usize = segment.parse().ok()?;
+                node = items.get(index)?;
+                segments.push(PathSegment::Index(index));
+            }
+            serde_json::Value::Object(members) => {
+                node = members.get(segment)?;
+                segments.push(PathSegment::Key(segment.clone()));
+            }
+            _ => return None,
+        }
+    }
+    Some(segments)
+}
+
+/// The path in the parsed document of the value at `path` of the loaded
+/// value: a wrapped scalar's index 0 is the document's root, and a later
+/// index, which the document does not hold, is placed at the root too.
+fn source_path(path: &[simplified_schema::coercion::PathSegment], wrapped: bool) -> &[simplified_schema::coercion::PathSegment] {
+    match path.split_first() {
+        Some((simplified_schema::coercion::PathSegment::Index(0), rest)) if wrapped => rest,
+        Some((simplified_schema::coercion::PathSegment::Index(_), _)) if wrapped => &path[..0],
+        _ => path,
+    }
 }
 
 /// `detail`, a union violation's text, with at most [`UNION_DETAIL_LINES`]
@@ -672,7 +810,16 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         ),
         MarkdownError::SchemaValidationFailed { path, .. } => (simplified_schema::SCHEMA_PREPARE_CODE, file_only(named(path))),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
-        MarkdownError::Interpolation { source, cause, .. } => (expression_code(cause), proven(Some(source.as_ref()))),
+        MarkdownError::Interpolation { source, cause, expression, .. } => (
+            expression_code(cause),
+            match spread_operand_source(source, expression, cause) {
+                Some((source, range)) => {
+                    span = Some(range);
+                    Some(source)
+                }
+                None => proven(Some(source.as_ref())),
+            },
+        ),
         MarkdownError::Transclusion(inner) => (
             match inner.as_ref() {
                 TransclusionError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
@@ -1011,8 +1158,33 @@ fn expression_code(cause: &ExpressionError) -> &'static str {
         }
         ExpressionError::UnknownFunction { .. } => UNKNOWN_FUNCTION_CODE,
         ExpressionError::InvalidCallback { .. } => simplified_schema::expression::parser::INVALID_CALLBACK_CODE,
+        ExpressionError::InvalidSpreadOperand { .. } => super::expression::INVALID_SPREAD_OPERAND_CODE,
         _ => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
     }
+}
+
+/// The authored position and range of the spread operand an
+/// [`ExpressionError::InvalidSpreadOperand`] names, inside the anchored
+/// `{{ … }}` holding `expression`. `None` for any other cause, an unplaced
+/// site, or a construct whose text does not hold the expression as written
+/// (an escaped YAML scalar), which keeps the construct's own position.
+fn spread_operand_source(
+    source: &SourceRef,
+    expression: &str,
+    cause: &ExpressionError,
+) -> Option<(DiagnosticSource, std::ops::Range<usize>)> {
+    let ExpressionError::InvalidSpreadOperand { site, .. } = cause.without_callbacks() else {
+        return None;
+    };
+    let SourceRef::OnDiskSpan { context, span } = source else {
+        return None;
+    };
+    let construct = span.range();
+    let start = construct.start + context.content.get(construct)?.find(expression)?;
+    let operand = super::expression::spread_operand_span(&super::expression::parse_spanned(expression).ok()?, site.ordinal()?)?;
+    let range = start + operand.start..start + operand.end;
+    let (line, column) = super::expression::one_based_position(&context.content, range.start)?;
+    Some((DiagnosticSource::at(context_file(context), line, column), range))
 }
 
 /// The policy stop in `error`'s chain: its blocking and earlier warnings.

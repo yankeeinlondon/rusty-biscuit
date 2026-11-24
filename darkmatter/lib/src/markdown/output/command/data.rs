@@ -312,6 +312,8 @@ pub struct TriggerConditionData {
 pub struct TriggerTraceData {
     /// Its identity.
     pub source: String,
+    /// Its `name` label; `null` when it declares none.
+    pub name: Option<String>,
     /// Whether it matched.
     pub matched: bool,
     /// Whether its payload is a template, resolved only for a matching
@@ -372,6 +374,7 @@ impl From<&simplified_schema::triggers::TriggerTraceEntry> for TriggerTraceData 
     fn from(trigger: &simplified_schema::triggers::TriggerTraceEntry) -> Self {
         Self {
             source: trigger.source.to_string(),
+            name: trigger.name.clone(),
             matched: trigger.matched,
             pending: trigger.pending,
             conditions: trigger

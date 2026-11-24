@@ -3,7 +3,7 @@ $schema:
     review: file(required;eager;match(**/*review*.md)) -> the non-indexed review (e.g. `review.md`) which started this review/implement cycle
     target: file -> the review whose findings this run implements
     iteration: number
-    initial_review: file -> the OG review that kicked off this review/implement cycle
+    initial-review: file -> the OG review that kicked off this review/implement cycle
 description: |-
     This prompt expects that the originating content was a review and that we are either _implementing_ the findings/suggestions of that original review, or, if the review has been marked as "implemented" then we will move to the highest indexed review in the same directory and implement that (unless that too is marked as "implemented").
 
@@ -13,7 +13,7 @@ target: "{{ frontmatter(review, 'implemented') ? find_last_index(review) : revie
 # the non-indexed review is iteration 0 (`file_index` reports it as -1)
 iteration: "{{ file_index(target) < 0 ? 0 : file_index(target) }}"
 report: "{{ dirname(target) + '/' + 'implementation-report-' + iteration + '.md' }}"
-initial_review: "{{ review }}"
+initial-review: "{{ review }}"
 yolo: true
 initialize:
     - when: "frontmatter(target, 'implemented')"
@@ -73,12 +73,12 @@ Once the review is complete you must set Frontmatter metadata on both the review
 
 - On the underlying review ({{target}}):
     - set `implemented` to `true`
-    - set `implemented_by` to `{{ctx.agent}}/{{ctx.model}}`
-    ::block when="initial_review != target"
-    - set `initial_review` to `{{ parent_dir(initial_review) + '/' + basename(initial_review) }}`
+    - set `implemented-by` to `{{ctx.agent}}/{{ctx.model}}`
+    ::block when="initial-review != target"
+    - set `initial-review` to `{{ parent_dir(initial-review) + '/' + basename(initial-review) }}`
     ::end-block
 - On your implementation report ({{report}}):
-    - set `reviewed_by` to `{{ctx.agent}}/{{ctx.model}}`
+    - set `reviewed-by` to `{{ctx.agent}}/{{ctx.model}}`
     - set `created` to "{{ ctx.now }}"
     - set `underlying` to "{{ parent_dir(target) + '/' + basename(target) }}"
 

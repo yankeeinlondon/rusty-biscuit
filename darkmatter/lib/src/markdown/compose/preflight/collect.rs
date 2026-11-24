@@ -34,6 +34,7 @@ use crate::markdown::compose::shell_expansion::alias::AliasResolutions;
 use crate::markdown::compose::shell_expansion::probe::login_shell;
 use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::expression::{Expr, ResolutionContext, parse};
+use simplified_schema::expression::ObjectEntry;
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
@@ -2114,7 +2115,7 @@ fn visit_calls_in_scope(expression: &Expr, locals: &[&str], visit: &mut impl FnM
             }
         }
         Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
+            for value in entries.iter().map(ObjectEntry::value) {
                 visit_calls_in_scope(value, locals, visit);
             }
         }
@@ -2392,6 +2393,14 @@ mod tests {
     use crate::markdown::compose::ComposeOptions;
     use std::io::Write;
     use tempfile::TempDir;
+
+    /// A nested composition named in a spread operand is walked, even when
+    /// a later field overwrites the key it supplies.
+    #[test]
+    fn object_spread_operands_are_scanned_even_when_overwritten() {
+        let md: Markdown = "---\nv: \"{{ { ...{ k: as_markdown('fm.md') }, k: 1 } }}\"\n---\n{{ { ...{ k: as_markdown('body.md') }, k: 1 } }}\n".into();
+        assert_eq!(authored_as_markdown_literals(&md, true), ["fm.md", "body.md"]);
+    }
 
     #[test]
     fn authored_target_and_pending_shell_data_identify_the_same_dependency() {

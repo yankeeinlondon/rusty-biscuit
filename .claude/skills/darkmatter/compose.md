@@ -1495,9 +1495,9 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
 - **Frontmatter.** `interpolate_frontmatter_located` records the failing
   string's key/index path and the construct's span in it; the pipeline walks
   the crate-private `locate_frontmatter_value` (the schema locator's tolerant
-  grammar, which also follows tags, block scalars, quoted continuations, and
-  empty values; schema documents keep the strict v1 grammar, which shares only
-  indentless sequences and continued plain scalars) to the authoring scalar and projects through its
+  grammar, which also follows tags; schema documents keep the strict v1
+  grammar, which shares indentless sequences, block scalars, and plain and
+  quoted continuations) to the authoring scalar and projects through its
   quoting, escapes, line folding, and indentation with
   `yaml_scalar::decode_scalar_node`, which follows libyaml's rules for plain,
   quoted, literal `|`, and folded `>` scalars on one line or several

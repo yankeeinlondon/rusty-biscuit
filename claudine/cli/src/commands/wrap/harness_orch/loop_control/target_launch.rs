@@ -758,4 +758,4 @@ pub(super) fn rebuild_target_launch(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

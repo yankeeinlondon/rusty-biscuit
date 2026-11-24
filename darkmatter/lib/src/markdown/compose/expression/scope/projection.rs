@@ -41,6 +41,13 @@ pub struct DeclaredTypes<'s> {
     frontmatter: Option<&'s Map<String, Value>>,
     host_roots: HostRoots<'s>,
     host_catalog: Option<&'s GlobalCatalog>,
+    /// Observed values' shapes by top-level key (an editor's evaluation);
+    /// each replaces the declaration's shape for its property.
+    observed: Option<&'s std::collections::BTreeMap<String, Shape>>,
+    /// Observed `load_data` calls' shapes by the call as written, without
+    /// spans (an editor's evaluation); each replaces a matching call's
+    /// provisional type wherever it is typed.
+    observed_calls: Option<&'s [(simplified_schema::expression::ast::Expr, Shape)]>,
 }
 
 /// The schema a [`DeclaredTypes`] projects on first read.
@@ -194,6 +201,9 @@ pub(crate) enum VariableClass<'p> {
 }
 
 /// A top-level declaration lookup.
+// A short-lived lookup result, matched at once; boxing `Found` would add an
+// allocation per lookup to save stack space no caller keeps.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Declaration<'s> {
     /// The projected definition; owned when root-union arms or layers were
     /// folded into it.
@@ -216,7 +226,33 @@ impl<'s> DeclaredTypes<'s> {
             frontmatter: None,
             host_roots: HostRoots::None,
             host_catalog: None,
+            observed: None,
+            observed_calls: None,
         }
+    }
+
+    /// Types each property in `observed` by the shape of its observed value
+    /// ([`Shape::observed`]) instead of its declaration's shape; the
+    /// declared type itself stays what the schema says.
+    pub fn with_observed(mut self, observed: &'s std::collections::BTreeMap<String, Shape>) -> Self {
+        self.observed = Some(observed);
+        self
+    }
+
+    /// Types each `load_data` call written as one of `calls` (compared
+    /// without spans) by its observed values' shape instead of the call's
+    /// provisional type.
+    pub fn with_observed_calls(mut self, calls: &'s [(simplified_schema::expression::ast::Expr, Shape)]) -> Self {
+        self.observed_calls = Some(calls);
+        self
+    }
+
+    /// The observed shape of a `load_data` call written as `call`, when
+    /// [`Self::with_observed_calls`] supplied one.
+    pub(crate) fn observed_call(&self, call: &simplified_schema::expression::SpannedExpr) -> Option<&'s Shape> {
+        let calls = self.observed_calls.filter(|calls| !calls.is_empty())?;
+        let erased = call.erase();
+        calls.iter().find(|(known, _)| *known == erased).map(|(_, shape)| shape)
     }
 
     /// The declared layer of every layer of `schema`, after resolution and
@@ -563,6 +599,16 @@ impl<'s> DeclaredTypes<'s> {
     pub(super) fn projected(&self, subject: &Subject) -> (DeclaredType, Shape) {
         let unknown = Shape::Unknown { non_null: false };
         match &subject.binding {
+            BindingId::Document(key) if self.observed.is_some_and(|observed| observed.contains_key(key)) => {
+                let observed = self.observed.and_then(|observed| observed.get(key)).cloned().unwrap_or(unknown);
+                let shape = walk(observed, &subject.path, self.definitions());
+                let declared = match self.declaration(key) {
+                    Declaration::Undeclared if subject.path.is_empty() => DeclaredType::Undeclared,
+                    Declaration::Found(def) if subject.path.is_empty() => DeclaredType::Property(def.into_owned()),
+                    _ => shape.to_definition().map_or(DeclaredType::NoProjection, DeclaredType::Property),
+                };
+                (declared, shape)
+            }
             BindingId::Document(key) => {
                 let def = match self.declaration(key) {
                     Declaration::Found(def) => def,
@@ -776,6 +822,98 @@ fn arm_member(atom: &PropertyAtom, member: &Member, definitions: &DefinitionTabl
         },
         _ => unknown,
     }
+}
+
+/// What spreading a value of one non-null alternative writes into an
+/// object literal.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SpreadFields {
+    /// Each declared key, the type of its value when written, and whether
+    /// every value of the alternative writes it.
+    pub(crate) fields: Vec<(String, Shape, bool)>,
+    /// Whether the alternative may write keys it does not declare: an open
+    /// or pattern-key object, a bare `object`, or a type that is not known
+    /// to be closed.
+    pub(crate) open: bool,
+}
+
+impl SpreadFields {
+    fn opaque() -> Self {
+        Self { fields: Vec::new(), open: true }
+    }
+}
+
+/// What a spread of each non-null alternative of `shape` writes, or for an
+/// alternative that is not an object (spreading it fails) the JSON type it
+/// has instead (`number`, `array`, …). `None` for an unknown shape. A
+/// recursive reference opens its definition through the same alias budget
+/// [`member_shape`] uses; one that cannot be opened is
+/// [`SpreadFields::open`] with no known keys.
+pub(crate) fn spread_fields(shape: &Shape, definitions: &DefinitionTable) -> Option<Vec<Result<SpreadFields, &'static str>>> {
+    let Shape::Arms { arms, .. } = shape else {
+        return None;
+    };
+    let mut found = Vec::new();
+    for arm in arms {
+        arm_spread_fields(arm, definitions, definitions.len(), &mut found);
+    }
+    Some(found)
+}
+
+fn arm_spread_fields(
+    atom: &PropertyAtom,
+    definitions: &DefinitionTable,
+    aliases: usize,
+    found: &mut Vec<Result<SpreadFields, &'static str>>,
+) {
+    use simplified_schema::simplified::narrowing::{Family, families};
+    if atom.is_array || matches!(atom.ty, TypeExpr::Tuple(_)) {
+        found.push(Err("array"));
+        return;
+    }
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => found.push(Ok(SpreadFields {
+            fields: shape
+                .properties
+                .iter()
+                .map(|(name, def)| (name.clone(), Shape::of_type(def), def.is_required()))
+                .collect(),
+            open: !shape.pattern_keys.is_empty(),
+        })),
+        TypeExpr::Ref(key) => match definitions.get(key).map(|definition| Shape::of_type(&definition.body)) {
+            Some(Shape::Arms { arms, .. }) if aliases > 0 => {
+                for arm in &arms {
+                    arm_spread_fields(arm, definitions, aliases - 1, found);
+                }
+            }
+            _ => found.push(Ok(SpreadFields::opaque())),
+        },
+        _ => match families(atom) {
+            [Family::String] => found.push(Err("string")),
+            [Family::Number] => found.push(Err("number")),
+            [Family::Boolean] => found.push(Err("boolean")),
+            [Family::Array] => found.push(Err("array")),
+            _ => found.push(Ok(SpreadFields::opaque())),
+        },
+    }
+}
+
+/// The JSON types of `shape`'s alternatives, in order and distinct, when
+/// spreading a value of it always fails: the shape is known, excludes
+/// `null`, and none of its alternatives is an object.
+pub(crate) fn spread_always_fails(shape: &Shape, definitions: &DefinitionTable) -> Option<Vec<&'static str>> {
+    if shape.admits_null() {
+        return None;
+    }
+    let arms = spread_fields(shape, definitions)?;
+    let mut types: Vec<&'static str> = Vec::new();
+    for arm in arms {
+        let found = arm.err()?;
+        if !types.contains(&found) {
+            types.push(found);
+        }
+    }
+    (!types.is_empty()).then_some(types)
 }
 
 /// The values of one item of the array alternative `atom`.

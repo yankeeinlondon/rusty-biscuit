@@ -236,6 +236,23 @@ registers none.
 
 A missing *value* is not a failure — see [Missing Variables](#missing-variables).
 
+A frontmatter value that is exactly one `{{ … }}` keeps the expression's typed
+result (see [Whole Values Keep Their Type](./fm-interpolation.md#whole-values-keep-their-type)),
+and [schema validation](./schema-validation.md) judges that result against
+the property's declared type, converting it where it can (`"1000"` against
+`number` becomes `1000`). A result that does not fit fails composition with
+the usual `dm.schema.*` code, placed at the expression rather than at the
+key. When the value came straight from a `load_data` call, the failure also
+points into the data file:
+
+```yaml
+$schema:
+    people: "{ name: string(required), age: number }[]"
+people: "{{ load_data('people.yaml') }}"   # `age: old` in people.yaml fails here and at its line
+```
+
+See [Typing data with the destination schema](../topics/loading-data.md#typing-data-with-the-destination-schema).
+
 
 ## Interpolation Literals
 

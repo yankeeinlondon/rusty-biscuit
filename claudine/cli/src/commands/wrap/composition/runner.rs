@@ -469,6 +469,8 @@ pub(super) fn run_composition_body(
         // in place rather than constructing a second capture.
         epoch_context: Some(request.prepared.compose_context.clone()),
         document_epoch: request.prepared.document_epoch.clone(),
+        stabilized_source: None,
+        pass_preparation: None,
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -566,6 +568,8 @@ pub(super) fn run_composition_body(
         // coordinator to re-prepare. `initialize`-route proxies are surfaced
         // earlier (see `provider_run_handoff`) and never reach this path.
         handoff: surfaced_handoff,
+        stabilized_source: prompt_state.stabilized_source.take(),
+        pass_preparation: prompt_state.pass_preparation.take(),
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

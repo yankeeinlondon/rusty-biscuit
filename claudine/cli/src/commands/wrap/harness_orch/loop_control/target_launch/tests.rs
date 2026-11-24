@@ -11,7 +11,7 @@ use claudine::composition::{EffectiveSelectionHints, ModelHint};
 /// replaces every fixture's model and these rows hard-fail. Same host-dependence
 /// class as [`FIXTURE_MODEL`]'s: the rebuild must be decided by the fixture, not
 /// by the developer's shell.
-fn without_ambient_model() -> test_toolkit::EnvGuard {
+pub(in crate::commands::wrap::harness_orch) fn without_ambient_model() -> test_toolkit::EnvGuard {
     test_toolkit::EnvGuard::remove_safe("MODEL")
 }
 
@@ -59,7 +59,7 @@ const RECORDED_ARGV: &str = "recorded-invocation-argv";
 /// process environment and the model catalog, so this fixture depends on
 /// neither — and cannot rot when a real model name leaves the catalog. The
 /// value is deliberately not a real model; nothing here asserts on it.
-const FIXTURE_MODEL: &str = "fixture/opencode-model";
+pub(in crate::commands::wrap::harness_orch) const FIXTURE_MODEL: &str = "fixture/opencode-model";
 
 /// The launch-plan inputs the fixture invocation recorded: Goose,
 /// non-interactive, no `--yolo`, no model, no body tags.
@@ -170,7 +170,7 @@ fn no_ambient_env() -> claudine::invocation_context::DocumentEnvironment {
 
 /// The invocation intent an unchanged run resolves against: Goose,
 /// non-interactive, nothing explicit, MCP in play so a body tag counts.
-fn intent() -> LaunchRebuildIntent {
+pub(in crate::commands::wrap::harness_orch) fn intent() -> LaunchRebuildIntent {
     LaunchRebuildIntent {
         explicit_provider: None,
         fallback_provider: Provider::Goose,

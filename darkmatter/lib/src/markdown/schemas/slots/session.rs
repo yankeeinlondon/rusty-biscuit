@@ -458,6 +458,14 @@ impl SlotSession {
         Ok(requests.len())
     }
 
+    /// What an editor property observation shares with this session: its
+    /// grants (which never ask without a handler), its cancel flag, its work
+    /// limits (the default allowances when none were set), and its data
+    /// runtime.
+    pub(crate) fn observation_parts(&self) -> (Arc<SlotGrants>, Option<Arc<AtomicBool>>, IterationLimits, DataRuntime) {
+        (self.run_grants(), self.cancel.clone(), self.limits.unwrap_or_default(), self.data.clone())
+    }
+
     /// The run's grants, built on first use.
     fn run_grants(&self) -> Arc<SlotGrants> {
         Arc::clone(self.grants.get_or_init(|| {

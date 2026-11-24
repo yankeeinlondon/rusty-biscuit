@@ -74,6 +74,7 @@ pub mod catalog;
 pub mod ctx;
 pub mod data;
 mod deferred;
+pub(crate) mod editor_reads;
 pub mod diagnostics;
 pub(crate) mod equality;
 pub(crate) mod fm_namespace;
@@ -94,6 +95,8 @@ mod read_gate_tests;
 pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
+pub mod spread;
+pub mod trace;
 
 pub(crate) use absence::static_access_reads_in_scope;
 pub use absence::{
@@ -101,7 +104,8 @@ pub use absence::{
     static_variable_reads, static_variable_reads_in_scope,
 };
 pub use simplified_schema::expression::ast::{
-    BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedCallArgument, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+    BinaryOp, BindingPattern, CallArgument, Callback, Expr, ObjectEntry, SpannedCallArgument, SpannedBindingPattern, SpannedCallback,
+    SpannedExpr, SpannedExprKind, SpannedObjectEntry,
 };
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -115,7 +119,7 @@ pub use call_binding::{
 };
 pub use call_check::{
     ALWAYS_FALSE_CALL_CODE, AlwaysFalseFinding, ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding,
-    CallProblem, DataProblem, PreparedCallCheck, check_call,
+    CallProblem, DataProblem, INVALID_SPREAD_OPERAND_CODE, PreparedCallCheck, SPREAD_CHECK_NAME, check_call,
     check_call_with_definitions, check_expression_calls, check_prepared_calls, classify_argument,
     classify_argument_with_definitions, expression_type,
 };
@@ -152,6 +156,7 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use spread::{SpreadSite, spread_operand_span};
 pub use scope::{
     BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, RawDeclarations,
     ItemFrame, LexicalTypes, PatternMismatch, ScopedType, Shape, SortKeySupport, SourceProjection, Subject, TypeScope, TypedLocal,
@@ -404,6 +409,17 @@ pub trait EvaluationLookup {
     /// that hold no lazy root.
     fn begin_expression_scope(&self) {}
 
+    /// The value of `root[key]` for a bare root and a literal string key,
+    /// when this lookup can answer it without materializing the whole root.
+    /// `None` (the default) evaluates the root and indexes it as usual.
+    ///
+    /// The editor's property observation answers `fm['key']` here, because
+    /// its whole `fm` is never known while the property's own template is
+    /// unresolved, but one authored key usually is.
+    fn resolve_index(&self, _root: &str, _key: &str) -> Option<Result<Value, ExpressionError>> {
+        None
+    }
+
     /// The enclosing request or standalone session's shared collection allowance.
     fn iteration_budget(&self) -> Option<&iteration::IterationBudget> {
         None
@@ -549,7 +565,7 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
     // inside that scope, so it never reopens it.
     lookup.begin_expression_scope();
     let budget = evaluation_budget(lookup);
-    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut (), &budget)
+    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut (), &budget).map_err(|error| error.placed_in(expr))
 }
 
 /// [`evaluate`], reporting to `observer` every evaluated read of an unknown
@@ -568,7 +584,8 @@ pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<Value, ExpressionError> {
     lookup.begin_expression_scope();
     let budget = evaluation_budget(lookup);
-    let result = evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget);
+    let result = evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget)
+        .map_err(|error| error.placed_in(expr));
     if O::OBSERVES_MEMBERS {
         observer.finish_expression(expr);
     }
@@ -617,9 +634,62 @@ pub(crate) fn is_member_selector(expr: &Expr) -> bool {
     }
 }
 
+/// The lookup's own answer for `base[index]`, when `base` is a bare root and
+/// `index` a literal key; see [`EvaluationLookup::resolve_index`].
+fn lookup_index<L: EvaluationLookup>(base: &Expr, index: &Expr, lookup: &L) -> Option<Result<Value, ExpressionError>> {
+    match (base, index) {
+        (Expr::Variable(root), Expr::StringLiteral(key)) if !root.contains('.') => lookup.resolve_index(root, key),
+        _ => None,
+    }
+}
+
 /// Recursive evaluation inside one already-open expression scope. `scope`
 /// says whether this position handles absence; see [`absence`].
+///
+/// With a [`trace`] open, a node that derives its value clears the trace's
+/// origin after evaluating; a parenthesized expression and a ternary forward
+/// what their last evaluated child (the selected arm) left, and a `load_data`
+/// call what its handler recorded.
 fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &Expr,
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<Value, ExpressionError> {
+    let value = evaluate_node(expr, lookup, scope, observer, budget);
+    // An editor observation keeps what each `load_data` occurrence returned,
+    // and whether its bound read was headerless and uncontracted, for typing
+    // that call site (callback parameters included). The read mode is taken
+    // whatever the outcome, so a failed call leaves none behind.
+    if let Expr::FunctionCall { name, .. } = expr
+        && editor_reads::is_collecting_calls()
+        && functions::inspect_registration(name, |registration| registration.name() == data::load::FUNCTION)
+            .unwrap_or(false)
+    {
+        let headerless = editor_reads::take_read_mode();
+        if let Ok(returned) = &value {
+            editor_reads::note_call(expr, returned, headerless);
+        }
+    }
+    if trace::is_active() {
+        let forwards = match expr {
+            Expr::Paren(_) | Expr::Ternary { .. } => true,
+            Expr::FunctionCall { name, .. } => {
+                functions::inspect_registration(name, |registration| registration.name() == data::load::FUNCTION)
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
+        if !forwards {
+            trace::derive();
+        }
+    }
+    value
+}
+
+/// One node of [`evaluate_expr`].
+fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
     expr: &Expr,
     lookup: &L,
     scope: AbsenceScope<'_>,
@@ -645,11 +715,32 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             .map(|item| evaluate_expr(item, lookup, operand, observer, budget))
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), evaluate_expr(value, lookup, operand, observer, budget)?)))
-            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
-            .map(Value::Object),
+        Expr::ObjectLiteral(entries) => {
+            // Entries run once each in written order; the last one to supply
+            // a key wins, and a null spread supplies nothing.
+            let mut object = serde_json::Map::new();
+            for entry in entries {
+                match entry {
+                    ObjectEntry::Field { key, value } => {
+                        let value = evaluate_expr(value, lookup, operand, observer, budget)?;
+                        object.insert(key.clone(), value);
+                    }
+                    ObjectEntry::Spread { operand: spread } => {
+                        match evaluate_expr(spread, lookup, operand, observer, budget)? {
+                            Value::Object(fields) => object.extend(fields),
+                            Value::Null => {}
+                            other => {
+                                return Err(ExpressionError::InvalidSpreadOperand {
+                                    found: crate::markdown::compose::context::merge::json_type_name(&other),
+                                    site: spread::SpreadSite::of(spread),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Value::Object(object))
+        }
         Expr::Paren(inner) => evaluate_expr(inner, lookup, scope, observer, budget),
         Expr::UnaryNot(inner) => {
             let value = evaluate_expr(inner, lookup, operand, observer, budget)?;
@@ -672,6 +763,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             evaluate_binary(*op, &left, &right)
         }
         Expr::Index { base, index } => {
+            if let Some(value) = lookup_index(base, index, lookup) {
+                return value;
+            }
             // Access on a handled value is still that value's absence check.
             let base = evaluate_expr(base, lookup, scope, observer, budget)?;
             let index = evaluate_expr(index, lookup, operand, observer, budget)?;
@@ -868,6 +962,7 @@ fn evaluate_callback_function<L: EvaluationLookup, O: MissingRootObserver>(
     budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     let name = name.to_ascii_lowercase();
+    admit_editor_call(&name, lookup)?;
     let registration = functions::function_registration(&name).ok_or_else(|| unknown_function_error(&name))?;
     registration.check_arity(args.len()).map_err(|error| ExpressionError::Call(Box::new(error)))?;
     let invalid = |message: String| ExpressionError::InvalidCallback { span: 0..0, message };
@@ -939,6 +1034,7 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
         if O::OBSERVES { scope.call_argument(name, index, args.len()) } else { scope.operand() }
     };
     let name = name.to_ascii_lowercase();
+    admit_editor_call(&name, lookup)?;
     if let Some((registration, kind)) = functions::lazy_function(&name) {
         return match kind {
             functions::LazyKind::All | functions::LazyKind::Any => {
@@ -974,6 +1070,16 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     match functions::call_function(&name, &evaluated, ctx) {
         Some(result) => result,
         None => Err(unknown_function_error(&name)),
+    }
+}
+
+/// Under an editor observation, refuses a call the editor does not make
+/// ([`editor_reads::admit_call`]) once evaluation reaches it; every other
+/// surface is unaffected.
+fn admit_editor_call<L: EvaluationLookup>(name: &str, lookup: &L) -> Result<(), ExpressionError> {
+    match lookup.resolution_context_ref() {
+        Some(context) if context.editor.is_some() => editor_reads::admit_call(name),
+        _ => Ok(()),
     }
 }
 
@@ -1082,6 +1188,9 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
             // `evaluate_expr` would.
             if O::OBSERVES_MEMBERS && is_member_selector(expr) {
                 observer.member_read(std::ptr::from_ref(expr).addr());
+            }
+            if let Some(value) = lookup_index(base, index, lookup) {
+                return Ok((value?, None));
             }
             let (base_value, base_occurrence) =
                 evaluate_caller_file_argument(base, lookup, scope, observer, budget)?;

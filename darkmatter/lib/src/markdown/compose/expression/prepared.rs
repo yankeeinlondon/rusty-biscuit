@@ -625,7 +625,7 @@ fn visit_calls<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e str, &'e So
         | SpannedExprKind::BoolLiteral(_) => {}
         SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| visit_calls(item, visit)),
         SpannedExprKind::ObjectLiteral(entries) => {
-            entries.iter().for_each(|(_, value)| visit_calls(value, visit));
+            entries.iter().for_each(|entry| visit_calls(entry.value(), visit));
         }
         SpannedExprKind::Paren(inner)
         | SpannedExprKind::UnaryNot(inner)

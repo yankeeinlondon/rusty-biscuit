@@ -5,8 +5,9 @@ use std::io::Write;
 
 use crate::error::WorktreeError;
 
-mod program;
-pub use program::{command, forget_installation_hint, name_installation_for_gix};
+// One implementation, shared with the `sniff` CLI: its docs describe the
+// Git for Windows entries and the installation hint.
+pub use sniff::programs::git_program::{command, forget_installation_hint, name_installation_for_gix};
 
 #[derive(Debug, Clone)]
 pub struct RepoInfo {
@@ -177,7 +178,7 @@ pub fn checkout_layout(dir: &Path) -> Option<[PathBuf; 3]> {
 
 /// Run `git rev-parse` with the given argument and return trimmed stdout.
 fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
-    let output = calls::output(program::command().args(["rev-parse", arg]))
+    let output = calls::output(command().args(["rev-parse", arg]))
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
@@ -221,7 +222,7 @@ fn git_command_status(dir: Option<&Path>, args: &[&str], allow_no_match: bool) -
         }
     }
 
-    let mut command = program::command();
+    let mut command = command();
     if let Some(dir) = dir {
         command.current_dir(dir);
     }
@@ -285,7 +286,7 @@ pub(crate) fn git_from_output(base: &Path, dir: &Path, args: &[&OsStr]) -> std::
     }
 
     calls::output(
-        program::command()
+        command()
             .current_dir(base)
             .arg("-C")
             .arg(dir)
@@ -304,7 +305,7 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
-    let mut command = program::command();
+    let mut command = command();
     command.current_dir(base).arg("-C").arg(dir).args(args).envs(env.iter().copied())
         .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     if stdin.is_some() {

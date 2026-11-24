@@ -519,7 +519,8 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 
 /// Runs `analyze` with the type scope of a site in this document: the
 /// declared layer of every layer of its effective schema
-/// (`DeclaredTypes::for_schema`) and static frontmatter, narrowed, for a body `offset`, by every `::block when`
+/// (`DeclaredTypes::for_schema`), static frontmatter, and the slot worker's
+/// current observed property values, narrowed, for a body `offset`, by every `::block when`
 /// and `::map` / `::filter` region enclosing it ([`collections::scopes`], the
 /// library's `BodyScopes`). These are the inputs composition and
 /// `analyze_directive_targets` build the same site's scope from. A
@@ -537,6 +538,13 @@ pub(crate) fn with_site_scope<R>(
         .unwrap_or(&empty_frontmatter);
     let declared = DeclaredTypes::for_schema(bundle.map(|bundle| &bundle.effective))
         .with_static_frontmatter(static_frontmatter);
+    // A current observation of an eligible property types references to it
+    // by its value; diagnostics keep the declared types, so no member
+    // finding rests on which optional fields the data happens to hold.
+    let declared = match ctx.overlay.and_then(|overlay| overlay.properties.as_deref()) {
+        Some(view) => declared.with_observed(&view.shapes).with_observed_calls(&view.calls),
+        None => declared,
+    };
     let unguarded = TypeScope::unguarded(&declared);
     let site = match offset {
         Some(offset) => collections::scopes(ctx.text).scope_at(unguarded, offset),

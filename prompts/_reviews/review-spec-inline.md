@@ -7,7 +7,7 @@ basename: "{{ basename(spec) }}"
 dir: "{{ dirname(spec) }}"
 
 start:
-    message: "👀 reviewing the specification file: `{{spec}}`"
+    message: "👀 reviewing the specification `{{ parent_dir(spec) }}` _in_ **{{ctx.repo}}** repo [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
 success:
     say: |-
         {{
@@ -15,8 +15,8 @@ success:
             ? "The review of the draft specification file in " + ctx.area + " has completed"
             : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
         }}
-    message: "✅  review of the draft specification {{ code_link(spec) }} has completed"
-    info: the {{link(spec)}} _specification_ has been reviewed and updated inline
+    message: "✅  review of the draft specification `{{ parent_dir(spec) }}` has completed successfully [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
+    info: "the {{link(spec, parent_dir(spec))}} _specification_ has been reviewed and updated inline"
 failure:
     say: |-
         {{
@@ -50,7 +50,7 @@ This will be an "inline review" meaning your task is to directly update the spec
 > - the spec you're reviewing includes a `peers` frontmatter property, this indicates that the spec you are reviewing is part of a group of specs are related and together are designed to address a larger design goal
 ::end-block
 ::block when='frontmatter(spec, "depends-on")'
-> - the spec you're reviewing includes a `depends_on` frontmatter property, this indicates that the spec you are reviewing 
+> - the spec you're reviewing includes a `depends-on` frontmatter property, this indicates that the spec you are reviewing 
 ::end-block
 
 It's important to note that Frontmatter references to other specs are likely not a full filepath reference as that is _unstable_ in this repo:
@@ -93,12 +93,12 @@ Update the spec file's ({{spec}}) Frontmatter (keep any other properties that we
 
 ::file ../_set_spec_schema.md
 - set the spec file's `reviewed` Frontmatter property to `true`
-- set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
-- set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
-- set the spec file's `review_iterations` to `0`
+- set the spec file's `reviewed-by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
+- set the spec file's `reviewed-on` Frontmatter property to "{{ctx.today}}"
+- set the spec file's `review-iterations` to `0`
 - set the spec file's `status` Frontmatter property, but only when it is missing or currently `draft-spec` (a spec that is already further along, `on-hold`, or `abandoned` keeps its status):
     - if your review left one or more items in the spec's "Open Questions" section that need an author ruling, set `status` to `human-in-the-loop`
     - otherwise set `status` to `finalized-spec`
-- set the spec file's `needs_rulings` Frontmatter property to `true` when open questions remain and `false` otherwise
-    - when `true`, also set `required_rulings` to a list naming each ruling still required (one short line per open question)
-    - when `false`, remove any existing `required_rulings` property
+- set the spec file's `needs-rulings` Frontmatter property to `true` when open questions remain and `false` otherwise
+    - when `true`, also set `required-rulings` to a list naming each ruling still required (one short line per open question)
+    - when `false`, remove any existing `required-rulings` property

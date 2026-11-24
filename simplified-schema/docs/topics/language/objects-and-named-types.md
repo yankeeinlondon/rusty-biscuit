@@ -1,6 +1,6 @@
 # Objects and Named Types
 
-Inline object literals type a nested mapping in one string; named types let one definition be reused, imported from another file, or refer to itself.
+Inline object literals type a nested mapping in one string; named types let one definition be reused, imported from another file, or refer to itself; [object composition](#object-composition-name-and-extends) copies the members of one named object into another.
 
 ## Inline Object Literals
 
@@ -96,17 +96,29 @@ Every inline object compiles to a JSON Schema fragment that sets `additionalProp
 
 ### YAML Mapping vs. Inline Object
 
-A YAML mapping at a property position is still a `SchemaError::Grammar`. Inline object syntax is recognized **only** when the property value is a **quoted string scalar** that the string-layer grammar parser recognizes as an inline object body. Authors who want typed nested objects must quote the object body as a string; YAML-native mapping schemas are a separate, future feature.
+A nested object can also be written as a YAML mapping instead of a quoted string. A mapping at a property position, as a property-union arm, or as a named type's definition is the same object shape as the equivalent inline object literal: each entry is parsed as a property definition (a type string, another mapping, a sequence union, or `null`), and the object is closed like any inline object.
 
 ```yaml
 $schema:
-    # OK: string scalar recognized as inline object
-    config: "{ host: string(required) }"
-
-    # Error: YAML mapping at a property position is still reserved
-    # config:
-    #     host: string
+    # These two properties have the same shape
+    config: "{ host: string(required), port: number(default(8080)) }"
+    config_block:
+        host: string(required)
+        port: number(default(8080))
 ```
+
+- **The mapping form holds what a one-line string cannot:** a
+  [`$constraints` block](#object-arity-constraints-min-keys--max-keys),
+  quoted [pattern keys](#pattern--dictionary-keys), and a
+  [`$extends` directive](#object-composition-name-and-extends).
+  `required: true` or `generated: true` in its `$constraints` block applies
+  to the property, as the `(required)` postfix does on a string.
+- **Every key is a property.** A key named `type` declares a property called
+  `type`; there is no long-form `type:` descriptor.
+- **The nesting cap counts mappings too.** Each nested mapping is one level
+  of the 32-level [nesting depth](#nesting-depth).
+- **Export uses this form.** `to_simplified_yaml()` writes a spread-free
+  inline object as a block mapping.
 
 ### JSON Schema Output
 
@@ -840,7 +852,7 @@ Rules:
 - **Literal keys win** over pattern keys. Because JSON Schema's `patternProperties` also applies to declared `properties`, the converter subtracts literal names from each emitted non-catch-all pattern with a negative lookahead. For example `<starting::x->` alongside literal key `x-kind` emits a pattern equivalent to `^(?!(?:x-kind)$)x-`. If wrapping would make a user-supplied `<pattern::RE>` invalid, conversion fails loudly rather than silently double-validating.
 - Multiple pattern keys are allowed (multiple `patternProperties`).
 - A pattern-keyed object is **closed** by default (`additionalProperties: false`) unless a `<string>` catch-all is present, in which case the catch-all lowers to `additionalProperties: <valueType>`.
-- A pattern-keyed object whose value type is a `@`-import sidesteps the one-level inline-object nesting cap — cross-file named types are the depth escape hatch.
+- A pattern-keyed object whose value type is a `@`-import sidesteps the 32-level inline-object nesting cap — cross-file named types are the depth escape hatch.
 
 Schemas that emit a lookaround-bearing pattern are validated with `jsonschema`'s `fancy-regex` engine **per schema**; every other schema keeps the ReDoS-safe linear engine.
 
@@ -864,6 +876,8 @@ $schema:
 ```
 
 `$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
+
+A `types` table, and a value typed `schema(mapping)`, is a table of named declarations rather than an object, so `$constraints` written directly in it is a grammar error ("a `types` table holds named declarations; `$constraints` belongs inside a declaration's object"); so is a pattern key such as `"<string>"`. Put the block inside the declaration it constrains: `types: { pair: { "<string>": unknown, $constraints: { max-keys: 1 } } }`.
 
 Key counts judge the value after [defaults are applied](../validation.md#applying-defaults):
 a key a default inserts counts like a written one, so adding a default to a
@@ -945,7 +959,7 @@ $schema:
 
 - **What counts as declared.** The root's literal properties, its pattern-key
   matches, and properties merged in from another
-  [layer](../schema-object.md#layering). A
+  [layer](../simplified-schema-struct.md#layering). A
   [`<string>` catch-all](#pattern--dictionary-keys) admits every key, so
   closing a root that has one changes nothing.
 - **How it fails.** An undeclared key is the same unknown-key problem a nested
@@ -990,3 +1004,501 @@ $schema:
 - **`json` is strict; `yaml` is a superset.** JSON is valid YAML, so `yaml` accepts JSON; `json` rejects YAML-only syntax.
 - Validation-only APIs stay **non-mutating** — they validate against a transient converted copy and leave the caller's frontmatter untouched. Only the composing/write-back path exposes the serialized value.
 - Embedded sub-schema constraints (`yaml(schema(<ref>))`) are deferred to a future extension.
+
+## Object Composition (`...name` and `$extends`)
+
+Object composition lets one object reuse the properties of a named object
+type, and override the ones it needs to change. Use it when several objects
+share a set of properties, so the declarations are written once and cannot
+drift apart. There are two spellings: `...name` inside an inline object, and
+a `$extends` directive inside a YAML schema mapping.
+
+```yaml
+kind: schema
+$schema:
+    $extends: events
+    source: string
+    snapshot: "{ ...events, price: number(min(0)) }"
+types:
+    events: "{ id: string(required), price: number }"
+```
+
+The root receives `id` and `price` from `events`. The nested `snapshot`
+receives the same required `id` and replaces `price` with its own
+non-negative one. Each receiving object validates, lowers, and answers
+queries exactly as if its final properties had been written there:
+
+```yaml
+kind: schema
+$schema:
+    id: string(required)
+    price: number
+    source: string
+    snapshot: "{ id: string(required), price: number(min(0)) }"
+types:
+    events: "{ id: string(required), price: number }"
+```
+
+Composition copies **members** (properties and pattern keys). It never
+removes an inherited property, and it does not compose arrays, unions, or
+document values. The `...` of a `{{ … }}` object literal is a different
+feature; see [Object literals and spread](../expression-syntax.md#object-literals-and-spread).
+
+### The two forms
+
+**`...name` in an inline object.** A spread may appear at the start, middle,
+or end of an inline object body, any number of times, including an object
+made only of spreads, and the usual trailing comma is allowed. It works
+wherever an inline object does: a property, an array item type, a union arm,
+a nested object.
+
+```yaml
+kind: schema
+$schema:
+    priced:  "{ ...events, price: number(min(0)) }"
+    tagged:  "{ tag: string, ...events, }"
+    history: "{ ...events, ...audit }[]"
+    either:  "{ ...events } | string"
+types:
+    events: "{ id: string(required), price: number }"
+    audit:  "{ changed_by: string, changed_at: datetime }"
+```
+
+**`$extends` in a YAML schema mapping.** The value is one named reference or
+a nonempty YAML sequence of them, in flow or block style:
+
+```yaml
+kind: schema
+$schema:
+    $extends: events
+    order:
+        $extends: [events, audit]
+        total: number
+    refund:
+        $extends:
+            - events
+            - audit
+        reason: string
+types:
+    events: "{ id: string(required), price: number }"
+    audit:  "{ changed_by: string, changed_at: datetime }"
+```
+
+`$extends` is schema metadata, like `$constraints`, and is accepted in every
+mapping the schema grammar reads as an object:
+
+| Position | Example |
+| --- | --- |
+| the root `$schema` mapping | `$schema: { $extends: events, source: string }` |
+| one mapping arm of a root union | `$schema: [{ $extends: events, kind: literal(a; required) }, …]` |
+| a mapping arm of a property union | `choice: [string, { $extends: events }]` |
+| a mapping-valued `types` entry | `types: { order: { $extends: events, total: number } }` |
+| a nested property mapping | `order: { $extends: events, total: number }` |
+
+- **Quoting the key changes nothing.** `"$extends":` and `'$extends':` are
+  the same directive.
+- **Placement among the keys changes nothing.** `$extends` written last
+  still applies before the mapping's own properties (see
+  [Order and replacement](#order-and-replacement)).
+- **Wrong values are grammar errors at the value or item.** `null`, an empty
+  value, a number, a boolean, a mapping, `[]`, and a non-string list item
+  are rejected. A comma inside one string (`$extends: "a, b"`) is rejected
+  with the hint to write a YAML sequence, `[a, b]`.
+- **The `types` table itself is not an object.** `$extends` placed directly
+  under `types:` is the name of a type, not a directive, whatever its
+  definition is: `types: { $extends: string }` declares a string type. The
+  envelope check of a schema file reads the table the same way. It is a poor
+  type name all the same: `$` is not an identifier character, so no
+  reference can name it. A mapping entry of the table is an object again, so
+  `types: { order: { $extends: base } }` composes. Unlike `$extends`,
+  `$constraints` and pattern keys directly under `types:` are refused (see
+  [Object Arity Constraints](#object-arity-constraints-min-keys--max-keys)).
+
+### Which names an operand can use
+
+An operand is a named-type reference, looked up by the same rules as any
+other reference (see [Local Type References](local-type-references.md)):
+
+```yaml
+kind: schema
+$schema:
+    a: "{ ...events }"                     # bare local name
+    b: "{ ...events@this }"                # the same, spelled explicitly
+    c: "{ ...contact@./people.yaml }"      # a type from another file
+    d: "{ ...string@this }"                # the local type named `string`
+    e: "{ ...later }"                      # forward references work
+    f: "{ ...alias }"                      # aliases are followed to the object
+types:
+    events: "{ id: string(required) }"
+    string: "{ s: number }"
+    alias:  events(required) -> an alias of events
+    later:  "{ x: string }"
+```
+
+- **Built-in names need `@this`.** `...string` names the built-in `string`,
+  which has no members, and is a grammar error that suggests
+  `...string@this`. The same holds for `$extends: string`.
+- **Aliases are followed, their qualifiers are not.** `...alias` copies the
+  members of `events`; the alias's own `required` and description stay with
+  the alias.
+- **Every import form works:** a file next to the schema, a magic path, an
+  embedded document in a host's schema bundle, and local names a host
+  supplies beside the schema. An imported operand records its file, and the
+  files that file imports, as dependencies of the resolved schema, exactly
+  as `Name@file` does. A schema built from text alone
+  (`SimplifiedSchema::try_from(&str)`) reads no file, so an operand that
+  names one fails with `ResolutionUnavailable`.
+- **An empty object qualifies.** `empty: "{}"` is a valid target that
+  contributes nothing.
+
+**Copied keys never become type names.** The local names of a schema are the
+ones its author wrote. When a schema has no `types` table, its top-level
+`$schema` entries are its local names; a property brought in by `$extends`
+is a property of the root but not a new name:
+
+```yaml
+$schema:
+    $extends: base
+    base: "{ helper: { q: string } }"
+    x: "{ ...helper }"     # error: unknown named type `helper`
+```
+
+For the same reason `select("helper")` cannot find it. Each inline arm of a
+root union keeps its own local names, so the same operand can mean a
+different type in each arm:
+
+```yaml
+$schema:
+    - $extends: shape
+      shape: "{ a: string }"     # this arm receives `a`
+      kind: literal(a; required)
+    - $extends: shape
+      shape: "{ b: number }"     # this arm receives `b`
+      kind: literal(b; required)
+```
+
+**A copied definition keeps its own scope.** References inside a copied
+property resolve in the file (or root-union arm) that declared it, never in
+the receiver:
+
+```yaml
+# lib.yaml
+kind: schema
+types:
+    child: "{ a: string }"
+    base: "{ c: child }"
+```
+
+```yaml
+# main.yaml
+kind: schema
+$schema:
+    $extends: base@./lib.yaml
+    mine: child                  # this file's `child`
+types:
+    child: "{ z: number }"
+```
+
+`c` is `lib.yaml`'s `child` (`{ a: string }`), while `mine` is
+`main.yaml`'s.
+
+### Order and replacement
+
+Entries apply **left to right**, and for each key the **last declaration
+wins**. A spread applies where it is written; every `$extends` operand
+applies, in list order, before the mapping's own properties.
+
+| Object | `id` is |
+| --- | --- |
+| `{ id: number, ...events }` | `string(required)`, from `events` |
+| `{ ...events, id: number }` | `number`, written here |
+| `{ ...events, ...other }` | `other`'s `id`, when it has one |
+| `$extends: events` plus `id: number`, in any key order | `number` |
+
+For properties that both spellings can express, `$extends: [a, b]` with
+`total: number` means the same as `"{ ...a, ...b, total: number }"`.
+
+- **A property is replaced as a whole.** Its type, constraints, `required`,
+  `default(...)`, description, and examples all come from the winning
+  declaration. Overriding `id: string(required; default('x')) -> the id`
+  with `id: number` gives an optional `id` with no default and no
+  description.
+- **A replaced key keeps its first position.** In
+  `{ price: string, ...events }` the winning `price` from `events` stays
+  first, so output order is deterministic.
+- **Two written properties with one name are still an error,** even with a
+  spread between them: `{ id: string, ...events, id: number }` is a
+  `SchemaError::Grammar` at the second `id`.
+- **Every operand must resolve,** even one whose members are all replaced
+  later. `{ ...nope, a: number }` fails on `nope`.
+
+### What an operand cannot carry
+
+An operand names an object whose members are copied, so it takes nothing a
+property reference can add. Each of these is a grammar error at the
+offending text:
+
+| Written | Why it fails |
+| --- | --- |
+| `...events(required)`, `$extends: events(required)` | no constraint list; constrain the receiving object |
+| `...events[]` | no `[]` |
+| `...events -> a description` | no description; describe the receiving property |
+| `...{{ shape }}`, `...events{{ x }}` | no template |
+| `...`, `...@./a.yaml`, `...a@` | no name, or no path after `@` |
+
+A postfix **after the object** still belongs to the containing property:
+
+```yaml
+$schema:
+    rows:    "{ ...events }[](min(1))"     # a non-empty list of events
+    current: "{ ...events }(required) -> the current event"
+```
+
+The file path after `@` is read with the usual
+[reference delimiters](#cross-file-named-type-imports-namefile): up to the
+next `,`, `}`, or `->` (and `)` inside a group), so
+`...a@./dir (x)/a[1].yaml` names that file. In a YAML flow sequence, quote
+an item whose path holds `[` or `{`: `$extends: ['a@./x{1}.yaml']`.
+
+### Origins: examples, defaults, and templates
+
+A copied property keeps the origin of the file that declared it:
+
+- A relative `example(./ex.yaml)` resolves from the declaring file's
+  folder, and an example on a replaced declaration is never read.
+- A default the copied property inserts is attributed to the declaring file
+  (`ResolvedSchema::default_files`).
+- A `{{ … }}` template inside a copied member evaluates in its declaring
+  file.
+- If the receiver replaces an imported property, its own definition and
+  origin replace the imported ones together.
+
+A schema error inside a copied member, such as a `function(...)` property
+that cannot be lowered, is `SchemaError::ComposedMember`, which names the
+member's declaration. A validation problem in a supplied value still points
+at that value in the document.
+
+### Constraints and pattern keys
+
+Only the target's members are copied. Its own object-level constraints stay
+with it: `$constraints`, a postfix on the object, its description, and a
+`required` or `default` on the object itself. The receiver's own
+constraints, including `closed` and key counts, apply to the **merged**
+members:
+
+```yaml
+kind: schema
+$schema:
+    copy: "{ ...pair }"          # accepts { a, b }: max-keys(1) is not copied
+    use: pair                    # rejects { a, b }: an ordinary use keeps it
+    bounded:
+        $extends: pair
+        c: string
+        $constraints: { max-keys: 2 }   # judges a, b, and c together
+types:
+    pair:
+        a: string
+        b: string
+        $constraints: { max-keys: 1 }
+```
+
+[Pattern keys](#pattern--dictionary-keys) are copied too:
+
+- **A later entry for the same pattern replaces it.** Two patterns are the
+  same when they lower to the same JSON Schema key for the receiving object,
+  so `<starting::a>` and `<pattern::^a>` are one pattern. The `<string>`
+  catch-all is one identity of its own.
+- **Distinct patterns both apply,** even when they overlap: with
+  `<starting::a>: number` and `<ending::z>: string`, the key `az` must
+  satisfy both.
+- **Literal keys keep precedence** over every pattern. Patterns are lowered
+  against the final set of literal keys, so a newly added literal is
+  excluded from the patterns exactly as in a handwritten object.
+- **An inherited pattern can close a root.** A root that receives a pattern
+  key and no catch-all is closed by the usual pattern rule, and an inherited
+  `<string>` catch-all types every extra key.
+
+### Eligible targets and errors
+
+A target must be **one object with a declared shape**, reached directly or
+through aliases. Anything else fails at the operand:
+
+| Case | Example | Error |
+| --- | --- | --- |
+| Primitive | `...label` with `label: string` | `InvalidCompositionTarget`, "it is a primitive type, not an object" |
+| Opaque object | `...meta` with `meta: object` | `InvalidCompositionTarget`, "it is `object`, which declares no members" |
+| Union, even of objects | `...shape` with `shape: ["{ a: string }", "{ b: number }"]` | `InvalidCompositionTarget`, "it is a union, not a single object" |
+| List or tuple | `...rows` with `rows: "{ a: string }[]"` | `InvalidCompositionTarget`, "it is a list, not an object" |
+| Function signature | `...greet` with `greet: "function(…)"` | `InvalidCompositionTarget`, "it is a function signature, not an object" |
+| Shape supplied by a template | `...dynamic` with `dynamic: "{{ shape_of() }}"` | `InvalidCompositionTarget`, "it is supplied by a template, so its members are unknown" |
+| Unknown name | `...missing` | `UnknownNamedType` at the operand |
+| File that cannot be loaded | `...base@./absent.yaml` | `CompositionReference`, holding the original cause (such as `NoMatch`) |
+| Chain deeper than 32 | `t1` spreads `t2`, … `t33` | `CompositionReference`, holding an `ImportCycle` |
+| Loop with no child value | `a: "{ ...b }"`, `b: "{ ...a }"` | `NonDescendingCycle`, listing every hop, aliases included |
+
+`md schema validate` prints, for example:
+
+```text
+$schema.order[...0]: `label` cannot be composed into an object: it is a primitive type, not an object
+```
+
+`InvalidCompositionTarget` names the operand as written, its site, the
+reason (`CompositionTargetKind`), and the declaration that decided it.
+Through an alias that is the type the alias reaches. A declared object with
+a template inside one member is a valid target; only a shape supplied
+entirely by a template is not. The [diagnostics guide](../diagnostics.md#where-a-definition-failure-points)
+describes where each error points.
+
+### Recursion through composition
+
+A composition reference describes the object at the receiving position: it
+does not descend into a child value. Composition and recursion therefore
+mix under the usual [child-value rule](#the-child-value-rule): every loop
+must pass through a child value at least once.
+
+```yaml
+kind: schema
+$schema:
+    tree: branch
+types:
+    base:   "{ children: branch[] }"
+    branch: "{ ...base, label: string }"
+```
+
+`branch` receives `children` from `base`, and its children are `branch`es.
+Resolving `branch` needs only the member list of `base`, with `children`
+kept as a reference to `branch`; checking a document then reaches `branch`
+again only on a smaller value. This document is valid; had `c` been written
+as a list instead of text, the problem would be reported at
+`tree/children/0/children/0/label`:
+
+```yaml
+tree:
+    label: a
+    children:
+        - label: b
+          children:
+              - label: c
+```
+
+The same cycle split across two files resolves too. A recursive target can
+also be composed from outside its cycle: with `node: "{ children: node[] }"`,
+`labeled: "{ ...node, label: string }"` adds a `label` to the receiving
+object, while its `children` are still plain `node`s.
+
+A loop made **only** of composition and alias hops never reaches a value,
+so it is a `SchemaError::NonDescendingCycle`:
+
+```yaml
+kind: schema
+$schema:
+    value: a
+types:
+    a: "{ ...b }"
+    b: "{ ...a }"
+```
+
+```text
+named types form a cycle that never descends into a child value: types.b[...0] -> `a`, types.a[...0] -> `b`
+```
+
+Composition and alias hops count toward the same 32-level limit as other
+named-type references.
+
+### How a composed object is assembled
+
+```mermaid
+flowchart TD
+    R["receiving object"] --> E["entries in written order:<br/>spreads in place, $extends operands first"]
+    E --> T{"operand: follow aliases<br/>to a declared object?"}
+    T -->|no| X["InvalidCompositionTarget,<br/>UnknownNamedType, or CompositionReference"]
+    T -->|"loops back with no child value"| C["NonDescendingCycle"]
+    T -->|yes| M["the target's own assembled members<br/>(child references not expanded)"]
+    M --> W["winner per literal key and per emitted pattern key:<br/>last declaration wins, first position kept"]
+    E --> W
+    W --> D["each winner resolves its references<br/>and origins in its declaring file"]
+    D --> O["one object: validation, queries,<br/>and JSON Schema see the merged members"]
+```
+
+### Output: JSON Schema and YAML export
+
+**JSON Schema.** A composed object lowers to one object shape with the
+merged `properties`, `required`, and pattern keys, never an `allOf` of the
+parts (an `allOf` of closed objects would reject the properties each part
+adds). Recursive and shared named types still use `$defs` and `$ref` as
+usual. Subtyping (`is_subtype`) gives the same answer for a composed object
+and its handwritten equivalent, in both directions. Lowering a shape whose
+operands were never resolved fails with `SchemaError::Convert`.
+
+**YAML export.** `to_simplified_yaml()` writes composition **as authored**,
+never as the merged members, so reparsing the export with the same
+file-resolution context gives the same composition:
+
+- `$extends` keeps its scalar or sequence form and is written **first** in
+  its mapping, whatever its authored placement.
+- An inline object with spreads stays one type-expression string, with each
+  spread at its position, written compactly (`'{...base,label: string(required)}'`).
+  Properties written between two spreads come out literals first.
+- A property-union arm that uses `$extends` is written as a mapping, so the
+  directive survives; other arms keep their string form.
+- **A selected named type** (`schema.select("branch")`) whose definition uses
+  spreads exports as a root that extends it, beside the authored `types`
+  table:
+
+  ```yaml
+  $schema:
+      $extends: branch@this
+  types:
+      base: '{ id: string(required), children: branch[] }'
+      branch: '{...base,label: string(required)}'
+  ```
+
+  A selected name that cannot be written as an operand (such as `type.v2`)
+  is `ExportUnsupported`. Selecting from a root that has no `types` table and
+  uses `$extends` drops the root's directive from the copied table, because
+  `$extends` under `types:` would read back as a type name.
+- **Layered schemas** with a composing root in any layer, or a lower layer's
+  property that composes, cannot be flattened into one document, so their
+  export is `ExportUnsupported`. They still validate together; only the
+  single authored YAML export is unavailable. A nested composition in the
+  top layer is exported.
+
+### Migrating a literal `$extends` property
+
+`$extends` is now reserved inside authored schema mappings. A schema that
+used it as an ordinary property name changes meaning:
+
+- A value that is not a valid operand, such as `$extends: string`, is a
+  grammar error that explains the reservation:
+
+  ```text
+  `$extends` is reserved for object composition and needs a named object type, but `string` is the built-in `string` type; write `string@this` to compose a local type named `string`, or use raw JSON Schema to declare a literal `$extends` property
+  ```
+
+- A value that happens to be a valid operand, such as `$extends: base`, now
+  composes `base`. Check existing schemas for a `$extends` key before
+  upgrading.
+- To declare a property literally named `$extends`, use a raw JSON Schema
+  file; SimplifiedSchema cannot.
+
+Only schema mappings are affected. A document's **data** may still hold a
+`$extends` key wherever its schema admits it, for example under an open
+root:
+
+```yaml
+---
+$schema:
+    "$extends": base
+    base: "{ id: string }"
+$extends: kept as ordinary data
+id: a
+base: {}
+---
+```
+
+### In an editor
+
+DMLS completes operands after `...`, in a `$extends` value, and in each
+`$extends` list item, and offers hover and go-to-definition on them. A failing operand is
+underlined as a whole, with the target's declaration as related
+information. See [Diagnostics](../diagnostics.md#composition-in-the-editor).

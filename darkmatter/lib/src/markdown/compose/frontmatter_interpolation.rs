@@ -37,13 +37,13 @@ use super::expression::{
 };
 use super::interpolation::{
     BeforeEval, Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
-    interpolate_value_guarded, ScanMode,
+    ScanMode,
 };
-use super::interpolation::rewrite::reborrow;
+use super::interpolation::rewrite::{interpolate_value_traced, reborrow};
 use super::expression::absence::MissingRoot;
 use super::member_sites::{MemberCandidates, MemberFrame};
 use super::{ComposeContext, ComposeWarning, SharedFrontmatter};
-use super::value_origin::{DataPaths, FrontmatterProvenance};
+use super::value_origin::{DataPaths, ExpressionOrigin, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::literal_token::{self, TokenError};
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
@@ -286,6 +286,9 @@ struct LeafScope<'a, 'g> {
     data: &'a DataPaths,
     /// Authored strings this rewrite scanned. Their results are data.
     scanned: Vec<Vec<ValuePathSegment>>,
+    /// The origin of a top-level key's value when it is wholly one
+    /// `{{ expr }}` that evaluated.
+    origin: Option<ExpressionOrigin>,
     /// Checked before each expression, given its warnings as the pass
     /// reports them (scoped to their leaf and key).
     before_eval: BeforeEval<'g>,
@@ -336,7 +339,7 @@ fn rewrite_value<L: EvaluationLookup>(
             let mut scoped = reborrow(&mut scope.before_eval).map(|check| {
                 move |new: &[ComposeWarning]| check(&new.iter().cloned().map(present).collect::<Vec<_>>())
             });
-            let (value, count, warnings) = interpolate_value_guarded(
+            let (value, count, warnings, trace) = interpolate_value_traced(
                 s,
                 evaluator,
                 policy,
@@ -351,6 +354,10 @@ fn rewrite_value<L: EvaluationLookup>(
             })?;
             let warnings =
                 warnings.into_iter().map(|warning| warning.in_scope(&scope.display)).collect();
+            if scope.segments.len() == 1 {
+                scope.origin =
+                    trace.map(|trace| ExpressionOrigin { scanned: s.clone(), span: trace.span, load: trace.load });
+            }
             scope.scanned.push(scope.segments.clone());
             Ok((value, count, warnings))
         }
@@ -1135,22 +1142,26 @@ fn interpolate_frontmatter_impl(
     }
     // Rewrites one templated key's authored leaves; its data leaves pass
     // through untouched.
+    let mut origins: Vec<(String, Option<ExpressionOrigin>)> = Vec::new();
     let rewrite_key = |key: &str,
                        original: &Value,
                        evaluator: &Evaluator<'_, FrontmatterSeedState>,
                        scanned_leaves: &mut Vec<Vec<ValuePathSegment>>,
+                       origins: &mut Vec<(String, Option<ExpressionOrigin>)>,
                        before_eval: BeforeEval<'_>| {
         let mut scope = LeafScope {
             segments: vec![ValuePathSegment::Key(key.to_string())],
             display: key.to_string(),
             data: &data,
             scanned: Vec::new(),
+            origin: None,
             before_eval,
         };
         let outcome = rewrite_value(original, evaluator, policy, &mut scope)
             .map_err(|e| key_scoped_failure(key, e));
         if outcome.is_ok() {
             scanned_leaves.extend(scope.scanned);
+            origins.push((key.to_string(), scope.origin));
         }
         outcome
     };
@@ -1224,7 +1235,7 @@ fn interpolate_frontmatter_impl(
             // `state.data` below.
             let outcome = {
                 let evaluator = evaluator_for(&state, best_effort, members.as_ref());
-                let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
+                let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, &mut origins, reborrow(&mut before_eval));
                 missing_roots.extend(
                     evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
                 );
@@ -1307,7 +1318,7 @@ fn interpolate_frontmatter_impl(
 
         let outcome = {
             let evaluator = evaluator_for(&state, best_effort, members.as_ref());
-            let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
+            let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, &mut origins, reborrow(&mut before_eval));
             missing_roots.extend(
                 evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
             );
@@ -1338,6 +1349,9 @@ fn interpolate_frontmatter_impl(
 
     for path in scanned_leaves {
         provenance.data_mut().mark(path);
+    }
+    for (key, origin) in origins {
+        provenance.set_expression_origin(&key, origin);
     }
 
     let provisional_keys = if defer_shell_pending {

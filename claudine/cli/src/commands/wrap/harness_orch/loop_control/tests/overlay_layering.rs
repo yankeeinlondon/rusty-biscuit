@@ -1033,3 +1033,460 @@ fn the_retried_attempts_preflight_and_materialization_both_see_the_retry_overlay
     let read = fx.materialize(&mut state).expect("the retried read materializes");
     assert_eq!(read.prompt.trim(), "reason=flaky");
 }
+
+// ── the stabilized reread's lifecycle context ─────────────────────────────
+
+/// Which staged-boot route a [`StagedBootRun`] drives.
+#[derive(Clone, Copy, Debug)]
+enum BootRoute {
+    /// A directly-invoked document: the command coordinator prepared the seed
+    /// and the harness owes only `BootstrapStage::StabilizeOnly`.
+    StabilizeOnly,
+    /// A proxied target that authors `initialize`: adopted, initialized against
+    /// its bootstrap read, then `BootstrapStage::TargetInitialized`, which
+    /// calls `rebuild_target_launch`.
+    Adopted,
+}
+
+/// What one staged boot plus the normal `start` dispatch left behind.
+struct StagedBootRun {
+    /// `Some(error)` when `bootstrap_adopted_document_phase` failed.
+    boot_error: Option<String>,
+    /// `Some(error)` when `prepare_harness_plan_phase` failed.
+    plan_error: Option<String>,
+    /// Whether `start_lifecycle_phase` was reached.
+    start_dispatched: bool,
+    /// `Some(error)` when `start_lifecycle_phase` failed.
+    start_error: Option<String>,
+    /// The stabilized prompt, when the boot produced one.
+    prompt: Option<String>,
+    epoch: Option<claudine::invocation_context::DocumentEpochWork>,
+    /// What the boot handed the owning loop as its retained source.
+    stabilized_source: Option<crate::commands::wrap::harness_orch::RetainedLoopSource>,
+    events: Vec<Emitted>,
+    log: Vec<String>,
+    dir: PathBuf,
+    _tmp: Option<tempfile::TempDir>,
+}
+
+impl StagedBootRun {
+    fn stderr(&self, signal: LifecycleSignal) -> Vec<String> {
+        self.events
+            .iter()
+            .filter_map(|event| match event {
+                Emitted::Stderr(emitted, text) if *emitted == signal => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=F", "-c", "user.email=f@e", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The model the fixture names explicitly, so `env.MODEL` is the fixture's
+/// own and never the host's.
+const STAGED_MODEL: &str = super::super::target_launch::tests::FIXTURE_MODEL;
+
+/// An approval handler that approves every exact command it is offered.
+struct ApproveAll;
+
+impl darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler for ApproveAll {
+    fn approve(
+        &self,
+        _request: darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest,
+    ) -> Result<
+        darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision,
+        darkmatter::markdown::compose::shell_expansion::ShellExpansionError,
+    > {
+        Ok(darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision::AllowOnce)
+    }
+}
+
+/// Drive a staged boot over a committed Git repository.
+///
+/// `initial` is the root as first prepared (with `early.txt` already
+/// untracked); before the stabilized reread the root is replaced with
+/// `stabilized` and `late.txt` is created, exactly as an `initialize`-time
+/// edit would. Every stage is the production phase function, in the order
+/// `prepare_attempt_phase` calls them.
+fn run_staged_boot(route: BootRoute, initial: &str, stabilized: &str, approve_shell: bool) -> StagedBootRun {
+    let fx = fixture(serde_json::json!({}));
+    let dir = fx._dir.path().to_path_buf();
+    let root = match route {
+        BootRoute::StabilizeOnly => fx.source_path.clone(),
+        BootRoute::Adopted => {
+            std::fs::write(&fx.source_path, "---\ntitle: router\n---\nrouter body\n").unwrap();
+            dir.join("target.md")
+        }
+    };
+    std::fs::write(&root, initial).unwrap();
+    std::fs::write(dir.join(".gitignore"), "events.log\n").unwrap();
+    git(&dir, &["init", "-q", "--initial-branch=main"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-q", "-m", "initial"]);
+    std::fs::write(dir.join("early.txt"), "early\n").unwrap();
+
+    let _no_model = super::super::target_launch::tests::without_ambient_model();
+    let intent = super::super::target_launch::tests::intent();
+    let invocation =
+        claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &dir).unwrap();
+    let mut state = prompt_state(&fx.source_path);
+    state.input_layers.file_resolution_context = invocation.launch_file_resolution_context().clone();
+    state.input_layers.env_overrides = std::collections::BTreeMap::from([
+        ("AGENT".to_string(), "goose".to_string()),
+        ("MODEL".to_string(), STAGED_MODEL.to_string()),
+    ]);
+    state.source_context = Some(invocation.derive_source(&fx.source_path).unwrap());
+    state.invocation_context = Some(invocation);
+
+    let (mut seed, host_context, config) = match route {
+        BootRoute::StabilizeOnly => {
+            let seed = super::super::super::materialize_harness_prompt(
+                &mut state,
+                Some(&dir),
+                &dir,
+                None,
+                claudine::composition::SchemaStage::DeferToStabilizedReread,
+            )
+            .expect("the command's seed preparation succeeds");
+            let context = seed.compose_context.clone();
+            let config = seed.lifecycle.clone().expect("the seed carries its lifecycle");
+            (Some(seed), context, config)
+        }
+        BootRoute::Adopted => (None, None, fx.config.clone()),
+    };
+
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(&dir),
+        launch_area: None,
+        context: host_context.as_ref(),
+    };
+    let mut guard = dispatch_guard(&config, &ctx, &emitter);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    let mut coordinator = coordinator(&fx.source_path);
+    match route {
+        BootRoute::StabilizeOnly => coordinator.arm_stabilization(),
+        BootRoute::Adopted => coordinator
+            .adopt(request_with(&fx.source_path, &root, &[]), &mut state, &mut guard, &mut active)
+            .expect("the target is resolvable"),
+    }
+
+    let shell_options = claudine::harness::ShellApprovalOptions {
+        permissions: claudine::harness::CapturedPermissions::Absent,
+        approval_handler: approve_shell.then(|| {
+            std::sync::Arc::new(ApproveAll) as std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>
+        }),
+        ..Default::default()
+    };
+    let mut harness_context = crate::commands::wrap::harness_orch::CachedHarnessLoopContext::with_shell_options(
+        &state.source_path.clone(),
+        Some(&dir),
+        shell_options,
+    );
+    let effect_engine = engine(&dir);
+    // The fixture intent's own provider (Goose), so this test adds no
+    // provider dispatch site of its own.
+    let profile = crate::commands::wrap::profile::profile_for_provider(intent.fallback_provider)
+        .expect("the fixture provider has a profile");
+
+    let mut prompt = AttemptPromptPreparation {
+        prompt_state: &mut state,
+        harness_context: &mut harness_context,
+        initial_materialized: &mut seed,
+        child_cwd: &dir,
+        repo_root: Some(&dir),
+        effective_non_interactive: true,
+        show_checks: false,
+        detail_requested: false,
+        silent: true,
+        stream_verbosity: Verbosity::Silent,
+    };
+    let mut lifecycle = AttemptLifecycleExecution {
+        guard: &mut guard,
+        effect_engine: &effect_engine,
+        term: &fx.term,
+        loop_start: loop_start_now(),
+    };
+    let mut control = AttemptRetryProxyControl {
+        active: &mut active,
+        coordinator: &mut coordinator,
+        provider: intent.fallback_provider,
+        profile,
+        cli_model: Some(STAGED_MODEL),
+        launch_intent: &intent,
+        handoff_ledger: None,
+    };
+
+    if matches!(route, BootRoute::Adopted) {
+        let step = initialize_adopted_target_phase(&mut prompt, &mut lifecycle, &mut control)
+            .expect("the target's bootstrap read and initialize succeed");
+        assert!(step.is_none(), "the target's initialize clears it to stabilize");
+        assert!(!control.coordinator.owes_full_bootstrap(), "mark_target_initialized ran");
+    }
+
+    // The `initialize`-time edit: a file appears after the first observation
+    // and the root is rewritten.
+    std::fs::write(dir.join("late.txt"), "late\n").unwrap();
+    std::fs::write(&root, stabilized).unwrap();
+
+    let attempt = control.active.iteration().attempt().number();
+    preflight_fresh_document_phase(&mut prompt, &mut lifecycle, attempt, control.coordinator.bootstrap_pending())
+        .expect("the fresh-document preflight passes");
+    let mut document = materialize_attempt_prompt_phase(
+        &mut prompt,
+        &mut lifecycle,
+        &control,
+        claudine::composition::SchemaStage::DeferToStabilizedReread,
+    )
+    .expect("the pre-stabilization read succeeds");
+
+    let mut run = StagedBootRun {
+        boot_error: None,
+        plan_error: None,
+        start_dispatched: false,
+        start_error: None,
+        prompt: None,
+        epoch: None,
+        stabilized_source: None,
+        events: Vec::new(),
+        log: Vec::new(),
+        dir: dir.clone(),
+        _tmp: None,
+    };
+    match bootstrap_adopted_document_phase(&mut prompt, &mut lifecycle, &mut control, &mut document) {
+        Err(error) => run.boot_error = Some(format!("{error:#}")),
+        Ok(Some(_)) => run.boot_error = Some("the boot ended the run".to_string()),
+        Ok(None) => {
+            run.prompt = Some(document.materialized.prompt.clone());
+            match prepare_harness_plan_phase(&mut prompt, &mut lifecycle, &control, &document.materialized) {
+                Err(error) => run.plan_error = Some(format!("{error:#}")),
+                Ok(_) => {
+                    run.start_dispatched = true;
+                    if let Err(error) =
+                        start_lifecycle_phase(&mut prompt, &mut lifecycle, &mut control, &document.materialized)
+                    {
+                        run.start_error = Some(format!("{error:#}"));
+                    }
+                }
+            }
+        }
+    }
+    run.epoch = document.materialized.document_epoch.as_ref().map(|epoch| epoch.work_snapshot());
+    run.stabilized_source = prompt.prompt_state.stabilized_source.take();
+    run.events = emitter.events();
+    run.log = std::fs::read_to_string(&fx.log_path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    lifecycle.guard.defuse();
+    run._tmp = Some(fx._dir);
+    run
+}
+
+/// The untracked-file list a rendered `files=` field shows.
+fn files_field(text: &str) -> &str {
+    text.split("files=").nth(1).unwrap_or("").trim()
+}
+
+const STAGED_INITIAL: &str = "---\ntitle: root\n\
+initialize:\n  - append_line: [events.log, initialize]\n\
+blocked:\n  - stderr: 'initial-blocked files={{ ctx.untracked_files }}'\n  - append_line: [events.log, initial-blocked]\n\
+finalize:\n  - stderr: 'initial-finalize files={{ ctx.untracked_files }}'\n  - append_line: [events.log, initial-finalize]\n\
+---\nfiles={{ ctx.untracked_files }}\n";
+
+const STAGED_STABILIZED: &str = "---\ntitle: root\n\
+start:\n  - stderr: 'start branch={{ ctx.branch }} model={{ env.MODEL }} files={{ ctx.untracked_files }}'\n  - append_line: [events.log, start]\n\
+---\nbranch={{ ctx.branch }} model={{ env.MODEL }} files={{ ctx.untracked_files }}\n";
+
+fn assert_stabilized_events_use_the_active_epoch(route: BootRoute) {
+    let run = run_staged_boot(route, STAGED_INITIAL, STAGED_STABILIZED, false);
+    assert_eq!(run.boot_error, None, "{route:?}: the stabilized boot succeeds");
+    assert_eq!(run.plan_error, None, "{route:?}: the stabilized plan parses");
+    assert!(run.start_dispatched, "{route:?}: start is dispatched");
+
+    let prompt = run.prompt.as_deref().unwrap_or_default();
+    let expected = format!("branch=main model={STAGED_MODEL} files=");
+    assert!(prompt.contains(&expected), "{route:?}: prepared prompt {prompt:?} lacks {expected:?}");
+    assert!(
+        files_field(prompt).contains("early.txt") && !files_field(prompt).contains("late.txt"),
+        "{route:?}: the prompt keeps the earlier file observation: {prompt:?}"
+    );
+
+    assert_eq!(run.start_error, None, "{route:?}: start renders through the stabilized context");
+    let starts = run.stderr(LifecycleSignal::Start);
+    assert_eq!(
+        starts,
+        vec![format!("start {}", prompt.trim())],
+        "{route:?}: the guard-rendered start shows the prompt's branch, model, and file list"
+    );
+    assert_eq!(
+        run.log.iter().filter(|line| *line == "start").count(),
+        1,
+        "{route:?}: the stabilized start fires once: {:?}",
+        run.log
+    );
+
+    let epoch = run.epoch.expect("the stabilized read carries its epoch");
+    assert_eq!(
+        epoch.volatile_observations,
+        std::collections::BTreeMap::from([("file_changes".to_string(), 1), ("git".to_string(), 1)]),
+        "{route:?}: each volatile group is observed once in the epoch"
+    );
+    assert!(
+        epoch.prepared_context_consumers.get("lifecycle").copied().unwrap_or(0) >= 1,
+        "{route:?}: the stabilized epoch records its lifecycle consumer: {:?}",
+        epoch.prepared_context_consumers
+    );
+}
+
+/// A rewritten `start` that names a context group the original root never
+/// named renders from the stabilized epoch — same branch, model, and earlier
+/// file list as the prepared prompt — on the direct (`StabilizeOnly`) route.
+#[test]
+fn stabilized_harness_events_use_the_active_epoch() {
+    assert_stabilized_events_use_the_active_epoch(BootRoute::StabilizeOnly);
+}
+
+/// The same contract on the adopted (`TargetInitialized`) route, which also
+/// calls `rebuild_target_launch`.
+#[test]
+fn stabilized_harness_events_use_the_active_epoch_after_target_rebuild() {
+    assert_stabilized_events_use_the_active_epoch(BootRoute::Adopted);
+}
+
+const STAGED_PLAN_FAILURE: &str = "---\ntitle: root\ntimeout: 1s\nstep_timeout: 2s\n\
+start:\n  - append_line: [events.log, start]\n\
+blocked:\n  - stderr: 'rewritten-blocked branch={{ ctx.branch }}'\n  - append_line: [events.log, rewritten-blocked]\n\
+finalize:\n  - stderr: 'rewritten-finalize branch={{ ctx.branch }}'\n  - append_line: [events.log, rewritten-finalize]\n\
+---\nbranch={{ ctx.branch }}\n";
+
+fn assert_plan_failure_uses_the_rewritten_catch_and_context(route: BootRoute) {
+    let run = run_staged_boot(route, STAGED_INITIAL, STAGED_PLAN_FAILURE, false);
+
+    assert_eq!(run.boot_error, None, "{route:?}: both timeout strings pass preparation");
+    assert!(!run.start_dispatched, "{route:?}: start is never dispatched");
+    let plan_error = run.plan_error.as_deref().unwrap_or_default();
+    assert!(
+        plan_error.contains("step_timeout"),
+        "{route:?}: the relation fails at plan parse: {plan_error:?}"
+    );
+    let initialized: &[&str] = match route {
+        BootRoute::StabilizeOnly => &[],
+        BootRoute::Adopted => &["initialize"],
+    };
+    let expected: Vec<String> = initialized
+        .iter()
+        .chain(&["rewritten-blocked", "rewritten-finalize"])
+        .map(|line| line.to_string())
+        .collect();
+    assert_eq!(
+        run.log, expected,
+        "{route:?}: the rewritten catch runs once each, never start or the initial catch"
+    );
+    assert_eq!(
+        run.stderr(LifecycleSignal::Blocked),
+        vec!["rewritten-blocked branch=main".to_string()],
+        "{route:?}"
+    );
+    assert_eq!(
+        run.stderr(LifecycleSignal::Finalize),
+        vec!["rewritten-finalize branch=main".to_string()],
+        "{route:?}"
+    );
+}
+
+/// A setup failure after the stabilized pair is installed — a `timeout` and
+/// `step_timeout` that each parse but whose relation fails in
+/// `parse_harness_plan` — runs the rewritten `blocked`/`finalize` once each
+/// with the stabilized context, and never `start`.
+#[test]
+fn a_stabilized_plan_failure_routes_through_the_rewritten_catch_and_context() {
+    assert_plan_failure_uses_the_rewritten_catch_and_context(BootRoute::StabilizeOnly);
+}
+
+/// The same failure on the adopted route, after `rebuild_target_launch`.
+#[test]
+fn a_stabilized_plan_failure_after_target_rebuild_routes_through_the_rewritten_catch() {
+    assert_plan_failure_uses_the_rewritten_catch_and_context(BootRoute::Adopted);
+}
+
+/// A stabilized `start` naming an unapproved `shell` fails the lifecycle shell
+/// audit before the new pair is installed, so `bootstrap_blocked` routes it
+/// through the bootstrap (pre-reread) `blocked`/`finalize` and context.
+#[test]
+fn a_stabilized_shell_audit_failure_routes_through_the_bootstrap_catch_and_context() {
+    let stabilized = "---\ntitle: root\n\
+start:\n  - shell: echo unauthorized\n\
+blocked:\n  - append_line: [events.log, rewritten-blocked]\n\
+finalize:\n  - append_line: [events.log, rewritten-finalize]\n\
+---\nbranch={{ ctx.branch }}\n";
+    let run = run_staged_boot(BootRoute::StabilizeOnly, STAGED_INITIAL, stabilized, false);
+
+    assert!(run.boot_error.is_some(), "the stabilized lifecycle shell audit fails");
+    assert_eq!(
+        run.log,
+        vec!["initial-blocked".to_string(), "initial-finalize".to_string()],
+        "the bootstrap lifecycle owns the failure"
+    );
+    for signal in [LifecycleSignal::Blocked, LifecycleSignal::Finalize] {
+        let rendered = run.stderr(signal);
+        assert_eq!(rendered.len(), 1, "{signal:?} renders once: {rendered:?}");
+        assert!(
+            files_field(&rendered[0]).contains("early.txt") && !files_field(&rendered[0]).contains("late.txt"),
+            "{signal:?} renders the bootstrap file observation: {rendered:?}"
+        );
+    }
+}
+
+/// An approved `::shell` body directive that first appears on the stabilized
+/// read runs during composition, while a shell action in an early catch
+/// (before `start`) never reaches a shell runner.
+#[test]
+fn an_approved_stabilized_body_shell_runs_but_an_early_catch_shell_never_does() {
+    let stabilized = "---\ntitle: root\ntimeout: 1s\nstep_timeout: 2s\n\
+start:\n  - append_line: [events.log, start]\n\
+blocked:\n  - append_line: [events.log, rewritten-blocked]\n  - shell: echo early > early-shell.txt\n\
+finalize:\n  - append_line: [events.log, rewritten-finalize]\n\
+---\nbody\n\n::shell echo approved-by-harness\n";
+    let run = run_staged_boot(BootRoute::StabilizeOnly, STAGED_INITIAL, stabilized, true);
+
+    assert_eq!(run.boot_error, None, "the approved stabilized read succeeds");
+    assert!(
+        run.prompt.as_deref().unwrap_or_default().contains("approved-by-harness"),
+        "the approved body directive ran: {:?}",
+        run.prompt
+    );
+    assert!(run.plan_error.is_some(), "the early catch is reached through the plan failure");
+    assert!(
+        !run.dir.join("early-shell.txt").exists(),
+        "a shell action before start never reaches a shell runner"
+    );
+    assert!(run.log.contains(&"rewritten-blocked".to_string()), "blocked still ran: {:?}", run.log);
+
+    let retained = run.stabilized_source.expect("the successful stabilization retains its read");
+    assert_eq!(retained.source.original_text, stabilized, "the retained source is the rewritten root");
+    let approved = retained.approvals.exact().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        (approved, retained.approvals.templates().count()),
+        (vec!["echo approved-by-harness".to_string()], 0),
+        "the retained approval set is exactly what the stabilized read earned"
+    );
+}

@@ -1,9 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use sniff::filesystem::repo::{Package, RepoInfo};
+use sniff::filesystem::blast_radius::ChangeScope;
+use sniff::filesystem::git::{FileStatus, GitInfo};
+use sniff::filesystem::repo::{Package, RepoInfo, attribute_paths, observed_scope_paths};
 
 use super::filter_packages;
 use super::resolve_dir;
@@ -113,69 +115,37 @@ pub fn render_repo_packages_formatted(
         PackagesFormat::List => entries.join("\n"),
     }
 }
-/// Collect package names that have uncommitted changes (dirty or untracked files).
+/// Collect package names that own an uncommitted change: staged, unstaged,
+/// untracked, or conflicted.
 ///
-/// Cross-references git status dirty/untracked file paths with package relative
-/// paths to determine which packages are affected.
+/// Empty when the result carries no package catalog or its changed paths were
+/// not observed ([`sniff::filesystem::repo::observed_scope_paths`]).
 pub(crate) fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
-    let fs = match result.filesystem.as_ref() {
-        Some(fs) => fs,
-        None => return vec![],
-    };
+    changed_package_names(result, |git| {
+        observed_scope_paths(git, ChangeScope::Dirty).unwrap_or_default()
+    })
+}
 
-    let packages = match fs.repo.as_ref().and_then(|r| r.packages.as_ref()) {
-        Some(p) => p,
-        None => return vec![],
+/// Names of the packages that own any of the changed paths `select` picks,
+/// sorted and de-duplicated, using the library's package ownership rules.
+fn changed_package_names(
+    result: &sniff::SniffResult,
+    select: impl FnOnce(&GitInfo) -> Vec<PathBuf>,
+) -> Vec<String> {
+    let Some(fs) = result.filesystem.as_ref() else {
+        return vec![];
     };
-
-    let git = match fs.git.as_ref() {
-        Some(g) => g,
-        None => return vec![],
+    let Some(packages) = fs.repo.as_ref().and_then(|r| r.packages.as_ref()) else {
+        return vec![];
     };
-
-    // Collect all dirty file paths (relative to repo root). Identity-only
-    // `GitInfo` has no computed status, so there are no dirty packages to name.
-    let status = match git.status.as_ref() {
-        Some(s) => s,
-        None => return vec![],
+    let Some(git) = fs.git.as_ref() else {
+        return vec![];
     };
-    let dirty_paths: Vec<&str> = status
-        .dirty
-        .iter()
-        .map(|d| d.filepath.to_str().unwrap_or(""))
-        .chain(
-            status
-                .untracked
-                .iter()
-                .map(|u| u.filepath.to_str().unwrap_or("")),
-        )
-        .collect();
-
-    if dirty_paths.is_empty() {
+    let paths = select(git);
+    if paths.is_empty() {
         return vec![];
     }
-
-    let mut names: Vec<String> = packages
-        .iter()
-        .filter(|pkg| {
-            let prefix = &pkg.relative;
-            dirty_paths.iter().any(|path| {
-                if prefix.is_empty() {
-                    // Root package: file is dirty if it's not inside any other package
-                    !packages.iter().any(|other| {
-                        !other.relative.is_empty() && path.starts_with(&other.relative)
-                    })
-                } else {
-                    path.starts_with(prefix)
-                }
-            })
-        })
-        .map(|pkg| pkg.name.clone())
-        .collect();
-
-    names.sort();
-    names.dedup();
-    names
+    attribute_paths(packages, &paths).packages
 }
 
 /// Pure selector returning dirty package names, honoring the repo `filter`.
@@ -240,55 +210,9 @@ pub fn render_dirty_packages(
 }
 /// Collect package names that have staged files (in index).
 pub(crate) fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
-    let fs = match result.filesystem.as_ref() {
-        Some(fs) => fs,
-        None => return vec![],
-    };
-
-    let packages = match fs.repo.as_ref().and_then(|r| r.packages.as_ref()) {
-        Some(p) => p,
-        None => return vec![],
-    };
-
-    let git = match fs.git.as_ref() {
-        Some(g) => g,
-        None => return vec![],
-    };
-
-    let staged_paths: Vec<&str> = git
-        .file_changes
-        .iter()
-        .filter(|f| {
-            f.status == sniff::filesystem::git::FileStatus::Staged
-                || f.status == sniff::filesystem::git::FileStatus::Both
-        })
-        .map(|f| f.path.to_str().unwrap_or(""))
-        .collect();
-
-    if staged_paths.is_empty() {
-        return vec![];
-    }
-
-    let mut names: Vec<String> = packages
-        .iter()
-        .filter(|pkg| {
-            let prefix = &pkg.relative;
-            staged_paths.iter().any(|path| {
-                if prefix.is_empty() {
-                    !packages.iter().any(|other| {
-                        !other.relative.is_empty() && path.starts_with(&other.relative)
-                    })
-                } else {
-                    path.starts_with(prefix)
-                }
-            })
-        })
-        .map(|pkg| pkg.name.clone())
-        .collect();
-
-    names.sort();
-    names.dedup();
-    names
+    changed_package_names(result, |git| {
+        observed_scope_paths(git, ChangeScope::Staged).unwrap_or_default()
+    })
 }
 
 /// Pure selector returning staged package names, honoring the repo `filter`.
@@ -347,57 +271,16 @@ pub fn render_staged_packages(
 /// Collect package names that have unstaged changes (modified in working tree).
 ///
 /// Cross-references git file_changes with `Modified` or `Both` status against
-/// package relative paths.
+/// package relative paths. Unlike `ChangeScope::Unstaged`, conflicted paths are
+/// not counted.
 pub(crate) fn unstaged_package_names(result: &sniff::SniffResult) -> Vec<String> {
-    let fs = match result.filesystem.as_ref() {
-        Some(fs) => fs,
-        None => return vec![],
-    };
-
-    let packages = match fs.repo.as_ref().and_then(|r| r.packages.as_ref()) {
-        Some(p) => p,
-        None => return vec![],
-    };
-
-    let git = match fs.git.as_ref() {
-        Some(g) => g,
-        None => return vec![],
-    };
-
-    let unstaged_paths: Vec<&str> = git
-        .file_changes
-        .iter()
-        .filter(|f| {
-            f.status == sniff::filesystem::git::FileStatus::Modified
-                || f.status == sniff::filesystem::git::FileStatus::Both
-        })
-        .map(|f| f.path.to_str().unwrap_or(""))
-        .collect();
-
-    if unstaged_paths.is_empty() {
-        return vec![];
-    }
-
-    let mut names: Vec<String> = packages
-        .iter()
-        .filter(|pkg| {
-            let prefix = &pkg.relative;
-            unstaged_paths.iter().any(|path| {
-                if prefix.is_empty() {
-                    !packages.iter().any(|other| {
-                        !other.relative.is_empty() && path.starts_with(&other.relative)
-                    })
-                } else {
-                    path.starts_with(prefix)
-                }
-            })
-        })
-        .map(|pkg| pkg.name.clone())
-        .collect();
-
-    names.sort();
-    names.dedup();
-    names
+    changed_package_names(result, |git| {
+        git.file_changes
+            .iter()
+            .filter(|f| matches!(f.status, FileStatus::Modified | FileStatus::Both))
+            .map(|f| f.path.clone())
+            .collect()
+    })
 }
 
 /// Pure selector returning unstaged package names, honoring the repo `filter`.

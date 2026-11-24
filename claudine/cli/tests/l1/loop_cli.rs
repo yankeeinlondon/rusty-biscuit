@@ -103,6 +103,85 @@ Body
     assert_eq!(calls.trim(), "2", "inline loop should run 2 iterations");
 }
 
+/// A later inline pass compares the provider's result with the deliverable as
+/// that pass found it. Pass 1 writes a body; pass 2 succeeds without writing
+/// anything, so its result equals its own baseline: the unchanged-body
+/// verdict fires and pass 1's deliverable stays exactly as it was written.
+/// Pass 1's edit must never count as pass 2's.
+#[cfg(unix)]
+#[test]
+fn inline_compose_loop_refuses_a_later_pass_that_leaves_the_deliverable_unchanged() {
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
+    let snapshot_path = fixture.cwd().join("pass-2-baseline.md");
+
+    let md_file = fixture.cwd().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+prompt: "Generate a number"
+failure:
+  info: 'FAILURE code={{ err.code }} reason={{ err.detail.reason }}'
+loop:
+  while: "counter < 1"
+  actions:
+    - "increment(counter)"
+---
+Body
+"#,
+    )
+    .unwrap();
+
+    common::InlineAgentStub::new(&md_file)
+        .prelude(
+            "count=0\n\
+             if [ -f \"$CLAUDINE_COUNT_FILE\" ]; then\n\
+             IFS= read -r count < \"$CLAUDINE_COUNT_FILE\"\n\
+             fi\n\
+             count=$((count + 1))\n\
+             printf '%s' \"$count\" > \"$CLAUDINE_COUNT_FILE\"\n\
+             if [ \"$count\" -ge 2 ]; then\n\
+             cp \"$CLAUDINE_DOCUMENT\" \"$CLAUDINE_SNAPSHOT\"\n\
+             printf 'Nothing left to change.\\n'\n\
+             exit 0\n\
+             fi\n",
+        )
+        .body("Generated body 1\n")
+        .install(fixture.bin_dir(), "goose");
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .env("CLAUDINE_DOCUMENT", &md_file)
+        .env("CLAUDINE_SNAPSHOT", &snapshot_path)
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let text = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+
+    assert_eq!(fs::read_to_string(&count_path).unwrap().trim(), "2", "{text}");
+    assert!(!output.status.success(), "pass 2 changed nothing and must fail:\n{text}");
+    assert!(
+        text.contains("FAILURE code=composition.body_unchanged reason=unchanged"),
+        "pass 2 reports the unchanged-body verdict:\n{text}"
+    );
+    let pass_one = fs::read(&snapshot_path).expect("pass 2 snapshotted its baseline");
+    assert!(
+        String::from_utf8_lossy(&pass_one).contains("Generated body 1"),
+        "pass 2's baseline is pass 1's deliverable:\n{}",
+        String::from_utf8_lossy(&pass_one)
+    );
+    assert_eq!(
+        fs::read(&md_file).unwrap(),
+        pass_one,
+        "the refused pass leaves pass 1's deliverable byte for byte:\n{text}"
+    );
+}
+
 /// Regression: an `inline-compose` document whose prompt lives in the
 /// `prompt:` frontmatter key and whose body is empty must still seed and run.
 /// Before the seed path was parameterized by composition mode, seeding called

@@ -71,6 +71,14 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   root never authorizes a host. `denied_host_never_reads_a_fresh_cached_entry`
   and the CLI `test_compose_denied_host_never_reads_a_seeded_cache_entry` pin
   this ordering.
+- The cache-only path (`RemoteFetchRuntime::cache_only`, `cached_text(url,
+  now)`, over `cache::remote_cache::lookup_fresh`) is for editor reads: it
+  checks scheme, the `network` configuration error, and host policy before the
+  store, serves only a current-version, non-`no-store`, non-`no-cache` entry
+  whose `expires_at` is after the injected `now` (body plus expiry), and never
+  fetches, registers a slot, revalidates, purges, or writes. Both paths share
+  `decode_cached`; only the fetching path purges `no-store`. Every miss is a
+  typed `CacheOnlyPending`, never a read failure.
 - A failed fetch is typed where it happens: `compose/remote_fetch/error.rs::RemoteFetchFailure`
   (`kind: expression::RemoteReadKind`, `message`). `Transport` covers the
   request, HTTP status, body read, header, and response UTF-8 failures;

@@ -401,7 +401,7 @@ fn a_schema_problem_with_no_line_keeps_its_file() {
     };
     problems[0].line = None;
     problems[0].column = None;
-    let error = MarkdownError::SchemaValidationFailed { path: failed, problems, summary, description, source: None };
+    let error = MarkdownError::SchemaValidationFailed { path: failed, problems, summary, description, source: None, expression_origins: Default::default() };
 
     assert_eq!(error_diagnostics(&error)[0].source, file_only(&path));
 }
@@ -416,6 +416,7 @@ fn a_placeholder_path_is_no_file() {
             summary: "s".into(),
             description: None,
             source: None,
+            expression_origins: Default::default(),
         };
         assert_eq!(error_diagnostics(&error)[0].source, None, "{placeholder}");
     }

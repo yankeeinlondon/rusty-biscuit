@@ -14,9 +14,9 @@ use std::fmt::Write;
 use super::{
     alphanumeric::AlphanumericOptions,
     types::{
-        CallExample, Constraint, DynamicElement, DynamicKind, ExampleOutcome, FunctionParameters,
-        FunctionType, PropertyAtom, PropertyDef, SimplifiedType, Slot, SuggestionCandidate, TupleType,
-        TypeExpr, TemplateConstraintKind,
+        CallExample, CompositionOperand, Constraint, DynamicElement, DynamicKind, ExampleOutcome,
+        FunctionParameters, FunctionType, ObjectComposition, PatternKey, PatternKeyDef, PropertyAtom,
+        PropertyDef, SimplifiedType, Slot, SuggestionCandidate, TupleType, TypeExpr, TemplateConstraintKind,
     },
 };
 use crate::numeric::{NumberTextError, admit_number_spelling, format_number};
@@ -384,24 +384,60 @@ fn write_call_example(out: &mut String, example: &CallExample) {
     out.push(')');
 }
 
+/// Writes `shape` as `{ … }`. An object with `...Name` spreads also writes
+/// its pattern members, each spread at its recorded position: the literal
+/// and pattern members written before it, then the spread, so the members
+/// between two spreads come out literals first. Without a spread, pattern
+/// members are not written (the block export refuses such an object).
 fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_array: bool) {
-    out.push('{');
-    for (i, (name, def)) in shape.properties.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
+    let spreads = match shape.composition.as_deref() {
+        Some(ObjectComposition::Inline(spreads)) => spreads.as_slice(),
+        _ => &[],
+    };
+    let mut entries: Vec<String> = Vec::new();
+    let literal = |name: &str, def: &PropertyDef| format!("{name}: {}", serialize_property_def(def));
+    let pattern = |entry: &PatternKeyDef| format!("{}: {}", pattern_key_text(&entry.key), serialize_property_def(&entry.def));
+    let (mut literals, mut patterns) = (shape.properties.iter(), shape.pattern_keys.iter());
+    let (mut literals_written, mut patterns_written) = (0, 0);
+    for spread in spreads {
+        for (name, def) in literals.by_ref().take(spread.literals_before.saturating_sub(literals_written)) {
+            entries.push(literal(name, def));
+            literals_written += 1;
         }
-        out.push_str(name);
-        out.push(':');
-        out.push(' ');
-        // The recursive inline object case: serialize the property's
-        // PropertyAtom and prefix with a single space so the produced
-        // `{ name: <atom> }` form re-parses. Whitespace inside braces is
-        // stripped by the grammar parser (Decision #2).
-        out.push_str(&serialize_property_def(def));
+        for entry in patterns.by_ref().take(spread.patterns_before.saturating_sub(patterns_written)) {
+            entries.push(pattern(entry));
+            patterns_written += 1;
+        }
+        entries.push(format!("...{}", composition_operand_text(&spread.operand)));
     }
+    entries.extend(literals.map(|(name, def)| literal(name, def)));
+    if !spreads.is_empty() {
+        entries.extend(patterns.map(pattern));
+    }
+    out.push('{');
+    out.push_str(&entries.join(","));
     out.push('}');
     if is_array {
         out.push_str("[]");
+    }
+}
+
+/// The key text of a pattern member, as the parser reads it in a block
+/// mapping and an inline object.
+pub(crate) fn pattern_key_text(key: &PatternKey) -> String {
+    match key {
+        PatternKey::CatchAll => "<string>".into(),
+        PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
+        PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
+        PatternKey::Pattern(pattern) => format!("<pattern::{pattern}>"),
+    }
+}
+
+/// A composition operand as written: `Name`, or `Name@reference`.
+pub(crate) fn composition_operand_text(operand: &CompositionOperand) -> String {
+    match &operand.reference {
+        Some(reference) => format!("{}@{reference}", operand.name),
+        None => operand.name.clone(),
     }
 }
 
@@ -1311,6 +1347,23 @@ mod tests {
             "person[](required)@./people.yaml -> People",
             "person[](required)@./people.yaml -> People",
         );
+    }
+
+    /// Spreads keep their positions, and an object with spreads writes its
+    /// pattern members (literals first between two spreads).
+    #[test]
+    fn composition_spreads_round_trip_at_their_positions() {
+        assert_canonical("{ ...a }", "{...a}");
+        assert_canonical("{ ...a, ...a@this, }", "{...a,...a@this}");
+        assert_canonical("{ x: string, ...string@this, y: number }", "{x: string,...string@this,y: number}");
+        assert_canonical(
+            "{ <string>: number, a: string, ...base@./x (1).yaml, <starting::p>: string, b: boolean }",
+            "{a: string,<string>: number,...base@./x (1).yaml,b: boolean,<starting::p>: string}",
+        );
+        assert_canonical("{ ...a, n: { ...b } }[](max(2))", "{...a,n: {...b}}[](max(2))");
+        // Without a spread, pattern members are not written, as before.
+        let parsed = parse_type_expr("value", "{ a: string, <string>: number }").unwrap();
+        assert_eq!(serialize_property_atom(&parsed), "{a: string}");
     }
 
     #[test]

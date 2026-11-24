@@ -254,7 +254,12 @@ fn type_conforms(atom: &PropertyAtom, value: &Value) -> bool {
 
 /// Checks a non-array value against the type-expr and value constraints.
 fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
-    if !value_matches_type(&atom.ty, value) {
+    // `schema(mapping)` reads a table of named declarations, which only the
+    // options judge parses; the bare `schema` check would read it as an
+    // object and reserve its `$extends`.
+    let table = matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Schema))
+        && atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Mapping));
+    if !table && !value_matches_type(&atom.ty, value) {
         return false;
     }
     if !declaration_options_hold(atom, value) {

@@ -10,7 +10,7 @@ last_updated: 2026-11-06
     - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
 - Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
-- [Load data files](./docs/topics/loading-data.md) (YAML, JSON, JSON Lines, CSV, TSV, TOML, JSON5) into an expression, checked against a type: `load_data("hosts.csv", "{ name: string, port: number }[]")`
+- [Load data files](./docs/topics/loading-data.md) (YAML, JSON, JSON Lines, CSV, TSV, TOML, JSON5) into an expression, checked against a type in the call (`load_data("hosts.csv", "{ name: string, port: number }[]")`) or by the schema of the frontmatter property that receives it (`hosts: "{{ load_data('hosts.csv') }}"`)
 - Render to [multiple output formats](./docs/topics/output-formats.md)
     - Render [focused terminal code excerpts](./docs/topics/code-blocks.md) with source line numbers and gap markers in one panel
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`, including an [`edit`](./docs/topics/lifecycle/index.md#editing-a-file-edit) action that pauses the run while you write a file in your editor
@@ -96,7 +96,7 @@ host OS input and take focus.
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)
-    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as, options)`: formats, read options (format, delimiter, headerless CSV), CSV rows, optional files, and failures that point into the data file
+    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as?, options?)`: formats, optional contracts and destination typing, read options (format, delimiter, CSV column names), CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Editing Plain YAML Files](./docs/topics/yaml-editing.md) — the library's in-place, comment-preserving edits of a whole `.yaml` file
     - [Configuration Files](./docs/topics/configuration.md) — `~/.darkmatter.yaml` and the repository's `.darkmatter.yaml`: settings, schema defaults, and loading a `ConfigSnapshot`

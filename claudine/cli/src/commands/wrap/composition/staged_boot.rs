@@ -158,6 +158,35 @@ impl StagedLifecycleRuntime {
     }
 }
 
+/// Install a completed preparation's lifecycle actions and the context they
+/// were prepared against on `guard`, together.
+///
+/// The guard's event ledger is untouched, so an event that already fired
+/// (`initialize`) does not fire again. Lifecycle use is recorded on `epoch`,
+/// else on `invocation`. Every route that replaces a document's actions —
+/// the command's staged reread, a later loop pass, the harness's stabilized
+/// reread, and a retry or resume — installs through here, so an event never
+/// renders the new actions against the context of an earlier read.
+pub(crate) fn install_prepared_lifecycle(
+    guard: &mut LifecycleRunGuard<'_>,
+    config: LifecycleConfig,
+    context: ComposeContext,
+    epoch: Option<&DocumentEpoch>,
+    invocation: Option<&InvocationContext>,
+) {
+    guard.set_config(config);
+    guard.set_run_prepared_context(context);
+    match (epoch, invocation) {
+        (Some(epoch), _) => epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        ),
+        (None, Some(invocation)) => invocation.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        ),
+        (None, None) => {}
+    }
+}
+
 /// The user/repo lifecycle settings, loaded only when the document configures
 /// lifecycle notifications at all.
 pub(crate) fn lifecycle_settings(

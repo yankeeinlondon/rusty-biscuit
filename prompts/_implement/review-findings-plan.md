@@ -3,14 +3,14 @@ $schema:
     spec: file(required;eager; match(**/*spec*.md)) -> the specification file that defines the target goal for this feature or fix
     design: file(match(**/*design*.md))
     iteration: number(required) -> the iteration of the review cycle
-    skip_performance_gates: boolean -> allows you to skip findings in the review which are due to a performance gate having not been met (or proven)
+    skip-performance-gates: boolean -> allows you to skip findings in the review which are due to a performance gate having not been met (or proven)
     review: file -> the latest review iteration which we will use to create the plan
 description: |-
     This prompt will take a feature review as input and convert it into an executable plan
 iteration: |-
     {{
-        frontmatter(spec, 'review_iterations')
-            ? frontmatter(spec, 'review_iterations') || 1 
+        frontmatter(spec, 'review-iterations')
+            ? frontmatter(spec, 'review-iterations') || 1 
             : 1
     }}
 review: {{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}
@@ -81,7 +81,7 @@ Once you have built the first draft of the plan, you must:
 
 - Save the plan as "{{plan}}"
 - Add frontmatter to the plan document and set:
-    - `total_phases` property to the number of phases defined in this plan
+    - `total-phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
     - `agent` set this to "{{ ctx.agent }}/{{ ctx.model }}"

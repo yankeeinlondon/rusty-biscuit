@@ -19,7 +19,7 @@ Outputs a comma-separated list of area names:
 sniff, homelab
 ```
 
-An area is reported as dirty if any package within it has staged, unstaged, or untracked file changes.
+An area is reported as dirty if any package within it has staged, unstaged, untracked, or conflicted file changes. Files are assigned to packages exactly as [`dirty-packages`](./repo_dirty-packages.md) describes, so a changed file inside an area's directory that no package there owns counts for the repository-root package (and its area, `""`) when one exists, and for no area otherwise.
 
 ## Arguments and Flags
 

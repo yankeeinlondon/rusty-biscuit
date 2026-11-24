@@ -48,6 +48,7 @@ pub(crate) mod coerce;
 pub mod completion;
 pub mod detect;
 mod frontmatter_shape;
+mod observed;
 pub mod resolve;
 pub mod rewrite;
 mod schema_files;
@@ -97,6 +98,7 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use frontmatter_shape::effective_property_shape;
+pub use observed::{DeferReason, ObservedValidation, ObservedVerdict};
 pub use rewrite::NormalizationOutcome;
 use simplified::{
     DefKey, Definition, DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
@@ -654,6 +656,7 @@ impl DarkmatterSchemas {
                     .collect();
                 library_triggers::TriggerTraceEntry {
                     source: registered.trigger.source.clone(),
+                    name: registered.trigger.envelope.name.clone(),
                     matched: conditions.iter().all(|condition| condition.matched),
                     pending: registered.payload.pending.is_some(),
                     conditions,
@@ -5126,7 +5129,7 @@ mod phase4_trigger_assembly {
         fs::create_dir_all(root.join("schemas")).unwrap();
         write(
             &root.join("schemas/memory.trigger.yaml"),
-            "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n",
+            "kind: schema-trigger\ntitle: Memory Trigger\nnotes: TODO\nmatch:\n",
         );
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\n$schema: ./schemas/memory.trigger.yaml\n---\nbody\n");

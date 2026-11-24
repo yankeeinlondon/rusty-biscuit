@@ -1,0 +1,8 @@
+kind: namespace-schema
+namespace: loop
+$schema:
+    count: "number(integer; min(1)) -> The one-based iteration."
+    is_first: "boolean -> Whether this is the first iteration."
+    is_last: "boolean -> Whether this is the final pass the cap permits."
+    last_output: "unknown -> The previous pass's result: text for a document, a list for a sequence, a dictionary for a group."
+    last_exit_code: "number(integer) -> The previous iteration's exit code."

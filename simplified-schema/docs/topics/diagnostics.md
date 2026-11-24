@@ -178,6 +178,30 @@ structurally:
   a conflict reached through several imports points at each declaration.
 - **`NonDescendingCycle`** lists every `CycleReference` of each rejected
   cycle, with its site, its target, and the source that declares the target.
+  A loop of `...name` / `$extends` and alias hops is reported this way too,
+  each hop at the operand or alias that wrote it.
+- **Composition errors** point at the operand, the `...name` or `$extends`
+  item that failed (see
+  [Object Composition](language/objects-and-named-types.md#object-composition-name-and-extends)):
+  - `InvalidCompositionTarget { name, site, definition, reason }`: the
+    operand resolved to something that is not one declared object. `name` is
+    the operand as written, `site` the operand, `definition` the declaration
+    that decided it (through aliases, the type they reach), and `reason` a
+    `CompositionTargetKind`: `Primitive`, `OpaqueObject`, `Union`, `Array`
+    (a list or tuple), `Callable`, or `Template`.
+  - `CompositionReference { operand, site, source }`: the operand could not
+    be looked up because its file failed to resolve or load, or the chain of
+    composition and alias hops passed the 32-level limit. `source` keeps the
+    original cause (`NoMatch`, `SchemaDocument`, `ImportCycle`, …).
+  - An operand that names no type is the ordinary `UnknownNamedType`, at
+    the operand.
+  - `ComposedMember { site, source }`: lowering failed inside a member that
+    was copied in; `site` is the member's declaration, and `source` the
+    failure, whose property path names the receiving object.
+
+  ```text
+  $schema.order[...0]: `label` cannot be composed into an object: it is a primitive type, not an object
+  ```
 - **`ReferencedSchema`** wraps an error raised inside another schema file
   with that file's `path`, so per-property detail survives while the
   diagnostic points at the file that authored it.
@@ -195,6 +219,20 @@ file's spans are filled in; a reference in the inline `$schema` has none,
 because the resolver received a YAML value, not text. The caller that holds
 the document projects its own range from the
 [source-aware parsers](#source-aware-parsing-and-located-failures).
+
+### Composition in the editor
+
+DMLS reports a composition failure as `dm.schema.invalid_type_definition`,
+like other named-type failures, ranged on the **whole failing operand**
+(`label@./types.yaml`, not just `label`), whether it is written after `...`
+or as a `$extends` value or list item. When the target's declaration is
+known, it is attached as related information; for a failure further down a
+chain, the diagnostic stays on the receiver's operand and relates the
+declaration that failed. Editing an imported target, including in an
+unsaved buffer, refreshes the receiving schema's diagnostics and property
+completions. Completion, hover, and go-to-definition on operands are
+described in the `use-dmls` skill and the
+[DMLS schema support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md) page.
 
 ### Where a schema came from
 
@@ -304,7 +342,7 @@ the line of the top-level key it falls under, column 1.
 ## Source-Aware Parsing and Located Failures
 
 An editor or linter that underlines a schema error needs to know *where* the
-rejected text was written, not just what was wrong. Three passive functions
+rejected text was written, not just what was wrong. Four passive functions
 return that location along with the semantic error. None of them reads a
 file, resolves an import, or evaluates anything.
 
@@ -312,11 +350,12 @@ file, resolves an import, or evaluates anything.
 |---|---|---|---|
 | `parse_property_definition_with_source(property, &value, yaml_source, source_offset)` | one property definition | `SourceAware<PropertyDef>` | `LocatedDefinitionFailure` |
 | `parse_schema_declaration_with_source(&value, yaml_source, source_offset)` | one whole declaration, such as a frontmatter `$schema` value | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
+| `parse_schema_table_with_source(&value, yaml_source, source_offset)` | a table of named declarations, such as a value typed `schema(mapping)`, read as a `types` table is | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
 | `locate_standalone_definition_failure(source)` | a whole standalone schema file | — | `Option<LocatedDefinitionFailure>` |
 
 A successful `SourceAware<T>` holds the same `value` the source-free parser
 returns and a `source_map` of authored byte ranges. The source-free parsers
-(`parse_property_definition`, `parse_schema_declaration`, `parse_yaml_schema`)
+(`parse_property_definition`, `parse_schema_declaration`, `parse_schema_table`, `parse_yaml_schema`)
 still return `Result<_, SchemaError>` with the same variants and messages.
 
 A failure carries five fields:
@@ -343,7 +382,10 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
 
 - **`path`** is structural, never rebuilt from a message. Mapping keys are
   literal (`"a.b"` is one key), and sequence members, including root-union
-  arms, are zero-based `union_arm` indexes. A property call starts at that
+  arms, are zero-based `union_arm` indexes. A `...name` operand is a
+  `Spread(i)` segment, the `i`-th spread of its inline object, displayed
+  `[...i]` (`order[...0]`), and a `$extends` list item is a `union_arm`
+  under `$extends` (`$extends[1]`). A property call starts at that
   definition, a declaration call at the declaration, and the standalone
   helper at the envelope, so its paths begin with `types` or `$schema`.
 - **The node that introduced the violation is the one reported.** In
@@ -357,7 +399,7 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
   `tags: []`, a wrong-type arm `tags: [string, 7]`, an aliased value), when
   the presentation is outside the
   [source-aware boundary](language/types.md#source-aware-presentation-boundary) (such as a
-  quoted scalar continued across lines anywhere in the document), or when the
+  tagged scalar continued across lines anywhere in the document), or when the
   authored text does not decode to the parsed value. `value_span` is then the
   rejected value when that can still be located, and `None` otherwise. The
   `error` is always returned; a missing location never hides it.
@@ -375,17 +417,27 @@ envelope or declaration-shape error, including an envelope its definition
 rejects, which `parse_standalone_schema_document` reports inside
 `SchemaError::SchemaDocument`.
 
-For partial input, where no document parses yet, two helpers read a plain
+For partial input, where no document parses yet, these helpers read a
 scalar the way YAML folds it:
 
+- `decode_scalar_node_prefix(source, start, parent_indent, cursor)` decodes
+  the part of the scalar node at `start` written before `cursor`, in every
+  presentation: plain, single- or double-quoted, literal (`|`), and folded
+  (`>`). A quoted scalar is read only up to the cursor, so one whose closing
+  quote has not been typed yet still decodes; for `event: 'base@` followed by
+  the line `  th`, the prefix at the end is `base@ th`. It returns `None`
+  for an alias, a collection, an empty value (whatever follows on later
+  lines is another node), and a cursor outside the scalar (past its closing
+  quote or its last line).
 - `decode_plain_scalar_node(source, start, parent_indent)` decodes the plain
   scalar whose node starts at `start`, after any same-line anchor or tag,
   and returns its decoded map and end offset. It returns `None` for a quoted
   or block scalar, a collection, an alias, a comment, an empty value, and an
   anchor whose scalar starts on a later line.
-- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)` and
-  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)` are
-  the cursor parsers over that decoded scalar. An anchor or tag never enters
+- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)`,
+  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)`, and
+  `locate_composition_operand_cursor_in_scalar(source, &scalar, cursor)` are
+  the cursor parsers over a scalar either helper decoded. An anchor or tag never enters
   the reported token. The cursor must sit inside the scalar, at its end, or
   after trailing spaces or tabs on its last line.
 
@@ -406,6 +458,7 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `UnsupportedJsonDialect` | A referenced `.json` file declares a `$schema` dialect other than exactly `https://json-schema.org/draft/2020-12/schema` (an empty string or a trailing `#` included). Carries the `path` and the `declared` text. |
 | `InvalidJsonSchema`     | A referenced `.json` file declares the Draft 2020-12 dialect but fails its meta-schema (checked offline). Distinct from a format rejection. Carries the `path` and the validator's message. |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
+| `BundleBoundary`        | A bundle scope refused a reference that is not a listed member reached by `./` or `../` (see [Selecting a schema file](./selecting-schema-files.md#resolving-inside-a-bundle)). |
 | `SchemaDocument`        | A recognized standalone schema document (informal, `kind: schema`, or `kind: yaml-schema` envelope) fails its envelope definition ([details](#an-envelope-its-definition-rejects)) or has a payload the parser rejects, or a schema document's text is not a schema (not valid YAML or strict JSON, or an untagged `$schema` mapping with an unsupported top-level key, whose message adds the `.json` migration when `$schema` is a `json-schema.org` URI); carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)); an envelope rejection carries a `span` and no `source`. |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
@@ -416,10 +469,13 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `ConflictingDefaults`   | One object location declares different defaults for one property: on two object arms of a union, or in raw JSON Schema. Carries the location's `pointer`, the `property`, and each `default` keyword's pointer (`declarations`). Raised when the schema is lowered or prepared, before any value, except for a key that no schema names and several patterns or catch-alls select with different defaults: that conflict depends on the key, so it is reported by validation, inside `ValidationFailure::Unprepared`, only when the key needs its default. See [Applying defaults](./validation.md#applying-defaults). |
 | `RecursiveDefault`      | Applying defaults would never end: a `$ref` chain returns to itself without describing a child value (`path` is `None`), or a default keeps creating another defaulted parent (`path` names where it repeats). `reference` is the reference, or the `default` keyword's pointer. |
 | `ImportCycle`           | A chain of named-type references (bare or `Name@file`) that never repeats a type is deeper than 32 levels. A type that refers back to itself is not this error. |
-| `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, or a cycle through a `function(...)` signature). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](language/objects-and-named-types.md#recursive-named-types). |
+| `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, a cycle through a `function(...)` signature, or a loop of `...name` / `$extends` and alias hops). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](language/objects-and-named-types.md#recursive-named-types). |
 | `UnresolvedReference`   | A local `$ref` names no definition in the schema it was written in, or a chain of references never reaches a schema. Carries the schema's label, the reference, and its JSON Pointer location. |
 | `UnsupportedMergeReference` | A schema joined at a merge (a baseline or a root-union arm; a trigger payload reports it inside `TriggerPayloadNotMergeable`) uses a reference form whose meaning would change at the merged root (`$id`, an anchor, a dynamic or external reference, or a local reference outside `#/$defs/…`). See [JSON Schema Baseline Restrictions](../../../darkmatter/docs/topics/schemas/definition.md#json-schema-baseline-restrictions). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
+| `InvalidCompositionTarget` | A `...name` or `$extends` operand resolved to a type that is not one object with a declared shape. Carries the operand as written, its site, the deciding `definition` site, and a `CompositionTargetKind`. See [Eligible targets and errors](language/objects-and-named-types.md#eligible-targets-and-errors). |
+| `CompositionReference`  | A composition operand could not be looked up: its file failed to resolve or load, or the composition chain passed 32 levels. Carries the operand, its site, and the original cause as `source`. |
+| `ComposedMember`        | Lowering failed inside a member copied in by composition. Carries the member's declaration site and the failure as `source`. |
 | `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintParticipant`: its `origin` (a `SchemaConstraintOrigin`) and the `constraint` value that took part. See [Merging use-site constraints](language/objects-and-named-types.md#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](language/unions.md#named-union-references). |
 | `ReferenceCycle`        | A `$schema` file-reference chain revisits a file it is already resolving; `chain` lists the files in visit order. |
@@ -443,7 +499,7 @@ the document's `kind` has no single usable definition. `cause` is a
 
 | Cause | Meaning |
 |---|---|
-| `Duplicate { files }` | Two or more definitions claim the kind; every file is named, sorted by path. |
+| `Duplicate { files }` | Two or more definitions claim the kind; every file is named, sorted by path (registered definitions, which are consulted only for a kind no shipped or local definition claims, sorted by host, then definition path). |
 | `Reserved { file, defect }` | The one definition claiming the kind failed; `defect` is its failure. |
 | `Unavailable { file, defect }` | No healthy definition claims the kind, and `file` failed before revealing what it claims. |
 | `RootUnreadable { root, defect }` | A folder searched for definitions could not be read. |

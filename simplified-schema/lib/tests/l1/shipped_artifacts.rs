@@ -285,7 +285,7 @@ refused! {
     null_sources: edited(|value| set(value, "/header/sources", Value::Null)) => MalformedArtifact at Some("/header/sources");
     object_sources: edited(|value| set(value, "/header/sources", json!({}))) => MalformedArtifact at Some("/header/sources");
     empty_sources: edited(|value| set(value, "/header/sources", json!([]))) => SourceMismatch at Some("/header/sources");
-    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/3");
+    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/4");
     every_source_invalid: edited(|value| set(value, "/header/sources", json!([5, 6]))) => MalformedArtifact at Some("/header/sources/0");
     a_source_with_an_unknown_member: edited(|value| set(value, "/header/sources/0/extra", json!(1))) => MalformedArtifact at Some("/header/sources/0");
     a_repeated_source: edited(|value| { let first = value["header"]["sources"][0].clone(); value["header"]["sources"].as_array_mut().unwrap().insert(0, first); }) => MalformedArtifact at Some("/header/sources/1");

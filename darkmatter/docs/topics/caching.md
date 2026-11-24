@@ -390,6 +390,43 @@ Serving stale data is never an implicit consequence of configuring a cache
 root: it happens only under `Fallback`, only after a revalidation that failed
 in transport, and never for `no-cache`.
 
+### Editor reads
+
+DMLS, the editor's language server, reads this cache when it
+[observes a property](./schemas/schema-slots.md#observed-properties) that
+loads a URL, so an editor can judge remote data without ever going to the
+network. It only reads: it never fetches, revalidates, writes, or removes
+an entry, so the cache holds only what an earlier `md compose` stored.
+
+- **Where.** The store a composition with `--cache-root <root>` uses, at
+  `<root>/.darkmatter/cache/v1/` with no namespace, where `<root>` is the
+  root of the document's file tree: its repository root inside a Git
+  repository. A missing store is a cache miss and is not created. The
+  `DMLS_CACHE_DIR` setting is for DMLS's own index and plays no part here.
+- **Host policy first.** As for a composition, the URL must be allowed
+  before the store is opened: by `permissions.network: allow`, or by an
+  approval of that URL in the editor's session. A refused URL never reveals
+  whether it is cached.
+- **Fresh entries only.** An entry is used only within the lifetime it was
+  stored with (see [Freshness](#freshness)), judged at the moment the
+  editor's job starts. An expired entry, a `no-cache` or `no-store` entry, a
+  miss, or an entry larger than what is left of the editor's work allowance
+  gives no value: the property stays pending, with no diagnostic. No
+  freshness mode applies; the editor behaves as `Strict` without the
+  revalidation.
+- **Expiry.** The editor remembers the earliest expiry of the responses an
+  observation used and withdraws the observation at that moment. The next
+  observation finds the entry expired and is pending until a composition
+  refreshes the entry.
+
+```bash
+# Fill the cache the editor reads, from the repository root:
+md compose notes.md --allow host=example.com --cache-root .
+# With `permissions.network: allow`, DMLS now judges
+# `{{ load_data('https://example.com/people.yaml') }}` from the cached body
+# until the response's `max-age` runs out.
+```
+
 ```bash
 # First run: 127.0.0.1 answers 200 with `max-age=0`; the body is cached.
 md compose doc.md --allow host=127.0.0.1 --cache-root .
@@ -507,6 +544,7 @@ define its own unqualified `ContentPolicy`.
 - `darkmatter/lib/src/markdown/compose/cache/manifest.rs`
 - `darkmatter/lib/src/markdown/compose/cache/store.rs`
 - `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
+- `darkmatter/lib/src/markdown/compose/expression/editor_reads.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `darkmatter/lib/src/markdown/compose/expression/data/runtime.rs`
 - `darkmatter/lib/src/markdown/schemas/slots/cache.rs`

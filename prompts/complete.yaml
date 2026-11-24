@@ -8,7 +8,7 @@ $schema:
     iteration: number -> the number of reviews that have taken place in the fix/review cycle
 
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review-iterations') || 0) + 1  : 1   }}"
 spec-name: "{{ parent_dir(spec) }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 

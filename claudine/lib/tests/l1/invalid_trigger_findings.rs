@@ -18,7 +18,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot, build_resolution_context};
 use simplified_schema::triggers::TriggerSource;
 
-const MEMORY_TRIGGER: &str = "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n";
+const MEMORY_TRIGGER: &str = "kind: schema-trigger\ntitle: Memory Trigger\nnotes: TODO\nmatch:\n";
 
 /// A valid trigger: a document setting `gate` must carry a numeric `count`.
 const GATE_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  count: number(required)\n";
@@ -123,7 +123,7 @@ fn a_check_with_no_effective_schema_records_the_incident_trigger() {
     };
     assert_eq!(warning.source, fixture.trigger("memory.yaml"));
     assert!(warning.message.starts_with("ignoring invalid schema trigger"), "{}", warning.message);
-    assert!(warning.message.contains("found unknown keys: name, description"), "{}", warning.message);
+    assert!(warning.message.contains("found unknown keys: title, notes"), "{}", warning.message);
     assert!(!warning.message.contains("merge-conflicts.md"), "never blames the prompt: {}", warning.message);
 }
 

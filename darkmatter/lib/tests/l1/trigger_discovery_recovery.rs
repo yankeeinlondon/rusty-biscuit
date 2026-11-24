@@ -108,7 +108,7 @@ fn effective_properties(schemas: &DarkmatterSchemas, markdown: &Markdown) -> Vec
 #[test]
 fn an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous() {
     let trigger = "schemas/memory.yaml";
-    let repo = Repo::new(&[(trigger, "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n")]);
+    let repo = Repo::new(&[(trigger, "kind: schema-trigger\ntitle: Memory Trigger\nnotes: TODO\nmatch:\n")]);
 
     let schemas = repo.schemas();
 
@@ -121,7 +121,7 @@ fn an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous() {
     // The source as discovery found it; a `join`ed fixture path keeps its
     // authored `/` on Windows, so it is compared above, not as text.
     assert!(message.contains(&finding.source().to_string()), "{message}");
-    assert!(message.contains("unknown keys: name, description"), "the unknown keys are named: {message}");
+    assert!(message.contains("unknown keys: title, notes"), "the unknown keys are named: {message}");
 
     let document = repo.document("prompt.md", "title: hello\n");
     assert!(schemas.effective_for(&document).expect("no effective schema").is_none());
@@ -639,7 +639,7 @@ fn an_accepted_payload_is_resolved_once_across_scans() {
 // ── md clean's transaction ──────────────────────────────────────────────────
 
 /// The incident trigger: unsupported envelope keys and a null `match:`.
-const INCIDENT_TRIGGER: &str = "kind: schema-trigger\nname: memory\ndescription: Memory notes\nmatch:\n$schema: memory-payload.yaml\n";
+const INCIDENT_TRIGGER: &str = "kind: schema-trigger\ntitle: memory\nnotes: Memory notes\nmatch:\n$schema: memory-payload.yaml\n";
 
 /// Runs the clean transaction over `docs/{name}` with `config`.
 fn clean(
@@ -669,7 +669,7 @@ fn clean_carries_the_skipped_trigger_outside_its_diagnostics() {
 
     assert_eq!(result.trigger_findings.len(), 1, "{:?}", result.trigger_findings);
     assert_eq!(result.trigger_findings[0].source(), &TriggerSource::File(repo.path("schemas/memory.yaml")));
-    assert!(result.trigger_findings[0].message().contains("found unknown keys: name, description"));
+    assert!(result.trigger_findings[0].message().contains("found unknown keys: title, notes"));
     // The valid neighbor still constrains the document: `level` must be a
     // number, and that is the only diagnostic.
     assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);

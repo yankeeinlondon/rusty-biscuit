@@ -196,8 +196,8 @@ fn harness_prepare_options(
         .or(compatibility_source_context.as_ref());
     // The launch-anchored epoch snapshot. Constructed through the invocation
     // owner — never from this document's source context — so a harness
-    // re-materialization (bootstrap read, stabilized reread, retry, resume,
-    // loop refresh) cannot re-anchor prepared `ctx.*` on the prompt directory.
+    // re-materialization (bootstrap read, stabilized reread, retry, resume)
+    // cannot re-anchor prepared `ctx.*` on the prompt directory.
     let propagated = state
         .invocation_context
         .as_ref()
@@ -302,8 +302,14 @@ pub(crate) fn materialize_harness_prompt(
     schema: claudine::composition::SchemaStage,
 ) -> Result<MaterializedHarnessPrompt> {
     materialize_harness_prompt_selecting(state, _repo_root, child_cwd, resume_followup, schema, None)
+        .map(|(materialized, _)| materialized)
 }
 
+/// Read the active document fresh from disk and prepare it canonically.
+///
+/// Also returns the read itself with the approvals its preparation ran under,
+/// which a first-attempt stabilized reread hands to its owning loop
+/// ([`super::RetainedLoopSource`]).
 pub(super) fn materialize_harness_prompt_selecting(
     state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
@@ -311,14 +317,14 @@ pub(super) fn materialize_harness_prompt_selecting(
     resume_followup: Option<&str>,
     schema: claudine::composition::SchemaStage,
     select: Option<&claudine::composition::ResolvedIdentitySelector<'_>>,
-) -> Result<MaterializedHarnessPrompt> {
+) -> Result<(MaterializedHarnessPrompt, super::RetainedLoopSource)> {
     let loaded = load_overlaid_source(state).map(|source| {
         let options = harness_prepare_options(state, &source, child_cwd);
         (source, options)
     });
     // This is the retried attempt's canonical read: it consumes a pending
     // `retry.with` overlay whether or not the read succeeds, so no later
-    // retry, resume, or loop refresh sees it.
+    // retry, resume, or loop pass sees it.
     state.pending_retry_overlay = None;
     let (source, options) = loaded?;
 
@@ -365,6 +371,10 @@ pub(super) fn materialize_harness_prompt_selecting(
     let loop_values = prepared.input_layers.loop_values.clone();
     let compose_context = prepared.compose_context;
     let document_epoch = prepared.document_epoch;
+    let retained = super::RetainedLoopSource {
+        source,
+        approvals: prepared.input_layers.pre_approved_commands.unwrap_or_default(),
+    };
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
     let lifecycle = prepared.lifecycle;
@@ -397,7 +407,7 @@ pub(super) fn materialize_harness_prompt_selecting(
     }
 
     let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
-    Ok(MaterializedHarnessPrompt {
+    Ok((MaterializedHarnessPrompt {
         frontmatter,
         prompt,
         env_overrides,
@@ -413,7 +423,7 @@ pub(super) fn materialize_harness_prompt_selecting(
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
         loop_values,
         mcp_body_tags,
-    })
+    }, retained))
 }
 
 /// The bootstrap read of an adopted target that authors `initialize`, as the

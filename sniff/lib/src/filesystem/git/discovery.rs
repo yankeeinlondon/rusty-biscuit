@@ -1193,30 +1193,69 @@ pub(crate) fn get_commits_for_branch_fallible(
     branch_name: &str,
     count: usize,
 ) -> Result<Vec<CommitInfo>> {
-    let mut commits = Vec::new();
+    get_commits_for_branch_from_snapshot(repo, None, branch_name, count)
+}
 
-    // Prefer a local branch ref. A missing local branch falls through to the
-    // remote-tracking/SHA fallback (so `origin/main` and bare SHAs still
-    // resolve), but a malformed branch ref, or one peeling to a missing object,
-    // must surface rather than silently producing an empty history.
-    let local = repo
-        .try_find_reference(&format!("refs/heads/{branch_name}"))
-        .map_err(|e| SniffError::git("find_reference", e))?;
-
-    let start_oid = match local {
-        Some(r) => Some(
-            r.into_fully_peeled_id()
-                .map_err(|e| SniffError::git("peel", e))?
-                .detach(),
-        ),
-        None => resolve_remote_or_sha(repo, branch_name)?,
+/// [`get_commits_for_branch_fallible`] over refs the request already
+/// observed.
+///
+/// A local or remote-tracking branch present in `refs` starts the walk from
+/// its captured tip, and the captured decorations are reused when `refs`
+/// observed them. Every other name (a branch missing from the snapshot, a
+/// symbolic `<remote>/HEAD`, a SHA) takes the targeted lookup of
+/// [`get_commits_for_branch_fallible`], with the same results and errors.
+pub(crate) fn get_commits_for_branch_from_snapshot(
+    repo: &gix::Repository,
+    refs: Option<&super::remote_refresh::RefSnapshot>,
+    branch_name: &str,
+    count: usize,
+) -> Result<Vec<CommitInfo>> {
+    let captured = refs.and_then(|refs| {
+        refs.local_branch_tip(branch_name)
+            .or_else(|| refs.remote_branch_tip(branch_name))
+    });
+    let start_oid = match captured {
+        Some(oid) => Some(oid),
+        // Prefer a local branch ref. A missing local branch falls through to
+        // the remote-tracking/SHA fallback (so `origin/main` and bare SHAs
+        // still resolve), but a malformed branch ref, or one peeling to a
+        // missing object, must surface rather than silently producing an
+        // empty history.
+        None => {
+            let local = repo
+                .try_find_reference(&format!("refs/heads/{branch_name}"))
+                .map_err(|e| SniffError::git("find_reference", e))?;
+            match local {
+                Some(r) => Some(
+                    r.into_fully_peeled_id()
+                        .map_err(|e| SniffError::git("peel", e))?
+                        .detach(),
+                ),
+                None => resolve_remote_or_sha(repo, branch_name)?,
+            }
+        }
     };
-
     let Some(oid) = start_oid else {
         debug!(branch = %branch_name, "could not resolve branch ref for commit walk");
-        return Ok(commits);
+        return Ok(Vec::new());
     };
 
+    match refs.filter(|refs| refs.has_decorations()) {
+        Some(refs) => walk_branch_commits(repo, oid, count, refs.decorations()),
+        None => {
+            let decorations = collect_ref_decorations_fallible(repo)?;
+            walk_branch_commits(repo, oid, count, &decorations)
+        }
+    }
+}
+
+fn walk_branch_commits(
+    repo: &gix::Repository,
+    oid: gix::ObjectId,
+    count: usize,
+    decorations: &HashMap<gix::ObjectId, Vec<RefDecoration>>,
+) -> Result<Vec<CommitInfo>> {
+    let mut commits = Vec::new();
     let walk = repo
         .rev_walk(Some(oid))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
@@ -1224,8 +1263,6 @@ pub(crate) fn get_commits_for_branch_fallible(
         ))
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
-
-    let decorations = collect_ref_decorations_fallible(repo)?;
 
     for info_result in walk.take(count) {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;

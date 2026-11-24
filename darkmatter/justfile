@@ -323,7 +323,7 @@ check-zed:
     target="wasm32-wasip2"
     if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
         echo -e "{{ RED }}error{{ RESET }} check-zed: rust target {{ BOLD }}$target{{ RESET }} is not installed" >&2
-        echo "Install it with: rustup target add $target" >&2
+        echo "Install it with: rustup target add $target (or run 'just init' at the repository root)" >&2
         exit 1
     fi
     echo -e "Checking the {{ BOLD }}Zed WASM extension{{ RESET }} (zed-dmls) against $target"
@@ -342,7 +342,7 @@ zed-wasm:
     target="wasm32-wasip2"
     if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
         echo -e "{{ RED }}error{{ RESET }} zed-wasm: rust target {{ BOLD }}$target{{ RESET }} is not installed" >&2
-        echo "Install it with: rustup target add $target" >&2
+        echo "Install it with: rustup target add $target (or run 'just init' at the repository root)" >&2
         exit 1
     fi
     cargo build --locked --release --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"

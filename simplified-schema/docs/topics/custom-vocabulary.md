@@ -117,7 +117,7 @@ lowers `contract` to:
 
 | Payload key | Of | From | The library checks |
 | --- | --- | --- | --- |
-| `mapping: true` | `x-darkmatter-schema` | `mapping` | The declaration is written as a mapping, not a list or a reference. |
+| `mapping: true` | `x-darkmatter-schema` | `mapping` | The declaration is written as a mapping, not a list or a reference, and is read as a table of named declarations (its own `$extends` key is a name; its own `$constraints` and pattern keys are refused). |
 | `property: [{ "name", "declaration" }]` | `x-darkmatter-schema` | each `property(NAME, type-definition(...))` | Every inline mapping, or inline root-union arm, declares `name`, and its declaration satisfies `declaration`, itself a type-definition payload (`true` for a bare `type-definition`). Reference carriers and reference arms are skipped. |
 | `forms: ["literal", ...]` | `x-darkmatter-type-definition`, or a `declaration` | `forms(literal, ...)` | Every top-level alternative is a non-array atom with a listed type keyword; a `literal` or `enum` one denotes non-empty strings, and a named-type alternative passes. |
 | `declaredRequired: true` | `x-darkmatter-type-definition`, or a `declaration` | `declared-required` | The definition is `required`, with no alternative that admits null. |

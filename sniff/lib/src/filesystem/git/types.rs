@@ -1084,6 +1084,21 @@ impl GitRepo {
     }
 
     pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
+        Ok(self.detect_with_ref_snapshot(request, false)?.0)
+    }
+
+    /// [`Self::detect_with_request`], also returning the ref snapshot the
+    /// detection observed, if it took one.
+    ///
+    /// With `include_link_tips`, a request that collects commits also observes
+    /// every remote-tracking tip in that same snapshot, so the commits can be
+    /// linked later without a second ref enumeration. This matters on
+    /// detached `HEAD`, where no tracking branch would otherwise ask for them.
+    pub(crate) fn detect_with_ref_snapshot(
+        &self,
+        request: &GitRequest,
+        include_link_tips: bool,
+    ) -> Result<(GitInfo, Option<super::remote_refresh::RefSnapshot>)> {
         // Resolve the branch fallibly: a missing or malformed HEAD must surface
         // for every detection preset, not only the metadata-producing ones.
         // `minimal()`/`summary()` skip branch/tracking collection below, so this
@@ -1093,7 +1108,7 @@ impl GitRepo {
         let current_branch = self.try_current_branch()?;
 
         if request.is_identity_only() {
-            return Ok(self.identity_only_info(current_branch));
+            return Ok((self.identity_only_info(current_branch), None));
         }
 
         let is_minimal = request.is_minimal();
@@ -1103,9 +1118,11 @@ impl GitRepo {
         }
 
         let wants_tracking_refs = request.wants_tracking() && current_branch.is_some();
+        let wants_link_tips = include_link_tips && request.wants_commits();
         let needs_ref_snapshot = request.wants_ref_decorations()
             || request.wants_branches()
             || wants_tracking_refs
+            || wants_link_tips
             || (request.wants_remotes() && request.include_remote_branch_details)
             || (request.refresh_remote_tracking && request.include_commit_remote_containment);
         let ref_snapshot = if needs_ref_snapshot {
@@ -1114,6 +1131,7 @@ impl GitRepo {
                 &self.gix.borrow(),
                 request.wants_branches() || wants_tracking_refs,
                 wants_tracking_refs
+                    || wants_link_tips
                     || (request.wants_remotes() && request.include_remote_branch_details)
                     || (request.refresh_remote_tracking
                         && request.include_commit_remote_containment),
@@ -1262,7 +1280,7 @@ impl GitRepo {
             .map(parse_org_repo)
             .unwrap_or((None, None));
 
-        Ok(GitInfo {
+        let info = GitInfo {
             repo_root: self.repo_root.clone(),
             org,
             repo,
@@ -1282,7 +1300,8 @@ impl GitRepo {
             config,
             tracking,
             file_changes,
-        })
+        };
+        Ok((info, ref_snapshot))
     }
 
     /// Observe the Git shapes used only by the repository aggregate.

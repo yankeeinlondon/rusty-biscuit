@@ -96,7 +96,7 @@ pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use defaults::{AppliedDefault, DefaultPlan, DefaultPreparation};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
-    CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
+    CompositionTargetKind, CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
 };
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
@@ -122,24 +122,26 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
 pub use simplified::{
-    Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
+    Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, CompositionOperand, Constraint, DRAFT_2020_12, DecodedScalar,
+    Extends, InlineSpread, ObjectComposition,
     DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
-    SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, CompositionOperandPart, SchemaDeclaration,
     SchemaReferenceSite, SchemaRoot, SchemaShape, SchemaSourceId, SchemaSourceMap, SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind,
-    SchemaValueNode, SimplifiedType, SourceAware, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    NamespaceSchemaDocument, SchemaValueNode, SimplifiedType, SourceAware, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
     SuggestionItem, SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr,
     decode_alias_definition, decode_partial_scalar_at, decode_plain_scalar_node, decode_scalar, decode_scalar_at,
-    decode_scalar_node, flattened_alternatives, flow_collection_end, is_definition_subtype,
+    decode_scalar_node, decode_scalar_node_prefix, flattened_alternatives, flow_collection_end, is_definition_subtype,
     is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
-    is_union_arm_path, lint_suggestions, locate_schema_declaration_cursor,
+    is_union_arm_path, lint_suggestions, locate_composition_operand_cursor,
+    locate_composition_operand_cursor_in_scalar, locate_schema_declaration_cursor,
     locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
-    parse_type_definition_value,
-    parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
+    parse_namespace_schema_document, parse_type_definition_value,
+    parse_schema_declaration_with_source, parse_schema_table, parse_schema_table_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
     parse_yaml_schema,
     suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,
 };

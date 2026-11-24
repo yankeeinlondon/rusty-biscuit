@@ -55,7 +55,7 @@ use simplified_schema::{
 };
 use simplified_schema::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
-use super::value_origin::{DataPaths, FrontmatterProvenance, ValuePathSegment};
+use super::value_origin::{DataPaths, ExpressionOrigin, FrontmatterProvenance, ValuePathSegment};
 
 /// Which schema problems a pass of this stage may defer as pending
 /// composition, decided by whether a later stage resolves the value.
@@ -171,6 +171,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &crate::markdown::compose::C
         &projection,
         &data,
         PendingDeferral::BeforeShell { provenance: &provenance, provisional: &provisional },
+        provenance.expression_origins(),
         &consumer,
         &mut report,
         &mut Vec::new(),
@@ -427,6 +428,7 @@ pub(crate) fn prepare_schemas(
         summary,
         description: description.clone(),
         source: Some(Box::new(source)),
+        expression_origins: Default::default(),
     };
 
     // The source's own context: a child opened through `~`, or a source
@@ -546,6 +548,7 @@ pub(crate) fn run_with_registry(
     projection: &CallerProjection,
     data: &DataPaths,
     deferral: PendingDeferral<'_>,
+    origins: &HashMap<String, ExpressionOrigin>,
     consumer: &Path,
     compose_report: &mut ComposeReport,
     filled: &mut Vec<FilledDefault>,
@@ -580,6 +583,7 @@ pub(crate) fn run_with_registry(
                 summary: format!("schema could not be prepared: {err}"),
                 description: description.clone(),
                 source: Some(Box::new(err)),
+                expression_origins: Default::default(),
             });
         }
     };
@@ -638,6 +642,7 @@ pub(crate) fn run_with_registry(
                 summary: format!("schema could not be prepared: {err}"),
                 description: description.clone(),
                 source: Some(Box::new(err)),
+                expression_origins: Default::default(),
             })
     };
     let mut report = judge(schemas, markdown, filled)?;
@@ -715,6 +720,7 @@ pub(crate) fn run_with_registry(
         .collect();
 
     if !report.valid && !composition_independent.is_empty() {
+        let expression_origins = Box::new(expression_metadata(markdown, origins, &composition_independent));
         return Err(MarkdownError::SchemaValidationFailed {
             path,
             problems: composition_independent,
@@ -723,6 +729,7 @@ pub(crate) fn run_with_registry(
             // Schema was prepared successfully; the failure detail lives in
             // `problems`, so there is no upstream `SchemaError` cause.
             source: None,
+            expression_origins,
         });
     }
     if let Some(problem) = projection.unprojected.as_deref() {
@@ -732,6 +739,7 @@ pub(crate) fn run_with_registry(
             summary: "frontmatter did not satisfy the schema".to_string(),
             description,
             source: None,
+            expression_origins: Default::default(),
         });
     }
     // The verdict above recognized a supplied value by its text, so it also took
@@ -753,6 +761,7 @@ pub(crate) fn run_with_registry(
                 summary: "frontmatter did not satisfy the schema".to_string(),
                 description,
                 source: None,
+                expression_origins: Default::default(),
             });
         }
     }
@@ -1015,6 +1024,7 @@ pub(crate) fn validate_typed_shell_values(
     prepared: &PreparedSchemas,
     keys: &HashSet<String>,
     filled: &[FilledDefault],
+    origins: &HashMap<String, ExpressionOrigin>,
 ) -> MarkdownResult<()> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
@@ -1036,6 +1046,7 @@ pub(crate) fn validate_typed_shell_values(
         summary: format!("schema could not be prepared: {err}"),
         description: description.clone(),
         source: Some(Box::new(err)),
+        expression_origins: Default::default(),
     })?;
     let problems: Vec<_> = report
         .problems
@@ -1048,13 +1059,58 @@ pub(crate) fn validate_typed_shell_values(
     if problems.is_empty() {
         return Ok(());
     }
+    let expression_origins = Box::new(expression_metadata(markdown, origins, &problems));
     Err(MarkdownError::SchemaValidationFailed {
         path,
         problems,
         summary: "a shell result value did not satisfy the schema".to_string(),
         description,
         source: None,
+        expression_origins,
     })
+}
+
+/// The expression metadata of each top-level property `problems` name whose
+/// current value a whole-value `{{ … }}` produced (`origins`), keyed by the
+/// decoded property name: the expression's authored span in the document's
+/// loaded text, when it still authors the scanned string, and the direct
+/// load's source. A missing top-level property, or an unknown one, is no
+/// expression's value and gets nothing.
+fn expression_metadata(
+    markdown: &Markdown,
+    origins: &HashMap<String, ExpressionOrigin>,
+    problems: &[simplified_schema::ValidationProblem],
+) -> std::collections::BTreeMap<String, crate::markdown::ExpressionMetadata> {
+    let mut metadata = std::collections::BTreeMap::new();
+    if origins.is_empty() {
+        return metadata;
+    }
+    let fm_map = markdown.frontmatter().as_map();
+    for problem in problems {
+        let Some(key) = problem.instance_path.segments().first() else {
+            continue;
+        };
+        if metadata.contains_key(key) {
+            continue;
+        }
+        let (Some(origin), Some(value)) = (origins.get(key), fm_map.get(key)) else {
+            continue;
+        };
+        let span = markdown.source_text().and_then(|loaded| {
+            let range = super::frontmatter_interpolation::locate_frontmatter_span(
+                loaded,
+                vec![ValuePathSegment::Key(key.clone())],
+                &origin.scanned,
+                origin.span.clone(),
+            )?;
+            crate::markdown::AuthoredSpan::locate(loaded, range)
+        });
+        metadata.insert(
+            key.clone(),
+            crate::markdown::ExpressionMetadata { span, load: origin.load.clone(), value: value.clone() },
+        );
+    }
+    metadata
 }
 
 /// Whether `err` is a schema template a discovery pass leaves to the
@@ -1099,6 +1155,7 @@ pub(crate) fn verify_projection_stability(
                     .get("description")
                     .and_then(|value| value.as_str().map(String::from)),
                 source: Some(Box::new(err)),
+                expression_origins: Default::default(),
             });
         }
     };
@@ -1129,6 +1186,7 @@ pub(crate) fn prepare_caller_projection(
                     .get("description")
                     .and_then(|value| value.as_str().map(String::from)),
                 source: Some(Box::new(err)),
+                expression_origins: Default::default(),
             });
         }
     };
@@ -1150,6 +1208,7 @@ pub(crate) fn prepare_caller_projection(
                 .get("description")
                 .and_then(|value| value.as_str().map(String::from)),
             source: None,
+            expression_origins: Default::default(),
         }
     })
 }

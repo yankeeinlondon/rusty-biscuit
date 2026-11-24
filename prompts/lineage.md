@@ -6,7 +6,7 @@ $schema:
     iterations: number -> The number of iterations that it took to complete this cycle (_or at least to get to the point where a lineage review felt necessary_).
     finished: boolean -> a boolean flag indicating whether this review was run after a long `review/fix` cycle that _finished_ or one that is still ongoing!
     count: number -> the number of interations taken in the `review/fix` cycle
-spec_name: |-
+spec-name: |-
     {{ 
         ctx.current_package_area
             ? ctx.current_package_area + '/' + parent_dir(spec) 
@@ -14,27 +14,27 @@ spec_name: |-
             ? ctx.current_package + "/" + parent_dir(spec)
             : parent_dir(spec)
     }}
-working_dir: "{{ parent_dir(spec) }}"
-last_review: "{{ find_last_index( working_dir + 'review.md') }}"
-count: "{{ length(file_index(last_review)) }}"
+working-dir: "{{ parent_dir(spec) }}"
+last-review: "{{ find_last_index( working-dir + 'review.md') }}"
+count: "{{ length(file_index(last-review)) }}"
 iterations: |-
     {{
     
     }}
 finished: |-
     {{
-        frontmatter(last_review, 'implemented')
+        frontmatter(last-review, 'implemented')
     }}
-spec_context: |-
+spec-context: |-
     {{
         finished
-            ? 'The `' + spec_name + '` specification went through **' + count + '** review/fix cycles before it was finished.'
-            : 'The `' + spec_name + '` specification has gone through **' + count + '** review/fix cycles before and is still **not** finished!'
+            ? 'The `' + spec-name + '` specification went through **' + count + '** review/fix cycles before it was finished.'
+            : 'The `' + spec-name + '` specification has gone through **' + count + '** review/fix cycles before and is still **not** finished!'
     }}
 ---
 # Lineage Review
 
-You are being asked to run a "lineage review" of the `{{ spec_name }}` based around the '{{spec}}' specification file. A lineage review looks at the _elongated_ time that this specification took to complete and tries to find ways in which future cycles can be made more efficient.
+You are being asked to run a "lineage review" of the `{{ spec-name }}` based around the '{{spec}}' specification file. A lineage review looks at the _elongated_ time that this specification took to complete and tries to find ways in which future cycles can be made more efficient.
 
 ## Repo Context
 
@@ -42,7 +42,7 @@ You are being asked to run a "lineage review" of the `{{ spec_name }}` based aro
 
 ## Review/Fix Cycle Context
 
-{{spec_context}} We typically would like the review/fix cycle to take no more than 4 cycles (_but less is always better_). Things to know about this review/fix cycle include:
+{{spec-context}} We typically would like the review/fix cycle to take no more than 4 cycles (_but less is always better_). Things to know about this review/fix cycle include:
 
 - once a specification has been finalized we create a plan with the `@prompts/plan.md` prompt
 - that plan is then implemented -- _phase by phase_ -- using the `@prompts/_implement/implement-plan.md` prompt

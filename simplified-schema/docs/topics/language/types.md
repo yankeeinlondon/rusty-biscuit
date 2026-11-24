@@ -136,19 +136,20 @@ The semantic parsers operate on YAML values, while DMLS and other diagnostic
 consumers additionally require exact source spans. The v1 source-aware grammar
 is deliberately capped at these authored presentations:
 
-- plain, single-quoted, and double-quoted scalars, where a plain scalar may
-  continue onto more-indented lines;
+- plain, single-quoted, and double-quoted scalars, on one line or continued
+  across several (a plain scalar onto more-indented lines);
 - literal (`|`, `|-`) and folded (`>`, `>-`) block scalars, the usual way to
   write a multi-line `function(...)` signature;
 - block and flow sequences, including a block sequence whose `-` sits at the
-  same column as its parent key;
+  same column as its parent key and a flow collection that closes on a later
+  line;
 - implicit scalar-key block and flow mappings;
 - explicit scalar-key block mapping pairs, including compact mapping items in
   block sequences; and
 - mapping-value anchors and scalar aliases used by the shipped schema corpus.
 
-Serializers often produce indentless lists, and editors may wrap plain values
-onto continuation lines. Each presentation has the same meaning as its
+Serializers often produce indentless lists, and editors may wrap values onto
+continuation lines. Each presentation has the same meaning as its
 conventionally indented or single-line equivalent.
 
 **Indentless sequences.** Wherever the grammar accepts a sequence, its items
@@ -204,6 +205,26 @@ The value ends at the first line that is not indented past its key (here
 `next`) or at a comment line. Folding never makes an invalid expression valid;
 `string(min(1);` continued onto `bogus(2))` still has an unknown constraint.
 
+**Quoted scalars and flow collections across lines.** A single- or
+double-quoted value may wrap onto later lines at any indentation, and a flow
+collection (`[ … ]`, `{ … }`) may close on a later line. YAML folds each line
+break inside them to one space and drops the continuation line's indentation,
+so both definitions below are `{ a: string, n: number }`:
+
+```yaml
+$schema:
+  p: '{ a: string,
+    n: number }'
+  q: "{ a: string, n: num\
+    ber }"
+```
+
+The quoting rules still apply: a blank line is a line break, `''` is one
+quote in a single-quoted value, and in a double-quoted value an escape such
+as `\u0061` decodes to its character and a `\` at the end of a line joins the
+two lines with nothing between them, as in `q` above. A flow item may wrap
+too (`[number, 'string(max(9);` continued onto `min(1))']`).
+
 **Ranges.** Source maps and `suggest(...)` candidate spans are byte ranges into
 the original file, with its line endings left as authored (LF or CRLF). A token
 on a continuation line is ranged on that line, without its indentation. A token
@@ -214,15 +235,14 @@ encoding the editor negotiated (UTF-8 or UTF-16), so a grammar error such as
 `bogus` above is underlined on its own line, not across the whole value.
 
 This is a SimplifiedSchema authoring grammar, not a promise to project every
-presentation accepted by a general YAML parser. Tags, quoted scalars
-continued across lines, complex keys, explicit
+presentation accepted by a general YAML parser. Tags, complex keys, explicit
 flow-mapping keys, directives, and other unlisted YAML presentations are
 outside the v1 source-map and DMLS contract; a schema file that uses one fails
 to load with `could not project SimplifiedSchema expression spans through YAML
 source`. Every non-comment line of a schema value must belong to a presentation
 the grammar recognizes, so an unrecognized one fails rather than being skipped.
-Frontmatter lookup is more tolerant and also follows tags and quoted
-continuations; that does not extend to schema documents. Authors should
+Frontmatter lookup is more tolerant and also follows tags and comments
+inside a flow collection; that does not extend to schema documents. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.

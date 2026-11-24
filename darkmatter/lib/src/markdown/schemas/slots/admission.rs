@@ -90,7 +90,7 @@ impl Walk {
             SpannedExprKind::Variable(path) => self.variable(path, &expr.span, scope),
             SpannedExprKind::StringLiteral(_) | SpannedExprKind::NumberLiteral(_) | SpannedExprKind::BoolLiteral(_) => {}
             SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| self.expr(item, scope)),
-            SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| self.expr(value, scope)),
+            SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| self.expr(entry.value(), scope)),
             SpannedExprKind::UnaryNot(inner) | SpannedExprKind::UnaryMinus(inner) | SpannedExprKind::Paren(inner) => {
                 self.expr(inner, scope);
             }
@@ -217,5 +217,27 @@ fn bare_variable(expr: &SpannedExpr) -> Option<&str> {
         SpannedExprKind::Variable(path) => Some(path),
         SpannedExprKind::Paren(inner) => bare_variable(inner),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simplified_schema::expression::parse_spanned;
+
+    /// A spread operand is walked like any value, even when a later field
+    /// overwrites every key it supplies.
+    #[test]
+    fn object_spread_operands_are_admitted_even_when_overwritten() {
+        let codes = |source: &str| {
+            slot_class_report(&parse_spanned(source).unwrap()).rejections.iter().map(|rejection| rejection.code).collect::<Vec<_>>()
+        };
+        assert_eq!(codes("{ ...{ k: as_markdown('x.md') }, k: 1 }"), [SLOT_FORBIDDEN_FUNCTION_CODE]);
+        // A read's class is joined from an overwritten operand too.
+        let report = slot_class_report(&parse_spanned("{ ...{ k: load_data('./a.yaml', 'string[]') }, k: 1 }").unwrap());
+        assert_eq!(report.class, slot_class("load_data").unwrap());
+        assert_ne!(report.class, SlotClass::Pure);
+        let report = slot_class_report(&parse_spanned("{ ...fm, k: 1 }").unwrap());
+        assert_eq!(report.rejections.iter().map(|rejection| rejection.code).collect::<Vec<_>>(), [SLOT_FORBIDDEN_BINDING_CODE]);
     }
 }

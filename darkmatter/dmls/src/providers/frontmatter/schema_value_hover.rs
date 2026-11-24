@@ -92,5 +92,8 @@ fn markdown(fact: &SchemaReferenceFact, repository_root: Option<&std::path::Path
         SelectionOutcome::Failed(SelectionFailure::Resolution(error)) => {
             text::unresolvable_schema_reference(&selection.reference, &error.to_string())
         }
+        SelectionOutcome::Failed(SelectionFailure::Bundle(boundary)) => {
+            text::unresolvable_schema_reference(&selection.reference, &boundary.to_string())
+        }
     })
 }

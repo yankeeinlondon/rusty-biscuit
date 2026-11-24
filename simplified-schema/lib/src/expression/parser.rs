@@ -13,7 +13,11 @@
 //! multiplicative = unary (("*" | "/" | "%") unary)*
 //! unary          = "!" unary | "-" unary | postfix
 //! postfix        = primary ( "[" expression "]" | "." IDENT )*
-//! primary        = literal | variable | function_call | "(" expression ")"
+//! primary        = literal | variable | function_call | "(" expression ")" | array | object
+//! array          = "[" (expression ("," expression)*)? "]"
+//! object         = "{" (entry ("," entry)*)? "}"
+//! entry          = "..." expression | key ":" expression | IDENT
+//! key            = IDENT | STRING
 //! function_call  = variable "(" args? ")"
 //! args           = argument ("," argument)*
 //! argument       = expression | pattern ("=>" | "->") expression
@@ -57,6 +61,7 @@
 use super::{
     ast::{
         BinaryOp, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind,
+        SpannedObjectEntry,
     },
     lexer::{LexerError, Token, lex_spanned},
 };
@@ -629,6 +634,12 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if !matches!(self.current(), Token::RBracket) {
             loop {
+                if matches!(self.current(), Token::Ellipsis) {
+                    return Err(ParseError::new(
+                        "array spread is not supported; `...` is accepted only in an object literal",
+                        self.position(),
+                    ));
+                }
                 items.push(self.parse_expression()?);
                 if !matches!(self.current(), Token::Comma) {
                     break;
@@ -655,6 +666,22 @@ impl<'a> Parser<'a> {
         let mut keys = HashSet::new();
         if !matches!(self.current(), Token::RBrace) {
             loop {
+                if matches!(self.current(), Token::Ellipsis) {
+                    self.advance();
+                    let operand = self.parse_expression()?;
+                    entries.push(SpannedObjectEntry::Spread { operand });
+                    if !matches!(self.current(), Token::Comma) {
+                        break;
+                    }
+                    self.advance();
+                    if matches!(self.current(), Token::RBrace) {
+                        return Err(ParseError::new(
+                            "trailing commas are not supported",
+                            self.position(),
+                        ));
+                    }
+                    continue;
+                }
                 let key_token = self.advance();
                 let is_identifier_key = matches!(key_token.value, Token::Variable(_));
                 let (key, key_span) = match key_token.value {
@@ -691,7 +718,10 @@ impl<'a> Parser<'a> {
                     self.expect(&Token::Colon, "':'")?;
                     self.parse_expression()?
                 };
-                entries.push((Spanned::new(key, key_span), value));
+                entries.push(SpannedObjectEntry::Field {
+                    key: Spanned::new(key, key_span),
+                    value,
+                });
                 if !matches!(self.current(), Token::Comma) {
                     break;
                 }
@@ -841,6 +871,11 @@ pub const PRECEDENCE_TABLE: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expression::ast::ObjectEntry;
+
+    fn field(key: &str, value: Expr) -> ObjectEntry {
+        ObjectEntry::Field { key: key.to_string(), value }
+    }
 
     mod callbacks {
         use super::*;
@@ -904,9 +939,15 @@ mod tests {
             let Expr::ObjectLiteral(entries) = callback.body else {
                 panic!("expected object literal");
             };
-            let keys: Vec<_> = entries.iter().map(|(k, _)| k.as_str()).collect();
+            let keys: Vec<_> = entries
+                .iter()
+                .map(|entry| match entry {
+                    ObjectEntry::Field { key, .. } => key.as_str(),
+                    ObjectEntry::Spread { .. } => panic!("no spread written"),
+                })
+                .collect();
             assert_eq!(keys, ["value", "key", "n"]);
-            assert_eq!(entries[0].1, var("value"));
+            assert_eq!(*entries[0].value(), var("value"));
         }
 
         #[test]
@@ -2437,13 +2478,13 @@ mod tests {
             assert_eq!(
                 parse("{ spec-name: 1, snake_key: 2 }").unwrap(),
                 Expr::ObjectLiteral(vec![
-                    ("spec-name".to_string(), Expr::NumberLiteral(1.0)),
-                    ("snake_key".to_string(), Expr::NumberLiteral(2.0)),
+                    field("spec-name", Expr::NumberLiteral(1.0)),
+                    field("snake_key", Expr::NumberLiteral(2.0)),
                 ])
             );
             assert_eq!(
                 parse(r#"{ "spec-name": 1 }"#).unwrap(),
-                Expr::ObjectLiteral(vec![("spec-name".to_string(), Expr::NumberLiteral(1.0))])
+                Expr::ObjectLiteral(vec![field("spec-name", Expr::NumberLiteral(1.0))])
             );
         }
 
@@ -2464,10 +2505,122 @@ mod tests {
                 let src = format!(r#"{{ "{key}": 1 }}"#);
                 assert_eq!(
                     parse(&src).unwrap(),
-                    Expr::ObjectLiteral(vec![(key.to_string(), Expr::NumberLiteral(1.0))]),
+                    Expr::ObjectLiteral(vec![field(key, Expr::NumberLiteral(1.0))]),
                     "for {src:?}"
                 );
             }
+        }
+    }
+
+    mod object_spread {
+        use super::*;
+
+        fn spread(operand: Expr) -> ObjectEntry {
+            ObjectEntry::Spread { operand }
+        }
+
+        fn var(name: &str) -> Expr {
+            Expr::Variable(name.to_string())
+        }
+
+        #[test]
+        fn entries_keep_written_order() {
+            assert_eq!(
+                parse("{ ...defaults, color: 'blue', ...overrides, id }").unwrap(),
+                Expr::ObjectLiteral(vec![
+                    spread(var("defaults")),
+                    field("color", Expr::StringLiteral("blue".to_string())),
+                    spread(var("overrides")),
+                    field("id", var("id")),
+                ])
+            );
+        }
+
+        #[test]
+        fn spread_operand_is_a_whole_expression() {
+            assert_eq!(
+                parse("{ ...a || b, ...load_data('x.yaml') }").unwrap(),
+                Expr::ObjectLiteral(vec![
+                    spread(Expr::LogicalOr {
+                        left: Box::new(var("a")),
+                        right: Box::new(var("b")),
+                    }),
+                    spread(Expr::FunctionCall {
+                        name: "load_data".to_string(),
+                        args: vec![Expr::StringLiteral("x.yaml".to_string())],
+                    }),
+                ])
+            );
+        }
+
+        #[test]
+        fn spread_may_repeat_a_written_key() {
+            // A spread supplies keys only at evaluation; it never conflicts
+            // with a written field at parse time.
+            assert!(parse("{ a: 1, ...a, a2: 2 }").is_ok());
+            assert!(parse("{ ...a, ...a }").is_ok());
+        }
+
+        #[test]
+        fn written_duplicates_separated_by_a_spread_are_rejected() {
+            for (src, position) in [
+                ("{ a: 1, ...rest, a: 2 }", 17),
+                ("{ a, ...rest, a }", 14),
+                ("{ a, ...rest, \"a\": 2 }", 14),
+            ] {
+                let error = parse(src).unwrap_err();
+                assert!(error.message.contains("duplicate object key \"a\""), "{src}: {error}");
+                assert_eq!(error.position, position, "{src}");
+            }
+        }
+
+        #[test]
+        fn nested_spreads_parse_inside_operands_and_values() {
+            let expr = parse("{ ...{ ...inner, k: 1 }, outer: { ...x } }").unwrap();
+            assert_eq!(
+                expr,
+                Expr::ObjectLiteral(vec![
+                    spread(Expr::ObjectLiteral(vec![spread(var("inner")), field("k", Expr::NumberLiteral(1.0))])),
+                    field("outer", Expr::ObjectLiteral(vec![spread(var("x"))])),
+                ])
+            );
+        }
+
+        #[test]
+        fn spread_is_rejected_outside_an_object_entry() {
+            for (src, position) in [("...a", 0), ("[...a]", 1), ("[1, ...a]", 4), ("f(...a)", 2), ("{ k: ...a }", 5), ("{ ... }", 6)] {
+                let error = parse(src).unwrap_err();
+                assert_eq!(error.position, position, "{src}: {error}");
+            }
+            let error = parse("[...items]").unwrap_err();
+            assert!(error.message.contains("array spread is not supported"), "{error}");
+        }
+
+        #[test]
+        fn malformed_spread_entries_are_rejected() {
+            for src in ["{ ...a, }", "{ ...a b }", "{ ..a }", "{ .... a }", "{ ...a: 1 }"] {
+                assert!(parse(src).is_err(), "{src:?} should not parse");
+            }
+        }
+
+        #[test]
+        fn spread_spans_cover_the_operand_and_keys_keep_theirs() {
+            let src = "{ ...base, color: 'blue' }";
+            let expr = parse_spanned(src).unwrap();
+            assert_eq!(expr.span, 0..src.len());
+            let SpannedExprKind::ObjectLiteral(entries) = &expr.kind else {
+                panic!("object literal, got {expr:?}");
+            };
+            let SpannedObjectEntry::Spread { operand } = &entries[0] else {
+                panic!("spread first, got {:?}", entries[0]);
+            };
+            assert_eq!(&src[operand.span.clone()], "base");
+            let SpannedObjectEntry::Field { key, value } = &entries[1] else {
+                panic!("field second, got {:?}", entries[1]);
+            };
+            assert_eq!(&src[key.span.clone()], "color");
+            assert_eq!(&src[value.span.clone()], "'blue'");
+            assert_eq!(entries[0].value().span, operand.span);
         }
     }
 
@@ -2511,6 +2664,8 @@ mod tests {
             "a && b || c",
             "(a || b) && c",
             "a || (b || c)",
+            "{...base, color: 'blue'}",
+            "{...a, ...b, k}",
         ];
 
         #[test]

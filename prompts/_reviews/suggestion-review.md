@@ -85,11 +85,11 @@ The subset of the suggestions which are relevant to this review are:
         - `created` as "{{ctx.now}}"
         - `agent` as "{{ctx.agent}}/{{ctx.model}}"
         - `description` as "reviewed the _implementation success_ of addressing the concerns raised in the '{{parent_dir(review)}}/{{basename(review)}}' review"
-        - `parent_scope` as "{{ parent_dir(dirname(review)) }}"
+        - `parent-scope` as "{{ parent_dir(dirname(review)) }}"
         - `scope` as "{{ parent_dir(review) }}"
         - `baseline` as "{{parent_dir(review)}}/{{basename(review)}}"
         - `ready` as `true` when the review has no recommendations, otherwise `false`
         - `findings` as a list with one short line per recommendation (an empty list when there are none)
     - on the baseline review file -- {{review}} -- you will set the following:
         - `implemented` as `true`
-        - `follow_up_review` as "{{ basename(output) }}"
+        - `follow-up-review` as "{{ basename(output) }}"

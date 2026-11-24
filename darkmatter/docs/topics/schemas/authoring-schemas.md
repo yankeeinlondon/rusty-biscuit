@@ -309,7 +309,7 @@ These conditions are **planned** and not yet part of the trigger grammar; a trig
 - Repository membership or absence
 - An `expression` over document values
 
-Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. A trigger file holds only `kind`, `match`, and `$schema`:
+Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. A trigger file holds only `kind`, `match`, and `$schema`, plus an optional kebab-case `name` label, a `description`, and a `types` table local to the trigger (see [Trigger labels and local types](../../../../simplified-schema/docs/topics/language/schema-documents.md#trigger-labels-and-local-types)):
 
 ```yaml
 kind: schema-trigger

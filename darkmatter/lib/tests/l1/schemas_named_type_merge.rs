@@ -1218,3 +1218,35 @@ fn option_conflicts_through_two_imports_carry_both_canonical_sets() {
         "{display}"
     );
 }
+
+// ── Object composition: a winning member keeps its declaring file ────────
+
+#[test]
+fn composed_default_origin_names_the_file_of_the_winning_declaration() {
+    let dir = TempDir::new().expect("tempdir");
+    let types = write(
+        dir.path(),
+        "types/types.yaml",
+        "kind: schema\ntypes:\n  base: \"{ n: string(required; default(from-type)), m: string(default(replaced)) }\"\n",
+    );
+    let types = biscuit_file::canonicalize_simplified(&types).expect("types file");
+    let effective = effective_for_document(dir.path(), "\n  $extends: base@./types/types.yaml\n  m: string(default(own))");
+
+    let report = effective.validate(&json!({}));
+
+    assert!(report.valid, "{:?}", report.problems);
+    let origin_file = |name: &str| {
+        let applied = report
+            .defaults
+            .iter()
+            .find(|applied| applied.path.to_string() == name)
+            .unwrap_or_else(|| panic!("a default for `{name}`: {:?}", report.defaults));
+        (applied.value.clone(), applied.origin.as_ref().and_then(|origin| origin.file()).map(|file| {
+            biscuit_file::canonicalize_simplified(file).expect("a named schema file exists")
+        }))
+    };
+    assert_eq!(origin_file("n"), (json!("from-type"), Some(types.clone())), "the copied default names the type file");
+    let (value, file) = origin_file("m");
+    assert_eq!(value, json!("own"), "the document's own declaration replaced the copied one");
+    assert_ne!(file, Some(types), "and its origin with it");
+}

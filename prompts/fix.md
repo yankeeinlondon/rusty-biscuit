@@ -20,7 +20,7 @@ $schema:
     prompt: file(match(**/*.md)) -> caller can pass in a "prompt" to have an existing prompt file fixed
     issue: string -> description of the issue the caller wants diagnosed
     diagnosis: string -> a complete diagnosis of an issue, including a suggestion on how to fix the issue.
-    suggested_action: enum(fix,spec)
+    suggested-action: enum(fix,spec)
     action: enum(fix,spec,auto,prefer-fix,prefer-spec,ask)
 action: ask
 # this is KNOWN to not be the correct syntax and a work in progress
@@ -39,7 +39,7 @@ initialize:
 start:
     - when: "issue"
       action:
-          - when: "diagnosis && suggested_action"
+          - when: "diagnosis && suggested-action"
             action:
                 - message: |-
                     We have a diagnosis for the issue passed in and the recommended fix approach is {{ diagnosis == 'fix' ? 'fix directly (no need to create a spec)' : 'create a _fix_ specification for this problem' }}:
@@ -51,7 +51,7 @@ start:
                           - title: "Take Action"
                             showcase: diagnosis
                             description: "Based on the diagnosis presented, what action would you like to take?"
-                            choose_one: 
+                            choose-one: 
                                 - choice: fix
                                 - choice: spec
                                 - choice: stop

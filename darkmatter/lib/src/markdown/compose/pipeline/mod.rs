@@ -558,6 +558,7 @@ impl Markdown {
                     provenance: &provenance,
                     provisional: &provisional_keys,
                 },
+                provenance.expression_origins(),
                 &schema_consumer,
                 report,
                 &mut filled_defaults,
@@ -714,6 +715,7 @@ impl Markdown {
                     } else {
                         schema_validation::PendingDeferral::Final
                     },
+                    provenance.expression_origins(),
                     &schema_consumer,
                     report,
                     &mut filled_defaults,
@@ -735,6 +737,7 @@ impl Markdown {
                     &prepared_schemas,
                     &fse_report.typed_keys,
                     &filled_defaults,
+                    provenance.expression_origins(),
                 )?;
             }
         }

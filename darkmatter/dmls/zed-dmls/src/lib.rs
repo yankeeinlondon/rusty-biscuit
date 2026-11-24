@@ -30,7 +30,18 @@ impl DmlsExtension {
         if let Ok(settings) = LspSettings::for_worktree("dmls", worktree) {
             if let Some(binary) = settings.binary {
                 if let Some(path) = binary.path {
-                    return Ok(path);
+                    // User settings follow the client to remote projects, so a
+                    // home-relative path is the only spelling that is right on
+                    // every host. Zed spawns the command without a shell, so
+                    // the expansion happens here, against the worktree host's
+                    // environment rather than the client's.
+                    let env = worktree.shell_env();
+                    let home = env
+                        .iter()
+                        .find(|(key, _)| key == "HOME")
+                        .or_else(|| env.iter().find(|(key, _)| key == "USERPROFILE"))
+                        .map(|(_, value)| value.as_str());
+                    return Ok(expand_home(&path, home));
                 }
             }
         }
@@ -106,6 +117,25 @@ fn unresolved_binary_error(release_error: String) -> String {
     )
 }
 
+/// Expands a leading `~`, `$HOME`, or `${HOME}` in a configured binary path.
+///
+/// Only a prefix followed by the end of the string or a path separator is
+/// expanded (`~user` and `$HOMEDIR` are left alone). With no known home the
+/// path is returned unchanged, so the spawn error names what was configured.
+fn expand_home(path: &str, home: Option<&str>) -> String {
+    let Some(home) = home.filter(|home| !home.is_empty()) else {
+        return path.to_string();
+    };
+    for prefix in ["${HOME}", "$HOME", "~"] {
+        if let Some(rest) = path.strip_prefix(prefix) {
+            if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
+                return format!("{}{rest}", home.trim_end_matches(['/', '\\']));
+            }
+        }
+    }
+    path.to_string()
+}
+
 /// Release asset name for a platform, matching the `just dist` recipe naming.
 fn asset_name(version: &str, platform: zed::Os, arch: zed::Architecture) -> String {
     match (platform, arch) {
@@ -153,3 +183,25 @@ impl zed::Extension for DmlsExtension {
 }
 
 zed::register_extension!(DmlsExtension);
+
+#[cfg(test)]
+mod tests {
+    use super::expand_home;
+
+    #[test]
+    fn expands_each_home_spelling() {
+        for path in ["~/.cargo/bin/dmls", "$HOME/.cargo/bin/dmls", "${HOME}/.cargo/bin/dmls"] {
+            assert_eq!(expand_home(path, Some("/home/build")), "/home/build/.cargo/bin/dmls");
+        }
+        assert_eq!(expand_home("~", Some("/home/build/")), "/home/build");
+    }
+
+    #[test]
+    fn leaves_other_paths_unchanged() {
+        let home = Some("/home/build");
+        assert_eq!(expand_home("/usr/bin/dmls", home), "/usr/bin/dmls");
+        assert_eq!(expand_home("~other/dmls", home), "~other/dmls");
+        assert_eq!(expand_home("$HOMEDIR/dmls", home), "$HOMEDIR/dmls");
+        assert_eq!(expand_home("~/dmls", None), "~/dmls");
+    }
+}

@@ -133,7 +133,7 @@ fn trace_report(
     for finding in findings {
         row(&mut out, &terminal, format!(
             "- {} <dim>[{}]</dim>",
-            Prose::escape_text(&finding.source().to_string()),
+            Prose::escape_text(&finding.label()),
             finding.code()
         ));
     }
@@ -169,7 +169,7 @@ fn trace_report(
 fn terminal_trigger(out: &mut String, terminal: &Terminal, trigger: &TriggerTraceEntry) {
     let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
     let pending = if trigger.pending { " <dim>(payload pending: holds schema slots)</dim>" } else { "" };
-    row(out, terminal, format!("- {} — {status}{pending}", Prose::escape_text(&trigger.source.to_string())));
+    row(out, terminal, format!("- {} — {status}{pending}", Prose::escape_text(&trigger_label(trigger))));
     for condition in &trigger.conditions {
         let result = if condition.matched {
             "<green>matched</green>".to_string()
@@ -217,7 +217,9 @@ fn trace_markdown(
         out.push_str("- none\n");
     }
     for finding in findings {
-        out.push_str(&format!("- {} {}\n", code_span(&finding.source().to_string()), code_span(finding.code())));
+        let source = code_span(&finding.source().to_string());
+        let label = finding.name().map_or_else(|| source.clone(), |name| format!("{name} ({source})"));
+        out.push_str(&format!("- {label} {}\n", code_span(finding.code())));
     }
 
     out.push_str("\n**Registered host:**\n\n");
@@ -251,7 +253,11 @@ fn trace_markdown(
 fn markdown_trigger(out: &mut String, trigger: &TriggerTraceEntry) {
     let status = if trigger.matched { "matched" } else { "not matched" };
     let pending = if trigger.pending { " (payload pending: holds schema slots)" } else { "" };
-    out.push_str(&format!("- {} — {status}{pending}\n", code_span(&trigger.source.to_string())));
+    let label = match &trigger.name {
+        Some(name) => format!("{name} ({})", code_span(&trigger.source.to_string())),
+        None => code_span(&trigger.source.to_string()),
+    };
+    out.push_str(&format!("- {label} — {status}{pending}\n"));
     for condition in &trigger.conditions {
         let result = if condition.matched {
             "matched".to_string()
@@ -317,6 +323,14 @@ impl RootLine {
             None => String::new(),
         };
         format!("{label}:{value}{note}")
+    }
+}
+
+/// `name (source)` for a labeled trigger, its source alone otherwise.
+fn trigger_label(trigger: &TriggerTraceEntry) -> String {
+    match &trigger.name {
+        Some(name) => format!("{name} ({})", trigger.source),
+        None => trigger.source.to_string(),
     }
 }
 

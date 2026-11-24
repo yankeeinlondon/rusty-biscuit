@@ -134,12 +134,12 @@ Save a structured report to {{review}}.
 
 - Include `## Summary`, findings ordered by severity, `## Suggestions`, and a final assessment of whether the package area appears acceptable for macOS, Linux, native Windows, and WSL based only on cross-platform support.
 - Save to the review file's Frontmatter:
-    - `$schema` as `{ ready: boolean, macos_ready: boolean, windows_ready: boolean, linux_ready: boolean, agent: string, created: string }`
+    - `$schema` as `{ ready: boolean, macos-ready: boolean, windows-ready: boolean, linux-ready: boolean, agent: string, created: string }`
     - `about` as 'A cross-platform review of the {{ctx.area}} package area on {{ctx.today}}'
     - `author` as 'prompts/cross-platform.md'
     - `created` as '{{ctx.now}}'
     - `agent` as '{{ctx.agent}}/{{ctx.model}}'
     - `ready` as a boolean flag which indicates whether this code "acceptable" based solely on its ability to support all target platforms
-    - `macos_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **macOS** platform
-    - `windows_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **windows** platform
-    - `linux_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **linux** platform
+    - `macos-ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **macOS** platform
+    - `windows-ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **windows** platform
+    - `linux-ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **linux** platform

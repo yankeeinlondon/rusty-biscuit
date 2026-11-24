@@ -11,8 +11,8 @@ $schema:
     branch: string -> the name for the proposed branch when the push stage has to create one
     title: string -> an optional pull request title
     about: string -> optional context from the caller about what this work is
-    on_failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed
-on_failure: ask
+    on-failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed
+on-failure: ask
 start:
     - when: "uncommitted == 'abort'"
       then:
@@ -35,7 +35,7 @@ start:
                             branch: "{{ branch || '' }}"
                             title: "{{ title || '' }}"
                             about: "{{ about || '' }}"
-                            on_failure: "{{ on_failure }}"
+                            on-failure: "{{ on-failure }}"
                             report: "{{ report }}"
                             committed: "{{ true }}"
 blocked:

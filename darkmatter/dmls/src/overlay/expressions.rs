@@ -496,7 +496,7 @@ pub fn function_call_at<'a>(
         } => vec![condition, then_branch, else_branch],
         SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
         SpannedExprKind::ObjectLiteral(entries) => {
-            entries.iter().map(|(_, value)| value).collect()
+            entries.iter().map(|entry| entry.value()).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
         SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
@@ -553,7 +553,7 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
         } => vec![condition, then_branch, else_branch],
         SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
         SpannedExprKind::ObjectLiteral(entries) => {
-            entries.iter().map(|(_, value)| value).collect()
+            entries.iter().map(|entry| entry.value()).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
         SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
@@ -1741,7 +1741,7 @@ pub(crate) fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
         } => vec![condition, then_branch, else_branch],
         SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
         SpannedExprKind::ObjectLiteral(entries) => {
-            entries.iter().map(|(_, value)| value).collect()
+            entries.iter().map(|entry| entry.value()).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
         SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),

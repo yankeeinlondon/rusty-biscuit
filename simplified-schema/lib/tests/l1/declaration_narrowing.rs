@@ -182,6 +182,22 @@ mod carriers {
         assert_accepts(&schema, &with_carrier(json!({ "a": "string", "b": "number" })));
     }
 
+    /// A `mapping` carrier is a table of named declarations, as a `types`
+    /// table is: its own `$extends` is a name, while each entry's mapping is
+    /// still an object. Without `mapping` the carrier is a schema object.
+    #[test]
+    fn mapping_reads_a_table_where_extends_is_a_name() {
+        let table = schema_with("schema(mapping)");
+        assert_accepts(&table, &with_carrier(json!({ "$extends": "string" })));
+        assert_accepts(&table, &with_carrier(json!({ "$extends": ["string", "number"] })));
+        assert_accepts(&table, &with_carrier(json!({ "$extends": { "a": "string" } })));
+        let entry = json!({ "order": { "$extends": "string" } });
+        let refused = table.validate_strict(&with_carrier(entry)).expect_err("an entry's `$extends` composes");
+        assert!(format!("{refused:?}").contains("reserved for object composition"), "{refused:?}");
+        let object = schema_with("schema");
+        assert!(object.validate_strict(&with_carrier(json!({ "$extends": "string" }))).is_err());
+    }
+
     /// `mapping` judges the carrier; without it a root union is a valid
     /// declaration, and a data schema still accepts lists.
     #[test]
@@ -390,5 +406,20 @@ mod atom_judges {
         }
         let error = judge_schema(&constraints, &json!({ "title": "string" })).unwrap_err();
         assert_eq!(error, "the schema must declare `kind`");
+    }
+
+    /// A trigger condition on a `schema(mapping)` value reads the table as
+    /// the lowered keyword does.
+    #[test]
+    fn a_mapping_condition_reads_a_table() {
+        use simplified_schema::triggers::{PathSubject, parse_match_conditions};
+        let table = json!({ "$extends": "string" });
+        assert!(judge_schema(&atom_constraints("schema(mapping)"), &table).is_ok());
+        let subject = PathSubject::detached();
+        for (condition, accepted) in [("declares: schema(mapping)", true), ("declares: schema", false)] {
+            let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(condition).unwrap();
+            let conditions = parse_match_conditions(&yaml).unwrap();
+            assert_eq!(conditions.matches(&json!({ "declares": table }), &subject), accepted, "{condition}");
+        }
     }
 }

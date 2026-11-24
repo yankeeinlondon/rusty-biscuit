@@ -44,6 +44,18 @@ pub(crate) struct RefSnapshot {
     remote_branches: Vec<ObservedRemoteBranch>,
     remote_defaults: HashMap<String, String>,
     decorations: HashMap<gix::ObjectId, Vec<RefDecoration>>,
+    /// Whether `remote_branches` was requested, so an empty list proves the
+    /// repository has no remote-tracking branches rather than that they were
+    /// never read.
+    remote_branches_observed: bool,
+    local_branches_observed: bool,
+    decorations_observed: bool,
+    /// No observed symbolic ref could resolve differently in another worktree
+    /// of the same repository. The only symbolic refs that keep this true are
+    /// `refs/remotes/<remote>/HEAD` aliases of a directly observed branch of
+    /// that same remote; anything else (for example a branch pointing at a
+    /// per-worktree `refs/worktree/…` ref) clears it.
+    worktree_independent: bool,
 }
 
 impl RefSnapshot {
@@ -67,7 +79,15 @@ impl RefSnapshot {
             .all()
             .map_err(|e| SniffError::git("references", e))?;
 
-        let mut snapshot = Self::default();
+        let mut snapshot = Self {
+            remote_branches_observed: remote_branches,
+            local_branches_observed: local_branches,
+            decorations_observed: decorations,
+            ..Self::default()
+        };
+        let mut direct_names: HashSet<String> = HashSet::new();
+        let mut remote_head_aliases: Vec<String> = Vec::new();
+        let mut worktree_independent = true;
         for reference in iter {
             let reference = reference.map_err(|e| SniffError::git("references", e))?;
             let full_name = reference.name().as_bstr().to_string();
@@ -84,6 +104,17 @@ impl RefSnapshot {
                 gix::refs::TargetRef::Symbolic(target) => Some(target.as_bstr().to_string()),
                 gix::refs::TargetRef::Object(_) => None,
             };
+            match &symbolic_target {
+                None => {
+                    direct_names.insert(full_name.clone());
+                }
+                Some(target) => match remote_head_alias_prefix(&full_name) {
+                    Some(prefix) if target.starts_with(&prefix) => {
+                        remote_head_aliases.push(target.clone());
+                    }
+                    _ => worktree_independent = false,
+                },
+            }
             let tip = reference
                 .into_fully_peeled_id()
                 .map_err(|e| SniffError::git("peel", e))?
@@ -140,25 +171,67 @@ impl RefSnapshot {
             }
         }
 
+        snapshot.worktree_independent = worktree_independent
+            && remote_head_aliases
+                .iter()
+                .all(|target| direct_names.contains(target));
         snapshot.local_branches.sort_by(|a, b| a.name.cmp(&b.name));
         snapshot.remote_branches.sort_by(|a, b| {
             a.remote
                 .cmp(&b.remote)
                 .then_with(|| a.branch.cmp(&b.branch))
         });
-        for decorations in snapshot.decorations.values_mut() {
-            decorations.sort_by(|a, b| {
-                b.is_head
-                    .cmp(&a.is_head)
-                    .then_with(|| ref_kind_order(a.kind).cmp(&ref_kind_order(b.kind)))
-                    .then_with(|| a.name.cmp(&b.name))
-            });
-        }
+        sort_decorations(&mut snapshot.decorations);
         Ok(snapshot)
     }
 
     pub(crate) fn decorations(&self) -> &HashMap<gix::ObjectId, Vec<RefDecoration>> {
         &self.decorations
+    }
+
+    /// Whether [`Self::decorations`] was observed; a snapshot taken without
+    /// decorations has an empty map that proves nothing.
+    pub(crate) fn has_decorations(&self) -> bool {
+        self.decorations_observed
+    }
+
+    /// Whether every observed ref reads the same from any worktree of the
+    /// repository (see the field docs). Required, with equal common
+    /// directories, before another worktree may reuse this snapshot.
+    pub(crate) fn is_worktree_independent(&self) -> bool {
+        self.worktree_independent
+    }
+
+    /// This snapshot as seen from a worktree whose `HEAD` names
+    /// `head_branch`: the same refs, with only the local-branch decoration
+    /// that worktree has checked out marked `is_head`.
+    pub(crate) fn with_head_branch(&self, head_branch: Option<&str>) -> Self {
+        let mut snapshot = self.clone();
+        for decorations in snapshot.decorations.values_mut() {
+            for decoration in decorations.iter_mut() {
+                decoration.is_head = decoration.kind == RefKind::LocalBranch
+                    && head_branch.is_some_and(|head| head == decoration.name);
+            }
+        }
+        sort_decorations(&mut snapshot.decorations);
+        snapshot
+    }
+
+    /// Tip of local branch `branch`, when local branches were observed.
+    pub(crate) fn local_branch_tip(&self, branch: &str) -> Option<gix::ObjectId> {
+        self.local_branches_observed
+            .then(|| self.local_tip(branch))
+            .flatten()
+    }
+
+    /// Tip of remote-tracking `<remote>/<branch>`, spelled as one name, when
+    /// remote branches were observed. `<remote>/HEAD` is never a match.
+    pub(crate) fn remote_branch_tip(&self, remote_branch: &str) -> Option<gix::ObjectId> {
+        if !self.remote_branches_observed {
+            return None;
+        }
+        let (remote, branch) = remote_branch.split_once('/')?;
+        self.remote_tip(remote, branch)
     }
 
     fn local_tip(&self, branch: &str) -> Option<gix::ObjectId> {
@@ -187,6 +260,12 @@ impl RefSnapshot {
         })
     }
 
+    /// Whether [`Self::remote_branch_tips`] is the complete set of
+    /// remote-tracking branches. A default or decoration-only snapshot is not.
+    pub(crate) fn has_remote_branch_tips(&self) -> bool {
+        self.remote_branches_observed
+    }
+
     /// The branch `refs/remotes/<remote>/HEAD` points at, when recorded.
     pub(crate) fn remote_default_branch(&self, remote: &str) -> Option<&str> {
         self.remote_defaults.get(remote).map(String::as_str)
@@ -199,6 +278,25 @@ impl RefSnapshot {
             .map(|observed| observed.tip)
             .collect()
     }
+}
+
+fn sort_decorations(decorations: &mut HashMap<gix::ObjectId, Vec<RefDecoration>>) {
+    for decorations in decorations.values_mut() {
+        decorations.sort_by(|a, b| {
+            b.is_head
+                .cmp(&a.is_head)
+                .then_with(|| ref_kind_order(a.kind).cmp(&ref_kind_order(b.kind)))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+    }
+}
+
+/// `refs/remotes/<remote>/` when `full_name` is `refs/remotes/<remote>/HEAD`.
+fn remote_head_alias_prefix(full_name: &str) -> Option<String> {
+    let remote = full_name
+        .strip_prefix("refs/remotes/")?
+        .strip_suffix("/HEAD")?;
+    (!remote.is_empty() && !remote.contains('/')).then(|| format!("refs/remotes/{remote}/"))
 }
 
 fn ref_kind_order(kind: RefKind) -> u8 {
@@ -842,8 +940,9 @@ pub(crate) enum AncestryWalkEnd {
 }
 
 /// Visit every ancestor of `tip`, including `tip`, until `visit` breaks or the
-/// history ends. This is the one containment walk shared by the deep tier's
-/// per-remote containment and commit linking.
+/// history ends. The deep tier's per-remote containment uses this independent
+/// form because it records every containing remote; commit linking prunes
+/// shared history through [`walk_ancestry_with_filter`].
 ///
 /// Each visited commit increments [`counters::GIT_COMMIT_VISITS`] and consumes
 /// one unit of `visit_budget`, which callers share across several walks to
@@ -858,16 +957,38 @@ pub(crate) fn walk_ancestry(
     repo: &gix::Repository,
     tip: gix::ObjectId,
     visit_budget: &mut usize,
+    visit: impl FnMut(gix::ObjectId) -> ControlFlow<()>,
+) -> AncestryWalkEnd {
+    walk_ancestry_with_filter(repo, tip, visit_budget, None, visit)
+}
+
+/// [`walk_ancestry`] that never enters a commit in `completed`.
+///
+/// `completed` must be closed under ancestry (a union of fully walked
+/// histories): a member is neither yielded nor read, so none of its ancestors
+/// are reached through it. The filter is applied before a commit is queued, so
+/// pruned commits cost no visit and no object read. `tip` itself is always
+/// walked; callers skip a covered tip before calling. Shallow boundaries are
+/// handled by the same gix walk as the unfiltered form.
+pub(crate) fn walk_ancestry_with_filter(
+    repo: &gix::Repository,
+    tip: gix::ObjectId,
+    visit_budget: &mut usize,
+    completed: Option<&HashSet<gix::ObjectId>>,
     mut visit: impl FnMut(gix::ObjectId) -> ControlFlow<()>,
 ) -> AncestryWalkEnd {
-    let Ok(walk) = repo
+    let platform = repo
         .rev_walk(Some(tip))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
-        .use_commit_graph(Some(true))
-        .all()
-    else {
+        .use_commit_graph(Some(true));
+    let walk = match completed {
+        None => platform.all(),
+        // Look up by owned id: `ObjectId` and `oid` need not hash alike.
+        Some(completed) => platform.selected(move |id| !completed.contains(&id.to_owned())),
+    };
+    let Ok(walk) = walk else {
         return AncestryWalkEnd::Failed;
     };
 

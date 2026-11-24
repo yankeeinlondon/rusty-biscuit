@@ -16,7 +16,7 @@ use crate::common;
 use common::{CliProcessFixture, strip_ansi};
 
 /// The trigger from the original incident.
-const MEMORY_TRIGGER: &str = "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n";
+const MEMORY_TRIGGER: &str = "kind: schema-trigger\ntitle: Memory Trigger\nnotes: TODO\nmatch:\n";
 
 /// The start of every row Darkmatter words for a skipped trigger.
 const WARNING: &str = "ignoring invalid schema trigger";
@@ -84,7 +84,7 @@ fn assert_incident_warning(run: &Run, trigger: &Path, prompt: &str) {
     assert_eq!(run.warnings(), 1, "the trigger is reported exactly once:\n{}", run.stderr);
     let file_name = trigger.file_name().unwrap().to_str().unwrap();
     assert!(run.stderr.contains(file_name), "names the trigger file:\n{}", run.stderr);
-    assert!(run.stderr.contains("found unknown keys: name, description"), "names the reason:\n{}", run.stderr);
+    assert!(run.stderr.contains("found unknown keys: title, notes"), "names the reason:\n{}", run.stderr);
     assert!(!run.stderr.contains("schema load failed"), "never a schema-load error:\n{}", run.stderr);
     let warning_row = &run.stderr[run.stderr.find(WARNING).unwrap()..];
     let warning_row = &warning_row[..warning_row.find(" found unknown keys").unwrap()];

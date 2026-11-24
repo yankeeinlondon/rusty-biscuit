@@ -120,7 +120,7 @@ const EXCEPTIONS: &[Exception] = &[
         "Darkmatter's global catalog, registered explicitly",
     ),
     // simplified-schema/schemas: the shipped `kind: yaml-schema` definitions
-    // (the two envelope definitions and the trigger definition). The
+    // (the three envelope definitions and the trigger definition). The
     // library's corpus admits them; here Darkmatter's resolver must refuse
     // each as a `$schema` target, since a definition is selected by `kind`.
     exception(
@@ -134,6 +134,12 @@ const EXCEPTIONS: &[Exception] = &[
         "schema-trigger.yaml",
         Class::YamlSchemaDefinition,
         "the definition of `kind: schema-trigger` documents, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
+        "namespace-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: namespace-schema` documents, applied by `kind`",
     ),
     exception(
         "simplified-schema/schemas",
@@ -1117,11 +1123,6 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p12_pattern_parens.md",
         "expected `,` or `)` in argument list",
     )];
-    // A multi-line quoted scalar is outside the source-aware parser's strict
-    // presentation grammar, so it parses but cannot be projected.
-    let unprojectable = [
-        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_inline.md",
-    ];
     let schemas = inline_schemas(&root, &dirs);
     let before = fingerprint(schemas.iter().map(|schema| schema.path.as_path()));
     let counters = effect_counters();
@@ -1129,7 +1130,6 @@ fn shipped_markdown_inline_schemas_parse_passively() {
     let mut named = Vec::new();
     let mut failed = Vec::new();
     let mut source_aware = 0usize;
-    let mut unprojected = Vec::new();
     for schema in &schemas {
         let parsed = parse_schema_declaration(&schema.declaration);
         // The source-aware parser keeps the source-free value, and on failure
@@ -1151,17 +1151,6 @@ fn shipped_markdown_inline_schemas_parse_passively() {
                     "{}: the source-aware parse changed the error",
                     schema.label
                 ),
-                (Ok(_), Err(failure)) if unprojectable.contains(&schema.label.as_str()) => {
-                    assert!(
-                        failure.path.segments().is_empty()
-                            && failure.authored_span.is_none()
-                            && failure.value_span.is_none()
-                            && failure.to_string().contains("could not project"),
-                        "{}: expected an unlocated projection error, got {failure:?}",
-                        schema.label
-                    );
-                    unprojected.push(schema.label.as_str());
-                }
                 (parsed, aware) => panic!(
                     "{}: the source-free parse gave {parsed:?} but the source-aware parse gave {:?}",
                     schema.label,
@@ -1221,10 +1210,6 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         schemas.len() >= 500,
         "the inline-schema corpus shrank to {}",
         schemas.len()
-    );
-    assert_eq!(
-        unprojected, unprojectable,
-        "an unprojectable inline schema now projects; remove it"
     );
     assert!(
         source_aware >= 500,

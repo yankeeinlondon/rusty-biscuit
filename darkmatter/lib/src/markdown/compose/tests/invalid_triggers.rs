@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The trigger from the original incident: unsupported envelope keys and a
 /// null `match:`.
-const MEMORY_TRIGGER: &str = "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n";
+const MEMORY_TRIGGER: &str = "kind: schema-trigger\ntitle: Memory Trigger\nnotes: TODO\nmatch:\n";
 
 /// A repository with the incident trigger at `schemas/memory.yaml`.
 struct Repo {
@@ -89,7 +89,7 @@ fn a_prompt_without_schema_composes_beside_the_incident_trigger() {
     assert_eq!(warning.source.as_deref(), Some("darkmatter.schema"));
     assert_eq!(warning.stage, "schema_validation");
     assert!(warning.message.starts_with("ignoring invalid schema trigger"), "{}", warning.message);
-    assert!(warning.message.contains("found unknown keys: name, description"), "{}", warning.message);
+    assert!(warning.message.contains("found unknown keys: title, notes"), "{}", warning.message);
     assert!(!warning.message.contains("merge-conflicts.md"), "never blames the prompt: {}", warning.message);
     assert_eq!(
         warning.invalid_trigger_source(),

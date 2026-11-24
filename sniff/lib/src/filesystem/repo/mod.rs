@@ -21,6 +21,7 @@ pub mod nx_turbo;
 pub(crate) mod ownership;
 pub mod polyglot;
 pub mod python;
+pub mod scope;
 pub(crate) mod seed;
 pub mod standard;
 pub(crate) mod test_runner_usage;
@@ -35,12 +36,13 @@ pub use aggregate::{
     resolve_directory_version, resolve_scope, resolve_scope_with_overrides,
 };
 pub use aggregate_view::{
-    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, detect_repo_aggregate,
-    scope_paths,
+    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, area_changed_paths,
+    detect_repo_aggregate, observed_scope_paths, scope_paths,
 };
 pub use ownership::PackageOwnershipLookup;
 pub use area::{AreaError, detect_area};
 pub use glob::PACKAGE_MANIFEST_FILE_NAMES;
+pub use scope::resolve_package_and_area;
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
 pub use lockfile::{
     LockfileObservation, LockfileReason, LockfileStatus, StandaloneLockfileObservation,

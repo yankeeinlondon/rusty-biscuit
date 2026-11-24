@@ -111,8 +111,13 @@ A data output is one object:
 | `notices` | `{ file, message }` rows, such as defaults written in place of an unreadable reference |
 | `outcome`, `diagnostics` | the run's status and its records; stderr stays empty |
 
-`md init` reports no `dm.config.missing` warning: the file it would name is
-the one being created. Other configuration notices, such as the conversion
+Any other `md` command also creates a missing `~/.darkmatter.yaml` at its
+defaults (and says so once). `md init` is the explicit way to do it, the way
+to complete an existing file with missing settings, and the only way to
+create the repository's file. It reports no `dm.config.missing` warning and
+no `dm.config.created` notice: the file is reported as `created` in its own
+result, and nothing is written when the command fails (for example `--repo`
+outside a repository). Other configuration notices, such as the conversion
 of a legacy policy file, are reported as for every command.
 
 The schema is `cli/schemas/output/init.yaml`.

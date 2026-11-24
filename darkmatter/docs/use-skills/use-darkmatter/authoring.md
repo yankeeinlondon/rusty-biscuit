@@ -143,7 +143,7 @@ unknown `ctx.*` key gives a warning with a "did you mean" suggestion.
   `max`, `abs`, `round`), dates (`date(iso, fmt)`, `is_today`, `older_than`,
   `date_delta`, …), list formatting (`as_csv`, `as_unordered_list`,
   `as_json`, …), files (`file_exists`, `find_files(glob)`, `frontmatter(file)`,
-  `load_data(file, type)`, `relative`, `absolute`, `link`, …), git
+  `load_data(file, type?)`, `relative`, `absolute`, `link`, …), git
   (`recent_commits`, …), repository (`package`, `package_area`), shell probes
   (`has_command`, `can_execute`), network (`ping`, which needs an
   `--allow host=IP`), and `as_markdown(text)`. `as_markdown` composes the
@@ -159,11 +159,33 @@ unknown `ctx.*` key gives a warning with a "did you mean" suggestion.
 
 ```md
 {{ load_data("hosts.csv", "{ name: string, port: number }[]") }}
+{{ load_data("export.csv", null, {header: ['label', 'years']}) }}
 ```
 
-`load_data` reads YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5. The
-second argument is a SimplifiedSchema type that the data must satisfy. A
-failure points at the line and column inside the data file.
+```yaml
+$schema:
+    hosts: "{ name: string, port: number }[]"
+hosts: "{{ load_data('hosts.csv') }}"   # no contract: the property's schema judges it
+```
+
+`load_data` reads YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5.
+
+- The second argument, `as`, is an optional SimplifiedSchema container type.
+  With it, the call converts the data and fails if it does not fit. Without
+  it (or `null`), the data comes back unconverted (CSV cells stay text), and
+  a whole-value frontmatter `{{{ … }}}` is judged and converted by the
+  property's declared type at frontmatter validation. Give `as` when a
+  callback needs converted values.
+- The result is always a container: a scalar root becomes a one-element
+  array, and `null` or an empty YAML file becomes `[]`.
+- CSV/TSV `header` is `true` (default: the first record names the columns,
+  converted to camelCase, so `First Name` is `firstName`), `false` (rows of
+  cells), or a list of names used verbatim, with every record as data.
+- A failure points at the line and column inside the data file; a
+  destination schema failure points at the `{{{ … }}}` expression and, for a
+  direct load, at the data too.
+
+The full rules are in `docs/topics/loading-data.md`.
 
 ## Directives
 

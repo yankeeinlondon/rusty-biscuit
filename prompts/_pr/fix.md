@@ -1,7 +1,7 @@
 ---
 name: Fix Local Test Failures
 description: |-
-    Repairs the problems a blocked push was diagnosed with, proves the repair by re-running the tests that failed, and **stages** the result. Reached by proxy from `_pr/triage.md` (the caller said yes) or from `_pr/diagnose.md` (`on_failure=fix`).
+    Repairs the problems a blocked push was diagnosed with, proves the repair by re-running the tests that failed, and **stages** the result. Reached by proxy from `_pr/triage.md` (the caller said yes) or from `_pr/diagnose.md` (`on-failure=fix`).
 
     An attempt that does not verify is retried with a fresh agent, which reads what earlier attempts recorded in the report. This uses the lifecycle `retry` action rather than a `loop:` block: an attempt is a fresh session bounded by one budget, and the verified attempt hands off to `commit.md` from `success`.
 
@@ -14,12 +14,12 @@ committed: false
 branch: "{{ frontmatter(report, 'branch') }}"
 step_timeout: 60m
 timeout: 3h
-max_attempts: 3
+max-attempts: 3
 start:
     # `start` fires again on every retry, so this counts attempts in the one
     # place that outlives them.
-    - increment_frontmatter: ["{{ report }}", "fix_attempts"]
-    - message: "🔧  fixing the local test failures on `{{branch}}` in {{ ctx.area_description || ctx.repo }} (attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }})"
+    - increment_frontmatter: ["{{ report }}", "fix-attempts"]
+    - message: "🔧  fixing the local test failures on `{{branch}}` in {{ ctx.area_description || ctx.repo }} (attempt {{ frontmatter(report, 'fix-attempts') }} of {{ max-attempts }})"
 success:
     - when: "frontmatter(report, 'status') == 'fixed' && committed"
       then:
@@ -53,14 +53,14 @@ success:
                 {{ frontmatter(report, 'summary') }}
           - say: "The local test failures were not fixed. {{ frontmatter(report, 'summary') }}"
           - error: "{{ frontmatter(report, 'summary') }}"
-    - when: "frontmatter(report, 'fix_attempts') >= max_attempts"
+    - when: "frontmatter(report, 'fix-attempts') >= max-attempts"
       then:
-          - message: "💥  the local test failures on `{{branch}}` are still not fixed after {{ max_attempts }} attempts; what each attempt tried is in `{{report}}`"
-          - say: "The local test failures are still not fixed after {{ max_attempts }} attempts."
-          - error: "the fix did not verify within {{ max_attempts }} attempts"
+          - message: "💥  the local test failures on `{{branch}}` are still not fixed after {{ max-attempts }} attempts; what each attempt tried is in `{{report}}`"
+          - say: "The local test failures are still not fixed after {{ max-attempts }} attempts."
+          - error: "the fix did not verify within {{ max-attempts }} attempts"
     # Each retry is a fresh session that starts from the `## Fix attempt` notes
-    # its predecessors left in the report. The budget matches `max_attempts`.
-    - warn: "attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }} did not produce a verified fix; starting a fresh attempt"
+    # its predecessors left in the report. The budget matches `max-attempts`.
+    - warn: "attempt {{ frontmatter(report, 'fix-attempts') }} of {{ max-attempts }} did not produce a verified fix; starting a fresh attempt"
     - retry: 2
 failure:
     message: "❌  fixing the local test failures on `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
@@ -72,7 +72,7 @@ failure:
 ## Context
 
 - A push of the `{{branch}}` branch of **{{ctx.repo}}** was blocked because local testing on **{{ctx.os}}** failed. The failures have been diagnosed, and the caller wants them fixed.
-- A fix gets up to {{max_attempts}} attempts, and this is attempt {{ frontmatter(report, 'fix_attempts') || 1 }}. Each attempt is a fresh session, so the report file is the only memory shared between them.
+- A fix gets up to {{max-attempts}} attempts, and this is attempt {{ frontmatter(report, 'fix-attempts') || 1 }}. Each attempt is a fresh session, so the report file is the only memory shared between them.
 - You are running non-interactively: nobody can answer a question during this session. Record what you find in the report file instead.
     - If a tool call or a file read is refused, say so in your closing summary and find another way to the same information.
 
@@ -82,8 +82,8 @@ failure:
 
 1. Read `{{report}}` in full. The `issue` property is your briefing: the problems to repair, their root causes, the commands that reproduce them, and the constraints the repair must respect.
     - If the report body already has `## Fix attempt` sections, earlier attempts did not produce a verified fix. Read every one before you change anything, and do not repeat an approach that is recorded there as failed.
-2. Repair only the problems whose `fix_branch` is `{{branch}}`.
-    - A problem whose `fix_branch` names another branch is not repaired here. Leave it alone and say so in `summary`.
+2. Repair only the problems whose `fix-branch` is `{{branch}}`.
+    - A problem whose `fix-branch` names another branch is not repaired here. Leave it alone and say so in `summary`.
     - Repair the cause the diagnosis named. Do not weaken, skip, or delete a test to make it pass, and do not refresh a pinned hash or fixture without re-deriving it the way `issue` describes.
     - Touch only what the repair needs.
 3. Prove the repair: run the reproducing commands from `issue` and confirm that each one now passes. Run `just lint` in every package area you changed. Do not run the full pre-push gates and do not push; the hook does that on the next run of the PR prompt.

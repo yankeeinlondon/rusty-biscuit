@@ -153,9 +153,10 @@ fn authored_index(root: &Value, path: &[PathSegment]) -> Option<usize> {
 }
 
 /// A row is [`TabularSource::row`] `i` (a header is never a row; without one
-/// the first record is row 0), and a cell is named by its header in object
-/// mode and by its index in list mode. The root is the first record. Nothing
-/// below a cell has a position of its own.
+/// the first record is row 0), and a cell is named by its column's key in
+/// object mode (a camelCase header name or an explicit name) and by its index
+/// in list mode. The root is the first record. Nothing below a cell has a
+/// position of its own.
 fn table_offset(table: &TabularSource, path: &[PathSegment]) -> Option<usize> {
     let data = &table.data;
     let row = match path.first() {
@@ -166,7 +167,7 @@ fn table_offset(table: &TabularSource, path: &[PathSegment]) -> Option<usize> {
     let column = match (path.get(1), table.mode) {
         (None, _) => return Some(row.offset),
         (Some(PathSegment::Key(name)), RowMode::Object) => {
-            data.headers.as_ref()?.fields.iter().position(|field| field.text == *name)?
+            table.keys.as_ref()?.iter().position(|key| key == name)?
         }
         (Some(PathSegment::Index(index)), RowMode::List) => *index,
         _ => return None,
@@ -226,7 +227,7 @@ mod tests {
     fn a_list_mode_cell_is_its_raw_field_offset() {
         let text = "a,b\n1,\"x\"\n";
         let data = biscuit_file::read_delimited(text, b',').expect("reads");
-        let table = TabularSource { mode: RowMode::List, header: true, data: Arc::new(data) };
+        let table = TabularSource { mode: RowMode::List, header: true, keys: None, data: Arc::new(data) };
         let mut locator = SourceLocator::new(DataFormat::Csv, text, Some(&table));
         assert_eq!(locator.place(&[PathSegment::Index(0), PathSegment::Index(1)], false).position, Some((2, 3)));
         assert_eq!(locator.place(&[PathSegment::Index(0), PathSegment::Index(2)], true).position, Some((2, 1)));
@@ -240,13 +241,13 @@ mod tests {
             SourceLocator::new(DataFormat::Csv, text, Some(table)).place(path, false).position
         };
         let cell = |row, column| [PathSegment::Index(row), PathSegment::Index(column)];
-        let headerless = TabularSource { mode: RowMode::List, header: false, data: data.clone() };
+        let headerless = TabularSource { mode: RowMode::List, header: false, keys: None, data: data.clone() };
         assert_eq!(at(&headerless, &[]), Some((1, 1)), "the root is the first record");
         assert_eq!(at(&headerless, &cell(0, 1)), Some((1, 3)), "/0/1 is the first record's second cell");
         assert_eq!(at(&headerless, &cell(1, 0)), Some((2, 1)));
         assert_eq!(at(&headerless, &cell(2, 0)), None);
 
-        let headed = TabularSource { mode: RowMode::List, header: true, data };
+        let headed = TabularSource { mode: RowMode::List, header: true, keys: None, data };
         assert_eq!(at(&headed, &[]), Some((1, 1)));
         assert_eq!(at(&headed, &cell(0, 1)), Some((2, 3)), "a header is skipped");
         assert_eq!(at(&headed, &cell(1, 0)), None);

@@ -63,8 +63,9 @@ checking at the first error. `md compose` always collects them.
 A [`load_data`](../functions/load-data.md) call that fails stops the command,
 unless an explicit [`try`](../functions/try.md) recovers it.
 This section covers when that happens, which surrounding constructs pass the
-failure on, what an explicit recovery reports, and why a failure can stop the
-run before composition starts. The codes and fields of the failure are in
+failure on, what an explicit recovery reports, why a failure can stop the
+run before composition starts, and how a loaded value that fails its
+property's schema differs. The codes and fields of the failure are in
 [Data errors](../cli/data-contracts.md#data-errors).
 
 ### An unguarded data failure is never recovered
@@ -169,6 +170,35 @@ cases to composition, which reports them in the same way:
   `"string[("`. A computed `as` that parses but is not a container
   (`"string"`) is proven in the check.
 
+### A loaded value that fails its property's schema
+
+A `load_data` call without `as` succeeds on any well-formed file, and the
+schema of the frontmatter property that stores the result judges the value
+afterward. A mismatch there is a **schema** problem, not a data failure: it
+follows the schema family's stopping rule (every problem in the document is
+collected), keeps a `dm.schema.*` code, and `try` around the call does not
+recover it, because the call itself succeeded.
+
+Such a problem has two locations when the value came straight from the file:
+
+```md
+---
+$schema:
+    direct: "{ name: string(required), age: number }[]"
+direct: "{{ load_data('data.yaml') }}"
+---
+```
+
+| Location | Where it points |
+| --- | --- |
+| `source` | the `{{` of the property's expression in the document (here line 4, column 10), not the property's key |
+| `data_location` | the failing value in the data file, such as `data.yaml` line 4, column 8, pointer `/1/age` |
+
+`data_location` appears for the call itself, the call in parentheses, and a
+conditional whose selected arm is the call. A value built from the data, by
+a callback, a spread, `try`, or `||`, has `source` alone. The record fields
+are in [Destination schema failures](../cli/data-contracts.md#destination-schema-failures).
+
 ## How a problem is located
 
 In a data output, a problem's `source` says where to look. Its positions are always
@@ -221,7 +251,7 @@ What each family reports:
 
 | Problem | `source` |
 | --- | --- |
-| A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone |
+| A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone; for a property whose whole value is one `{{ … }}` expression, the expression, with a [`data_location`](#a-loaded-value-that-fails-its-propertys-schema) when the value came straight from a `load_data` call |
 | A `load_data` failure | the start of the `{{ … }}` interpolation that holds the call; its `as` argument for a contract the call check rejects; its options argument for options the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |

@@ -102,6 +102,7 @@ pub mod category_detector;
 pub mod contract;
 pub mod enums;
 pub mod find_program;
+pub mod git_program;
 pub mod host_capability;
 pub mod install;
 pub mod inventory;

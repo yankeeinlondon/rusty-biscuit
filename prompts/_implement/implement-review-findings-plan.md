@@ -3,20 +3,20 @@ $schema:
     spec: file(required;eager; match(**/*spec*.md)) -> the specification file that defines the target goal for this feature or fix
     design: file(match(**/*design*.md))
     iteration: number(required) -> the iteration of the review cycle
-    skip_performance_gates: boolean -> allows you to skip findings in the review which are due to a performance gate having not been met (or proven)
+    skip-performance-gates: boolean -> allows you to skip findings in the review which are due to a performance gate having not been met (or proven)
     review: file -> the latest review iteration which we will use to create the plan
     plan: file(required;eager;match(**/*plan*.md))
     phase: number(required) -> the phase of the plan we are implementing
-    total_phases: number
+    total-phases: number
     
 iteration: |-
     {{
-        frontmatter(spec, 'review_iterations')
-            ? frontmatter(spec, 'review_iterations') || 1 
+        frontmatter(spec, 'review-iterations')
+            ? frontmatter(spec, 'review-iterations') || 1 
             : 1
     }}
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || 1 : null }}"
-total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 1 : 0 }}"
+total-phases: "{{ file_exists(plan) ? frontmatter(plan, 'total-phases') || frontmatter(plan, 'phases') || 1 : 0 }}"
 design: "{{ file_exists(replace(spec, 'spec', 'design')) ? file_exists(replace(spec, 'spec', 'design')) : null"
 review: {{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}
 plan: {{ dirname(spec) + '/' + 'review-plan-' + iteration + '.md' }}
@@ -28,16 +28,16 @@ success:
 failure:
     message: "💥  creating a plan for the review findings of `{{review}}` failed [{{err.code}}, {{err.msg}}]"
 loop:
-    until: "phase >= total_phases"
+    until: "phase >= total-phases"
     action: "increment(phase)"
 ---
-::block when="total_phases"
-# Implement Phase {{phase}} of {{total_phases}}
+::block when="total-phases"
+# Implement Phase {{phase}} of {{total-phases}}
 ::end-block
-::block when="!total_phases"
+::block when="!total-phases"
 # Implement Phase {{phase}}
 
-> ⚠️ there was no `total_phases` set on this plan! This metadata missing may indicate a problem
+> ⚠️ there was no `total-phases` set on this plan! This metadata missing may indicate a problem
 ::end-block
 
 ## Context
@@ -110,8 +110,8 @@ You are done when:
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `skills_files_updated_during_phase_{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
-    ::block when="phase == total_phases"
-        - set `source_code` Frontmatter to every source code file that was updated or created during the various phases of the plan
+    ::block when="phase == total-phases"
+        - set `source-code` Frontmatter to every source code file that was updated or created during the various phases of the plan
         - set `documentation` Frontmatter to every documentation file that was updated or created during the various phases of the plan
     ::end-block
     - if this is a monorepo, then include `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
@@ -129,7 +129,7 @@ You are done when:
 
 ::block when="has_skill(ctx.area)"
 - use the '{{ctx.area}}' skill during the implementation
-::block when="phase == total_phases"
+::block when="phase == total-phases"
 - do NOT move the spec directory into the `_completed` folder when the final phase is complete (that is done as a separate step which you are not responsible for)
 ::end-block
 ::end-block

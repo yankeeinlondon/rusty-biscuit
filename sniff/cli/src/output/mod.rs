@@ -259,6 +259,43 @@ pub fn emit_stderr(text: &str, plain: bool) {
 ///
 /// Some `RepoAction` variants trigger side effects (e.g., `std::process::exit`)
 /// and cannot be rendered to a string — these are handled inline.
+/// Render `repo git-status` text for the final selected history.
+///
+/// `branch` is the `--branch` argument (`Some(None)` for a bare flag) and
+/// `worktree` the `--worktree` selector. The worktree heading names
+/// `git.current_branch`, which worktree selection has already replaced with
+/// that worktree's branch. `commit_links` holds captured links by full SHA;
+/// `None` renders every hash unlinked.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_repo_git_status(
+    git: &sniff::filesystem::git::GitInfo,
+    history_count: usize,
+    verbose: u8,
+    compact: bool,
+    branch: Option<Option<&str>>,
+    worktree: Option<&str>,
+    commit_links: Option<&std::collections::HashMap<String, sniff::filesystem::git::CommitLink>>,
+) -> String {
+    let target_worktree = worktree.zip(git.current_branch.as_deref());
+    // Annotate the heading only for an explicit branch different from the
+    // checked-out one; a bare or current `--branch` selects nothing new.
+    let target_branch = match branch {
+        Some(Some(name)) if !name.is_empty() && git.current_branch.as_deref() != Some(name) => {
+            Some(name)
+        }
+        _ => None,
+    };
+    render_git_section(
+        git,
+        history_count,
+        verbose,
+        compact,
+        target_branch,
+        target_worktree,
+        commit_links,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_text(
     result: &SniffResult,
@@ -557,33 +594,14 @@ pub fn render_text(
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        // `--worktree` takes precedence; the worktree handler
-                        // upstream already replaced `current_branch` with the
-                        // worktree's branch, so use that for the heading.
-                        let target_worktree =
-                            worktree.as_deref().zip(git.current_branch.as_deref());
-
-                        // Annotate the Status heading only when the user
-                        // explicitly named a branch different from the
-                        // currently checked-out one. `--branch` with no
-                        // value (Some(None)) resolves to current and is a
-                        // no-op for both data and heading.
-                        let target_branch = match branch {
-                            Some(Some(name))
-                                if !name.is_empty()
-                                    && git.current_branch.as_deref() != Some(name.as_str()) =>
-                            {
-                                Some(name.as_str())
-                            }
-                            _ => None,
-                        };
-                        out.push_str(&render_git_section(
+                        out.push_str(&render_repo_git_status(
                             git,
                             history_count,
                             verbose,
                             *compact,
-                            target_branch,
-                            target_worktree,
+                            branch.as_ref().map(Option::as_deref),
+                            worktree.as_deref(),
+                            None,
                         ));
                     }
                 }
