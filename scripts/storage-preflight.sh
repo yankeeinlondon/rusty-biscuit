@@ -124,14 +124,14 @@ report_wsl_vhdx() {
             awk -v n="$name" -v s="$size_bytes" -v u="$used_bytes" 'BEGIN {
                 printf "  %s ext4.vhdx: %.1f GiB on disk, %.1f GiB in use by the guest\n",
                        n, s / 1073741824, u / 1073741824
-                printf "    ~%.1f GiB reclaimable -- run '\''just wsl-compact'\''\n",
+                printf "    ~%.1f GiB reclaimable -- see WSL2 VHDX reclamation in docs/kache-strategy.md\n",
                        (s - u) / 1073741824
             }'
         else
             awk -v n="$name" -v s="$size_bytes" -v t="$total_kib" 'BEGIN {
                 printf "  %s ext4.vhdx: %.1f GiB on disk, %.0f%% of this volume\n",
                        n, s / 1073741824, (s / 1024) / t * 100
-                printf "    check reclaimable space with '\''just wsl-compact-status'\''\n"
+                printf "    see WSL2 VHDX reclamation in docs/kache-strategy.md\n"
             }'
         fi
     done < <(list_wsl2_distributions)
@@ -179,7 +179,7 @@ Cargo storage preflight failed.
 ${wsl_report}
 ${reclaim_report}
 
-'just windows-sweep' trims the native Cargo target to its 80 GB cap. Automatic
+'just sweep' trims the native Cargo target to its 80 GB cap. Automatic
 reclaim can be disabled with BISCUIT_BUILD_AUTO_SWEEP=0. Set
 BISCUIT_BUILD_MIN_FREE_GIB=0 only for an intentional emergency override.
 EOF

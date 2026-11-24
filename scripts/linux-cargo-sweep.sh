@@ -16,8 +16,8 @@ set -euo pipefail
 readonly UNIT_NAME="rusty-biscuit-sweep"
 readonly CRON_MARKER="# rusty-biscuit-sweep (managed by scripts/linux-cargo-sweep.sh)"
 
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-repo_root=$(cd "$script_dir/.." && pwd -P)
+script_dir=$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 log_path="${SWEEP_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/rusty-biscuit-sweep.log}"
 
 # Unit files go under XDG_DATA_HOME rather than XDG_CONFIG_HOME because on this
@@ -44,14 +44,6 @@ case "$operation" in
         # shellcheck source=scripts/cargo-path.sh
         source "$script_dir/cargo-path.sh"
 
-        # Sweeping a target/ that a build is actively writing removes artifacts
-        # out from under rustc and fails the build. The scheduled path must
-        # yield; a hand-typed `just sweep` deliberately does not, matching the
-        # equivalent guard in windows-cargo-sweep.ps1.
-        if busy=$(pgrep -a -x 'cargo|rustc|clippy-driver|cargo-nextest' 2> /dev/null) && [[ -n "$busy" ]]; then
-            echo "sweep: skipped, build processes are active"
-            exit 0
-        fi
         mkdir -p "$(dirname "$log_path")"
         {
             echo "=== $(date -Is) ==="
@@ -101,14 +93,16 @@ EOF
             systemctl --user daemon-reload
             systemctl --user start "$UNIT_NAME.timer"
 
-            # Without lingering, the user systemd instance is torn down at
-            # logout and the timer only advances while a session happens to be
-            # open. Not fatal, so a refusal here is reported rather than raised.
-            if ! loginctl show-user "$USER" --property=Linger 2> /dev/null | grep -q 'Linger=yes'; then
-                loginctl enable-linger "$USER" 2> /dev/null \
-                    || echo "sweep: could not enable linger; run 'sudo loginctl enable-linger $USER' so the timer fires without an open session" >&2
-            fi
             echo "Installed systemd user timer '$UNIT_NAME.timer' (daily, catches up missed runs)."
+            # Minimal hosts may lack a polkit agent. Linger is optional for
+            # installation, but required to schedule runs while logged out.
+            sweep_user=$(id -un)
+            if [[ "$(loginctl show-user "$sweep_user" --property=Linger --value 2>/dev/null)" == yes ]] ||
+                loginctl --no-ask-password enable-linger "$sweep_user" >/dev/null 2>&1; then
+                echo "Scheduled sweeps can run even after you sign out."
+            else
+                printf "Scheduled sweeps may stop after you sign out. To keep them running, ask an administrator to run:\n  sudo loginctl enable-linger %s\n" "$sweep_user" >&2
+            fi
         else
             entry="$script_dir/linux-cargo-sweep.sh run ${roots[*]}"
             { crontab -l 2> /dev/null | grep -vF "$CRON_MARKER" | grep -vF "$entry" || true
@@ -141,7 +135,7 @@ EOF
         elif crontab -l 2> /dev/null | grep -qF "$CRON_MARKER"; then
             crontab -l | grep -A1 -F "$CRON_MARKER"
         else
-            echo "sweep: no schedule installed on this host (run 'just install-linux-sweep')"
+            echo "sweep: no schedule installed on this host (run 'just install-sweep')"
         fi
         if [[ -f "$log_path" ]]; then
             echo "--- last run ---"

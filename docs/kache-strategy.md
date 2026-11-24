@@ -65,11 +65,8 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   daemon exit).
 - **Sweep:** version-controlled at `scripts/sweep.sh` (four per-root passes + an orphan pass +
   census below), run via
-  `just sweep [roots...]`. Schedule per host: launchd on macOS (done — see below),
-  `just install-windows-sweep` on Windows, and `just install-linux-sweep` on Linux
-  (systemd user timer, falling back to cron where no systemd user instance exists —
-  build-linux, whose `~/.config` is a read-only CIFS mount). Target hygiene matters
-  with or without a cache.
+  `just sweep [host|all]`. Use `just install-sweep` to register the local
+  schedule. Target hygiene matters with or without a cache.
 - **CI: kache removed.** `Swatinem/rust-cache@v2` remains on the legs that still
   compile — the native build owner, `check`, and `lint`. A test tier consumes a
   verified archive and restores no cache at all
@@ -191,17 +188,59 @@ steady-state win, prototype B on one Windows leg and compare wall time against O
 | Remote | none configured (local-only; daemon therefore optional) |
 | Health | judge with `kache stats`, **not** `kache doctor` |
 
+## Run and inspect Cargo sweeps
+
+Run `just sweep` from the repository root to apply this machine's Cargo
+cleanup policy. Run `just sweep-status` to compare available space now and
+after a sweep, see which passes are expected to free space, and check the
+schedule. The report does not remove files. On Linux, WSL, and macOS it
+requires Python 3 and estimates savings from allocated blocks, counts each
+candidate once, and selects the size cap using the projected space after
+earlier passes. On native Windows it uses Cargo artifact sizes. Shared
+blocks and snapshots can reduce the actual gain on any platform. macOS
+volumes with the same APFS container capacity share a row in the report.
+The interactive command shows scan progress and uses terminal styling.
+Redirected output stays plain, and `NO_COLOR=1` disables terminal colors.
+
+On Linux and macOS, the manual sweep defaults to the current checkout. To select other roots, run `bash scripts/sweep.sh PATH...`
+with Cargo and cargo-sweep on your path. Manual and scheduled sweeps defer
+when a build is active. If a directory changes during removal, the sweep
+retries once if no build is active.
+
+Pass an SSH destination to run either command on another machine, for example
+`just sweep build-win` or `just sweep-status build-win`. Remote commands use
+the target host's `$CODING_DIR/rusty-biscuit` checkout, with `~/coding/rusty-biscuit`
+as the default. On native Windows, the installed Cargo sweep task can also
+provide the checkout path. If those paths are missing, both commands look for
+the cross-check clone for this worktree. The target needs the sweep scripts
+and noninteractive SSH access. A WSL SSH destination uses the Linux guest's
+policy.
+
+Use `just sweep-status all` to preview the local machine and the SSH destinations
+set in `BUILD_WIN`, `BUILD_WSL`, `BUILD_MACOS`, and `BUILD_LINUX`.
+`just sweep all` runs the cleanup on the same machines. Blank variables are
+skipped and repeated SSH destinations are visited once. Both commands report
+individual host failures and continue through the list.
+
+### Install the local schedule
+
+Run `just install-sweep` from a checkout that will remain in place. It registers
+a daily 04:00 task in Windows Task Scheduler, a daily 04:00 Linux or WSL timer
+with cron as the fallback, or a Sunday and Wednesday 04:00 launch agent on macOS.
+On Linux and WSL, the systemd timer can run while you are logged out when
+linger is enabled. If the installer says sweeps may stop after sign-out, an
+administrator can enable background runs with `sudo loginctl enable-linger "$(id -un)"`.
+Run `just uninstall-sweep` to remove the local schedule.
+
 ## Sweep script
 
-**What:** `~/.local/bin/rusty-biscuit-sweep.sh` — prunes Cargo `target/` dirs, which cargo never
-garbage-collects. Logs to `~/Library/Logs/rusty-biscuit-sweep.log`.
+**What:** The launch agent runs `scripts/macos-cargo-sweep.sh run` from the
+checkout used to install it. Output goes to `~/Library/Logs/rusty-biscuit-sweep.log`.
 
 **Frequency:** `com.ken.rusty-biscuit-sweep` launchd agent, **Sun + Wed 04:00**.
 (launchd can't do "every 3 days at a fixed time"; twice weekly keeps the 04:00 window.)
 
-**Roots:**
-- `~/.claudine/worktrees/rusty-biscuit`
-- `/Volumes/coding/personal/rusty-biscuit`
+**Root:** The checkout used to install the launch agent.
 
 **Strategy — four escalating passes, most-targeted first:**
 
@@ -273,8 +312,8 @@ incremental directories are absent.
 It skips safely while Cargo, rustc, Clippy, or a linker is active, caps the
 resolved target tree at 80 GB, and logs before/after capacity to
 `%LOCALAPPDATA%\rusty-biscuit\logs\cargo-sweep.log`. Run
-`just install-windows-sweep` once to register the current-user task for every
-day at 04:00; inspect it with `just windows-sweep-status`. The daily task is a
+`just install-sweep` once to register the current-user task for every
+day at 04:00. Inspect it with `just sweep-status`. The daily task is a
 backstop: this target has grown by more than 50 GiB between two scheduled runs,
 so schedule frequency alone cannot guarantee headroom.
 
@@ -311,10 +350,17 @@ worth paying to recover a few GiB. It skips while Windows or in-guest build
 processes are active, needs elevation for `diskpart compact vdisk`
 (`Optimize-VHD` requires the Hyper-V module, which these hosts lack), and logs
 to `%LOCALAPPDATA%\rusty-biscuit\logs\wsl-vhdx-compact.log`. Register the weekly
-Saturday 03:00 task with `just install-wsl-compact`; inspect reclaimable space
-per distribution with `just wsl-compact-status`, or reclaim now with
-`just wsl-compact`. **The task runs `wsl --shutdown`** and will end a WSL session
-live at that hour.
+Saturday 03:00 task with `just install-wsl-compact`. From the repository
+root in Windows PowerShell, inspect the task and per-distribution reclaimable
+space with this command.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation status
+```
+
+To reclaim space immediately, open an elevated Windows PowerShell session and
+use `-Operation run`. Both scheduled and manual compaction run `wsl --shutdown`
+when they have disks to compact, which ends running WSL sessions.
 
 Every path is resolved at run time — distribution names and their `BasePath`
 come from the `Lxss` registry, and the target volume from `cargo metadata` — so
@@ -451,8 +497,9 @@ Swept artifacts come back as link-restores, not recompiles.
 
 ```
 scripts/sweep.sh                                              (version-controlled; `just sweep`)
-scripts/linux-cargo-sweep.sh                        (version-controlled; `just install-linux-sweep`)
-scripts/windows-cargo-sweep.ps1                   (version-controlled; `just install-windows-sweep`)
+scripts/linux-cargo-sweep.sh                        (version-controlled; `just install-sweep`)
+scripts/macos-cargo-sweep.sh                        (version-controlled; `just install-sweep`)
+scripts/windows-cargo-sweep.ps1                   (version-controlled; `just install-sweep`)
 scripts/wsl-vhdx-compact.ps1                        (version-controlled; `just install-wsl-compact`)
 ~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)   [Mac]
 ~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)  [Mac]

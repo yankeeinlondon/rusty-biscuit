@@ -152,6 +152,9 @@ completed` when the schedule or runners change.
 - we use the `just` runner extensively throughout this monorepo.
 - you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
 - shared recipes for just can be found in the @just/ directory
+- run `just sweep [host|all]` to prune Cargo build artifacts and `just sweep-status [host|all]` to see projected free space, cleanup savings, and the schedule
+    - omit the host to operate locally, pass an SSH destination, or use `all` for the local machine and configured `BUILD_*` destinations
+    - use `just install-sweep` and `just uninstall-sweep` to manage the local schedule
 - recipes you should find in nearly every package-area include:
     - `just test` - runs all L1 tests for this package area
     - `just test-l2` - runs all L2 tests for this package area

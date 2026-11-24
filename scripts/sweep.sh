@@ -20,8 +20,61 @@
 # per-crate keying fast (~100x slower on huge trees).
 # Decisions and sizing evidence: docs/kache-strategy.md.
 #
-# Usage: sweep.sh [ROOT ...]   (default: the enclosing git worktree root)
+# Usage: sweep.sh [--dry-run] [ROOT ...]   (default: the enclosing git worktree root)
 set -euo pipefail
+
+if [[ "${1:-}" == --dry-run ]]; then
+    shift
+    script_dir=$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+    if [[ $# == 0 ]]; then
+        set -- "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    fi
+    for root in "$@"; do
+        bash "$script_dir/sweep.sh" --preview-input "$root" | python3 "$script_dir/sweep-report.py" "Not checked"
+    done
+    exit 0
+fi
+
+preview=0
+if [[ "${1:-}" == --preview-input ]]; then
+    preview=1
+    shift
+fi
+
+# Manual and scheduled cleanup share the guard. A build can start while the
+# census or a prior pass is running, so check again before each mutation.
+defer_if_building() {
+    if pgrep -x 'cargo|rustc|clippy-driver|cargo-nextest' >/dev/null 2>&1; then
+        echo "Sweep deferred because build processes are active."
+        exit 0
+    fi
+}
+
+remove_tree() {
+    local diagnostics result attempt
+    for attempt in 1 2; do
+        defer_if_building
+        if diagnostics=$(LC_ALL=C rm -rf -- "$@" 2>&1); then
+            return 0
+        else
+            result=$?
+        fi
+        if [[ -z "$diagnostics" ]] || grep -qv ': Directory not empty$' <<< "$diagnostics"; then
+            printf '%s\n' "$diagnostics" >&2
+            return "$result"
+        fi
+        defer_if_building
+        if [[ "$attempt" == 1 ]]; then
+            echo "A cleanup directory changed during removal. Retrying once." >&2
+        fi
+    done
+    printf '%s\n' "$diagnostics" >&2
+    return "$result"
+}
+
+if [[ "$preview" == 0 ]]; then
+    defer_if_building
+fi
 
 time_days="${SWEEP_TIME_DAYS:-14}"
 max_size="${SWEEP_MAX_SIZE:-120GB}"
@@ -41,21 +94,28 @@ else
     roots=("$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 fi
 
+if [[ "$preview" == 1 ]]; then
+    root=$(CDPATH= cd -- "${roots[0]}" && pwd -P)
+    roots=("$root")
+    printf '%s\0' "$root" "$time_days" "$min_free_gib" "$max_size" "$hard_max_size"
+fi
+
 for root in "${roots[@]}"; do
     if [[ ! -d "$root" ]]; then
         echo "sweep: skipping missing root: $root" >&2
         continue
     fi
 
-    echo "==> $root"
-
-    # Census: the 10 largest target/ dirs before sweeping, so cap sizing is
-    # driven by the log rather than guesses.
-    find "$root" -type d -name target -prune 2>/dev/null \
-        | while IFS= read -r target; do du -sk "$target" 2>/dev/null; done \
-        | sort -rn \
-        | head -10 \
-        | awk '{printf "[census] %8.1f GiB  %s\n", $1 / 1048576, $2}'
+    if [[ "$preview" == 0 ]]; then
+        echo "Sweeping ${root##*/}"
+        find "$root" -type d -name target -prune -print0 2>/dev/null \
+            | while IFS= read -r -d '' target; do du -sk "$target" 2>/dev/null; done \
+            | sort -rn \
+            | awk -F '\t' -v root="$root/" 'NR <= 10 {
+                if (index($2, root) == 1) $2 = substr($2, length(root) + 1)
+                printf "[census] %8.1f GiB  %s\n", $1 / 1048576, $2
+            }'
+    fi
 
     # Incremental caches are capped by size because the --time pass below
     # structurally cannot reach them: every build re-touches the incremental
@@ -63,25 +123,35 @@ for root in "${roots[@]}"; do
     # fresh no matter how stale the work behind them is. Removing them costs a
     # single non-incremental rebuild of the workspace crates; dependency
     # artifacts under deps/ are untouched. cargo-sweep does not cover this.
-    find "$root" -type d -name target -prune 2>/dev/null \
-        | while IFS= read -r target; do
-            incremental_dirs=()
-            while IFS= read -r -d '' inc; do
-                incremental_dirs+=("$inc")
-            done < <(find "$target" -type d \( -name incremental -o -name incremental.kache-auto \) -prune -print0 2>/dev/null)
-            (( ${#incremental_dirs[@]} > 0 )) || continue
-            size_kb=$(du -skc "${incremental_dirs[@]}" 2>/dev/null | awk 'END {print $1}')
-            [[ -n "${size_kb:-}" ]] || continue
-            if (( size_kb > incremental_max_kb )); then
-                awk -v k="$size_kb" -v c="$incremental_max_kb" -v p="$target" 'BEGIN {
+    while IFS= read -r target; do
+        incremental_dirs=()
+        while IFS= read -r -d '' inc; do
+            incremental_dirs+=("$inc")
+        done < <(find "$target" -type d \( -name incremental -o -name incremental.kache-auto \) -prune -print0 2>/dev/null)
+        [[ -n "${incremental_dirs[0]:-}" ]] || continue
+        size_kb=$(du -skc "${incremental_dirs[@]}" 2>/dev/null | awk 'END {print $1}')
+        [[ -n "${size_kb:-}" ]] || continue
+        if (( size_kb > incremental_max_kb )); then
+            if [[ "$preview" == 1 ]]; then
+                for inc in "${incremental_dirs[@]}"; do
+                    printf 'incremental\0%s\0%s\0' "$target" "$inc"
+                done
+            else
+                awk -v k="$size_kb" -v c="$incremental_max_kb" -v p="${target#"$root"/}" 'BEGIN {
                     printf "[incremental] %.1f GiB > %.1f GiB combined cap -- removing incremental caches under %s\n",
                            k / 1048576, c / 1048576, p
                 }'
-                rm -rf "${incremental_dirs[@]}"
+                remove_tree "${incremental_dirs[@]}"
             fi
-        done
+        fi
+    done < <(find "$root" -type d -name target -prune 2>/dev/null)
 
+    if [[ "$preview" == 1 ]]; then
+        continue
+    fi
+    defer_if_building
     cargo sweep -r --installed "$root"
+    defer_if_building
     cargo sweep -r --time "$time_days" "$root"
 
     # Bound target growth even on roomy volumes; reserve the tighter cap for
@@ -92,6 +162,7 @@ for root in "${roots[@]}"; do
             printf "[capacity] %.1f GiB free >= %.1f GiB floor -- applying unconditional cap\n",
                    f / 1048576, m / 1048576
         }'
+        defer_if_building
         cargo sweep -r --maxsize "$hard_max_size" "$root"
     else
         if [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
@@ -102,6 +173,7 @@ for root in "${roots[@]}"; do
                        f / 1048576, m / 1048576
             }'
         fi
+        defer_if_building
         cargo sweep -r --maxsize "$max_size" "$root"
     fi
 done
@@ -157,18 +229,25 @@ for orphan_dir in "${orphan_dirs[@]}"; do
             continue
         fi
 
-        size_kb=$(du -sk "$candidate" 2> /dev/null | awk '{print $1}')
-        awk -v k="${size_kb:-0}" -v d="$orphan_days" -v p="$candidate" 'BEGIN {
-            printf "[orphan] %.1f GiB  untouched >%s days -- removing %s\n", k / 1048576, d, p
-        }'
-        rm -rf "$candidate"
-    done < <(find "$orphan_dir" -mindepth 2 -maxdepth 3 -name CACHEDIR.TAG -type f 2> /dev/null)
+        if [[ "$preview" == 1 ]]; then
+            printf 'orphan\0%s\0' "$resolved"
+        else
+            size_kb=$(du -sk "$candidate" 2>/dev/null | awk '{print $1}')
+            awk -v k="${size_kb:-0}" -v d="$orphan_days" -v p="${candidate##*/}" 'BEGIN {
+                printf "[orphan] %.1f GiB  untouched >%s days -- removing %s\n", k / 1048576, d, p
+            }'
+            remove_tree "$candidate"
+        fi
+    done < <(find "$orphan_dir" -mindepth 2 -maxdepth 3 -name CACHEDIR.TAG -type f 2>/dev/null)
 done
+
+if [[ "$preview" == 1 ]]; then
+    exit 0
+fi
 
 # APFS local snapshots can pin freed blocks; thin them so the space actually
 # returns to the volume. macOS only.
 if command -v tmutil &> /dev/null; then
+    defer_if_building
     tmutil thinlocalsnapshots / 9999999999 2> /dev/null || true
 fi
-
-echo "sweep: done"

@@ -1823,66 +1823,32 @@ _ensure-cargo-sweep:
         RUSTC_WRAPPER="" cargo install --locked cargo-sweep
     fi
 
-# prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
-# combined incremental caches >15 GiB, uninstalled toolchains, untouched >14d,
-# then a 200GB cap (120GB below 100 GiB free), then out-of-tree target dirs under
-# ~/.cache left behind by --target-dir builds (docs/kache-strategy.md).
-# Constrained Windows hosts use the native 80GB policy below. Roots default to
-# this repo; override with paths.
-sweep *args="": _ensure-cargo-sweep
-    @scripts/sweep.sh {{ args }}
+# Prune Cargo build artifacts locally, on an SSH host, or on all build hosts.
+sweep host="":
+    @bash scripts/sweep-host.sh run {{ quote(host) }}
+
+# Show projected free space and cleanup savings locally, remotely, or on all build hosts.
+sweep-status host="":
+    @bash scripts/sweep-host.sh status {{ quote(host) }}
 
 # restore the native Cargo target cap if needed, then verify Windows headroom
 storage-check: _storage_preflight
 
-# run the native Windows 80 GB sweep policy now
-windows-sweep:
-    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation run
+# Install the Cargo sweep schedule for this machine.
+install-sweep:
+    @bash scripts/sweep-host.sh install
 
-# install the daily native Windows sweep policy in Task Scheduler
-install-windows-sweep:
-    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation install
-
-# show the native Windows sweep task's state and next run
-windows-sweep-status:
-    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
-
-# A WSL2 ext4.vhdx grows to its high-water mark and never shrinks, so it can
-# starve the target volume of space that sweeping Cargo cannot return — the
-# usual cause of a storage-preflight failure that `just sweep` does not fix.
-# WSL's own `--set-sparse` remedy is disabled upstream for corruption risk
-# (docs/kache-strategy.md), which is why this reclaim is scheduled, not automatic.
-#
-# reclaim WSL2 vhdx slack now (elevated; ends any running WSL session)
-wsl-compact *args="":
-    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation run {{ args }}
+# Remove the Cargo sweep schedule from this machine.
+uninstall-sweep:
+    @bash scripts/sweep-host.sh uninstall
 
 # install the weekly WSL2 vhdx compaction task in Task Scheduler
 install-wsl-compact:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation install
 
-# show the WSL2 vhdx task's state plus per-distro reclaimable space
-wsl-compact-status:
-    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation status
-
 # remove the weekly WSL2 vhdx compaction task
 uninstall-wsl-compact:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation uninstall
-
-# Separate from the Windows task above even on WSL2: that one sweeps C:\ and
-# cannot see the guest's ext4 filesystem, where target/ actually lives.
-#
-# install the daily 04:00 Linux sweep schedule (systemd user timer, else cron)
-install-linux-sweep *roots="":
-    @scripts/linux-cargo-sweep.sh install {{ roots }}
-
-# show the Linux sweep schedule's next run and last log lines
-linux-sweep-status:
-    @scripts/linux-cargo-sweep.sh status
-
-# remove the Linux sweep schedule
-uninstall-linux-sweep:
-    @scripts/linux-cargo-sweep.sh uninstall
 
 # ensure the test runner every tier above L1 depends on is available
 #

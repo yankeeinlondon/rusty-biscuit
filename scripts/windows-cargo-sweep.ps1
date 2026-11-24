@@ -18,14 +18,15 @@ $scriptPath = $MyInvocation.MyCommand.Path
 if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptPath)
 }
-if (-not $CargoPath) {
-    $CargoPath = (Get-Command cargo.exe -ErrorAction Stop).Source
-}
 if (-not $CargoSweepPath) {
     $CargoSweepPath = Join-Path $env:USERPROFILE ".cargo\bin\cargo-sweep.exe"
 }
 if (-not $LogPath) {
     $LogPath = Join-Path $env:LOCALAPPDATA "rusty-biscuit\logs\cargo-sweep.log"
+}
+
+if ($Operation -in @("install", "run") -and -not $CargoPath) {
+    $CargoPath = (Get-Command cargo.exe -ErrorAction Stop).Source
 }
 
 if ($Operation -eq "install") {
@@ -61,10 +62,18 @@ if ($Operation -eq "status") {
     # Out-String renders now rather than leaving objects for the formatter to
     # lay out at pipeline end -- the `exit` below discards anything still
     # buffered there, which silently swallows the whole report.
-    Get-ScheduledTask -TaskName $taskName -ErrorAction Stop |
-        Select-Object TaskName, State, Description | Format-List | Out-String
-    Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop |
-        Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List | Out-String
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $task | Select-Object TaskName, State, Description | Format-List | Out-String
+        Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop |
+            Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List | Out-String
+    } else {
+        Write-Output "Sweep schedule is not installed. Run 'just install-sweep' to install it."
+    }
+    if (Test-Path -LiteralPath $LogPath) {
+        Write-Output "--- last run ---"
+        Get-Content -LiteralPath $LogPath -Tail 5
+    }
     exit 0
 }
 

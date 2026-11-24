@@ -537,3 +537,11 @@ socket directory also means first-run state, so Zellij shows its "About
 Zellij" tips popup over the pane; start it with a `--config` file holding
 `show_startup_tips false` and `show_release_notes false`. See
 `biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs`.
+
+## Sweep reports and shared APFS capacity
+
+`diskutil info -plist DEVICE` exposes `APFSContainerReference`. Use `df -P PATH`
+to resolve a checkout directory to its device before calling `diskutil`. Volumes such as
+`/` and `/Volumes/coding` on the macOS build host can have different device
+IDs while reporting the same capacity and availability from one APFS
+container. Count that capacity once when projecting post-sweep free space.
