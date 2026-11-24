@@ -247,6 +247,25 @@ fn valid_required_property_passes() {
 }
 
 #[test]
+fn prepares_prompt_with_bare_multiword_schema_values() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        concat!(
+            "---\n$schema:\n",
+            "  license: string(suggest(GPL v3, Apache 2.0))\n",
+            "  status: enum(draft, in review; required)\n",
+            "license: GPL v3\nstatus: in review\n---\n",
+            "Review {{ status }} under {{ license }}.\n",
+        ),
+    );
+    let prepared =
+        prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context()))
+            .expect("prepare a prompt with bare multiword schema values");
+    assert!(prepared.prompt.contains("Review in review under GPL v3."), "{}", prepared.prompt);
+}
+
+#[test]
 fn missing_required_returns_missing_properties_error() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
