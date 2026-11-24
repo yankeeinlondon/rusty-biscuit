@@ -1607,7 +1607,7 @@ Claudine publishes it like this:
 
 ```text
 ~/.claudine/registrations/
-├── .darkmatter.lock           held while a publish runs
+├── .darkmatter.lock           held while a publish (or setup) runs
 └── darkmatter/
     ├── manifest.yaml          every file below and its BLAKE3 digest
     ├── globals.lifecycle.json
@@ -1687,6 +1687,11 @@ flowchart LR
       - ~/hosts/mine.yaml
       - ~/.claudine/registrations/darkmatter/manifest.yaml   # Claudine
   ```
+
+  Setup holds the publisher lock (`~/.claudine/registrations/.darkmatter.lock`)
+  from step 1 through step 4, so another publisher, such as
+  `claudine registrations publish` in a second terminal, waits until setup
+  has finished rather than publishing between its steps.
 
   A repository's `.darkmatter.yaml` is never changed. A failure in step 3 is
   a warning (Claudine's own configuration is already saved) and step 4 is

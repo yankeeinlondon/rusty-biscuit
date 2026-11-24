@@ -19,7 +19,11 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use serde::Serialize;
 
 pub(crate) mod config;
+mod path;
+mod permissions;
+mod registration;
 mod report;
+mod tts;
 
 #[cfg(test)]
 mod tests;
@@ -93,6 +97,9 @@ pub fn run(snapshot: &RequestSnapshot, fix: bool) -> Vec<DoctorRow> {
 #[derive(Debug)]
 pub(crate) struct Environment {
     home: Option<PathBuf>,
+    /// The directory `claudine doctor` was started in; shells are probed
+    /// there.
+    launch_dir: PathBuf,
     /// The launch file-resolution context, or why it could not be built.
     context: Result<FileResolutionContext, ContextUnavailable>,
 }
@@ -111,17 +118,28 @@ impl Environment {
             Ok(context) => context.home_dir().map(Path::to_path_buf),
             Err(_) => snapshot.home().map(Path::to_path_buf),
         };
-        Self { home, context }
+        Self { home, launch_dir: snapshot.request_dir().to_path_buf(), context }
     }
 
+    /// An environment launched in the context's working directory, else the
+    /// home, else the system temporary directory.
     #[cfg(test)]
     pub(crate) fn for_test(home: Option<PathBuf>, context: Result<FileResolutionContext, ContextUnavailable>) -> Self {
-        Self { home, context }
+        let launch_dir = match (&context, &home) {
+            (Ok(context), _) => context.cwd().to_path_buf(),
+            (Err(_), Some(home)) => home.clone(),
+            (Err(_), None) => std::env::temp_dir(),
+        };
+        Self { home, launch_dir, context }
     }
 
     /// The home directory, when it can be located.
     pub(crate) fn home(&self) -> Option<&Path> {
         self.home.as_deref()
+    }
+
+    pub(crate) fn launch_dir(&self) -> &Path {
+        &self.launch_dir
     }
 
     pub(crate) fn context(&self) -> Result<&FileResolutionContext, ContextUnavailable> {
@@ -146,7 +164,6 @@ impl<'a> Pass<'a> {
         Self { environment, config: OnceCell::new() }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the registration and path checks read the environment"))]
     pub(crate) const fn environment(&self) -> &'a Environment {
         self.environment
     }
@@ -181,15 +198,15 @@ static REGISTRY: [CheckDescriptor; 7] = [
         id: "registration",
         title: "Darkmatter host registration",
         prerequisites: &["config"],
-        check: pending_check,
-        repair: None,
+        check: registration::check_registration,
+        repair: Some(registration::repair_registration),
     },
     CheckDescriptor {
         id: "darkmatter-permissions",
         title: "Darkmatter permissions handoff",
         prerequisites: &["config"],
-        check: pending_check,
-        repair: None,
+        check: permissions::check_permissions,
+        repair: Some(permissions::repair_permissions),
     },
     CheckDescriptor {
         id: "repo-config",
@@ -209,21 +226,32 @@ static REGISTRY: [CheckDescriptor; 7] = [
         id: "tts",
         title: "Text-to-speech",
         prerequisites: &[],
-        check: pending_check,
+        check: tts::check_tts,
         repair: None,
     },
     CheckDescriptor {
         id: "path",
         title: "Executable path",
         prerequisites: &[],
-        check: pending_check,
+        check: path::check_path,
         repair: None,
     },
 ];
 
-/// The stand-in for a check whose callback is not built yet.
-fn pending_check(_: &Pass<'_>) -> CheckOutcome {
-    CheckOutcome::from(vec![Finding::new(Severity::Info, Scope::General, "this check is not available yet")])
+/// `relative`, written with `/`, as a path with this OS's separators, so a
+/// test's expected text matches the native paths the report shows.
+#[cfg(test)]
+pub(crate) fn native_path(relative: &str) -> PathBuf {
+    relative.split('/').collect()
+}
+
+/// The registry without the host-probing `tts` and `path` rows, for tests
+/// of the file checks that should not detect speech engines or start shells.
+#[cfg(test)]
+pub(crate) fn file_checks() -> &'static [CheckDescriptor] {
+    let (files, host) = REGISTRY.split_at(5);
+    debug_assert!(host.iter().map(|check| check.id).eq(["tts", "path"]));
+    files
 }
 
 /// Inspects, then (with `fix`) repairs and inspects the affected rows again.

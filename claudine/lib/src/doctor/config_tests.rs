@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 
-use super::super::{ContextUnavailable, DoctorRow, Environment, REGISTRY, Severity, run_with};
+use super::super::{ContextUnavailable, DoctorRow, Environment, Severity, file_checks, native_path, run_with};
 use super::{ClaudineState, DarkmatterState, SemanticProblem, Unusable};
 
 const CLAUDINE: &str = ".claudine/config.yaml";
@@ -35,13 +35,13 @@ impl Fixture {
     }
 
     fn user(&self, name: &str, text: &str) -> PathBuf {
-        let path = self.home.join(name);
+        let path = self.home.join(native_path(name));
         std::fs::write(&path, text).unwrap();
         path
     }
 
     fn repository(&self, name: &str, text: &str) -> PathBuf {
-        let path = self.repo.join(name);
+        let path = self.repo.join(native_path(name));
         std::fs::write(&path, text).unwrap();
         path
     }
@@ -60,7 +60,7 @@ impl Fixture {
     }
 
     fn rows(&self) -> Vec<DoctorRow> {
-        run_with(&REGISTRY, &self.environment(), false)
+        run_with(file_checks(), &self.environment(), false)
     }
 
     /// Every entry under both roots with its bytes.
@@ -103,18 +103,20 @@ fn the_valid_control_passes_every_configuration_row() {
     let rows = fixture.rows();
     assert_row(&rows, "config", Severity::Ok, "every configuration file is valid");
     let config = row(&rows, "config");
-    assert!(config.detail.contains(&format!("{}: valid", fixture.home.join(CLAUDINE).display())), "{config:#?}");
+    assert!(config.detail.contains(&format!("{}: valid", fixture.home.join(native_path(CLAUDINE)).display())), "{config:#?}");
     assert!(config.detail.contains(&format!("{}: not present (optional)", fixture.repo.join(DARKMATTER).display())));
     assert_row(&rows, "repo-config", Severity::Info, "no repository configuration (it is optional)");
     assert_row(&rows, "stray-config-keys", Severity::Ok, "no unknown Claudine configuration keys");
-    assert!(rows.iter().all(|row| !row.fixable));
+    // The registration and permissions rows have repairs of their own; this
+    // fixture publishes no registration.
+    assert!(["config", "repo-config", "stray-config-keys"].iter().all(|id| !row(&rows, id).fixable));
 }
 
 #[test]
 fn an_inspection_writes_nothing_and_leaves_a_legacy_file_in_place() {
     let fixture = Fixture::new();
-    std::fs::remove_file(fixture.home.join(CLAUDINE)).unwrap();
-    std::fs::write(fixture.home.join(".claudine/config.json"), "{ logging: true }").unwrap();
+    std::fs::remove_file(fixture.home.join(native_path(CLAUDINE))).unwrap();
+    std::fs::write(fixture.home.join(native_path(".claudine/config.json")), "{ logging: true }").unwrap();
     fixture.repository(DARKMATTER, "bogus: 1\n");
     let before = fixture.tree();
     let rows = fixture.rows();
@@ -126,7 +128,7 @@ fn an_inspection_writes_nothing_and_leaves_a_legacy_file_in_place() {
 #[test]
 fn a_missing_user_file_is_an_error_with_the_setup_remedy() {
     let fixture = Fixture::new();
-    std::fs::remove_file(fixture.home.join(CLAUDINE)).unwrap();
+    std::fs::remove_file(fixture.home.join(native_path(CLAUDINE))).unwrap();
     std::fs::remove_file(fixture.home.join(DARKMATTER)).unwrap();
     let rows = fixture.rows();
     let config = row(&rows, "config");
@@ -141,7 +143,7 @@ fn a_missing_user_file_is_an_error_with_the_setup_remedy() {
 fn outside_a_repository_the_repository_rows_are_informational() {
     let fixture = Fixture::new();
     let environment = Environment::for_test(Some(fixture.home.clone()), Ok(fixture.context(None)));
-    let rows = run_with(&REGISTRY, &environment, false);
+    let rows = run_with(file_checks(), &environment, false);
     assert_row(&rows, "repo-config", Severity::Info, "not inside a repository");
     assert_row(&rows, "config", Severity::Ok, "every configuration file is valid");
 }
@@ -149,7 +151,7 @@ fn outside_a_repository_the_repository_rows_are_informational() {
 #[test]
 fn without_a_home_or_a_context_the_config_row_says_why_and_other_files_are_still_judged() {
     let fixture = Fixture::new();
-    let rows = run_with(&REGISTRY, &Environment::for_test(None, Err(ContextUnavailable)), false);
+    let rows = run_with(file_checks(), &Environment::for_test(None, Err(ContextUnavailable)), false);
     let config = row(&rows, "config");
     assert_eq!(config.severity, Severity::Error);
     assert!(config.detail.contains("the home directory cannot be located"), "{config:#?}");
@@ -158,7 +160,7 @@ fn without_a_home_or_a_context_the_config_row_says_why_and_other_files_are_still
 
     // With the home but no context, the Claudine user file is still read.
     fixture.user(CLAUDINE, "bogus: 1\n");
-    let rows = run_with(&REGISTRY, &Environment::for_test(Some(fixture.home.clone()), Err(ContextUnavailable)), false);
+    let rows = run_with(file_checks(), &Environment::for_test(Some(fixture.home.clone()), Err(ContextUnavailable)), false);
     assert_row(&rows, "stray-config-keys", Severity::Error, "unknown key `bogus`");
 }
 
@@ -343,7 +345,7 @@ fn override_null_inherits_and_empty_mappings_and_lists_follow_the_schema() {
         (true, "actions:\n  session_start:\n    - 3\n    - true\n", false),
     ] {
         fixture.user(CLAUDINE, "logging: true\n");
-        let _ = std::fs::remove_file(fixture.repo.join(CLAUDINE));
+        let _ = std::fs::remove_file(fixture.repo.join(native_path(CLAUDINE)));
         if scope_is_user {
             fixture.user(CLAUDINE, text);
         } else {
@@ -426,7 +428,7 @@ fn a_repository_at_the_home_is_judged_once_as_the_user_file() {
     let observations = super::observe(&environment);
     assert!(matches!(observations.claudine_repo.as_ref().unwrap().state, ClaudineState::AliasOfUser));
     assert!(matches!(observations.darkmatter_repo.as_ref().unwrap().state, DarkmatterState::AliasOfUser));
-    let rows = run_with(&REGISTRY, &environment, false);
+    let rows = run_with(file_checks(), &environment, false);
     assert_row(&rows, "repo-config", Severity::Ok, "is the user configuration");
     let stray = row(&rows, "stray-config-keys");
     assert_eq!(stray.detail.matches("unknown key `bogus`").count(), 1, "{stray:#?}");
@@ -437,12 +439,12 @@ fn a_repository_at_the_home_is_judged_once_as_the_user_file() {
 #[test]
 fn a_dangling_link_and_a_directory_are_unreadable_files() {
     let fixture = Fixture::new();
-    std::fs::remove_file(fixture.home.join(CLAUDINE)).unwrap();
-    std::os::unix::fs::symlink(fixture.home.join("nowhere.yaml"), fixture.home.join(CLAUDINE)).unwrap();
+    std::fs::remove_file(fixture.home.join(native_path(CLAUDINE))).unwrap();
+    std::os::unix::fs::symlink(fixture.home.join("nowhere.yaml"), fixture.home.join(native_path(CLAUDINE))).unwrap();
     std::fs::create_dir(fixture.repo.join(DARKMATTER)).unwrap();
     let rows = fixture.rows();
     let config = row(&rows, "config");
-    assert!(config.detail.contains(&format!("{}: is a symbolic link to nothing", fixture.home.join(CLAUDINE).display())));
+    assert!(config.detail.contains(&format!("{}: is a symbolic link to nothing", fixture.home.join(native_path(CLAUDINE)).display())));
     assert!(config.detail.contains(&format!("{}: is not a regular file", fixture.repo.join(DARKMATTER).display())));
 }
 

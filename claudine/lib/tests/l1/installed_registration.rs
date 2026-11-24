@@ -13,7 +13,8 @@ use std::sync::Arc;
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use claudine::composition::registration::{
     CleanupError, FileKind, LEGACY_MANIFEST_REFERENCE, MANIFEST_REFERENCE, Obstruction, PublishOutcome, PublishedFile,
-    RegistrationInventory, legacy_manifest_path, legacy_revisions_dir, manifest_path, output_root, publish,
+    PublishError, PublishHooks, RegistrationInventory, legacy_manifest_path, legacy_revisions_dir, manifest_path,
+    output_root, publish, publish_with,
 };
 use claudine::composition::{TriggerFindings, pre_validate_schema, resolve_composition_source_in_context};
 use claudine::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
@@ -846,6 +847,28 @@ fn installed_registration_failed_publication_leaves_a_legacy_home_untouched() {
 
     assert!(matches!(error, SetupError::Publish(_)), "{error}");
     assert_eq!(fixture.files(), before, "byte for byte");
+}
+
+#[test]
+fn installed_registration_setup_holds_the_publisher_lock_through_the_handoff() {
+    let fixture = Fixture::new();
+    with_legacy_registration(&fixture);
+    let home = fixture.home();
+    // Claudine's own write runs between the publish and the legacy cleanup;
+    // a publisher started there must find the lock taken.
+    let setup = setup_claudine(&fixture.context(), ConfigScope::User, |path| {
+        let mut observer = |_: &_| std::ops::ControlFlow::Continue(());
+        let hooks = PublishHooks { lock_deadline: std::time::Duration::from_millis(50), observer: &mut observer };
+        let concurrent = publish_with(&home, RegistrationInventory::claudine(), hooks);
+        assert!(matches!(concurrent, Err(PublishError::LockTimeout { .. })), "{concurrent:?}");
+        write_default(path)
+    })
+    .unwrap();
+
+    assert!(setup.cleanup.expect("cleanup ran").is_ok());
+    assert!(!legacy_manifest_path(&home).exists());
+    // Released once setup returns.
+    assert!(matches!(publish(&home, RegistrationInventory::claudine()), Ok(PublishOutcome::Current { .. })));
 }
 
 #[test]

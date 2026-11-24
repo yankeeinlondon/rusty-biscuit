@@ -34,7 +34,6 @@ use crate::error::ClaudineError;
 
 /// What the doctor knows about the configuration, read once per pass.
 #[derive(Debug)]
-#[cfg_attr(not(test), expect(dead_code, reason = "the speech and permissions checks read the typed configuration"))]
 pub(crate) struct ConfigObservations {
     pub(crate) home_available: bool,
     pub(crate) context_available: bool,
@@ -51,6 +50,7 @@ pub(crate) struct ConfigObservations {
     pub(crate) user_config: Result<ClaudineConfig, Unusable>,
     /// The user file with the repository overrides merged on top, judged
     /// again; the user file alone when there are no usable overrides.
+    #[cfg_attr(not(test), expect(dead_code, reason = "only tests read the merged configuration; the config row reports its semantic findings"))]
     pub(crate) effective_config: Result<ClaudineConfig, Unusable>,
     /// The semantic findings of the `config` row.
     semantic: Vec<Finding>,
@@ -497,7 +497,7 @@ fn unreadable_finding(unreadable: Unreadable, scope: Scope, path: &Path) -> Find
     Finding::new(Severity::Error, scope, summary).at(path).remedy("make it a readable file, or remove it")
 }
 
-fn io_kind(kind: std::io::ErrorKind) -> &'static str {
+pub(crate) fn io_kind(kind: std::io::ErrorKind) -> &'static str {
     match kind {
         std::io::ErrorKind::PermissionDenied => "permission denied",
         std::io::ErrorKind::InvalidData => "not valid text",

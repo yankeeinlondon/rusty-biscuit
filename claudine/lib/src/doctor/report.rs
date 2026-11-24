@@ -60,7 +60,6 @@ impl Finding {
     }
 
     #[must_use]
-    #[cfg_attr(not(test), expect(dead_code, reason = "the registration and permissions checks mark repairable findings"))]
     pub(crate) const fn fixable(mut self) -> Self {
         self.fixable = true;
         self

@@ -160,6 +160,36 @@ removed). `ClaudineSetup.{registration, cleanup}` carry both results; the
 CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
 `lib/tests/l1/installed_registration.rs` (migration section). User docs:
 [Schemas → published host registration](topics/schemas.md#the-published-host-registration).
+`setup_claudine` holds the publisher lock for the whole sequence
+(`composition::registration::Publisher`: `acquire`, `publish`,
+`finalize_legacy`; plain `publish` is one acquire plus one publish), lock
+order publisher then each configuration transaction's own locks. The
+`permissions` decision is shared with doctor: `config/setup.rs::
+plan_permissions_handoff(context, scope, HandoffMode::{Setup, Doctor}, …)`
+and `commit_permissions_handoff`; setup mode keeps setup's create-and-complete
+behavior through `init::setup_change`, doctor mode edits only `permissions`
+of existing valid files against their observed bytes (Claudine's block
+judged also by `darkmatter::config::init::check_referenced_permissions`).
+Doctor's registration repair is `composition/registration/repair.rs::
+repair_registration` (requires a valid existing user `.darkmatter.yaml`;
+preflight with the no-follow guard, publish, delete extras deepest first,
+verify, `init::replace_manifest_registration_existing`, verify, then legacy
+cleanup, all under one `Publisher`), with read-only inspection in
+`registration/inspect.rs` (`inspect_installation`; `config_target_blockers`
+is the no-follow guard both doctor writers use for a destination and its
+`LOCK_SUFFIX` sidecar). Claudine source may not call Darkmatter's
+installed-bundle loaders (`registrations_command.rs` guard), so a changed
+manifest is judged with `bundle::admit_manifest` plus digest checks.
+Doctor's two host rows never build an engine or run `claudine`:
+`doctor/tts.rs::assess(user_config, candidates)` reads enablement and the
+provider through `bridge_tts_settings` and judges biscuit-speaks' detected
+providers (a recognized name pins to that one, as `SpecificProvider` does);
+`doctor/path.rs::assess(current, shells)` judges
+`ExecutableIndex::build_path_only().find("claudine")` plus, on native
+Windows only, `sniff::programs::windows_shells::{detect, probe}` (a miss
+there is `warn`). Tests inject both slices; library tests of the file rows
+run `doctor::file_checks()` (the registry without `tts`/`path`) so no test
+starts a shell.
 `claudine setup` (`cli/src/commands/setup.rs`, outside `needs_config`, never
 prompts) is the repeatable route to all of this for a configured home, and
 the command Darkmatter's format 1 warning names; tests

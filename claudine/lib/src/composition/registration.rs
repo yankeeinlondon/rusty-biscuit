@@ -30,7 +30,8 @@
 //!   links. A symbolic link, a junction, or another reparse point is an
 //!   obstruction ([`PublishError::Obstructed`]): the publish stops, and the
 //!   link and its target are left alone. The examination is repeated under
-//!   the lock.
+//!   the lock, and for each destination again just before it is written or
+//!   removed.
 //! - **Serialized.** Cooperating publishers (threads or processes) take one
 //!   OS file lock, [`lock_path`], waiting at most [`LOCK_DEADLINE`].
 //! - **Members, then the manifest.** Under the lock, each member whose bytes
@@ -43,7 +44,11 @@
 //!   files named with [`TEMP_PREFIX`] in a publisher directory (leftovers
 //!   of an interrupted replacement) are removed. The manifest is replaced last, and only when its bytes differ.
 //! - **Unknown files are kept.** Anything else in the output root is not
-//!   the publisher's to remove; doctor reports it.
+//!   a publish's to remove; doctor reports it, and only doctor's explicit
+//!   repair (`repair_registration`) removes it.
+//! - **One lock across steps.** `Publisher` holds the lock for a caller
+//!   that publishes and then does more under it (doctor's repair: verify,
+//!   edit the user `register` entry, verify, remove the retired layout).
 //! - **No-op.** A publish of what is already installed writes nothing, so
 //!   every file keeps its modification time ([`PublishOutcome::Current`]).
 //!
@@ -331,8 +336,7 @@ pub struct PublishHooks<'a> {
 /// is written), a lock held past [`LOCK_DEADLINE`], or a failed file-system
 /// operation. The previous manifest stays in place in every case.
 pub fn publish(home: &Path, inventory: &RegistrationInventory) -> Result<PublishOutcome, PublishError> {
-    let mut observer = |_: &PublishStep| ControlFlow::Continue(());
-    publish_with(home, inventory, PublishHooks { lock_deadline: LOCK_DEADLINE, observer: &mut observer })
+    Publisher::acquire(home, inventory)?.publish(inventory)
 }
 
 /// [`publish`] with a lock deadline and an observer, for tests that hold
@@ -348,64 +352,141 @@ pub fn publish_with(
     inventory: &RegistrationInventory,
     hooks: PublishHooks<'_>,
 ) -> Result<PublishOutcome, PublishError> {
-    if let Some((path, reason)) = inventory.invalid_path() {
-        return Err(PublishError::InvalidPath { path: path.to_string(), reason });
-    }
-    let layout = Layout::new(home);
-    // Before anything is created, the lock file and its folder included.
-    layout.preflight(inventory)?;
-    access_log::note("create", &layout.registrations());
-    fs::create_dir_all(layout.registrations()).map_err(io_error("create", &layout.registrations()))?;
-    let _lock = acquire_lock(&lock_path(home), hooks.lock_deadline)?;
-    // Another publisher may have changed the tree while this one waited.
-    let plan = layout.preflight(inventory)?;
-    let observer = hooks.observer;
-    let stop = |step: PublishStep, observer: &mut dyn FnMut(&PublishStep) -> ControlFlow<()>| match observer(&step) {
-        ControlFlow::Continue(()) => Ok(()),
-        ControlFlow::Break(()) => Err(PublishError::Interrupted { step: format!("{step:?}") }),
-    };
-    stop(PublishStep::Locked, observer)?;
+    Publisher::acquire_with(home, inventory, hooks.lock_deadline)?.publish_observed(inventory, hooks.observer)
+}
 
-    let mut changes = PublishChanges::default();
-    for directory in &plan.directories {
-        changes.removed_temps.extend(remove_temps(directory)?);
-    }
-    for file in inventory.members() {
-        let destination = layout.destination(file.path());
-        if holds(&destination, file.bytes())? {
-            continue;
-        }
-        access_log::note("write", &destination);
-        atomic_write_registration(&destination, file.bytes()).map_err(io_error("write", &destination))?;
-        changes.written.push(file.path().to_string());
-        stop(PublishStep::MemberWritten(file.path().to_string()), observer)?;
-    }
-    for path in &plan.retired {
-        let destination = layout.destination(path);
-        access_log::note("remove", &destination);
-        match fs::remove_file(&destination) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(io_error("remove", &destination)(error)),
-        }
-        remove_empty_parents(&layout, path, inventory);
-        changes.retired.push(path.clone());
-        stop(PublishStep::Retired(path.clone()), observer)?;
-    }
-    stop(PublishStep::BeforeManifest, observer)?;
-    let manifest = layout.destination(MANIFEST_FILE);
-    if !holds(&manifest, inventory.manifest().bytes())? {
-        access_log::note("write", &manifest);
-        atomic_write_registration(&manifest, inventory.manifest().bytes()).map_err(io_error("write", &manifest))?;
-        changes.written.push(MANIFEST_FILE.to_string());
+/// The publisher lock, held, with the layout it guards: every operation a
+/// caller runs through one `Publisher` is serialized with every other
+/// publisher until it is dropped.
+///
+/// [`publish`] is one acquire and one [`Self::publish`]. A caller that must
+/// keep other publishers out across several steps (doctor's repair: publish,
+/// verify, edit the `register` entry, verify, remove the retired layout)
+/// keeps the value for all of them. Setup does the same
+/// (`config::setup::setup_claudine`): `acquire`, `publish`, its permissions
+/// handoff and `register` edit, then [`Self::finalize_legacy`] only when that
+/// edit succeeded.
+pub(crate) struct Publisher {
+    layout: Layout,
+    _lock: PublisherLock,
+}
+
+impl Publisher {
+    /// Takes the publisher lock under `home`, waiting at most
+    /// [`LOCK_DEADLINE`], after the preflight of `inventory`'s tree found
+    /// nothing in the way; the lock's folder is the only thing created.
+    pub(crate) fn acquire(home: &Path, inventory: &RegistrationInventory) -> Result<Self, PublishError> {
+        Self::acquire_with(home, inventory, LOCK_DEADLINE)
     }
 
-    if changes.is_empty() {
-        tracing::debug!(manifest = %manifest.display(), "the host registration is current");
-        Ok(PublishOutcome::Current { manifest })
-    } else {
-        tracing::debug!(manifest = %manifest.display(), ?changes, "published the host registration");
-        Ok(PublishOutcome::Published { manifest, changes })
+    fn acquire_with(
+        home: &Path,
+        inventory: &RegistrationInventory,
+        deadline: Duration,
+    ) -> Result<Self, PublishError> {
+        if let Some((path, reason)) = inventory.invalid_path() {
+            return Err(PublishError::InvalidPath { path: path.to_string(), reason });
+        }
+        let layout = Layout::new(home);
+        // Before anything is created, the lock file and its folder included.
+        layout.preflight(inventory)?;
+        access_log::note("create", &layout.registrations());
+        fs::create_dir_all(layout.registrations()).map_err(io_error("create", &layout.registrations()))?;
+        let lock = acquire_lock(&lock_path(home), deadline)?;
+        Ok(Self { layout, _lock: lock })
+    }
+
+    /// The home this publisher writes under.
+    fn home(&self) -> &Path {
+        &self.layout.home
+    }
+
+    /// Publishes `inventory` under the held lock, as [`publish`] describes.
+    pub(crate) fn publish(&self, inventory: &RegistrationInventory) -> Result<PublishOutcome, PublishError> {
+        self.publish_observed(inventory, &mut |_: &PublishStep| ControlFlow::Continue(()))
+    }
+
+    fn publish_observed(
+        &self,
+        inventory: &RegistrationInventory,
+        observer: &mut dyn FnMut(&PublishStep) -> ControlFlow<()>,
+    ) -> Result<PublishOutcome, PublishError> {
+        let mut changes = PublishChanges::default();
+        let manifest = self.publish_into(inventory, observer, &mut changes)?;
+        if changes.is_empty() {
+            tracing::debug!(manifest = %manifest.display(), "the host registration is current");
+            Ok(PublishOutcome::Current { manifest })
+        } else {
+            tracing::debug!(manifest = %manifest.display(), ?changes, "published the host registration");
+            Ok(PublishOutcome::Published { manifest, changes })
+        }
+    }
+
+    /// The publish itself, recording each change in `changes` as it is
+    /// made, so a caller still knows what changed when it fails partway.
+    /// Returns the manifest path.
+    fn publish_into(
+        &self,
+        inventory: &RegistrationInventory,
+        observer: &mut dyn FnMut(&PublishStep) -> ControlFlow<()>,
+        changes: &mut PublishChanges,
+    ) -> Result<PathBuf, PublishError> {
+        let layout = &self.layout;
+        // Another publisher may have changed the tree while this one waited.
+        let plan = layout.preflight(inventory)?;
+        let mut stop = |step: PublishStep| match observer(&step) {
+            ControlFlow::Continue(()) => Ok(()),
+            ControlFlow::Break(()) => Err(PublishError::Interrupted { step: format!("{step:?}") }),
+        };
+        stop(PublishStep::Locked)?;
+
+        for directory in &plan.directories {
+            changes.removed_temps.extend(remove_temps(directory)?);
+        }
+        for file in inventory.members() {
+            let destination = layout.destination(file.path());
+            if holds(&destination, file.bytes())? {
+                continue;
+            }
+            // The preflight is repeated at each mutation: a link created
+            // since is refused, never written through.
+            layout.writable(&Layout::output_names(file.path()))?;
+            access_log::note("write", &destination);
+            atomic_write_registration(&destination, file.bytes()).map_err(io_error("write", &destination))?;
+            changes.written.push(file.path().to_string());
+            stop(PublishStep::MemberWritten(file.path().to_string()))?;
+        }
+        for path in &plan.retired {
+            let destination = layout.destination(path);
+            if layout.route(&Layout::output_names(path))? != Entry::File {
+                continue;
+            }
+            access_log::note("remove", &destination);
+            match fs::remove_file(&destination) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(io_error("remove", &destination)(error)),
+            }
+            remove_empty_parents(layout, path, inventory);
+            changes.retired.push(path.clone());
+            stop(PublishStep::Retired(path.clone()))?;
+        }
+        stop(PublishStep::BeforeManifest)?;
+        let manifest = layout.destination(MANIFEST_FILE);
+        if !holds(&manifest, inventory.manifest().bytes())? {
+            layout.writable(&Layout::output_names(MANIFEST_FILE))?;
+            access_log::note("write", &manifest);
+            atomic_write_registration(&manifest, inventory.manifest().bytes()).map_err(io_error("write", &manifest))?;
+            changes.written.push(MANIFEST_FILE.to_string());
+        }
+        Ok(manifest)
+    }
+
+    /// Removes the retired format 1 registration
+    /// ([`remove_legacy_registration`]) while the lock is held. Call it only
+    /// once the user `register` entry names the new manifest.
+    pub(crate) fn finalize_legacy(&self) -> Result<LegacyCleanup, CleanupError> {
+        remove_legacy_registration(&self.layout.home)
     }
 }
 
@@ -706,9 +787,16 @@ fn previous_member_paths(path: &Path, bytes: &[u8]) -> Option<Vec<String>> {
 }
 
 mod access_log;
+mod inspect;
 mod legacy;
+mod repair;
 
+pub(crate) use inspect::{
+    Blocker, BlockerProblem, EntryPrecondition, ExpectedState, Installation, ManifestLoad,
+    config_target_blockers, entry_precondition, entry_registered, inspect_installation,
+};
 pub use legacy::{CleanupError, LegacyCleanup, remove_legacy_registration};
+pub(crate) use repair::{EditFailure, RepairFailure, RepairOperation, repair_registration};
 
 #[cfg(test)]
 mod tests {
