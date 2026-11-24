@@ -214,22 +214,33 @@ registration carries.
     - ~/.claudine/registrations/darkmatter/manifest.yaml
 ```
 
-- **Setup order.** Setup publishes first (a failed publish stops setup
-  before anything else is written), then writes Claudine's config and the
-  `permissions` handshake, then adds the `register` entry (replacing the old
-  `~/.claudine/darkmatter-host.yaml` entry if there is one), then deletes the
-  old `~/.claudine/darkmatter-host*` files. It never edits a repository's
+- **Setup order and upgrades.** Setup publishes the format 3 bundle first
+  (upgrading an older format 1 or format 2 installation in place, writing
+  `manifest.yaml` last; a failed publish stops setup before anything else is
+  written), then writes Claudine's config and the `permissions` handshake,
+  then adds the `register` entry (replacing the old
+  `~/.claudine/darkmatter-host.yaml` entry if there is one, while keeping
+  unrelated entries and comments), then deletes the old
+  `~/.claudine/darkmatter-host*` files. It never edits a repository's
   `.darkmatter.yaml`.
-- **Don't edit the published files.** `md` and DMLS check each one against
-  the manifest's digest; one edited, missing, or half-written file makes
-  them refuse the whole registration with a `dm.host.registration` warning.
-  `claudine` runs are unaffected, since they use the built-in copy.
-- **Repair or refresh** with `claudine registrations publish` (hidden from
-  `--help`). It rewrites only the files that differ, writes the manifest
-  last, prints the file list as JSON, and never edits `~/.darkmatter.yaml`.
-  `just install` runs it for you. If the `register` entry itself is gone,
-  add it back by hand. `claudine registrations` (no argument) lists what the
-  binary would publish.
+- **Don't edit the published files.** `md` and DMLS check each member (and
+  any derived `.facts.json` companion) against the format 3 manifest's
+  digest; one edited, missing, or half-written file makes them refuse the
+  whole registration with a `dm.host.registration` warning. `claudine doctor`
+  reports a missing file or companion (or an unsupported manifest format
+  version) as an `error` and a modified file or companion as a `warn`;
+  `claudine doctor --fix` restores them in place. `claudine` runs are
+  unaffected, since they use the built-in copy.
+- **Inspect or republish** with `claudine registrations` (hidden from
+  `--help`). With no argument it lists every inventory entry as JSON
+  (`kind`, `filepath`, 16-digit XXH64 `hash`, and optional `name`), covering
+  `manifest`, `lifecycle`, `schema-trigger`, `schema`, `yaml-schema`,
+  `namespace-schema`, `expression-schema`, `mutation-schema`, and
+  `expression-facts`. `claudine registrations publish` rewrites only the
+  files that differ, writes `manifest.yaml` last, prints the file list as
+  JSON, and never edits `~/.darkmatter.yaml`. `just install` runs it for
+  you. If the `register` entry itself is gone, run `claudine doctor --fix`
+  or add it back by hand.
 - **Change a Claudine key's type** with a `kind: schema-trigger` file in a
   schema location (`SCHEMAS_DIR`, a `schemas/` folder, or `~/schemas`) or
   with the document's own `$schema`. Both apply above Claudine's schemas. A

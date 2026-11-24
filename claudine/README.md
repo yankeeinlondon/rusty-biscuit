@@ -259,7 +259,8 @@ just install_claudine
 claudine hooks
 ```
 
-Setup also registers Claudine's schemas with Darkmatter, so `md` and the DMLS editor
+Setup also registers Claudine's format 3 schema bundle with Darkmatter (upgrading
+any older format 1 or format 2 installation in place), so `md` and the DMLS editor
 integration recognize and check Claudine documents in any folder; see
 [The published host registration](./docs/topics/schemas.md#the-published-host-registration).
 
@@ -304,7 +305,8 @@ Run `claudine doctor` when something does not work as expected. It checks
 your configuration files, the schemas Claudine registers with Darkmatter,
 the permissions handoff, speech, and whether `claudine` is on your `PATH`,
 and prints a remedy for every problem (exit status `1` while an error
-remains). `claudine doctor --fix` repairs the registration and the
+remains). `claudine doctor --fix` repairs the registration (upgrading older manifest
+versions in place and restoring missing or modified files) and the
 permissions handoff, and `--json` prints the report for scripts. See
 [`claudine doctor`](./docs/cli/doctor.md).
 

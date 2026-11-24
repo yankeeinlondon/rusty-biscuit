@@ -169,10 +169,13 @@ Reports never show configuration values or permission contents.
 - `--json` prints one array of `{id, severity, summary, detail, fixable}`
   objects; branch on `id`, `severity`, and `fixable`, not on the wording.
 - `--fix` repairs only two rows: `registration` (republishes Claudine's
-  schema files under `~/.claudine/registrations/darkmatter/`, writes the
-  `register` entry in an existing `~/.darkmatter.yaml` and drops any entry
-  still naming the format 1 manifest, even after its file was deleted, then
-  removes the format 1 `~/.claudine/darkmatter-host*` files) and
+  format 3 schema bundle under `~/.claudine/registrations/darkmatter/` —
+  upgrading an older format 1 or format 2 installation in place, writing
+  `manifest.yaml` last, and restoring missing or modified members including
+  any derived `expression-facts` companion — writes the `register` entry in
+  an existing `~/.darkmatter.yaml` and drops any entry still naming the
+  format 1 manifest, even after its file was deleted, then removes the
+  format 1 `~/.claudine/darkmatter-host*` files) and
   `darkmatter-permissions` (moves an inline `permissions` block from
   `~/.darkmatter.yaml` into Claudine's file, as `claudine setup` does). The
   exit status reflects the state after the repairs, and a second `--fix`

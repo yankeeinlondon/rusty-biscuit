@@ -129,7 +129,8 @@ if let InferenceData::Prose(text) = resp.data { println!("{text}"); }
 
 | Module | What it has |
 |---|---|
-| `claudine::composition` | preparation, the source resolution used above, sequence models |
+| `claudine::composition` | preparation, the source resolution used above, sequence models, and `registration` (format 3 host registration inventory and publisher) |
+| `claudine::doctor` | non-interactive setup inspection and `--fix` repair (configuration, format 3 registration, permissions handoff) |
 | `claudine::config` | reading `~/.claudine/config.yaml` and the repo config |
 | `claudine::linking` | skill, command, and agent discovery and linking |
 | `claudine::mcp` | the MCP catalog |

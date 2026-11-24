@@ -1631,6 +1631,8 @@ companion (`expression-facts`) today; when an inventory includes an
 `expression-schema` catalog, its generated `.facts.json` companion sits
 beside it in `digests` (never in `files`) and is verified through
 Darkmatter's shared bundle preparation before anything is published.
+The inventory reserves `manifest.yaml` for the file it generates. It rejects
+any supplied member or companion with that name, regardless of ASCII case.
 `kind: mutation-schema` members are refused for host publication
 (`host-defined actions are not supported`).
 
