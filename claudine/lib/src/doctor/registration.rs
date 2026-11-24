@@ -33,6 +33,10 @@ use crate::composition::registration::{
 const FIX: &str = "run `claudine doctor --fix`";
 
 pub(crate) fn check_registration(pass: &Pass<'_>) -> CheckOutcome {
+    check_registration_with(pass, RegistrationInventory::claudine())
+}
+
+pub(crate) fn check_registration_with(pass: &Pass<'_>, inventory: &RegistrationInventory) -> CheckOutcome {
     let environment = pass.environment();
     let Some(home) = environment.home() else {
         return CheckOutcome::from(vec![Finding::new(
@@ -42,8 +46,7 @@ pub(crate) fn check_registration(pass: &Pass<'_>) -> CheckOutcome {
         )]);
     };
     let darkmatter = &pass.config().darkmatter_user;
-    let mut installation =
-        publisher::inspect_installation(home, darkmatter.path.as_deref(), RegistrationInventory::claudine());
+    let mut installation = publisher::inspect_installation(home, darkmatter.path.as_deref(), inventory);
     if let Ok(context) = environment.context() {
         installation.judge_manifest(home, context);
     }
@@ -80,7 +83,15 @@ pub(crate) fn check_registration(pass: &Pass<'_>) -> CheckOutcome {
         manual.push(finding);
     }
     for finding in repairable {
-        outcome.push(if eligible { finding.remedy(FIX).fixable() } else { finding });
+        outcome.push(if eligible {
+            if finding.remedy.is_some() {
+                finding.remedy("update Darkmatter and Claudine, then run `claudine doctor --fix` to republish the registration").fixable()
+            } else {
+                finding.remedy(FIX).fixable()
+            }
+        } else {
+            finding
+        });
     }
     for finding in manual {
         outcome.push(finding);
@@ -120,7 +131,7 @@ fn disk_findings(installation: &Installation) -> Vec<Finding> {
                 (ExpectedState::Changed, false) => {
                     let finding = Finding::new(Severity::Warn, Scope::User, "differs from the file this Claudine publishes");
                     if file.digest_mismatch {
-                        finding.note("its bytes do not match the manifest's digest, which Darkmatter's format 2 loader refuses, so the host is not loaded until it is republished")
+                        finding.note("its bytes do not match the manifest's digest, which Darkmatter's format 3 loader refuses, so the host is not loaded until it is republished")
                     } else {
                         finding
                     }
@@ -132,6 +143,12 @@ fn disk_findings(installation: &Installation) -> Vec<Finding> {
                         "the manifest differs from the one this Claudine publishes",
                     )
                     .note("Darkmatter still loads the bundle it lists as Claudine's registration"),
+                    Some(ManifestLoad::UnsupportedFormat { version }) => Finding::new(
+                        Severity::Error,
+                        Scope::User,
+                        format!("the manifest uses unsupported host registration format version {version} and Darkmatter refuses it"),
+                    )
+                    .remedy("update Darkmatter and Claudine, then republish the registration"),
                     Some(ManifestLoad::Refused { at }) => {
                         let finding = Finding::new(
                             Severity::Error,
@@ -319,13 +336,17 @@ fn past(operation: &str) -> &'static str {
 }
 
 pub(crate) fn repair_registration(pass: &Pass<'_>) -> RepairOutcome {
+    repair_registration_with(pass, RegistrationInventory::claudine())
+}
+
+pub(crate) fn repair_registration_with(pass: &Pass<'_>, inventory: &RegistrationInventory) -> RepairOutcome {
     let Ok(context) = pass.environment().context() else {
         return RepairOutcome {
             changes: Vec::new(),
             failure: Some(precondition_text(EntryPrecondition::NoContext)),
         };
     };
-    let repair = publisher::repair_registration(context, RegistrationInventory::claudine());
+    let repair = publisher::repair_registration(context, inventory);
     RepairOutcome {
         changes: repair.operations.iter().map(operation_text).collect(),
         failure: repair.failure.as_ref().map(failure_text),

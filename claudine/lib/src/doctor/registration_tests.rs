@@ -201,7 +201,7 @@ fn a_changed_manifest_darkmatter_still_loads_is_a_warning_and_one_it_refuses_an_
     fixture.publish(&RegistrationInventory::claudine().clone().with_version("0.0.0-elsewhere"));
     assert_row(&fixture.check(), Severity::Warn, true, "Darkmatter still loads the bundle it lists as Claudine's registration");
 
-    std::fs::write(fixture.root().join("manifest.yaml"), "kind: darkmatter-host\nformat_version: 2\nhost: someone-else\n").unwrap();
+    std::fs::write(fixture.root().join("manifest.yaml"), "kind: darkmatter-host\nformat_version: 3\nhost: someone-else\n").unwrap();
     assert_row(&fixture.check(), Severity::Error, true, "Darkmatter refuses the bundle it lists as Claudine's registration");
 
     assert_repaired(&fixture, &fixture.fix());
@@ -1054,4 +1054,202 @@ mod obstructions {
         std::os::unix::fs::symlink(outside.join("lock"), &link).unwrap();
         assert_manual(&fixture, &link, &outside);
     }
+}
+
+// ------------------------------------------------- v2 upgrade & companions
+
+fn copy_tree(source: &Path, destination: &Path) {
+    std::fs::create_dir_all(destination).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+fn load_installed_profile(
+    root: &Path,
+    context: &biscuit_file::FileResolutionContext,
+) -> darkmatter::config::registration::RegisteredHostProfile {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use darkmatter::config::registration::{bundle, load_verified, md_owned_names};
+
+    let manifest_path = root.join("manifest.yaml");
+    let manifest_bytes = std::fs::read(&manifest_path).expect("manifest is readable");
+    let admitted = bundle::admit_installed_manifest(&manifest_path, &manifest_bytes, context)
+        .expect("installed manifest is admitted as format 3");
+    let mut members: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
+    for member in admitted.members() {
+        let bytes = std::fs::read(root.join(native_path(&member.path))).expect("member is readable");
+        members.insert(member.path.clone(), Arc::from(bytes));
+    }
+    let snapshot = bundle::verify_read(&manifest_path, &manifest_bytes, context, &members)
+        .expect("installed bundle verifies");
+    load_verified(snapshot, context, md_owned_names()).expect("installed bundle loads as a profile")
+}
+
+#[test]
+fn an_unsupported_v2_manifest_is_a_fixable_error_with_update_and_republish_remedy() {
+    let v2_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter");
+    let fixture = Fixture::empty();
+    copy_tree(&v2_source, &fixture.root());
+    // Equivalent spelling, unrelated host entry, and comments preserved.
+    let config = format!(
+        "# user config\nregister:\n    # third-party host\n    - ~/.acme/manifest.yaml # kept\n    - {}\n",
+        fixture.root().join("manifest.yaml").display()
+    );
+    fixture.config(&config);
+
+    let before_fix = fixture.check();
+    assert_row(&before_fix, Severity::Error, true, "unsupported host registration format version 2");
+    assert!(
+        before_fix.detail.contains("update Darkmatter and Claudine") && before_fix.detail.contains("republish"),
+        "{before_fix:#?}"
+    );
+
+    let fixed = fixture.fix();
+    assert_repaired(&fixture, &fixed);
+    let written: Vec<&str> = fixed.detail.lines().filter(|line| line.starts_with("Repaired: wrote ")).collect();
+    assert_eq!(
+        written.last().copied(),
+        Some(format!("Repaired: wrote {}", fixture.root().join("manifest.yaml").display()).as_str()),
+        "manifest written last: {written:#?}"
+    );
+    let expected_config = format!(
+        "# user config\nregister:\n    # third-party host\n    - ~/.acme/manifest.yaml # kept\n    - {ENTRY}\n"
+    );
+    assert_eq!(fixture.config_text(), expected_config, "equivalent register entry normalized in place; unrelated entry and comments preserved");
+
+    // Darkmatter accepts the upgraded v3 profile.
+    let context = fixture.environment().context().unwrap().clone();
+    let profile = load_installed_profile(&fixture.root(), &context);
+    assert_eq!(profile.host(), "claudine");
+
+    // A second repair with current bytes makes no change.
+    let snapshot_before = fixture.snapshot();
+    let repeat = fixture.fix();
+    assert_row(&repeat, Severity::Ok, false, "the registration is published and registered");
+    assert_eq!(fixture.snapshot(), snapshot_before, "second repair writes nothing");
+}
+
+#[test]
+fn companion_fixture_missing_companion_errors_modified_warns_and_repair_restores_agreement() {
+    use std::borrow::Cow;
+    use std::sync::{Arc, OnceLock};
+
+    use darkmatter::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
+    use serde_json::json;
+    use simplified_schema::coercion::ValueKind;
+
+    use crate::composition::inventory;
+
+    const PROJECT_CATALOG: &str = "\
+kind: expression-schema
+categories:
+    - Project -> Project helpers.
+types:
+    project_double: |-
+        function(
+            parameters(n: number);
+            returns(number);
+            category(Project);
+        ) -> Doubles a project number.
+";
+    const PROJECT_TRIGGER: &str = "\
+kind: schema-trigger
+name: project-doc
+match:
+    - project: string(required)
+$schema:
+    project: string
+";
+
+    fn companion_inventory() -> &'static RegistrationInventory {
+        static INVENTORY: OnceLock<RegistrationInventory> = OnceLock::new();
+        INVENTORY.get_or_init(|| {
+            let catalog =
+                HostFunctionCatalog::load(PROJECT_CATALOG, "schemas/project.yaml").expect("project catalog loads");
+            let facts = HostFunctions::builder(catalog)
+                .function(
+                    "project_double",
+                    &["double_project"],
+                    |reg| reg.reject_sources("n", &[ValueKind::Text]),
+                    Arc::new(|call| Ok(json!(call.args().number(0).unwrap_or(0.0) * 2.0))),
+                )
+                .build()
+                .expect("project functions build")
+                .facts_artifact();
+            let mut sources: Vec<(Cow<'static, str>, Cow<'static, [u8]>)> =
+                inventory::members_of(inventory::MemberKind::Namespace)
+                    .map(|member| (Cow::Owned(member.bundle_path()), Cow::Borrowed(member.bytes())))
+                    .collect();
+            sources.push((Cow::Borrowed("schemas/project-trigger.yaml"), Cow::Borrowed(PROJECT_TRIGGER.as_bytes())));
+            sources.push((Cow::Borrowed("schemas/project.yaml"), Cow::Borrowed(PROJECT_CATALOG.as_bytes())));
+            RegistrationInventory::from_embedded_sources(
+                "1.2.3",
+                sources,
+                inventory::LIFECYCLE_ARTIFACT,
+                [(Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(facts.into_bytes()))],
+            )
+            .expect("companion fixture inventory verifies")
+        })
+    }
+
+    fn check_companion(pass: &super::super::Pass<'_>) -> super::super::CheckOutcome {
+        super::check_registration_with(pass, companion_inventory())
+    }
+
+    fn repair_companion(pass: &super::super::Pass<'_>) -> super::super::RepairOutcome {
+        super::repair_registration_with(pass, companion_inventory())
+    }
+
+    static COMPANION_CHECK: [CheckDescriptor; 1] = [CheckDescriptor {
+        id: "registration",
+        title: "Darkmatter host registration",
+        prerequisites: &[],
+        check: check_companion,
+        repair: Some(repair_companion),
+    }];
+
+    let fixture = Fixture::empty();
+    let inv = companion_inventory();
+    fixture.publish(inv);
+    fixture.config(&format!("# my settings\nregister:\n    - {ENTRY}\n"));
+
+    let check = || row(run_with(&COMPANION_CHECK, &fixture.environment(), false));
+    let fix = || row(run_with(&COMPANION_CHECK, &fixture.environment(), true));
+
+    assert_row(&check(), Severity::Ok, false, "the registration is published and registered");
+
+    // Modified present companion bytes with unchanged manifest -> warning with digest note.
+    let companion_path = fixture.root().join(native_path("schemas/project.facts.json"));
+    let manifest_before = std::fs::read(fixture.root().join("manifest.yaml")).unwrap();
+    std::fs::write(&companion_path, "{}\n").unwrap();
+    let modified = check();
+    assert_row(&modified, Severity::Warn, true, "differs from the file this Claudine publishes");
+    assert!(modified.detail.contains("its bytes do not match the manifest's digest"), "{modified:#?}");
+    assert_eq!(std::fs::read(fixture.root().join("manifest.yaml")).unwrap(), manifest_before);
+
+    // Missing companion -> error.
+    std::fs::remove_file(&companion_path).unwrap();
+    let missing = check();
+    assert_row(&missing, Severity::Error, true, &format!("{}: is missing", companion_path.display()));
+
+    // Repair via the production repair callback restores exact bytes and Darkmatter agreement.
+    let repaired = fix();
+    assert_row(&repaired, Severity::Ok, false, "Repaired:");
+    assert_row(&check(), Severity::Ok, false, "the registration is published and registered");
+    for file in inv.files() {
+        let on_disk = std::fs::read(fixture.root().join(native_path(file.path()))).unwrap();
+        assert_eq!(on_disk, file.bytes(), "installed bytes match listing for {}", file.path());
+    }
+    let context = fixture.environment().context().unwrap().clone();
+    let profile = load_installed_profile(&fixture.root(), &context);
+    assert_eq!(profile.functions().len(), 1);
 }

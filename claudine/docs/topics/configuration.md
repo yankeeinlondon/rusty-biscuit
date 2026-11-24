@@ -271,9 +271,11 @@ removed once the entry is written. The entry is written even when the
 
 Setup runs on the first `claudine` command that finds no configuration,
 and whenever you run [`claudine setup`](../cli/setup.md). The command is how
-an existing install moves from the old registration to the new one: it never
-asks a question, keeps every setting you wrote, and changes nothing when run
-again.
+an existing install moves from an earlier registration format (the retired
+format 1 layout or an older format 2 manifest at the fixed path) to the
+current format 3 manifest in place: it writes members first and the manifest
+last, never asks a question, keeps every setting, unrelated `register`
+entry, and comment you wrote, and changes nothing when run again.
 
 ```sh
 claudine setup

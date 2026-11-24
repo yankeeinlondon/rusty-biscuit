@@ -128,4 +128,25 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn callable_and_companion_kinds_format_with_xxh64_fingerprints() {
+        use claudine::composition::registration::FileKind;
+        for (kind, expected_kind, path, bytes) in [
+            (FileKind::ExpressionSchema, "expression-schema", "schemas/project.yaml", b"kind: expression-schema\n".as_slice()),
+            (FileKind::MutationSchema, "mutation-schema", "schemas/actions.yaml", b"kind: mutation-schema\n".as_slice()),
+            (FileKind::ExpressionFacts, "expression-facts", "schemas/project.facts.json", b"{}\n".as_slice()),
+        ] {
+            let file = PublishedFile::new(path, kind, None::<&str>, bytes);
+            let value = serde_json::to_value(FileView::of(&file)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    "kind": expected_kind,
+                    "filepath": path,
+                    "hash": format!("{:016x}", xx_hash_bytes(bytes)),
+                })
+            );
+        }
+    }
 }

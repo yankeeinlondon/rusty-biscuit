@@ -627,3 +627,229 @@ fn host_publication_a_previous_manifest_that_fails_admission_retires_nothing() {
     assert!(removed.is_empty(), "an inadmissible previous manifest authorized a removal: {removed:?}");
     home.assert_loads(RegistrationInventory::claudine());
 }
+
+mod companion_inventory {
+    use std::borrow::Cow;
+    use std::sync::Arc;
+
+    use biscuit_hash::xx_hash_bytes;
+    use claudine::composition::inventory;
+    use darkmatter::markdown::compose::expression::{
+        DeclaredTypes, HostFunctionCatalog, HostFunctions, TypeScope, check_expression_calls, parse_spanned,
+    };
+    use serde_json::json;
+    use simplified_schema::coercion::ValueKind;
+    use simplified_schema::member_envelope::MUTATION_REFUSAL;
+
+    use super::*;
+
+    const PROJECT_CATALOG: &str = "\
+kind: expression-schema
+categories:
+    - Project -> Project helpers.
+types:
+    project_double: |-
+        function(
+            parameters(n: number);
+            returns(number);
+            category(Project);
+        ) -> Doubles a project number.
+";
+
+    const PROJECT_TRIGGER: &str = "\
+kind: schema-trigger
+name: project-doc
+match:
+    - project: string(required)
+$schema:
+    project: string
+";
+
+    const MUTATION_CATALOG: &str = "\
+kind: mutation-schema
+categories:
+    - Ops -> Operations.
+types:
+    do_thing: |-
+        function(
+            parameters(x: string);
+            returns(null);
+            category(Ops);
+        ) -> Do a thing.
+";
+
+    fn project_facts(catalog_text: &str) -> String {
+        let catalog =
+            HostFunctionCatalog::load(catalog_text, "schemas/project.yaml").expect("the project catalog loads");
+        HostFunctions::builder(catalog)
+            .function(
+                "project_double",
+                &["double_project"],
+                |registration| registration.reject_sources("n", &[ValueKind::Text]),
+                Arc::new(|call| Ok(json!(call.args().number(0).unwrap_or(0.0) * 2.0))),
+            )
+            .build()
+            .expect("the project functions build")
+            .facts_artifact()
+    }
+
+    fn base_yaml_sources() -> Vec<(Cow<'static, str>, Cow<'static, [u8]>)> {
+        let mut sources: Vec<(Cow<'static, str>, Cow<'static, [u8]>)> = inventory::members_of(inventory::MemberKind::Namespace)
+            .map(|member| (Cow::Owned(member.bundle_path()), Cow::Borrowed(member.bytes())))
+            .collect();
+        sources.push((Cow::Borrowed("schemas/project-trigger.yaml"), Cow::Borrowed(PROJECT_TRIGGER.as_bytes())));
+        sources.push((Cow::Borrowed("schemas/project.yaml"), Cow::Borrowed(PROJECT_CATALOG.as_bytes())));
+        sources
+    }
+
+    #[test]
+    fn companion_inventory_publishes_lists_and_republishes_without_changing_mtimes() {
+        let facts = project_facts(PROJECT_CATALOG);
+        let inventory = RegistrationInventory::from_embedded_sources(
+            "1.2.3",
+            base_yaml_sources(),
+            inventory::LIFECYCLE_ARTIFACT,
+            [(Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(facts.clone().into_bytes()))],
+        )
+        .expect("the companion-bearing inventory verifies");
+
+        // Typed inventory kinds and sorted path order.
+        let paths: Vec<&str> = inventory.files().iter().map(PublishedFile::path).collect();
+        let mut sorted = paths.clone();
+        sorted.sort_unstable();
+        assert_eq!(paths, sorted);
+        assert_eq!(inventory.file("manifest.yaml").unwrap().kind(), FileKind::Manifest);
+        assert_eq!(inventory.file("globals.lifecycle.json").unwrap().kind(), FileKind::Lifecycle);
+        assert_eq!(inventory.file("schemas/project-trigger.yaml").unwrap().kind(), FileKind::Trigger);
+        assert_eq!(inventory.file("schemas/project-trigger.yaml").unwrap().name(), Some("project-doc"));
+        assert_eq!(inventory.file("schemas/project.yaml").unwrap().kind(), FileKind::ExpressionSchema);
+        assert_eq!(inventory.file("schemas/project.facts.json").unwrap().kind(), FileKind::ExpressionFacts);
+        assert_eq!(inventory.file("schemas/project.facts.json").unwrap().text(), Some(facts.as_str()));
+
+        // Manifest fields: v3, no `functions`, `files` lists only YAML members,
+        // `digests` hashes every member including the derived facts companion.
+        let manifest_text = inventory.manifest().text().unwrap();
+        let manifest_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(manifest_text).unwrap();
+        assert_eq!(manifest_yaml["format_version"], serde_yaml_ng::Value::from(3));
+        assert!(manifest_yaml.get("functions").is_none(), "v3 omits `functions`: {manifest_text}");
+        let listed_files: Vec<&str> =
+            manifest_yaml["files"].as_sequence().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(listed_files.contains(&"./schemas/project.yaml"), "{listed_files:?}");
+        assert!(!listed_files.contains(&"./schemas/project.facts.json"), "companions are derived, not listed: {listed_files:?}");
+        assert!(!listed_files.contains(&"./globals.lifecycle.json"), "{listed_files:?}");
+        assert_eq!(manifest_yaml["lifecycle"].as_str(), Some("./globals.lifecycle.json"));
+        let digests = manifest_yaml["digests"].as_mapping().unwrap();
+        assert!(digests.contains_key("./schemas/project.yaml"));
+        assert!(digests.contains_key("./schemas/project.facts.json"));
+        assert!(digests.contains_key("./globals.lifecycle.json"));
+
+        // Publish and verify exact published bytes, manifest-last order, and
+        // Darkmatter loading of the expression catalog + facts companion.
+        let home = Home::new();
+        let outcome = publish(&home.home(), &inventory).expect("publishes");
+        let written = &changes(&outcome).written;
+        assert_eq!(written.last().map(String::as_str), Some(MANIFEST_FILE), "manifest written last: {written:?}");
+        for file in inventory.files() {
+            let installed = std::fs::read(home.output().join(file.path())).unwrap();
+            assert_eq!(installed, file.bytes(), "{}", file.path());
+            let hash = format!("{:016x}", xx_hash_bytes(&installed));
+            assert_eq!(hash, format!("{:016x}", xx_hash_bytes(file.bytes())));
+        }
+        home.assert_loads(&inventory);
+
+        // Loaded profile exposes `project_double`, its alias `double_project`,
+        // and its string source exclusion on `n`.
+        let entry = Registration {
+            reference: MANIFEST_REFERENCE.to_string(),
+            index: 0,
+            declared_in: home.home().join(".darkmatter.yaml"),
+            revision: ConfigRevision::User,
+            at: None,
+        };
+        let loaded = load_entries(&[entry], &home.context(), md_owned_names());
+        assert!(loaded.diagnostics.is_empty(), "{:#?}", loaded.diagnostics);
+        let sets = loaded.profiles[0].functions();
+        assert_eq!(sets.len(), 1);
+        let _guard = sets[0].functions.enter();
+        let declared = DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let ok_call = check_expression_calls(&parse_spanned("double_project(21)").unwrap(), &scope);
+        assert!(ok_call.iter().all(|c| c.diagnostics(false).is_empty()), "{ok_call:#?}");
+        let bad_call = check_expression_calls(&parse_spanned("project_double('21')").unwrap(), &scope);
+        assert!(bad_call.iter().any(|c| !c.diagnostics(false).is_empty()), "string source exclusion refused: {bad_call:#?}");
+
+        // Repeat publication is a no-op with stable timestamps.
+        let before = snapshot(&home.home());
+        let repeat = publish(&home.home(), &inventory).expect("repeat publish");
+        assert_eq!(repeat, PublishOutcome::Current { manifest: manifest_path(&home.home()) });
+        assert_eq!(snapshot(&home.home()), before, "repeat publish keeps every byte and mtime");
+    }
+
+    #[test]
+    fn companion_inventory_refuses_missing_stray_stale_companions_and_mutation_before_any_write() {
+        let home = Home::new();
+        let before = snapshot(&home.home());
+        let facts = project_facts(PROJECT_CATALOG);
+
+        // Missing companion for `schemas/project.yaml`.
+        let missing = RegistrationInventory::from_embedded_sources(
+            "1.2.3",
+            base_yaml_sources(),
+            inventory::LIFECYCLE_ARTIFACT,
+            std::iter::empty::<(Cow<'static, str>, Cow<'static, [u8]>)>(),
+        )
+        .expect_err("missing companion is refused");
+        assert!(
+            missing.iter().any(|r| r.message.contains("schemas/project.facts.json")),
+            "names expected sibling: {missing:#?}"
+        );
+
+        // Stray companion with no matching catalog.
+        let stray = RegistrationInventory::from_embedded_sources(
+            "1.2.3",
+            base_yaml_sources(),
+            inventory::LIFECYCLE_ARTIFACT,
+            [
+                (Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(facts.clone().into_bytes())),
+                (Cow::Borrowed("schemas/stray.facts.json"), Cow::Owned(facts.into_bytes())),
+            ],
+        )
+        .expect_err("stray companion is refused");
+        assert!(
+            stray.iter().any(|r| r.message.contains("schemas/stray.facts.json")),
+            "names stray digest key: {stray:#?}"
+        );
+
+        // Stale companion generated from different catalog bytes.
+        let stale_facts = project_facts(&format!("{PROJECT_CATALOG}\n# stale\n"));
+        let stale = RegistrationInventory::from_embedded_sources(
+            "1.2.3",
+            base_yaml_sources(),
+            inventory::LIFECYCLE_ARTIFACT,
+            [(Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(stale_facts.into_bytes()))],
+        )
+        .expect_err("stale companion is refused");
+        assert!(
+            stale.iter().any(|r| r.file.to_string_lossy().contains("project.facts.json")),
+            "located in companion: {stale:#?}"
+        );
+
+        // Mutation catalog source refused with the shared member rule.
+        let mut with_mutation = base_yaml_sources();
+        with_mutation.push((Cow::Borrowed("schemas/actions.yaml"), Cow::Borrowed(MUTATION_CATALOG.as_bytes())));
+        let mutation = RegistrationInventory::from_embedded_sources(
+            "1.2.3",
+            with_mutation,
+            inventory::LIFECYCLE_ARTIFACT,
+            [(Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(project_facts(PROJECT_CATALOG).into_bytes()))],
+        )
+        .expect_err("mutation catalog is refused");
+        assert!(
+            mutation.iter().any(|r| r.message.contains(MUTATION_REFUSAL)),
+            "uses shared mutation refusal: {mutation:#?}"
+        );
+
+        // No destination was written.
+        assert_eq!(snapshot(&home.home()), before);
+    }
+}

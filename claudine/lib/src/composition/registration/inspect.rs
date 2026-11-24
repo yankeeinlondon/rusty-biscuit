@@ -92,6 +92,9 @@ pub(crate) enum ExpectedState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ManifestLoad {
     Loads,
+    /// The installed manifest declares a format version this Darkmatter does
+    /// not load (1, 2, or a later version).
+    UnsupportedFormat { version: i128 },
     /// `at` is the file Darkmatter's first refusal is located in, when that
     /// is not the manifest.
     Refused { at: Option<PathBuf> },
@@ -526,7 +529,12 @@ fn manifest_load(
     let refused = |at: &Path| ManifestLoad::Refused { at: (at != path).then(|| at.to_path_buf()) };
     let admitted = match admitted {
         Ok(admitted) => admitted,
-        Err(refusal) => return refused(&refusal.file),
+        Err(refusal) => {
+            if let Some(version) = refusal.unsupported_format {
+                return ManifestLoad::UnsupportedFormat { version };
+            }
+            return refused(&refusal.file);
+        }
     };
     if admitted.host() != HOST_ID {
         return refused(path);

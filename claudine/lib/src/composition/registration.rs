@@ -1,7 +1,7 @@
 //! Publishing Claudine's `darkmatter-host` registration.
 //!
 //! Darkmatter (`md` and DMLS) learns Claudine's schemas, globals, and
-//! lifecycle from a format 2 `darkmatter-host` manifest that a `register`
+//! lifecycle from a format 3 `darkmatter-host` manifest that a `register`
 //! entry of `.darkmatter.yaml` names ([`MANIFEST_REFERENCE`]). This module
 //! writes that manifest and every file it lists from the copies compiled into
 //! this binary ([`RegistrationInventory::claudine`]); nothing is ever copied
@@ -38,8 +38,9 @@
 //!   differ from the inventory's is replaced through a sibling temporary file
 //!   ([`atomic_write_registration`], with the Windows replacement retry);
 //!   entries the previous manifest listed and the inventory no longer has
-//!   are removed, only when Darkmatter's format 2 admission
-//!   (`bundle::admit_manifest`) accepts that manifest as Claudine's (any
+//!   are removed, only when Darkmatter's manifest cleanup admission
+//!   (`bundle::admit_manifest`, format 3 or well-formed format 2) accepts that
+//!   manifest as Claudine's (any
 //!   refusal removes nothing; old member bytes need not match), except one
 //!   that reaches a current member's directory entry (an old spelling that
 //!   differs only in case, on a case-insensitive volume); regular
@@ -679,7 +680,8 @@ impl Layout {
     }
 
     /// The published paths the installed manifest lists, when Darkmatter's
-    /// format 2 admission accepts it as a Claudine manifest and every member
+    /// cleanup admission accepts it as a Claudine manifest (format 3 or
+    /// well-formed format 2) and every member
     /// is a path this publisher writes; nothing otherwise. An inadmissible
     /// manifest authorizes no removal at all: its other entries are never
     /// trusted on their own. Member bytes are not checked against the

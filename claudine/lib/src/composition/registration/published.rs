@@ -24,13 +24,19 @@ pub enum FileKind {
     Namespace,
     /// `kind: expression-schema`: a host expression catalog.
     ExpressionSchema,
+    /// `kind: mutation-schema`: a mutation catalog (recognized during source
+    /// classification and refused for host publication).
+    MutationSchema,
+    /// A derived `.facts.json` companion for an `expression-schema` catalog.
+    ExpressionFacts,
     /// The generated lifecycle artifact.
     Lifecycle,
 }
 
 impl FileKind {
     /// `manifest`, `schema-trigger`, `schema`, `yaml-schema`,
-    /// `namespace-schema`, `expression-schema`, or `lifecycle`.
+    /// `namespace-schema`, `expression-schema`, `mutation-schema`,
+    /// `expression-facts`, or `lifecycle`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -40,6 +46,8 @@ impl FileKind {
             Self::YamlSchema => MemberKind::YamlSchema.as_str(),
             Self::Namespace => MemberKind::Namespace.as_str(),
             Self::ExpressionSchema => MemberKind::ExpressionSchema.as_str(),
+            Self::MutationSchema => "mutation-schema",
+            Self::ExpressionFacts => "expression-facts",
             Self::Lifecycle => "lifecycle",
         }
     }
@@ -127,17 +135,79 @@ impl RegistrationInventory {
     pub fn claudine() -> &'static Self {
         static INVENTORY: OnceLock<RegistrationInventory> = OnceLock::new();
         INVENTORY.get_or_init(|| {
-            let members = inventory::members().iter().map(|member| {
-                PublishedFile::new(member.bundle_path(), member.kind.into(), member.name, member.bytes())
-            });
-            let lifecycle = PublishedFile::new(
-                inventory::LIFECYCLE_BUNDLE_PATH,
-                FileKind::Lifecycle,
-                None::<&'static str>,
-                inventory::LIFECYCLE_ARTIFACT,
-            );
-            Self::from_members(env!("CARGO_PKG_VERSION"), members.chain([lifecycle]))
+            let sources = inventory::members()
+                .iter()
+                .map(|member| (Cow::Owned(member.bundle_path()), Cow::Borrowed(member.bytes())));
+            let companions: [(Cow<'static, str>, Cow<'static, [u8]>); 0] = [];
+            Self::from_embedded_sources_with(
+                env!("CARGO_PKG_VERSION"),
+                sources,
+                Cow::Borrowed(inventory::LIFECYCLE_ARTIFACT),
+                companions,
+                &crate::composition::schema::shipped::registered_payload,
+            )
+            .unwrap_or_else(|refusals| panic!("Claudine's compiled registration inventory must verify: {refusals:#?}"))
         })
+    }
+
+    /// Builds and verifies an inventory from embedded YAML sources, the
+    /// generated lifecycle artifact, and generated expression-facts companions
+    /// keyed by derived published path (`schemas/project.facts.json`).
+    ///
+    /// Classifies each YAML source (including `expression-schema` and
+    /// `mutation-schema`), derives the format 3 manifest, and validates the
+    /// complete embedded bundle through Darkmatter's shared verified bundle
+    /// preparation before returning.
+    ///
+    /// ## Errors
+    ///
+    /// Every refusal Darkmatter's verified bundle preparation reports (missing,
+    /// stray, or stale companions, invalid catalogs, or `mutation-schema`
+    /// members).
+    #[doc(hidden)]
+    pub fn from_embedded_sources<S, C>(
+        version: impl Into<String>,
+        yaml_sources: S,
+        lifecycle: impl Into<Cow<'static, [u8]>>,
+        companions: C,
+    ) -> Result<Self, Vec<darkmatter::config::registration::bundle::SnapshotRefusal>>
+    where
+        S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
+        C: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
+    {
+        Self::from_embedded_sources_with(version, yaml_sources, lifecycle, companions, &|_| None)
+    }
+
+    fn from_embedded_sources_with<S, C>(
+        version: impl Into<String>,
+        yaml_sources: S,
+        lifecycle: impl Into<Cow<'static, [u8]>>,
+        companions: C,
+        prepared: &dyn Fn(&str) -> Option<simplified_schema::triggers::assemble::ResolvedPayload>,
+    ) -> Result<Self, Vec<darkmatter::config::registration::bundle::SnapshotRefusal>>
+    where
+        S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
+        C: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
+    {
+        let mut files: Vec<PublishedFile> = yaml_sources
+            .into_iter()
+            .map(|(path, bytes)| {
+                let (kind, name) = classify_yaml_source(&bytes);
+                PublishedFile::new(path, kind, name, bytes)
+            })
+            .collect();
+        files.push(PublishedFile::new(
+            inventory::LIFECYCLE_BUNDLE_PATH,
+            FileKind::Lifecycle,
+            None::<&'static str>,
+            lifecycle,
+        ));
+        for (path, bytes) in companions {
+            files.push(PublishedFile::new(path, FileKind::ExpressionFacts, None::<&'static str>, bytes));
+        }
+        let inventory = Self::from_members(version, files);
+        crate::composition::schema::bundle::profile_of_with(&inventory, prepared)?;
+        Ok(inventory)
     }
 
     /// An inventory of `members` (anything but the manifest, which is
@@ -233,16 +303,43 @@ impl RegistrationInventory {
     }
 }
 
-/// The format 2 manifest for `members`: `files` lists every schema member in
-/// path order, `lifecycle` the lifecycle artifact, and `digests` each by its
-/// reference.
+/// Classifies one YAML member's bytes into its inventory [`FileKind`] and
+/// optional display `name`, recognizing both `expression-schema` and
+/// `mutation-schema`. Full validation (including refusing `mutation-schema`)
+/// runs through Darkmatter's shared bundle preparation.
+fn classify_yaml_source(bytes: &[u8]) -> (FileKind, Option<Cow<'static, str>>) {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return (FileKind::Library, None);
+    };
+    if let Ok(admitted) = simplified_schema::member_envelope::admit_member_text(text) {
+        return (admitted.kind.into(), admitted.name.map(Cow::Owned));
+    }
+    let kind = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+        .ok()
+        .and_then(|value| value.get("kind")?.as_str().map(str::to_string));
+    let kind = match kind.as_deref() {
+        Some("mutation-schema") => FileKind::MutationSchema,
+        Some("expression-schema") => FileKind::ExpressionSchema,
+        Some("schema-trigger") => FileKind::Trigger,
+        Some("yaml-schema") => FileKind::YamlSchema,
+        Some("namespace-schema") => FileKind::Namespace,
+        _ => FileKind::Library,
+    };
+    let name = simplified_schema::member_envelope::declared_name(text).map(Cow::Owned);
+    (kind, name)
+}
+
+/// The format 3 manifest for `members`: `files` lists every YAML schema member
+/// in path order (excluding `lifecycle` and derived `expression-facts`
+/// companions), `lifecycle` names the lifecycle artifact, and `digests` hashes
+/// every member including derived companions by its reference.
 fn manifest_text(version: &str, members: &[PublishedFile]) -> String {
     let reference = |file: &PublishedFile| quoted(&format!("./{}", file.path));
     let mut members: Vec<&PublishedFile> = members.iter().collect();
     members.sort_by(|left, right| left.path.cmp(&right.path));
     let files: String = members
         .iter()
-        .filter(|file| file.kind != FileKind::Lifecycle)
+        .filter(|file| !matches!(file.kind, FileKind::Lifecycle | FileKind::ExpressionFacts))
         .map(|file| format!("    - {}\n", reference(file)))
         .collect();
     let lifecycle = members

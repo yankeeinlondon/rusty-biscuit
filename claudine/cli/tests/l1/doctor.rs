@@ -820,3 +820,99 @@ fn a_failed_write_to_stdout_is_an_error() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Error:") && stderr.to_lowercase().contains("space"), "{stderr}");
 }
+
+fn copy_tree(source: &Path, destination: &Path) {
+    std::fs::create_dir_all(destination).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn doctor_fix_upgrades_frozen_v2_registration_in_place_and_repeats_as_noop() {
+    let v2_source = biscuit_test_harness::manifest_dir!()
+        .join("../../darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter");
+    let fixture = CliProcessFixture::named("doctor-v2-upgrade");
+    common::write(&fixture.home().join(".claudine/config.yaml"), CLAUDINE_CONFIG);
+    let output_dir = claudine::composition::registration::output_root(fixture.home());
+    copy_tree(&v2_source, &output_dir);
+    let manifest_abs = output_dir.join("manifest.yaml");
+    let dm_config = format!(
+        "# mine\npermissions: ~/.claudine/config.yaml\nregister:\n  # third-party\n  - ~/.acme/manifest.yaml # kept\n  - {}\n",
+        manifest_abs.display()
+    );
+    common::write(&fixture.home().join(".darkmatter.yaml"), &dm_config);
+    install_claudine_on_path(&fixture);
+
+    // Inspection reports the v2 manifest as a fixable error with update + republish remedy.
+    let inspected = doctor(&fixture, &["--json"]);
+    assert_eq!(inspected.code, Some(1), "{}\n{}", inspected.stdout, inspected.stderr);
+    let inspected_rows = rows(&inspected);
+    let reg = row(&inspected_rows, "registration");
+    assert_eq!(reg["severity"], "error", "{reg}");
+    assert_eq!(reg["fixable"], true, "{reg}");
+    let detail = reg["detail"].as_str().unwrap();
+    assert!(detail.contains("unsupported host registration format version 2"), "{reg}");
+    assert!(detail.contains("update Darkmatter and Claudine") && detail.contains("republish"), "{reg}");
+
+    // `claudine doctor --fix` upgrades in place to v3, writing manifest last.
+    let fixed = doctor(&fixture, &["--fix", "--json"]);
+    assert_eq!(fixed.code, Some(0), "{}\n{}", fixed.stdout, fixed.stderr);
+    let fixed_rows = rows(&fixed);
+    let fixed_reg = row(&fixed_rows, "registration");
+    assert_eq!(fixed_reg["severity"], "ok", "{fixed_reg}");
+    let written: Vec<&str> = fixed_reg["detail"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("Repaired: wrote "))
+        .collect();
+    assert_eq!(
+        written.last().copied(),
+        Some(format!("Repaired: wrote {}", manifest_abs.display()).as_str()),
+        "manifest written last: {written:#?}"
+    );
+    let expected_dm_config = format!(
+        "# mine\npermissions: ~/.claudine/config.yaml\nregister:\n  # third-party\n  - ~/.acme/manifest.yaml # kept\n  - {MANIFEST_REFERENCE}\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).unwrap(),
+        expected_dm_config,
+        "equivalent register entry normalized in place; unrelated entry and comments preserved"
+    );
+
+    // Darkmatter accepts the upgraded v3 profile.
+    let context = biscuit_file::FileResolutionContext::from_snapshot(
+        fixture.cwd().to_path_buf(),
+        Some(fixture.home().to_path_buf()),
+        std::collections::HashMap::new(),
+    );
+    let entry = darkmatter::config::load::Registration {
+        reference: MANIFEST_REFERENCE.to_string(),
+        index: 0,
+        declared_in: fixture.home().join(".darkmatter.yaml"),
+        revision: darkmatter::config::load::ConfigRevision::User,
+        at: None,
+    };
+    let loaded = darkmatter::config::registration::load_entries(
+        &[entry],
+        &context,
+        darkmatter::config::registration::md_owned_names(),
+    );
+    assert!(loaded.diagnostics.is_empty(), "{:#?}", loaded.diagnostics);
+    assert_eq!(loaded.profiles.len(), 1);
+    assert_eq!(loaded.profiles[0].host(), "claudine");
+
+    // Second `claudine doctor --fix` makes no change.
+    let before_repeat = tree(fixture.home());
+    let repeat = doctor(&fixture, &["--fix", "--json"]);
+    assert_eq!(repeat.code, Some(0), "{}\n{}", repeat.stdout, repeat.stderr);
+    assert_eq!(severity(&rows(&repeat), "registration"), "ok");
+    assert_eq!(tree(fixture.home()), before_repeat);
+}

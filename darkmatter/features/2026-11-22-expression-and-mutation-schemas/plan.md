@@ -3,7 +3,7 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 4
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -49,6 +49,7 @@ packages:
 - darkmatter-cli
 - claudine
 - darkmatter-lsp
+- claudine-cli
 source_files_during_phase_2:
 - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
 - darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
@@ -176,6 +177,25 @@ skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/expressions.md
 - .claude/skills/darkmatter/library-surfaces.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/composition/registration/inspect.rs
+- claudine/lib/src/composition/registration/published.rs
+- claudine/lib/src/doctor/registration.rs
+- claudine/lib/src/doctor/registration_tests.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/cli/src/commands/registrations.rs
+- claudine/cli/tests/l1/doctor.rs
+docs_updated_during_phase_4:
+- claudine/docs/cli/doctor.md
+- claudine/docs/cli/registrations.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/claudine/SKILL.md
 ---
 
 # Expression and mutation schemas implementation plan
@@ -283,12 +303,12 @@ For the new and changed validators, every invalid shape yields a located error o
 
 ## Phase 4 — Publish and repair one inventory
 
-- [ ] **Inventory encoder**
+- [x] **Inventory encoder**
   - Own `claudine/lib/src/composition/registration.rs`, the v2 embedded include-table generator under `claudine/lib/build.rs`, and Claudine's related registration and shipped tests. Implement Rule 9 and encode members, companions and lifecycle from one verified source set. The manifest names only YAML members in `files`, references lifecycle separately, and hashes them and each derived facts companion. Keep the generated lifecycle artifact at its v2 location. Use exact source bytes for private inventory construction and listing.
   - Keep the v2 writer's lock, preflight and atomicity in `composition/registration.rs`, and preserve the same-path setup handoff in `config/setup.rs`. Expose the inventory's kinds through the existing hidden `Commands::Registrations` adapter, with the v2 list/detail/publish semantics and 16-digit XXH64 byte fingerprints. Use the same typed classification for CLI tests; leave selection and execution untouched.
   - Add a fixture to the inventory tests with `schemas/project.yaml`, its generated facts, a valid trigger and the lifecycle artifact from the existing fixture. Bind an eager `project_double` handler and an alias, with a string source exclusion on its numeric input, then generate the companion via `HostFunctions::facts_artifact`. Test missing, stray and stale embedded companions and mutation source rejection before any destination is written. Check manifest fields, exact listing and detail bytes, published bytes, and stable timestamps for repeat publication.
 
-- [ ] **Doctor upgrade**
+- [x] **Doctor upgrade**
   - Own the prerequisite registration check and repair callback under `claudine/lib/src/doctor/`, its L1 tests and CLI repair fixture. Route inspection through the v3 inventory including `expression-facts`; keep the doctor severity and exit policy. Exercise fixture companion missing as an error, modified present bytes as a warning with the unchanged manifest, and an unsupported installed v2 manifest as an error with an update and republish remedy. Keep the existing repair safety, path and post-verification rules.
   - Load the real tool-owned v2 fixture at the v2 fixed path in an isolated home, retaining an equivalent user register reference, unrelated registration entries and config comments. Demonstrate setup converts it in place to v3, and run a separate v2 → v3 upgrade with `claudine doctor --fix`. Verify an installed v3 profile is accepted by Darkmatter after both upgrades. Assert the manifest is published last and a second setup/doctor repair with current bytes makes no change. For the companion-bearing fixture inject the inventory through the doctor's existing library test probe and use the same repair callback as production; prove reads and listing agree after repair.
   - Run `just test -E 'test(registration) | test(host_publication) | test(host_catalog) | test(setup) | test(doctor)'` from `claudine/`. Update `claudine/docs/topics/schemas.md`, `claudine/docs/cli/doctor.md` and coverage in the configuration topic for the companion inventory and upgrade behavior.

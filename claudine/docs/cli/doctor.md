@@ -386,14 +386,17 @@ in the `register` list of `~/.darkmatter.yaml`. See
 [Schemas → the published host registration](../topics/schemas.md#the-published-host-registration)
 and Darkmatter's [host registration](../../../darkmatter/docs/topics/host-registration.md).
 
-Doctor compares the manifest and every published file, byte for byte,
-with what this `claudine` binary would publish:
+Doctor compares the manifest and every published file — including schema
+members, `globals.lifecycle.json`, and any derived `expression-facts`
+companion in the inventory — byte for byte, with what this `claudine`
+binary would publish:
 
 | Finding | Severity |
 | --- | --- |
-| The registration folder, the manifest, or a published file is missing | `error` |
-| A published file differs from what this binary publishes | `warn` |
+| The registration folder, the manifest, or a published file (including a derived `expression-facts` companion) is missing | `error` |
+| A published file (including a derived `expression-facts` companion) differs from what this binary publishes | `warn` |
 | The manifest differs, but Darkmatter still loads the bundle it lists as Claudine's registration | `warn` |
+| The installed manifest uses an unsupported format version (such as format 2) that Darkmatter refuses | `error`, with an update-and-republish remedy (`claudine doctor --fix` upgrades it in place to format 3) |
 | The manifest differs and Darkmatter refuses the bundle it lists as Claudine's registration | `error` |
 | An extra file in the registration folder | `warn` |
 | No `register` entry in `~/.darkmatter.yaml` names Claudine's manifest | `error` |

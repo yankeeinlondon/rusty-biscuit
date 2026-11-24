@@ -46,6 +46,7 @@ packages:
     - darkmatter-cli
     - claudine
     - darkmatter-lsp
+    - claudine-cli
 decisions-for-review:
     - |-
       Duplicate YAML keys: the plan asks the loader to record both the first and the repeated key. I kept the shared loader's error type unchanged (`SchemaError::SchemaDocument`, located at the repeated key) and added the first key's line and column to its message, plus a public `yaml_documents::duplicate_key(text)` that returns both byte offsets for any consumer that wants a "related location". The alternative is a `related` field on `SchemaDocument` itself, which would touch every producer and consumer of that widely used variant. If the reviewer prefers the field, the change is confined to `load.rs` plus the CLI and editor projections Phase 2 adds; `duplicate_key` would then become internal.
@@ -96,13 +97,11 @@ decisions-for-review:
     - |-
       Phase 3: Claudine was touched before Phase 4, minimally, so the monorepo keeps compiling and Claudine's published registration stays loadable by the new reader: its manifest encoder writes `format_version: 3` without `functions`, and `FileKind` gained an `ExpressionSchema` arm (needed by an exhaustive match on the shared `MemberKind`). The full inventory work (companions, `expression-facts`, doctor upgrade) stays in Phase 4. Alternative: leave Claudine broken until Phase 4. Redo cost: none.
 message-to-agent: |-
-  Phase 3 landed: format 3 host registrations with derived expression-catalog companions, strict facts provenance, cross-catalog name/alias collision checks, selected-host scope in `md compose` and DMLS, and deletion of legacy schema-root discovery and the process-wide host function cache. What Phase 4 can build on:
-  - `darkmatter/schemas/darkmatter-host.yaml` and `config/registration/{manifest,bundle}.rs` enforce the closed 7-field format 3 manifest (`kind`, `format_version: 3`, `host`, `version`, `files`, `lifecycle`, `digests`; no `functions`). Expression catalogs are listed in `files`; their `.facts.json` companions are derived by `host::facts_artifact_path` and required in `digests`.
-  - `bundle::admit_manifest` (used by Claudine's publisher for cleanup) admits both format 3 and well-formed format 2 manifests (`AdmittedManifest::format_version()`); malformed v2 manifests are refused and confer no cleanup authority. `bundle::admit_installed_manifest` (for `claudine doctor`), `load_snapshot`, `verify_read`, and `VerifiedSnapshot::from_embedded` accept format 3 only and return `SnapshotRefusal::unsupported_format: Option<i128>` with `unsupported host registration format version <n>; update Darkmatter and the host tool, then republish the registration`.
-  - `simplified_schema::member_envelope` includes `MemberKind::ExpressionSchema` and refuses `kind: mutation-schema` at `kind` with `MUTATION_REFUSAL` (`host-defined actions are not supported`).
-  - Minimal Claudine compatibility edits landed in Phase 3 so the monorepo compiles and stays loadable: `claudine/lib/src/composition/registration/published.rs` emits `format_version: 3` without `functions` and adds `FileKind::ExpressionSchema`; `claudine/lib/tests/l1/{host_catalog,host_publication,installed_registration,registration_inventory}.rs` were updated for format 3 and the removal of `is_host_function_catalog`. Phase 4 owns the full companion inventory (`expression-facts`, `mutation-schema` classification/refusal, private companion input table, fixture with `project.yaml` + generated facts, and `claudine doctor` v2→v3 upgrade/repair).
-  - The frozen v2 install fixture is at `darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/`.
-  - All three shipped artifacts are current (`just shipped-schemas`).
+  Phase 4 landed: Claudine's format 3 inventory encoder, companion input table, hidden `claudine registrations` kinds (`expression-schema`, `mutation-schema`, `expression-facts`), and `claudine doctor` v2→v3 upgrade and companion inspection/repair are complete and verified. What Phase 5 can build on:
+  - `RegistrationInventory::claudine()` builds and verifies through `RegistrationInventory::from_embedded_sources` (empty companion table; `claudine/registration/` remains YAML-only, no host expression catalog or `.facts.json` companion shipped by Claudine).
+  - `FileKind` exposes `manifest`, `schema-trigger`, `schema`, `yaml-schema`, `namespace-schema`, `expression-schema`, `mutation-schema`, `expression-facts`, and `lifecycle`; `claudine registrations` formats all of them with 16-digit XXH64 fingerprints.
+  - `claudine doctor` routes inspection through the v3 inventory including `expression-facts` (missing companion = `error`, modified companion = `warn` with format 3 digest note, unsupported manifest version such as format 2 = `error` with update-and-republish remedy) and `claudine doctor --fix` / `claudine setup` upgrade the frozen v2 install in place to v3, writing `manifest.yaml` last and preserving equivalent/unrelated `register` entries and comments.
+  - Claudine docs updated in Phase 4 (`claudine/docs/topics/schemas.md`, `claudine/docs/cli/doctor.md`, `claudine/docs/cli/registrations.md`, `claudine/docs/topics/configuration.md`) and `.claude/skills/claudine/SKILL.md`. Phase 5 owns the remaining language/host/publisher docs, caller skills (`just publish-skills` in `darkmatter/` and `claudine/`), regenerated expression docs and lifecycle schema parity against the Phase 1 baseline hashes, and final full-area `just test` + `just lint` validation across `simplified-schema/`, `darkmatter/`, and `claudine/`.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
     - darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
@@ -230,6 +229,25 @@ skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/library-surfaces.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/registration.rs
+    - claudine/lib/src/composition/registration/inspect.rs
+    - claudine/lib/src/composition/registration/published.rs
+    - claudine/lib/src/doctor/registration.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/host_publication.rs
+    - claudine/lib/tests/l1/installed_registration.rs
+    - claudine/cli/src/commands/registrations.rs
+    - claudine/cli/tests/l1/doctor.rs
+docs_updated_during_phase_4:
+    - claudine/docs/cli/doctor.md
+    - claudine/docs/cli/registrations.md
+    - claudine/docs/topics/configuration.md
+    - claudine/docs/topics/schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Implementation Log for 2026-11-22-expression-and-mutation-schemas (5 phases)
@@ -646,3 +664,57 @@ Failure outside this change: `test-toolkit::real_kache_config_selector::real_kac
 - Scope (`scripts/ci/affected_scope.py`): `claudine`, `claudine-cli`, `darkmatter`, `darkmatter-cli`, `darkmatter-lsp`, `simplified-schema`, `test-toolkit`.
 - Code-smell grep across changed readers (`registration.rs`, `manifest.rs`, `bundle.rs`, `host/artifact.rs`, `host/mod.rs`, `member_envelope.rs`): no `#[serde(default)]`, no ambiguous `Option<T>`, no `filter_map(.. as_str())` on load-bearing fields.
 - Windows cross-check (`./scripts/cross-check.sh --os windows darkmatter` on `build-win`): 13048 passed, 66 skipped, 0 failed.
+
+## Phase 4
+
+### Inventory encoder (Rule 9)
+
+- `claudine/lib/src/composition/registration/published.rs`:
+  - Extended `FileKind` with `ExpressionSchema`, `MutationSchema`, and `ExpressionFacts` alongside `Manifest`, `Trigger`, `Library`, `YamlSchema`, `Namespace`, and `Lifecycle` (`FileKind::as_str()` exposes `expression-schema`, `mutation-schema`, `expression-facts`).
+  - Added `RegistrationInventory::from_embedded_sources` (backed by `from_embedded_sources_with`) taking YAML sources, the generated lifecycle artifact, and an explicit companion table keyed by derived published path (`schemas/project.facts.json`). Classifies each YAML source (recognizing both `expression-schema` and `mutation-schema`), emits the format 3 manifest (`files` lists YAML members only, excluding `lifecycle` and `expression-facts`; `lifecycle` names `globals.lifecycle.json`; `digests` hashes every member including derived companions), and validates the entire embedded bundle through Darkmatter's shared verified bundle preparation (`composition::schema::bundle::profile_of_with`) before returning.
+  - `RegistrationInventory::claudine()` passes the empty companion table and verifies through `from_embedded_sources_with`, keeping `claudine/registration/` YAML-only and shipping no host expression catalog or `.facts.json` companion.
+  - `claudine/lib/build.rs` and `claudine/lib/src/composition/inventory/walk.rs` remain YAML-only and admit members via `simplified_schema::member_envelope::admit_member_text` (accepting `expression-schema`, refusing `mutation-schema` with `MUTATION_REFUSAL`).
+- `claudine/lib/src/composition/registration.rs`: kept the v2 writer lock, no-follow preflight, manifest-last atomicity, and format 3 / well-formed format 2 cleanup admission (`bundle::admit_manifest`); updated module and helper docblocks to format 3.
+- `claudine/cli/src/commands/registrations.rs`: `FileView::of` exposes all new `FileKind` strings with 16-digit XXH64 fingerprints; added unit test `callable_and_companion_kinds_format_with_xxh64_fingerprints`.
+- `claudine/lib/tests/l1/host_catalog.rs`: updated `claudine_ships_no_host_function_catalog_and_no_facts_artifact` to assert both `RegistrationInventory::claudine()` (v3 inventory) and `claudine/registration/` contain no `expression-schema`, `mutation-schema`, or `expression-facts` entries.
+- `claudine/lib/tests/l1/host_publication.rs`: added `companion_inventory` fixture (`schemas/project.yaml` declaring `project_double`, alias `double_project`, string source exclusion on `n`, companion generated via `HostFunctions::facts_artifact`, valid trigger, and lifecycle artifact) exercising typed kinds, manifest fields, published bytes, manifest-last order, Darkmatter loading and binding checks, repeat-publish no-op with stable timestamps, and pre-write refusal of missing, stray, and stale companions and `mutation-schema` sources.
+
+### Doctor upgrade
+
+- `claudine/lib/src/composition/registration/inspect.rs`: added `ManifestLoad::UnsupportedFormat { version: i128 }` mapped from `SnapshotRefusal::unsupported_format` in `manifest_load` (format 3 admission via `bundle::admit_installed_manifest`).
+- `claudine/lib/src/doctor/registration.rs`:
+  - Added `check_registration_with` and `repair_registration_with` taking `&RegistrationInventory` (production `check_registration` / `repair_registration` delegate with `RegistrationInventory::claudine()`), enabling library tests to inject the companion-bearing inventory through the production check and repair callbacks.
+  - Updated digest-mismatch note to reference Darkmatter's format 3 loader.
+  - Reported `ManifestLoad::UnsupportedFormat { version }` as `Severity::Error` with message naming the version and an update-and-republish remedy (`update Darkmatter and Claudine, then run \`claudine doctor --fix\` to republish the registration` when repair-eligible, or `update Darkmatter and Claudine, then republish the registration` when manual).
+- `claudine/lib/src/doctor/registration_tests.rs`: updated existing refused-manifest fixture to `format_version: 3`, added `an_unsupported_v2_manifest_is_a_fixable_error_with_update_and_republish_remedy` (loads the frozen v2 fixture at `darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter`, verifies equivalent register entry + unrelated entry + comments, manifest written last, Darkmatter v3 load via `bundle::admit_installed_manifest` + `bundle::verify_read` + `load_verified`, and repeat-repair no-op), and added `companion_fixture_missing_companion_errors_modified_warns_and_repair_restores_agreement` (missing companion = `error`, modified companion with unchanged manifest = `warn` with digest-mismatch note, repair restores exact bytes and Darkmatter profile agreement).
+- `claudine/lib/tests/l1/installed_registration.rs`: added `installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop` verifying `setup_claudine` upgrades the frozen v2 fixture in place to v3, writes `manifest.yaml` last, preserves unrelated `register` entries and comments, loads cleanly in Darkmatter, and repeats as a no-op.
+- `claudine/cli/tests/l1/doctor.rs`: added `doctor_fix_upgrades_frozen_v2_registration_in_place_and_repeats_as_noop` exercising `claudine doctor --json` and `claudine doctor --fix --json` end-to-end against the frozen v2 fixture.
+- **Fixes found during Phase 4 verification**:
+  - `installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop` initially used `assert_one_claudine_profile`, which asserted `diagnostics().is_empty()` even though the test intentionally included an unrelated nonexistent `~/hosts/mine.yaml` entry to verify preservation; updated the assertion to verify Claudine's upgraded v3 profile loads with zero diagnostics for Claudine while only `~/hosts/mine.yaml` is reported absent.
+  - `registrations_command::only_the_registration_module_locates_or_loads_an_installed_bundle` flagged `load_entries` inside `claudine/lib/src/doctor/registration_tests.rs` (since the source guard scans all `.rs` files under `lib/src/`). Replaced those test calls with a `load_installed_profile` helper using `bundle::admit_installed_manifest` + `bundle::verify_read` + `load_verified` (matching `inspect.rs`), while `claudine/cli/tests/l1/doctor.rs` continues to exercise `load_entries` end-to-end.
+- **Docs and skills**: updated `claudine/docs/topics/schemas.md`, `claudine/docs/cli/doctor.md`, `claudine/docs/cli/registrations.md`, `claudine/docs/topics/configuration.md`, and `.claude/skills/claudine/SKILL.md`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| Claudine ships no host expression catalog or `.facts.json` companion in v3 inventory or `claudine/registration/` | `claudine::l1 host_catalog::claudine_ships_no_host_function_catalog_and_no_facts_artifact` |
+| `FileKind` exposes `expression-schema`, `mutation-schema`, `expression-facts` with 16-digit XXH64 fingerprints in `claudine registrations` | `claudine-cli` `commands::registrations::tests::callable_and_companion_kinds_format_with_xxh64_fingerprints` |
+| Companion-bearing inventory fixture (`project.yaml` + generated facts + trigger + lifecycle): manifest fields, typed kinds, published bytes, manifest-last, Darkmatter alias + source exclusion checks, repeat-publish stable mtimes | `claudine::l1 host_publication::companion_inventory::companion_inventory_publishes_lists_and_republishes_without_changing_mtimes` |
+| Missing, stray, stale companions and `mutation-schema` source refused before any write | `claudine::l1 host_publication::companion_inventory::companion_inventory_refuses_missing_stray_stale_companions_and_mutation_before_any_write` |
+| Doctor inspection & repair on companion-bearing inventory (missing = `error`, modified with unchanged manifest = `warn` + digest note, repair restores agreement) | `claudine` `doctor::registration::tests::companion_fixture_missing_companion_errors_modified_warns_and_repair_restores_agreement` |
+| Doctor v2→v3 upgrade on frozen v2 fixture (library): unsupported v2 error + update/republish remedy, manifest last, equivalent/unrelated entries & comments kept, Darkmatter loads v3, repeat no-op | `claudine` `doctor::registration::tests::an_unsupported_v2_manifest_is_a_fixable_error_with_update_and_republish_remedy` |
+| Doctor v2→v3 upgrade on frozen v2 fixture (CLI): `claudine doctor --json` and `claudine doctor --fix --json`, Darkmatter `load_entries`, repeat no-op | `claudine-cli::l1 doctor::doctor_fix_upgrades_frozen_v2_registration_in_place_and_repeats_as_noop` |
+| Setup v2→v3 upgrade on frozen v2 fixture: in-place conversion, manifest last, unrelated entries & comments preserved, Darkmatter loads v3, repeat no-op | `claudine::l1 installed_registration::installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop` |
+| Source guard: no installed-bundle loader outside `composition/registration/` | `claudine-cli::l1 registrations_command::only_the_registration_module_locates_or_loads_an_installed_bundle` |
+
+### Gates
+
+- `cargo nextest run -p claudine --features work-counters -E 'test(registration) | test(host_publication) | test(host_catalog) | test(setup) | test(doctor)'` → 449 passed, 0 failed, 0 slow.
+- `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(registration) | test(host_publication) | test(host_catalog) | test(setup) | test(doctor)'` → 95 passed, 0 failed, 0 slow.
+- `cargo nextest run -p claudine-contract` (reverse dependency of `claudine`) → passed, 0 failed.
+- `cd claudine && just lint` → clean (`lint-transport` 9 passed / 0 slow, `lint-lifecycle-doc-facets` passed, clippy clean across `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, `claudine-gen`).
+- `just check-tier-coverage claudine` → 0 stranded.
+- Scope (`scripts/ci/affected_scope.py` on Phase 4 files): `source_packages` = `["claudine", "claudine-cli"]`, `reverse_dependencies` = `["claudine-contract"]`, `change_class` = `"package"`.
+- Code-smell grep across changed Phase 4 files (`registration.rs`, `inspect.rs`, `published.rs`, `doctor/registration.rs`, `commands/registrations.rs`): no `#[serde(default)]`, no ambiguous `Option<T>`, no `filter_map(.. as_str())`, and no `.ok()` on load-bearing validation (`classify_yaml_source`'s fallback `.ok()` only assigns a display kind before Darkmatter's strict `profile_of_with` rejects the bundle).
+- Cross-OS: all path handling uses `Layout::destination` / `native_path` / `biscuit_file::canonicalize_simplified`, and no OS-specific or `#[cfg(windows)]` logic changed; CI covers Windows/macOS/WSL2.

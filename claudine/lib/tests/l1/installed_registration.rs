@@ -1039,3 +1039,68 @@ fn installed_registration_cleanup_refuses_a_link_in_the_retired_tree_and_leaves_
     assert!(legacy_manifest_path(&fixture.home()).is_file(), "nothing was removed");
     assert!(legacy_revisions_dir(&fixture.home()).join("0123abcd/globals.yaml").is_file());
 }
+
+fn copy_tree(source: &Path, destination: &Path) {
+    std::fs::create_dir_all(destination).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop() {
+    let v2_source = biscuit_test_harness::manifest_dir!()
+        .join("../../darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter");
+    let fixture = Fixture::new();
+    copy_tree(&v2_source, &output_root(&fixture.home()));
+    let manifest_abs = manifest_path(&fixture.home());
+    let initial_dm = format!(
+        "# user settings\nregister:\n  # my own host\n  - ~/hosts/mine.yaml   # kept\n  - {}\n",
+        manifest_abs.display()
+    );
+    fixture.write(&fixture.darkmatter(), &initial_dm);
+
+    // Before setup, Darkmatter refuses the v2 manifest with its version.
+    let before = fixture.hosts(&fixture.context());
+    assert!(
+        before.diagnostics().iter().any(|d| d.message.contains("unsupported host registration format version 2")),
+        "{:#?}",
+        before.diagnostics()
+    );
+
+    let setup = fixture.setup().unwrap();
+    let changes = setup.publication.changes().expect("v2 upgraded to v3");
+    assert_eq!(changes.written.last().map(String::as_str), Some("manifest.yaml"), "manifest written last: {changes:?}");
+    let upgraded_manifest = std::fs::read_to_string(&manifest_abs).unwrap();
+    assert!(upgraded_manifest.contains("format_version: 3\n"), "{upgraded_manifest}");
+    assert!(!upgraded_manifest.contains("functions:"), "{upgraded_manifest}");
+
+    // Equivalent register entry, unrelated entry, and comments survive;
+    // Darkmatter accepts the upgraded Claudine v3 profile (only the unrelated
+    // placeholder entry is absent on disk).
+    let dm_text = std::fs::read_to_string(fixture.darkmatter()).unwrap();
+    assert!(dm_text.contains("# user settings\n"), "{dm_text}");
+    assert!(dm_text.contains("  # my own host\n  - ~/hosts/mine.yaml   # kept\n"), "{dm_text}");
+    let after = fixture.hosts(&fixture.context());
+    assert!(
+        after.diagnostics().iter().all(|d| d.entry.reference == "~/hosts/mine.yaml"),
+        "no diagnostic for Claudine's upgraded v3 profile: {:#?}",
+        after.diagnostics()
+    );
+    let profiles = &after.loaded().profiles;
+    assert_eq!(profiles.len(), 1, "one loaded profile");
+    assert_eq!(profiles[0].host(), "claudine");
+
+    // Second setup with current bytes makes no change.
+    let before_repeat = fixture.files();
+    let repeat = fixture.setup().unwrap();
+    assert!(matches!(repeat.publication, PublishOutcome::Current { .. }), "{repeat:?}");
+    assert_eq!(repeat.registration.unwrap().action, InitAction::Unchanged);
+    assert_eq!(fixture.files(), before_repeat, "second setup writes nothing");
+}

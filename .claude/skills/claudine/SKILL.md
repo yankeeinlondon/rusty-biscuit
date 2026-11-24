@@ -152,7 +152,9 @@ feature). A first claudine run in a fixture with no Claudine config therefore
 rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
 `~/.claudine/config.yaml` there. The full setup order is
 `config/setup.rs::setup_claudine`: `composition::registration::publish` the
-fixed format 2 tree (failure aborts setup, nothing written), then this
+fixed format 3 tree (built and verified via `RegistrationInventory::from_embedded_sources`,
+which classifies `expression-schema`, `mutation-schema`, and derived `expression-facts`
+companions and validates through Darkmatter's shared embedded bundle preparation; failure aborts setup, nothing written), then this
 handshake, then `darkmatter::config::init::replace_manifest_registration`
 puts `registration::MANIFEST_REFERENCE` in the user `~/.darkmatter.yaml`
 in place of any spelling of the retired `~/.claudine/darkmatter-host.yaml`

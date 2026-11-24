@@ -90,7 +90,7 @@ this page.
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `manifest`, `schema-trigger`, `schema`, `yaml-schema`, `namespace-schema`, or `lifecycle` |
+| `kind` | `manifest`, `schema-trigger`, `schema`, `yaml-schema`, `namespace-schema`, `expression-schema`, `mutation-schema`, `expression-facts`, or `lifecycle` |
 | `filepath` | the path inside `~/.claudine/registrations/darkmatter/`, written with `/` on every OS |
 | `hash` | XXH64 (seed 0) of the file's exact bytes, as 16 lowercase hexadecimal digits |
 | `name` | the file's display name; the key is absent when the file declares none |
@@ -104,25 +104,27 @@ included (`./schemas/seq.yaml`, a backslash), exits 1 with nothing on stdout:
 Error: `./schemas/seq.yaml` is not a published registration path; run `claudine registrations` for the list
 ```
 
-The manifest's `contents` is the format 2 `darkmatter-host` manifest
-Darkmatter reads. It lists every other file with its BLAKE3 digest (a
-different hash from the listing's XXH64 `hash`):
+The manifest's `contents` is the format 3 `darkmatter-host` manifest
+Darkmatter reads. `files` lists every YAML schema member (excluding
+`globals.lifecycle.json` and any derived `.facts.json` companion),
+`lifecycle` names the lifecycle artifact, and `digests` lists every other
+file — including derived `expression-facts` companions — with its BLAKE3
+digest (a different hash from the listing's XXH64 `hash`):
 
 ```yaml
 # Written by Claudine from the registration compiled into it, and rewritten when that changes; do not edit.
 kind: darkmatter-host
-format_version: 2
+format_version: 3
 host: claudine
 version: "0.1.0"
 files:
     - "./schemas/action.yaml"
-    # … every other file under schemas/, in path order
+    # … every other YAML member under schemas/, in path order
 lifecycle: "./globals.lifecycle.json"
-functions: []
 digests:
     "./globals.lifecycle.json": "73347213b879e94fe6fc409e460f322fd03825d329e82d43b8163b35d367901a"
     "./schemas/action.yaml": "b89504d935dc16eaa8b837245bbd244c33f59a7ac31e904f346d46bef833651f"
-    # … one digest for each listed file
+    # … one digest for each YAML member, lifecycle artifact, and derived expression-facts companion
 ```
 
 ## Publishing
