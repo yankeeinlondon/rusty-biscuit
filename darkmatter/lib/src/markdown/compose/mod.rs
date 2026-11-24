@@ -101,6 +101,8 @@
 
 pub(crate) mod body_origin;
 pub(crate) mod cache;
+#[cfg(any(test, feature = "cache-test-hooks"))]
+pub mod cache_test_hooks;
 mod call_precheck;
 pub mod conditions;
 pub mod context;

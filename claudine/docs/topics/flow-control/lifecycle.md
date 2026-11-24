@@ -130,8 +130,10 @@ which follows successful preflight, and resets that boundary on proxy adoption.
 A bootstrap-gate failure precedes target lifecycle ownership. Once installed,
 the target's lifecycle handles failures; a missing include after initialization
 routes through `blocked`/`finalize` exactly once and prevents launch. Retry and
-resume reread and audit without initializing again; later loop iterations use
-the already-audited structural plan. Dry runs fire no lifecycle events or
+resume reread and audit without initializing again; later loop iterations
+compose the document the loop kept at startup and audit their own commands
+against its approvals (see
+[Looping — What each pass reads](looping.md#what-each-pass-reads)). Dry runs fire no lifecycle events or
 dynamic proxy handoffs. Sequence static preflight still requires all includes
 to exist before the sequence starts, even when a task's initialization or an
 earlier task would create them. See
@@ -683,7 +685,7 @@ reads `loop` in a document that is not looping fails with
 `claudine.outside-loop` when that event fires, not before launch, because the
 document cannot know at preparation time whether it will run inside a loop.
 
-A lifecycle action's interpolation resolves against the union of the early- and late-binding surfaces, at event-time. Frontmatter references (`{{ fm.phase }}`, `{{ artifact.path }}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+A lifecycle action's interpolation resolves against the union of the early- and late-binding surfaces, at event-time. Frontmatter references (`{{ fm.phase }}`, `{{ artifact.path }}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that changes the document's own `phase` is visible to a later action or event of the same attempt. A value meant for the next loop iteration belongs in `set` or `loop.action`: a later ordinary iteration composes the document the loop kept at startup, so a disk write to that document is seen by the next run, a `retry` or `resume`, or a new sequence task, not by the next iteration (see [Looping — What each pass reads](looping.md#what-each-pass-reads)).
 
 Spans follow ordinary Darkmatter rules: `{{ … }}` is evaluated, and `{{{ … }}}` is an escape that renders the literal text `{{ … }}` without evaluating it. The backslash escapes `\{{ … }}` and `\{\{ … }}` are not evaluated either, but interpolation keeps them exactly as written, backslash included; the backslash disappears only on a channel that renders inline Markdown, such as `stderr`. Use `{{{ … }}}` when the braces must arrive without a backslash wherever the value goes (a `set:` value, a file, a shell command). The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
 
@@ -848,8 +850,9 @@ flowchart LR
 Phrases are submitted at each point where Claudine reads a document:
 
 - the **bootstrap** read, before `initialize` fires;
-- the **stabilized reread** after initialization, and every later read that
-  produces a new document state: each loop iteration, a `retry` or `resume`,
+- the **stabilized reread** after initialization, and every later
+  preparation that produces a new document state: each loop iteration (from
+  its own preparation of the document the loop kept), a `retry` or `resume`,
   and a `proxy` target (after its `with:` overlay is applied, so the target's
   phrases use the overlaid values; the caller never collects them);
 - in a sequence, **preflight**, which submits the early phrases of every
@@ -912,8 +915,10 @@ Pre-warm also does nothing under `--dry-run` or when `PLAYA_DRY_RUN` is `1`,
   state, not the document Claudine re-reads. A phrase that reads a key `set`
   writes is pre-warmed with the text it had before the `set`, and at event time
   it misses the cache and synthesizes the correct text. You hear the right
-  words, a little later. A document rewritten with `set_frontmatter` is re-read
-  and warmed with its new text.
+  words, a little later. A document rewritten with `set_frontmatter` is warmed
+  with its new text only where Claudine prepares it from disk again: after
+  `initialize`, at a `retry` or `resume`, or at the next run or sequence task.
+  A later loop iteration warms from the document the loop kept at startup.
 - Phrases for events that never fire are synthesized anyway. With a cloud
   provider that can mean a billed request for each unfired phrase, and any
   provider spends CPU or network time on them.
@@ -1812,7 +1817,7 @@ Unlike an event, `gate:` is never `null` or `{}`: both are
 `action`/`actions` at the loop root are the iteration mutations, not lifecycle
 grammar.
 
-Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. At the gate the lifecycle concerns run first, then the condition is evaluated, and the per-iteration mutations are applied only when the loop continues.
+Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize` or schema validation. Each later iteration composes the document kept at startup and checks the commands its own values produce against the approvals already given. `success`, `failure`, and `finalize` fire once per iteration. At the gate the lifecycle concerns run first, then the condition is evaluated, and the per-iteration mutations are applied only when the loop continues.
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 

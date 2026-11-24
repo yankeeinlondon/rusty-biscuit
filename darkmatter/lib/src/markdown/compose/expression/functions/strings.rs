@@ -126,12 +126,17 @@ fn snake_case(call: &BoundCall<'_>) -> Result<Value, String> {
 }
 
 fn camel_case(call: &BoundCall<'_>) -> Result<Value, String> {
-    transform(call, |text| {
-        let mut words = split_words(text).into_iter();
-        let mut out = words.next().unwrap_or_default();
-        out.extend(words.map(|word| capitalized(&word)));
-        out
-    })
+    transform(call, to_camel_case)
+}
+
+/// `text` in camelCase, exactly as the `camel_case` expression function
+/// returns it. `load_data` keys header-derived CSV/TSV object rows with it,
+/// so an author can predict a key by calling `camel_case` on the header.
+pub(crate) fn to_camel_case(text: &str) -> String {
+    let mut words = split_words(text).into_iter();
+    let mut out = words.next().unwrap_or_default();
+    out.extend(words.map(|word| capitalized(&word)));
+    out
 }
 
 fn pascal_case(call: &BoundCall<'_>) -> Result<Value, String> {

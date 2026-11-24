@@ -1370,6 +1370,14 @@ impl EvaluationLookup for ScopedLookup<'_> {
         self.inner.begin_expression_scope();
     }
 
+    /// A local shadowing `root` is indexed as an ordinary value.
+    fn resolve_index(&self, root: &str, key: &str) -> Option<Result<Value, ExpressionError>> {
+        if self.local(root).is_some() {
+            return None;
+        }
+        self.inner.resolve_index(root, key)
+    }
+
     fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
         Some(&self.scope)
     }

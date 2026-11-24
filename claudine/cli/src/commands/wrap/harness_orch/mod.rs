@@ -24,6 +24,7 @@ pub(crate) use shell_options::{
     build_harness_shell_options_with_cache,
 };
 pub(crate) use types::{
-    AttemptLaunch, HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt,
-    UnrecoveredLifecycleDowngrade, harness_prompt_mode_label,
+    AttemptLaunch, HarnessPromptMode, HarnessPromptState, LoopPassPreparation,
+    MaterializedHarnessPrompt, RetainedLoopSource, UnrecoveredLifecycleDowngrade,
+    harness_prompt_mode_label,
 };

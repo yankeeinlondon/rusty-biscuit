@@ -19,10 +19,10 @@ $schema:
     force: boolean -> fix the slow tests of the last recorded run even when the working tree changed after it; the proof still re-runs every scope in the current tree
 summary: "{{ ctx.repo_root + '/target/slow-tests/current.md' }}"
 report: "{{ ctx.repo_root + '/.claudine/tmp/slow/' + ctx.timestamp + '.md' }}"
-has_summary: "{{ file_exists(summary) }}"
-baseline_state: "{{ has_summary ? frontmatter(summary, 'state') : 'none' }}"
+has-summary: "{{ file_exists(summary) }}"
+baseline-state: "{{ has-summary ? frontmatter(summary, 'state') : 'none' }}"
 initialize:
-    - when: "!has_summary"
+    - when: "!has-summary"
       then:
           - warn: "no recorded test run in this checkout ({{ summary }} is missing); run a test recipe such as `just test` in a package area, then run this prompt again"
           - error: "there is no recorded test run to read slow tests from"
@@ -34,7 +34,7 @@ initialize:
     - ensure_dir: "{{ dirname(report) }}"
     - ensure_file: "{{ report }}"
     - set_frontmatter: ["{{ report }}", "status", "pending"]
-    - set_frontmatter: ["{{ report }}", "baseline_state", "{{ baseline_state }}"]
+    - set_frontmatter: ["{{ report }}", "baseline-state", "{{ baseline-state }}"]
     - set_frontmatter: ["{{ report }}", "tiers", "{{ frontmatter(summary, 'tiers') }}"]
 start:
     # A `resume` re-enters at `start`, after the agent has changed the tree on
@@ -54,7 +54,7 @@ start:
     - message: "🐌 fixing {{ frontmatter(summary, 'slow') }} slow test(s) in {{ ctx.area_description || ctx.repo }} ({{ ctx.agent }}/{{ ctx.model }})"
     - say: "Fixing slow tests."
 success:
-    - set: { proof: "$(just slow-tests verify --baseline {{ baseline_state }})::result::timeout:900" }
+    - set: { proof: "$(just slow-tests verify --baseline {{ baseline-state }})::result::timeout:900" }
     - when: "proof.ok && frontmatter(report, 'status') == 'fixed'"
       then:
           - success: "✅ no slow tests remain: every scope of the baseline re-ran in the current working tree with none at or above the threshold; details in {{ report }}"
@@ -74,7 +74,7 @@ success:
           - set_frontmatter: ["{{ report }}", "nudged", true]
           - warn: "the agent ended without proof that no slow tests remain; asking it once more"
           - resume: |-
-                You ended without the proof this task requires. `just slow-tests verify --baseline {{ baseline_state }}` must pass, and {{ report }} must say `status: fixed`. The report's status is `{{ frontmatter(report, 'status') }}`, and the check says:
+                You ended without the proof this task requires. `just slow-tests verify --baseline {{ baseline-state }}` must pass, and {{ report }} must say `status: fixed`. The report's status is `{{ frontmatter(report, 'status') }}`, and the check says:
 
                 {{ proof.stdout }}
 
@@ -99,12 +99,12 @@ blocked:
 
 ## The recorded runs
 
-::block when="has_summary"
+::block when="has-summary"
 
-These facts were read from `{{ summary }}` when this prompt was composed; you do not need to re-derive them. It holds every test run recorded while the working tree was in state `{{ baseline_state }}` (`sniff repo state`: `HEAD` plus the content of every changed file), one section per tier and directory, each with the command that re-runs it.
+These facts were read from `{{ summary }}` when this prompt was composed; you do not need to re-derive them. It holds every test run recorded while the working tree was in state `{{ baseline-state }}` (`sniff repo state`: `HEAD` plus the content of every changed file), one section per tier and directory, each with the command that re-runs it.
 
 - **Tiers:** {{ frontmatter(summary, 'tiers') }}, in {{ frontmatter(summary, 'scopes') }} scope(s)
-- **Tests run:** {{ frontmatter(summary, 'tests') }}, of which **{{ frontmatter(summary, 'slow') }}** took {{ frontmatter(summary, 'threshold_s') }}s or longer
+- **Tests run:** {{ frontmatter(summary, 'tests') }}, of which **{{ frontmatter(summary, 'slow') }}** took {{ frontmatter(summary, 'threshold-s') }}s or longer
 - **Last recorded:** {{ frontmatter(summary, 'recorded') }} on **{{ ctx.os }}**, on the `{{ ctx.branch }}` branch of **{{ ctx.repo }}**
 
 ::file {{ summary }}
@@ -133,7 +133,7 @@ Shortening a deadline is a fix only through a test seam that keeps the productio
 2. For each slow test, time it alone first, for example `cargo nextest run -p <package> -E 'test(=<test path>)'`, to tell intrinsic cost from contention. Then find where the time goes before changing anything.
 3. Fix the cause. Check the change against the anti-patterns below, and keep the test's coverage at least as strong as it was.
 4. When every test is fixed, run **every scope's re-run command** listed above, from the repository root, **after your last edit**. Each run is recorded under the working tree's state at that moment, so editing any file afterwards (a fix, a comment, a doc) starts a new state and the scopes must run again. A narrower run (one test, a `-E` filter) does not count.
-5. Check your proof with `just slow-tests verify --baseline {{ baseline_state }}`. It lists every scope that still has to run and every slow test that remains. Repeat until it says `proven`.
+5. Check your proof with `just slow-tests verify --baseline {{ baseline-state }}`. It lists every scope that still has to run and every slow test that remains. Repeat until it says `proven`.
 
 ::file ./_testing-anti-patterns.md
 
@@ -150,7 +150,7 @@ Shortening a deadline is a fix only through a test seam that keeps the productio
 
 Write your outcome to `{{ report }}`. It already exists with frontmatter that the lifecycle hooks read; keep the existing keys and set `status`:
 
-- `status: fixed` once `just slow-tests verify --baseline {{ baseline_state }}` says `proven`
+- `status: fixed` once `just slow-tests verify --baseline {{ baseline-state }}` says `proven`
 - `status: blocked` when you could not fix every slow test
 
 Below the frontmatter, write one section per slow test: its cause, what you changed, and its duration before and after. For a blocked test, say what you tried and what stopped you.

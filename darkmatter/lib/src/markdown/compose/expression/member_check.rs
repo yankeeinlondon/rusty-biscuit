@@ -288,7 +288,7 @@ pub(crate) fn spanned_nodes(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
             | SpannedExprKind::NumberLiteral(_)
             | SpannedExprKind::BoolLiteral(_) => {}
             SpannedExprKind::ArrayLiteral(items) | SpannedExprKind::FunctionCall { args: items, .. } => pending.extend(items),
-            SpannedExprKind::ObjectLiteral(entries) => pending.extend(entries.iter().map(|(_, value)| value)),
+            SpannedExprKind::ObjectLiteral(entries) => pending.extend(entries.iter().map(|entry| entry.value())),
             SpannedExprKind::Paren(inner) | SpannedExprKind::UnaryNot(inner) | SpannedExprKind::UnaryMinus(inner) => {
                 pending.push(inner);
             }
@@ -339,7 +339,7 @@ pub(crate) fn expr_nodes(expr: &Expr) -> Vec<&Expr> {
         match node {
             Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
             Expr::ArrayLiteral(items) | Expr::FunctionCall { args: items, .. } => pending.extend(items),
-            Expr::ObjectLiteral(entries) => pending.extend(entries.iter().map(|(_, value)| value)),
+            Expr::ObjectLiteral(entries) => pending.extend(entries.iter().map(|entry| entry.value())),
             Expr::Paren(inner) | Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) => pending.push(inner),
             Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } | Expr::LogicalOr { left, right } => {
                 pending.extend([&**left, &**right]);

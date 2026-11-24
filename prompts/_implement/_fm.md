@@ -8,7 +8,7 @@ description: |-
 ---
 The implementation log file -- {{log}} -- which you have used to document the progress made during this implementation should now have a well structured prose report in the body of the log file; now we need to add in :
 
-- `implemented_by` set to `{{ctx.agent}}/{{ctx.model}}`
+- `implemented-by` set to `{{ctx.agent}}/{{ctx.model}}`
 ::block when="spec"
 - `spec` set to `{{spec}}
 ::end-block

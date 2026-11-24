@@ -597,6 +597,7 @@ init *args="": _ensure-native-bash
     source scripts/cargo-path.sh
     just _ensure-native-libs
     just _ensure-host-tools
+    just _ensure-rust-targets
     echo
 
     echo -e "{{ BOLD }}CI/CD tools{{ RESET }}"
@@ -653,6 +654,27 @@ _ensure-native-bash:
 # ensure repository shell and interactive utility dependencies are available
 _ensure-host-tools:
     @bash scripts/ensure-host-tools.sh
+
+# Cross-compilation targets local recipes build for, added to the toolchain
+# pinned in rust-toolchain.toml. They are kept out of that file's `targets` so
+# CI toolchain installs do not download them.
+# wasm32-wasip2: darkmatter's `zed-wasm`/`check-zed` (the DMLS Zed extension)
+init_rust_targets := "wasm32-wasip2"
+
+# ensure the Rust cross-compilation targets local recipes need are installed
+_ensure-rust-targets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+    installed="$(rustup target list --installed)"
+    for target in {{ init_rust_targets }}; do
+        if grep -qx "$target" <<<"$installed"; then
+            echo -e "rust target {{ BOLD }}$target{{ RESET }} is installed"
+        else
+            echo -e "installing rust target {{ BOLD }}$target{{ RESET }}"
+            rustup target add "$target"
+        fi
+    done
 
 # ensure CLIs invoked directly by CI/CD and local reproduction recipes exist
 _ensure-ci-tools: _ensure-nextest

@@ -502,7 +502,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::FunctionCall { args, .. } => args.iter().collect(),
         Expr::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
         Expr::ArrayLiteral(items) => items.iter().collect(),
-        Expr::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
+        Expr::ObjectLiteral(entries) => entries.iter().map(|entry| entry.value()).collect(),
     }
 }
 

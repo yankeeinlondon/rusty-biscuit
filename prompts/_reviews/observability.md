@@ -2,13 +2,13 @@
 area: "{{ctx.current_package_area}}"
 root: "{{ctx.repo_root}}"
 review: "{{ctx.repo_root}}/{{ctx.current_package_area}}/reviews/{{ctx.today}}-observability/review-1.md"
-review_relative: "reviews/{{ctx.today}}-observability/review-1.md"
+review-relative: "reviews/{{ctx.today}}-observability/review-1.md"
 start: 
     message: "🎬 starting an observability review in the {{area}} package area [{{ctx.time_military}}]"
 success:
-    message: "📄 the observability review `{{review_relative}}` in {{area}} has completed [{{ctx.time_military}}]"
+    message: "📄 the observability review `{{review-relative}}` in {{area}} has completed [{{ctx.time_military}}]"
 failure:
-    message: "😵 the observability review `{{review_relative}}` failed to complete: {{err.msg}}"
+    message: "😵 the observability review `{{review-relative}}` failed to complete: {{err.msg}}"
 ---
 # Rust Observability Review: `tracing` + Metrics Implementation
 

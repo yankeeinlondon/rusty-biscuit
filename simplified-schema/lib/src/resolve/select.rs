@@ -16,6 +16,10 @@
 //! wins over every later location, which is then neither admitted nor
 //! probed. A recursive (`%`) reference walks only the disk.
 //!
+//! While a [`bundle`](super::bundle) scope is in force, it decides every
+//! local reference first and nothing else is probed: no schema root, buffer,
+//! or disk location is consulted.
+//!
 //! Besides the selected file, the selection reports every location it
 //! probed, in order, and the path a missing reference would be created at,
 //! so an editor can link to it without a second lookup rule.
@@ -80,6 +84,9 @@ pub enum SelectionFailure {
     /// A malformed reference, a missing anchor, a boundary violation, or a
     /// location that could not be checked.
     Resolution(FileReferenceError),
+    /// A [`bundle`](super::bundle) scope in force refused the reference
+    /// before anything was probed or read.
+    Bundle(super::bundle::BundleBoundary),
 }
 
 impl SchemaFileSelection {
@@ -90,8 +97,9 @@ impl SchemaFileSelection {
     /// [`SelectionOutcome::Missing`] is [`SchemaError::NoMatch`],
     /// [`SelectionOutcome::SiblingOnly`] is
     /// [`SchemaError::BareNameSiblingExists`], [`SelectionFailure::Remote`]
-    /// is [`SchemaError::RemoteUnsupported`], and
-    /// [`SelectionFailure::Resolution`] is [`SchemaError::Unresolved`].
+    /// is [`SchemaError::RemoteUnsupported`],
+    /// [`SelectionFailure::Resolution`] is [`SchemaError::Unresolved`], and
+    /// [`SelectionFailure::Bundle`] is [`SchemaError::BundleBoundary`].
     pub fn into_result(self) -> Result<PathBuf, SchemaError> {
         let reference = self.reference;
         match self.outcome {
@@ -103,6 +111,9 @@ impl SchemaFileSelection {
             SelectionOutcome::Failed(SelectionFailure::Remote) => Err(SchemaError::RemoteUnsupported { reference }),
             SelectionOutcome::Failed(SelectionFailure::Resolution(source)) => {
                 Err(SchemaError::Unresolved { reference, source })
+            }
+            SelectionOutcome::Failed(SelectionFailure::Bundle(boundary)) => {
+                Err(SchemaError::BundleBoundary { reference, boundary })
             }
         }
     }
@@ -195,6 +206,18 @@ fn select(
     };
     if file_ref.class().kind == FileReferenceKind::Url {
         return Ok(SelectionOutcome::Failed(SelectionFailure::Remote));
+    }
+    if let Some(decision) = super::bundle::select(trimmed, &file_ref, base_dir) {
+        probes.extend(decision.probed.into_iter());
+        return match decision.outcome {
+            Ok(path) => {
+                if let Some(admit) = admit {
+                    admit(&path)?;
+                }
+                Ok(SelectionOutcome::Found(path))
+            }
+            Err(boundary) => Ok(SelectionOutcome::Failed(SelectionFailure::Bundle(boundary))),
+        };
     }
     #[cfg(not(feature = "file"))]
     {
@@ -346,7 +369,6 @@ struct Probes {
 }
 
 impl Probes {
-    #[cfg_attr(not(feature = "file"), allow(dead_code))]
     fn extend(&mut self, probed: impl Iterator<Item = PathBuf>) {
         for path in probed {
             if self.seen.insert(path.clone()) {

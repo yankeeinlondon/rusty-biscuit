@@ -19,7 +19,7 @@ const CODE: &str = "dm.schema.invalid_trigger";
 /// The warning's opening words, without whitespace (see [`stderr_of`]).
 const WARNING: &str = "ignoringinvalidschematrigger";
 const INCIDENT: &str =
-    "kind: schema-trigger\nname: memory\ndescription: Memory notes\nmatch:\n$schema: memory-payload.yaml\n";
+    "kind: schema-trigger\ntitle: memory\nnotes: Memory notes\nmatch:\n$schema: memory-payload.yaml\n";
 const VALID_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n";
 const VALID_PAYLOAD: &str = "$schema:\n  owner: string(required)\n";
 
@@ -81,7 +81,7 @@ fn compact(text: &str) -> String {
 /// envelope's reason, never blaming a document's `$schema`.
 fn assert_incident_warning(stderr: &str) {
     assert_eq!(stderr.matches(WARNING).count(), 1, "exactly one warning: {stderr}");
-    for fragment in ["memory.yaml", "found unknown keys: name, description"] {
+    for fragment in ["memory.yaml", "found unknown keys: title, notes"] {
         assert!(stderr.contains(&compact(fragment)), "`{fragment}` not in {stderr}");
     }
     assert!(!stderr.contains("CompositionError"), "{stderr}");
@@ -102,7 +102,7 @@ fn assert_incident_row(row: &Value, trigger: &Path) {
     );
     let message = row["message"].as_str().unwrap();
     assert!(
-        message.starts_with("ignoring invalid schema trigger") && message.contains("found unknown keys: name, description"),
+        message.starts_with("ignoring invalid schema trigger") && message.contains("found unknown keys: title, notes"),
         "{row:#}"
     );
 }

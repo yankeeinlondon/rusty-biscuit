@@ -8,13 +8,13 @@ $schema:
     report: file(required) -> the report file shared by every stage of the PR flow
     title: string -> an optional pull request title; derived from the commits when omitted
     about: string -> optional context from the caller about what this branch's work is
-body_file: "{{ replace_last(report, '.md', '.pr-body.md') }}"
+body-file: "{{ replace_last(report, '.md', '.pr-body.md') }}"
 timeout: 20m
 success:
-    - when: "frontmatter(report, 'status') == 'pr_opened' && frontmatter(report, 'pr_url')"
+    - when: "frontmatter(report, 'status') == 'pr_opened' && frontmatter(report, 'pr-url')"
       then:
-          - success: "pull request ready: {{ frontmatter(report, 'pr_url') }}"
-          - message: "🚀  pull request for `{{branch}}` is open and CI/CD is running: {{ frontmatter(report, 'pr_url') }}"
+          - success: "pull request ready: {{ frontmatter(report, 'pr-url') }}"
+          - message: "🚀  pull request for `{{branch}}` is open and CI/CD is running: {{ frontmatter(report, 'pr-url') }}"
           - say: "The pull request is open and CI CD is running."
           - stop
     - message: |-
@@ -54,19 +54,19 @@ failure:
 
 1. Confirm `git rev-parse origin/{{branch}}` equals the `head` recorded in the report. If it does not, set `status: error` with a `summary` explaining the mismatch and stop; do not push from this stage.
 2. Check for an existing pull request with `gh pr list --head {{branch}} --state open --json url`.
-    - If one exists, the push already re-triggered its CI. Record its URL as `pr_url`, set `status: pr_opened`, and skip to step 5.
-3. Write the pull request description to `{{body_file}}` (never inline it on the command line; descriptions contain backticks and `$`). It should:
+    - If one exists, the push already re-triggered its CI. Record its URL as `pr-url`, set `status: pr_opened`, and skip to step 5.
+3. Write the pull request description to `{{body-file}}` (never inline it on the command line; descriptions contain backticks and `$`). It should:
     - open with a short paragraph on what the branch does and why
     - summarize the changes grouped by theme, not commit by commit
     - point to any `spec.md` files under `features/` or `fixes/` that the commits implement or close
     - list every commit above, so a reviewer can see work that is unrelated to the main theme
     - carry no agent attribution: no `Generated with …` line, no `Co-authored-by` or similar trailer, in the description or the title, whatever your harness suggests
-4. Open it with `gh pr create --base {{base}} --head {{branch}} --title <title> --body-file {{body_file}}`.
+4. Open it with `gh pr create --base {{base}} --head {{branch}} --title <title> --body-file {{body-file}}`.
 ::block when="title"
     - Use this title: **{{title}}**
 ::end-block
 ::block when="!title"
     - Derive a Conventional Commits title from the commits (e.g. `fix(darkmatter): unify array rendering to compact JSON`).
 ::end-block
-5. Set `pr_url` and `status: pr_opened` in the report, and replace `summary` with one sentence describing the pull request.
+5. Set `pr-url` and `status: pr_opened` in the report, and replace `summary` with one sentence describing the pull request.
 6. End with the pull request URL.

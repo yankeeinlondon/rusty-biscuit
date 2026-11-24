@@ -5,16 +5,16 @@ $schema:
     message: string -> if you want to provide a message that describes what this commit is about it will be fed into the prompt to help the agent name the commits
     plan: file -> if you want to have the "message" be that these commits are related to a plan than you can include a file reference to the plan
     phase: number -> if you've provided a plan to explain these commits then you can specify the specific phase which these commits belong to
-    lessons_learned: file
-lessons_learned: "@.claudine/memory/commits.md"
+    lessons-learned: file
+lessons-learned: "@.claudine/memory/commits.md"
 timeout: 30m
 step_timeout: 12m
-show_system_prompt: false
+show-system-prompt: false
 operation: commit
 agent: codex
 yolo: true
 model: gpt-6-luna
-resides_in: |-
+resides-in: |-
     {{
         length(ctx.dirty_package_areas) == 1
             ? 'are all part of the ' + as_csv(ctx.dirty_package_areas) + ' package area'
@@ -32,10 +32,10 @@ start:
         🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
-        🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git**
+        🗳️  staged files in {{ctx.repo }}{{ ctx.area ? '(' + ctx.area + ')' : ''}}'s **{{ctx.branch}}** branch, have been **committed to git** on `{{ctx.hostname}}`
 failure:
     message: |-
-        💥  the staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}} branch failed to commit as requested! The error was:
+        💥  the staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}} branch failed to commit as requested on `{{ctx.hostname}}`! The error was:
 
         {{err.msg}}
 ---
@@ -53,7 +53,7 @@ You are being asked to commit files to git using the **Conventional Commits** na
 
 ::end-block
 
-- There are {{ length(ctx.staged_files) }} staged files to commit which {{resides_in}}
+- There are {{ length(ctx.staged_files) }} staged files to commit which {{resides-in}}
 - The staged files are:
 
     {{ as_unordered_list(ctx.staged_files) }}
@@ -134,7 +134,7 @@ The following best practices should always be followed:
 
 In addition to the best practices above, the repository keeps a short journal of git mechanics that agents have found the hard way. Treat it as advice from prior runs, not as rules that override the task above:
 
-::file {{lessons_learned}}
+::file {{lessons-learned}}
 
 Step 5 says when, and how rarely, an entry may be added.
 
@@ -191,7 +191,7 @@ Your task is to:
 
 5.  Summarization and Closure
     - once all of the staged files you were responsible for have been committed, report back to the caller in summary form: each commit's hash and subject, anything left staged and why, and any unrelated working-tree changes you noticed and left alone.
-    - finally, decide whether this batch produced a journal entry. The journal (`{{lessons_learned}}`) holds only **very novel or surprising git mechanics**, and almost every batch produces none. Novelty is not how it felt; it is a test you can check. Add an entry only when **all** of these hold:
+    - finally, decide whether this batch produced a journal entry. The journal (`{{lessons-learned}}`) holds only **very novel or surprising git mechanics**, and almost every batch produces none. Novelty is not how it felt; it is a test you can check. Add an entry only when **all** of these hold:
         1. a git command did something different from what its documentation, this prompt, or the journal says it does, and you confirmed the behavior a second time rather than inferring it from one failure;
         2. the difference would bite any agent in any repository, not only this batch, this package, or this spec;
         3. no existing entry covers it, even partially; if one does, you leave the journal alone (you do not extend or "refine" an entry);

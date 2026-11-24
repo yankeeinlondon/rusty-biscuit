@@ -19,7 +19,8 @@ use simplified_schema::{
     ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
     locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
-    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_schema_table, parse_schema_table_with_source,
+    parse_yaml_schema,
 };
 use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
@@ -150,6 +151,9 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     // ranges and rewrites would land on the wrong bytes.
     if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale && overlay.yaml_document.is_none()) {
         crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
+        // After the passive passes, so an observed call failure the call
+        // check already marks is not reported twice.
+        crate::diagnostics::observed::property_diagnostics(ctx, ast, overlay.bundle(), &mut out);
     }
 
     // A claimed kind's definition problems are the report's: the envelope's
@@ -639,7 +643,7 @@ pub(crate) fn schema_problem_diagnostics(
 /// mapping and a list item shares its line with its fields, so the validator's
 /// JSON Pointer travels with it. A missing key's pointer names the parent
 /// object, as in `md schema validate --format json`; the message names the key.
-fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
+pub(super) fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
     if let Some(applied) = &problem.default {
@@ -723,6 +727,7 @@ fn semantic_authored_diagnostics(
                 MetaSchemaKind::TypeDefinition => {
                     parse_type_definition_value(&entry.key, &yaml).map(|_| ())
                 }
+                MetaSchemaKind::Schema if value.table => parse_schema_table(&yaml).map(|_| ()),
                 MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
             };
             match result {
@@ -743,7 +748,7 @@ fn semantic_authored_diagnostics(
         // source-aware parser only locates the failure they reported.
         // A declaration failure on no property is the declaration's own shape,
         // which keeps the whole value, as a standalone envelope's does.
-        let located = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
+        let located = locate_meta_type_failure(ctx.text, value_span.clone(), kind, value.table, &entry.key)
             .filter(|failure| failure.error.to_string() == error.to_string())
             .filter(|failure| {
                 kind == MetaSchemaKind::TypeDefinition
@@ -788,11 +793,13 @@ fn semantic_authored_diagnostics(
 /// the value parses or is not YAML on its own.
 ///
 /// The value is re-parsed in place (the text before it on its first line
-/// replaced with spaces), so the parser reads the authored columns.
+/// replaced with spaces), so the parser reads the authored columns. A
+/// `table` schema value is read as a table of named declarations.
 fn locate_meta_type_failure(
     text: &str,
     value_span: std::ops::Range<usize>,
     kind: MetaSchemaKind,
+    table: bool,
     key: &str,
 ) -> Option<LocatedDefinitionFailure> {
     let line_start = text[..value_span.start].rfind('\n').map_or(0, |index| index + 1);
@@ -803,6 +810,7 @@ fn locate_meta_type_failure(
         MetaSchemaKind::TypeDefinition => {
             parse_property_definition_with_source(key, &yaml, &source, line_start).err()
         }
+        MetaSchemaKind::Schema if table => parse_schema_table_with_source(&yaml, &source, line_start).err(),
         MetaSchemaKind::Schema => parse_schema_declaration_with_source(&yaml, &source, line_start).err(),
     }
 }
@@ -867,7 +875,7 @@ fn semantic_problem_range(
     let entry = ast.entry_or_ancestor(&problem.path)?;
     let span = if kind == SemanticProblemKind::TypeDefinition {
         let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
-        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, &entry.key)
+        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, false, &entry.key)
             .and_then(|failure| failure.authored_span.or(failure.value_span))
             .unwrap_or_else(|| entry.value_span.clone())
     } else {
@@ -1461,7 +1469,7 @@ fn without_fix(
 
 /// `relatedInformation` pointing at a problem's schema origin, when it is a
 /// referenced schema file.
-fn schema_origin_related(
+pub(super) fn schema_origin_related(
     ctx: &DocumentContext,
     bundle: &SchemaBundle,
     problem: &ValidationProblem,
@@ -1683,7 +1691,7 @@ fn enclosing_entry_span(
             .iter()
             .map_while(|segment| match segment {
                 SchemaSourcePathSegment::Property(key) => Some(key.as_str()),
-                SchemaSourcePathSegment::UnionArm(_) => None,
+                SchemaSourcePathSegment::UnionArm(_) | SchemaSourcePathSegment::Spread(_) => None,
             }),
     );
     (1..=keys.len())
@@ -1879,7 +1887,7 @@ fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<
 
 /// A zero-width range at the document start (fallback when a span cannot
 /// convert).
-fn zero_range() -> Range {
+pub(super) fn zero_range() -> Range {
     Range::default()
 }
 
@@ -2498,6 +2506,55 @@ mod tests {
         });
     }
 
+    /// A `schema(mapping)` value is a table of named declarations, located
+    /// as the library judges it: `$extends` there is a type name, and a
+    /// `$constraints` key written directly in it is the error.
+    #[test]
+    fn a_mapping_schema_value_is_located_as_a_table() {
+        let doc = |declaration: &str, value: &str| {
+            format!("---\n$schema:\n  defs: '{declaration}'\ndefs:\n{value}---\n\nbody\n")
+        };
+        let shape_errors = |text: &str| {
+            diagnostics_for(text, |diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                    .map(|diagnostic| (ranged_text(text, diagnostic).to_string(), diagnostic.message.clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        let valid = doc("schema(mapping)", "  $extends: string\n  b: number\n");
+        diagnostics_for(&valid, |diagnostics| assert!(diagnostics.is_empty(), "{diagnostics:#?}"));
+
+        let broken = doc("schema(mapping)", "  $extends: string\n  b: string(nope)\n");
+        let found = shape_errors(&broken);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].0, "nope", "{found:#?}");
+        assert!(!found[0].1.contains("$extends"), "{found:#?}");
+
+        let constrained = doc("schema(mapping)", "  $constraints: { min-keys: 1 }\n  b: number\n");
+        let found = shape_errors(&constrained);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].0, "{ min-keys: 1 }", "{found:#?}");
+        assert!(found[0].1.contains("a `types` table holds named declarations"), "{found:#?}");
+
+        // A table that parses but misses a required declaration keeps the
+        // judge's own message, not one from reading the table as an object.
+        let missing = doc(
+            "schema(mapping; property(kind, type-definition(forms(literal))))",
+            "  $extends: string\n",
+        );
+        diagnostics_for(&missing, |diagnostics| {
+            let messages: Vec<&str> = diagnostics
+                .iter()
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect();
+            assert_eq!(messages, ["the schema must declare `kind`"], "{diagnostics:#?}");
+        });
+    }
+
     #[test]
     fn valid_expression_under_mixed_union_is_clean() {
         // A value that parses cleanly is valid under the expression arm; no
@@ -3110,6 +3167,107 @@ mod tests {
                     None,
                 )],
                 "{diagnostics:#?}"
+            );
+        });
+    }
+
+    /// The one composition diagnostic, as `(range text, [related (file name,
+    /// line, related text, message)])`. Related text is read from the file
+    /// it points into, so each location is checked by what it covers.
+    fn composition_diagnostic(root: &Path, text: &str, diagnostics: &[Diagnostic]) -> (String, Vec<(String, String, String)>) {
+        let found: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION))
+            .collect();
+        assert_eq!(found.len(), 1, "{diagnostics:#?}");
+        let diagnostic = found[0];
+        let related = diagnostic
+            .related_information
+            .iter()
+            .flatten()
+            .map(|related| {
+                let path = crate::workspace::uri_to_file_path(&related.location.uri).expect("file uri");
+                let source = if path == root.join("doc.md") {
+                    text.to_string()
+                } else {
+                    std::fs::read_to_string(&path).expect("related file")
+                };
+                let range = related.location.range;
+                let line = source.lines().nth(range.start.line as usize).unwrap_or_default();
+                assert_eq!(range.start.line, range.end.line, "{related:?}");
+                let covered = line[range.start.character as usize..range.end.character as usize].to_string();
+                (path.file_name().unwrap().to_string_lossy().into_owned(), covered, related.message.clone())
+            })
+            .collect();
+        (ranged_text(text, diagnostic).to_string(), related)
+    }
+
+    #[test]
+    fn an_ineligible_local_composition_target_ranges_the_whole_operand() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  rows: 'string[]'\n  order: '{ ...rows@this, price: number }'\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "rows@this");
+            assert_eq!(
+                related,
+                [("doc.md".to_string(), "'string[]'".to_string(), "`rows@this` is defined here".to_string())]
+            );
+        });
+    }
+
+    /// Of two operands naming the same file, only the failing second one is
+    /// ranged, and the related location is the terminal declaration an
+    /// alias in that file reaches.
+    #[test]
+    fn an_ineligible_imported_target_ranges_its_own_operand_and_relates_the_terminal_declaration() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("types.yaml"), "$schema:\n  base: '{ id: string }'\n  rows: list@./lists.yaml\n").unwrap();
+        std::fs::write(root.join("lists.yaml"), "$schema:\n  list: 'number[]'\n").unwrap();
+        let text = "---\n$schema:\n  order:\n    $extends: [base@./types.yaml, rows@./types.yaml]\n    price: number\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "rows@./types.yaml");
+            assert_eq!(
+                related,
+                [(
+                    "lists.yaml".to_string(),
+                    "'number[]'".to_string(),
+                    "`rows@./types.yaml` is defined here".to_string()
+                )]
+            );
+        });
+    }
+
+    #[test]
+    fn a_missing_composition_file_ranges_the_operand_with_the_named_type_code() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  order:\n    $extends: base@./missing.yaml\n    price: number\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "base@./missing.yaml");
+            assert!(related.is_empty(), "{related:?}");
+            assert!(diagnostics.iter().all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_PREPARE)), "{diagnostics:#?}");
+        });
+    }
+
+    /// A composition that fails inside an imported file is ranged on this
+    /// document's reference into it, with the failing operand and the
+    /// target's declaration there as related locations.
+    #[test]
+    fn an_indirect_composition_failure_navigates_back_to_the_receiver() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("a.yaml"), "$schema:\n  rows: 'string[]'\n  wrap: '{ ...rows, id: string }'\n").unwrap();
+        let text = "---\n$schema:\n  order: wrap@./a.yaml\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "wrap");
+            assert_eq!(
+                related,
+                [
+                    ("a.yaml".to_string(), "rows".to_string(), "`rows` is composed here".to_string()),
+                    ("a.yaml".to_string(), "'string[]'".to_string(), "`rows` is defined here".to_string()),
+                ]
             );
         });
     }

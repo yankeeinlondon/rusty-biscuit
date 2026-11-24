@@ -49,6 +49,21 @@ and DMLS both read it.
   call code, severity, or message outside this module. Parity tests:
   `lib/tests/l1/shared_diagnostics.rs`, DMLS
   `expression_call_diagnostics::shared_fields`.
+- **Object spread** (`{ ...base, k: v }`) is checked through the same
+  record. A provably non-object, non-null operand is a `CallCheck` named
+  `SPREAD_CHECK_NAME` (`...`) with `CallProblem::InvalidSpreadOperand`,
+  spanning the operand (`INVALID_SPREAD_OPERAND_CODE`). `check_expression_calls`
+  walks every node (`visit_nodes`); `visit_call_nodes` is a filter over that
+  walk. So any consumer that iterates checks must tolerate a `...` check that
+  has no arguments. Typing folds entries in order
+  (`scope::Shape::object_of_entries`, using `projection::spread_fields`); an
+  open result gets `<string>: unknown`, which `serialize_property_atom` does
+  not print. The runtime failure is `ExpressionError::InvalidSpreadOperand`
+  (fatal). Its `SpreadSite` is placed by `evaluate`/`evaluate_observed` as a
+  node ordinal in `member_check::expr_nodes`. `report_diagnostics` maps the
+  ordinal back through `spread_operand_span` (that is, `spanned_nodes`) to
+  narrow an interpolation record to the operand. Reuse that ordinal mirror
+  for any other node-level runtime location; never compare an AST by value.
 - `CallCheck::always_false` marks a call whose authored literal argument
   is not a well-formed file reference, at a parameter registered with
   `RegistrationBuilder::false_for_malformed_reference` (`file_exists` only;
@@ -471,10 +486,14 @@ greps the handler sources.
 
 ## `load_data` (data files)
 
-`load_data(file: file | null, as: type-definition(container), options?:
+`load_data(file: file | null, as?: type-definition(container) | null, options?:
 {format, delimiter, header} | null)` reads YAML, JSON, JSONL/NDJSON, CSV, TSV,
-TOML, or JSON5 and returns the value fully converted to `as`, or fails; a
-partial value is never returned. `options` is a closed inline object in the
+TOML, or JSON5. The bound root is normalized first (`load.rs::bind_source`:
+arrays/objects kept, `null` → `[]`, any other scalar → a one-element array,
+`LoadedData::wrapped`), then converted to `as` when one is given; an omitted
+and a `null` `as` are the same call (empty contract key in the bind memo) and
+return the value unconverted, so CSV cells stay text until the destination
+schema converts them. A partial value is never returned. `options` is a closed inline object in the
 catalog (`schemas/partials/functions.yaml`): `format` is an `enum` of the
 seven names plus the aliases `yml`/`ndjson` (normalized to `yaml`/`jsonl` in
 `options.rs::format_from_name`, so they share memo entries and messages name
@@ -494,6 +513,28 @@ codes). Code: `compose/expression/data/` (`load.rs` is the function;
 `contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
 command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
 
+- **One loader for every surface.** Composition, schema slots, and DMLS
+  property observations all run the same `load.rs` handler over one
+  `DataRuntime` memo (requests.md); there is no editor-only parser or
+  shape pass. Editor mode is only `ResolutionContext::editor`
+  (`expression/editor_reads.rs`, set by `SlotSession::observe_properties`):
+  local candidates are gated before each probe, URLs come from a fresh
+  transport-cache entry only, bytes are charged before parsing, and a
+  refusal is `ExpressionError::ObservationPending`, which no `try`/`||`
+  recovers. Keep new loader behavior on the shared path so compose and the
+  editor cannot disagree. Behavior:
+  [With or without `as`](../../../darkmatter/docs/topics/loading-data.md#with-or-without-as),
+  [Typing data with the destination schema](../../../darkmatter/docs/topics/loading-data.md#typing-data-with-the-destination-schema).
+- **Uncontracted means unconverted, not unchecked.** With no `as` the call
+  still parses strictly, binds options, normalizes the root, normalizes header
+  keys, and records reads; only contract preparation and conversion are
+  skipped (no `PreparedContract`, empty bind-memo contract key). Conversion is left
+  to frontmatter validation (`compose/schema_validation.rs`), so never convert in the
+  loader "to help" an uncontracted call. Header-name failures (camelCase
+  collision, empty key) and an explicit list of the wrong width are
+  `DataError::Malformed` and stay `try`-recoverable
+  (`load_data_uncontracted::malformed_names_are_recovered_like_other_malformed_data`);
+  an invalid `header` list is `invalid_options` and is not.
 - **Recoverable read failures** (`error.rs::ExpressionError::is_recoverable_read_failure`):
   the one classifier the `try(expr, fallback)` special form uses. True only for a
   `FileReference` (or `Data(DataError::FileReference)`) miss that is
@@ -575,13 +616,20 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   every non-null arm and array/tuple element must agree; object/dictionary
   elements read rows by header, list/tuple elements by position (header row
   skipped); anything else, or a tuple with no elements, is
-  `dm.data.row_shape_conflict`. The first row is a header unless
-`header: false`, which reads every record as a list row (an object-row
-contract is `RowShapeConflict::HeaderlessObjectRows`, same code; the logical
-row view in `error.rs::TabularSource` keeps pointers and positions counted
-from the first record). Rows are
-  built per contract at bind time from the memoized table, so the
-  object-mode duplicate/empty-header error is per contract.
+  `dm.data.row_shape_conflict`. `header` is `options.rs::HeaderMode`
+  (`FirstRecord` default, `None` for `false`, `Names(Arc<[String]>)` for a
+  list, validated by `options::header_names`: non-empty, no empty or repeated
+  name, never trimmed); the bind memo keys on it, names included. Without a
+  contract the mode picks the rows (`load.rs::select_row_mode`); with one,
+  `contract::require_header_rows` (shared with the passive check) refuses
+  object rows for `None` (`HeaderlessObjectRows`) and list rows for `Names`
+  (`NamedListRows`). Header-record keys are `functions::strings::to_camel_case`
+  of each name (`load.rs::header_keys`: an empty key or a collision is
+  `dm.data.malformed` naming the original headers, even with no data rows);
+  explicit names must equal the first record's width
+  (`load.rs::tabular_source`). `TabularSource::keys` carries each column's
+  key, and `locate.rs::table_offset` finds a cell by it. Rows are built per
+  contract and mode at bind time from the memoized table.
 - **Numbers and formats** (`parse.rs`): JSON/JSONL through
   `numeric::admit_json_text_numbers`, JSON5 through `admit_json5_text_numbers`
   and `reject_non_finite_json5`, TOML by walking `Toml::value()` with
@@ -622,10 +670,31 @@ from the first record). Rows are
 - **Typed literal returns** (`call_check.rs::expression_type`): a literal
   `as` types the call as its bare shape (named references `unknown`, explicit
   null arms kept, `| null` added when `file` may be null, `null` for a literal
-  `null` file), which flows into `map`/`filter` callback locals. The
+  `null` file), which flows into `map`/`filter` callback locals. An
+  uncontracted call is provisional (`call_check.rs::uncontracted_type`): an
+  open object (`<string>: unknown`, which proves no member absent) or
+  `unknown[]`, narrowed for a provable CSV/TSV read to open-object rows or
+  `unknown[][]` for `header: false`.
+- **Destination provenance** (`expression/trace.rs`): a whole-value
+  frontmatter `{{ … }}` is evaluated under `trace::traced`
+  (`interpolation/rewrite.rs::interpolate_value_traced`); `evaluate_expr`
+  clears the origin after every node except a parenthesized expression, a
+  ternary (its last child is the selected arm), and a `load_data` call, whose
+  handler records a `LoadOrigin` (identity, format, text, table, wrap flag).
+  `frontmatter_interpolation.rs` stores it per top-level key as
+  `value_origin::ExpressionOrigin` on `FrontmatterProvenance`; both schema
+  passes (`schema_validation::run_with_registry`, `validate_typed_shell_values`)
+  turn it into `MarkdownError::SchemaValidationFailed::expression_origins`
+  (`ExpressionMetadata`), and `report_diagnostics::ExpressionProjector` (used
+  by the records and the status block alike) places each problem at the
+  expression with the data file's `data_location`; DMLS gets the same
+  projection through the public `report_diagnostics::data_locations`, so the
+  CLI and the editor name one position. Never match provenance by value
+  equality. Behavior and the forwarding table:
+  [Where a destination failure points](../../../darkmatter/docs/topics/loading-data.md#where-a-destination-failure-points). The
   **Undeclared member check** above applies to these shapes as to any typed
   value: `h.nmae` against `{ name: string }[]` elements warns; a named
   reference (`unknown`) or a computed `as` stays silent.
-- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime}.rs`,
+- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime,uncontracted,destination}.rs`,
   `cli/tests/l1/load_data.rs`; biscuit-file's opt-in readers in its
   `l1-delimited` target.

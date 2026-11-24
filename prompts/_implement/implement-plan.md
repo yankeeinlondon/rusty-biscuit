@@ -5,22 +5,22 @@ description: |-
     - if an appropriately named _specification_ or _design_ file is found in the same directory then they will be referenced to in the log's frontmatter as well as the prose content 
 $schema:
     phase: number(required;default(1)) -> the phase of the plan to start with
-    total_phases: number(required) -> the total number of phases the plan has
+    total-phases: number(required) -> the total number of phases the plan has
     plan: file(eager; required; match(**/*plan*.md)) -> the _plan file_ which is being implemented
     spec: file(eager; match(**/*spec*.md)) -> the _specification file_ which the plan was based on
-    pass_icon: string
-    commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
+    pass-icon: string
+    commit-message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
 yolo: true
-commit_message: ""
+commit-message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
-area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
-pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
-total_phases: |-
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start-phase') || 1 : null }}"
+area: "{{ ctx.area ? '**area:** ' + ctx.area + ', ' : '' }}"
+pass-icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
+total-phases: |-
     {{
         file_exists(plan)
-            ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0
+            ? frontmatter(plan, 'total-phases') || frontmatter(plan, 'phases') || 0
             : 0
     }}
 spec: |-
@@ -33,72 +33,72 @@ spec: |-
     }}
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
-# `depends_on` entries are `{date}-{name}` directories beside the spec or under
+# `depends-on` entries are `{date}-{name}` directories beside the spec or under
 # its `_completed/` folder. The expression language has no list iteration, so
 # the first three are checked explicitly; a longer list only warns.
-dependency_dir: "{{ spec ? dirname(dirname(spec)) : null }}"
-dependencies: "{{ spec ? frontmatter(spec, 'depends_on') || [] : [] }}"
-dependency_0: "{{ length(dependencies) > 0 ? (file_exists(dependency_dir + '/' + dependencies[0] + '/spec.md') ? dependency_dir + '/' + dependencies[0] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[0] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[0] + '/spec.md' : null) : null }}"
-dependency_1: "{{ length(dependencies) > 1 ? (file_exists(dependency_dir + '/' + dependencies[1] + '/spec.md') ? dependency_dir + '/' + dependencies[1] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[1] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[1] + '/spec.md' : null) : null }}"
-dependency_2: "{{ length(dependencies) > 2 ? (file_exists(dependency_dir + '/' + dependencies[2] + '/spec.md') ? dependency_dir + '/' + dependencies[2] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[2] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[2] + '/spec.md' : null) : null }}"
-unimplemented_dependencies: "{{ (dependency_0 && frontmatter(dependency_0, 'implemented') != true ? '- `' + dependencies[0] + '`\n' : '') + (dependency_1 && frontmatter(dependency_1, 'implemented') != true ? '- `' + dependencies[1] + '`\n' : '') + (dependency_2 && frontmatter(dependency_2, 'implemented') != true ? '- `' + dependencies[2] + '`\n' : '') }}"
+dependency-dir: "{{ spec ? dirname(dirname(spec)) : null }}"
+dependencies: "{{ spec ? frontmatter(spec, 'depends-on') || [] : [] }}"
+dependency-0: "{{ length(dependencies) > 0 ? (file_exists(dependency-dir + '/' + dependencies[0] + '/spec.md') ? dependency-dir + '/' + dependencies[0] + '/spec.md' : file_exists(dependency-dir + '/_completed/' + dependencies[0] + '/spec.md') ? dependency-dir + '/_completed/' + dependencies[0] + '/spec.md' : null) : null }}"
+dependency-1: "{{ length(dependencies) > 1 ? (file_exists(dependency-dir + '/' + dependencies[1] + '/spec.md') ? dependency-dir + '/' + dependencies[1] + '/spec.md' : file_exists(dependency-dir + '/_completed/' + dependencies[1] + '/spec.md') ? dependency-dir + '/_completed/' + dependencies[1] + '/spec.md' : null) : null }}"
+dependency-2: "{{ length(dependencies) > 2 ? (file_exists(dependency-dir + '/' + dependencies[2] + '/spec.md') ? dependency-dir + '/' + dependencies[2] + '/spec.md' : file_exists(dependency-dir + '/_completed/' + dependencies[2] + '/spec.md') ? dependency-dir + '/_completed/' + dependencies[2] + '/spec.md' : null) : null }}"
+unimplemented-dependencies: "{{ (dependency-0 && frontmatter(dependency-0, 'implemented') != true ? '- `' + dependencies[0] + '`\n' : '') + (dependency-1 && frontmatter(dependency-1, 'implemented') != true ? '- `' + dependencies[1] + '`\n' : '') + (dependency-2 && frontmatter(dependency-2, 'implemented') != true ? '- `' + dependencies[2] + '`\n' : '') }}"
 initialize:
     # A spec built on unimplemented work would stop at its own prerequisite
     # gate only after a full Phase 1; refuse before launching an agent.
-    - when: "unimplemented_dependencies"
+    - when: "unimplemented-dependencies"
       then:
           - message: |-
                 ⏸️  `{{parent_dir(spec)}}` depends on work that is not implemented yet:
 
-                {{unimplemented_dependencies}}
-          - error: "the spec {{spec}} lists `depends_on` entries that are not `implemented: true`; implement them first"
+                {{unimplemented-dependencies}}
+          - error: "the spec {{spec}} lists `depends-on` entries that are not `implemented: true`; implement them first"
     - when: "length(dependencies) > 3"
       then:
           - warn: "`{{parent_dir(spec)}}` lists {{length(dependencies)}} dependencies; only the first three were checked for `implemented: true`"
     # Fail before Phase 1 rather than discover the open rulings an hour into it.
-    - when: "spec && frontmatter(spec, 'needs_rulings') == true"
+    - when: "spec && frontmatter(spec, 'needs-rulings') == true"
       then:
           - message: |-
                 ⏸️  `{{parent_dir(spec)}}` still needs rulings before it can be implemented:
 
-                {{ as_ordered_list(frontmatter(spec, 'required_rulings') || []) }}
-          - error: "the spec {{spec}} sets `needs_rulings: true`; record the rulings (or set `needs_rulings: false`) before running the implementation"
+                {{ as_ordered_list(frontmatter(spec, 'required-rulings') || []) }}
+          - error: "the spec {{spec}} sets `needs-rulings: true`; record the rulings (or set `needs-rulings: false`) before running the implementation"
     - ensure_file: "{{log}}"
-    - when: "!total_phases || total_phases <= 0"
+    - when: "!total-phases || total-phases <= 0"
       then:
           - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-    - when: "!is_empty(frontmatter(plan, 'open_questions'))"
+          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total-phases` or `phases` Frontmatter property!"
+    - when: "!is_empty(frontmatter(plan, 'open-questions'))"
       then:
           - warn: |-
-                the plan `{{parent_dir(plan)}}` has **{{ length(frontmatter(plan, 'open_questions')) }}** open question(s); resolve them in the spec, then remove `open_questions` from {{link(plan)}}:
+                the plan `{{parent_dir(plan)}}` has **{{ length(frontmatter(plan, 'open-questions')) }}** open question(s); resolve them in the spec, then remove `open-questions` from {{link(plan)}}:
 
-                {{ as_ordered_list(frontmatter(plan, 'open_questions')) }}
-          - error: "the plan `{{parent_dir(plan)}}` has unresolved `open_questions`; implementation will not start until they are resolved"
-    - when: "total_phases && phase > total_phases"
+                {{ as_ordered_list(frontmatter(plan, 'open-questions')) }}
+          - error: "the plan `{{parent_dir(plan)}}` has unresolved `open-questions`; implementation will not start until they are resolved"
+    - when: "total-phases && phase > total-phases"
       then:
-          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"
-          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
+          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total-phases}})"
+          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total-phases}})"
 
 start:
-    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**repo**: {{ctx.repo}},{{area}} **agent:** {{ctx.agent}}/{{ctx.model}}, **branch:** {{ctx.branch}}, **host:** {{ctx.hostname}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
     # body renders the same message for the agent itself.
-    - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+    - when: "file_exists(log) && frontmatter(log, 'message-to-agent')"
       then:
           - message: |-
                 The previous phase's agent has passed a message to this agent:
 
-                {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
+                {{file_exists(log) ? frontmatter(log, 'message-to-agent') : null}}
 success: 
-    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
-    - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan (_on **{{ctx.hostname}}** host)"
+    - message: "{{pass-icon}}  phase **{{phase}}** (_of {{total-phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
     - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
     # The agent writes the completion flags; this only surfaces a final
     # phase that exited without them, since marking them here could claim
     # gates the agent never finished.
-    - when: "phase >= total_phases && (!frontmatter(plan, 'implemented') || (spec && !frontmatter(spec, 'implemented')))"
+    - when: "phase >= total-phases && (!frontmatter(plan, 'implemented') || (spec && !frontmatter(spec, 'implemented')))"
       then:
         - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
         - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
@@ -106,7 +106,7 @@ success:
     # loop's counter lives only in memory. Not a `shell` action: those resolve
     # at pre-flight from the plan on disk, not this iteration's `phase`.
     - set_frontmatter: ["{{plan}}", "phase", "{{phase + 1}}"]
-    - when: "ctx.dirty_files && !commit_message"
+    - when: "ctx.dirty_files && !commit-message"
       then:
         - message: |-
             staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
@@ -114,35 +114,35 @@ success:
             {{ as_unordered_list(ctx.dirty_files) }}
         - shell: "git add {{ctx.repo_root}}"
         - shell: just commit
-    - when: "ctx.dirty_files && commit_message"
+    - when: "ctx.dirty_files && commit-message"
       then:
         - message: |-
             staging all files from phase **#{{phase}}** in preparation for the git commit:
 
             {{ as_unordered_list(ctx.dirty_files) }}
         - shell: git add ..
-        - shell: git commit -m "{{commit_message}}"
+        - shell: git commit -m "{{commit-message}}"
     - when: "!ctx.dirty_files"
       then:
           - message: phase {{phase}} of the plan made no file changes!
           - warn: phase {{phase}} of the plan made no file changes!
 blocked:
-    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
+    message: "💥  phase **{{phase}}** (_of {{total-phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
     say: "Phase {{phase}} of a plan in {{ctx.area || ctx.repo }}, ran into problems!"
-    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
+    message: "❌️  phase **{{phase}}** (_of {{total-phases}}_) failed in the plan `{{parent_dir(plan)}}` [repo: {{ctx.repo}}, agent: {{ctx.agent}}/{{ctx.model}}, host: {{ctx.hostname}}]: {{err.msg}}."
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases"
+    until: "phase >= total-phases"
     action: "increment(phase)"
 ---
-::block when="total_phases"
-# Implement Phase {{phase}} of {{total_phases}}
+::block when="total-phases"
+# Implement Phase {{phase}} of {{total-phases}}
 ::end-block
-::block when="!total_phases"
+::block when="!total-phases"
 # Implement Phase {{phase}}
 
-> ⚠️ there was no `total_phases` set on this plan! This metadata missing may indicate a problem
+> ⚠️ there was no `total-phases` set on this plan! This metadata missing may indicate a problem
 ::end-block
 
 ::file "../_no_formatting.md"
@@ -169,13 +169,13 @@ You will log your implementation progress to: {{log}}
 - the log file for this implementation has not been started yet
 - make sure the log file ({{log}}) exists -- it may already exist as an empty file -- and then write to it
 - add the following sections:
-    - `# Implementation Log for {{parent_dir(spec)}} ({{total_phases}} phases)` for the logs title
+    - `# Implementation Log for {{parent_dir(spec)}} ({{total-phases}} phases)` for the logs title
     - `## Phase {{phase}}` for the log entries of this phase
 - then add the following metadata:
     - set `spec` to "{{spec}}"
     - set `plan` to "{{plan}}"
-    - set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
-    - set `started_phase` to "{{phase}}"
+    - set `implemented-by` to "{{ctx.agent}}/{{ctx.model}}"
+    - set `started-phase` to "{{phase}}"
 ::end-block
 
 ::block when="file_exists(log) && (!markdown_body_empty(log) || !is_empty(frontmatter(log)))"
@@ -186,12 +186,12 @@ You will log your implementation progress to: {{log}}
 ::end-block
 ::end-block
 
-::block when="file_exists(log) && frontmatter(log, 'message_to_agent')"
+::block when="file_exists(log) && frontmatter(log, 'message-to-agent')"
 ### Message from the Previous Phase's Agent
 
 The agent that implemented the previous phase left this message for you:
 
-{{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
+{{file_exists(log) ? frontmatter(log, 'message-to-agent') : null}}
 ::end-block
 
 ## Test Design Requirements
@@ -294,7 +294,7 @@ the artifact, keep going, and let the review pick it up.
 
 - when you meet a choice the plan does not settle, or find the plan or spec is
   wrong, choose the best option yourself, implement it, and keep going
-- record each such choice by appending an item to the `decisions_for_review`
+- record each such choice by appending an item to the `decisions-for-review`
   list on the implementation log ({{log}}); keep the items earlier phases
   added. The first review reads this list. Each item is a YAML `|-` block,
   written without repo jargon, that states:
@@ -318,8 +318,8 @@ the artifact, keep going, and let the review pick it up.
 
 Set this property on the implementation log ({{log}}), never on the spec or plan:
 
-- if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
-    - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
+- if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message-to-agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
+    - `message-to-agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
 
 ::block when="spec"
 ### Spec Frontmatter
@@ -331,21 +331,21 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 ::end-block
 ::end-block
 
-::block when="phase == total_phases"
+::block when="phase == total-phases"
 ### Final Phase: Mark the Implementation Complete
 
 This is the **last** phase of the plan. Once its work and gates are finished,
 and before your final summary, set these Frontmatter properties:
 
 - on the plan ({{plan}}) **and** the implementation log ({{log}}):
-    - `source_code`: every source code file created or updated across all phases of the plan
+    - `source-code`: every source code file created or updated across all phases of the plan
     - `documentation`: every documentation file created or updated across all phases of the plan
-    - `completed_phase`: `{{phase}}`
+    - `completed-phase`: `{{phase}}`
     - `implemented`: `true`
 ::block when="spec"
 - on the spec ({{spec}}):
     - `implemented`: `true`
-    - `implemented_by`: "{{ctx.agent}}/{{ctx.model}}"
+    - `implemented-by`: "{{ctx.agent}}/{{ctx.model}}"
 ::end-block
 
 The pipeline reads these flags to decide what runs next, so the plan is not
@@ -356,7 +356,7 @@ complete until they are saved to disk.
 
 ::block when="ctx.area && has_skill(ctx.area)"
 - use the '{{area}}' skill during the implementation
-::block when="phase == total_phases"
+::block when="phase == total-phases"
 - do NOT move the spec directory into the `_completed` folder when the final phase is complete (that is done as a separate step which you are not responsible for)
 ::end-block
 ::end-block

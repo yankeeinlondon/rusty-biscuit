@@ -322,6 +322,8 @@ fn emit_dry_run_outcome(
         iteration_signals: None,
         terminal_signal: None,
         handoff: None,
+        stabilized_source: None,
+        pass_preparation: None,
         final_output: None,
     }
 }
@@ -1380,16 +1382,22 @@ fn construct_lifecycle_runtime(
         // capture did not. Plain `ctx.*`/`env.*` therefore cannot diverge per
         // event and no per-event sniff scan runs. `current.*` stays event-time
         // and is captured below.
+        //
+        // An external guard's owner recorded this lifecycle use when it
+        // installed the preparation (`staged_boot::install_prepared_lifecycle`),
+        // so only a guard this pipeline builds records it here.
+        let owns_guard = attempt.external_guard.is_none();
         let lifecycle_context = {
             let mut ctx = request.prepared.compose_context.clone();
-            if let Some(epoch) = request.prepared.document_epoch.as_ref() {
-                epoch.record_prepared_context_consumer(
+            match (owns_guard, request.prepared.document_epoch.as_ref(), request.invocation_context.as_ref()) {
+                (false, _, _) => {}
+                (true, Some(epoch), _) => epoch.record_prepared_context_consumer(
                     claudine::invocation_context::PreparedContextConsumer::Lifecycle,
-                );
-            } else if let Some(invocation) = request.invocation_context.as_ref() {
-                invocation.record_prepared_context_consumer(
+                ),
+                (true, None, Some(invocation)) => invocation.record_prepared_context_consumer(
                     claudine::invocation_context::PreparedContextConsumer::Lifecycle,
-                );
+                ),
+                (true, None, None) => {}
             }
             if let Some(invocation) = request.invocation_context.as_ref() {
                 let requirements =
@@ -1536,6 +1544,8 @@ pub(super) fn route_initialize(
                 terminal_signal: Some(LifecycleSignal::Cancelled),
                 final_output: None,
                 handoff: None,
+                stabilized_source: None,
+                pass_preparation: None,
             })));
         }
         let init_result =
@@ -1597,6 +1607,8 @@ pub(super) fn route_initialize(
                             terminal_signal: None,
                             final_output: None,
                             handoff: None,
+                            stabilized_source: None,
+                            pass_preparation: None,
                         },
                     )));
                 }
@@ -1630,6 +1642,8 @@ pub(super) fn route_initialize(
                         terminal_signal: None,
                         final_output: None,
                         handoff: None,
+                        stabilized_source: None,
+                        pass_preparation: None,
                     })));
                 }
                 _ => unreachable!("the catch protocol consumes initialize error control"),
@@ -1742,7 +1756,11 @@ fn provider_run_handoff(
     if let Some(guard) = attempt.external_guard.take() {
         // Loop re-entry: `initialize` already ran for this document on the
         // first iteration, so there is no initialize-route transition to
-        // consume here.
+        // consume here. The guard renders this preparation's events with the
+        // same context this pipeline's own catch handlers use: the prepared
+        // snapshot, extended for groups the composed document names, with the
+        // target's environment on top.
+        guard.set_run_prepared_context(lifecycle_context.clone());
         return runner::run_composition_body(
             &ctx,
             guard,
@@ -1917,6 +1935,8 @@ fn provider_run_handoff(
                 terminal_signal: None,
                 final_output: None,
                 handoff: Some(committed),
+                stabilized_source: None,
+                pass_preparation: None,
             })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness

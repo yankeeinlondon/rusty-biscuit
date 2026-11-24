@@ -165,9 +165,11 @@ Highlights that affect setup:
 
 **`dmls` runs in a terminal but the editor can't find it.** GUI-launched
 editors (Dock, Spotlight, Finder) do not inherit your shell's `PATH`. Configure
-the absolute binary path instead — usually `~/.cargo/bin/dmls`. Both shipped
+the binary path instead — usually `~/.cargo/bin/dmls`. Both shipped
 extensions expose a setting for this (`dmls.server.path` in VS Code;
-`binary.path` in Zed's LSP settings).
+`binary.path` in Zed's LSP settings). In Zed, keep the path home-relative
+(`~/.cargo/bin/dmls`): the setting also applies to remote projects, and the
+extension expands `~` against the remote host's home directory.
 
 **Server list is empty, or servers sit in a "waiting" state after editor
 restart (Zed).** Zed captures each project's environment by running your login

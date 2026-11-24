@@ -285,6 +285,14 @@ focused discovery repeatedly.
   aggregate deliberately omits.
 - Repo-level version collapses to a string only when all discovered packages
   expose one distinct version; otherwise it is null.
+- Changed-path decisions (dirty/staged packages, areas, counts) read
+  `GitInfo.file_changes` through `repo::observed_scope_paths` /
+  `area_changed_paths` and attribute with `attribute_paths` (segment-aware;
+  the root package gets only unclaimed paths). `RepoStatus::dirty` /
+  `untracked` are patch-only detail, empty without `include_file_diffs`;
+  never treat them as the changed set. Those helpers return `None`
+  (indeterminate) for identity-only status or a dirty status without file
+  changes.
 
 Worktree projection has two distinct paths:
 

@@ -79,6 +79,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::expression::INCOMPATIBLE_CALL_CODE, "a call proven wrong (always an error)"),
     (super::expression::UNCERTAIN_CALL_CODE, "a call argument that might not bind"),
     (super::expression::ALWAYS_FALSE_CALL_CODE, "a predicate call that is always false"),
+    (super::expression::INVALID_SPREAD_OPERAND_CODE, "an object spread of a value that is neither an object nor null (always an error)"),
     (super::expression::host::INCOMPLETE_ANALYSIS_CODE, "a host call the analysis cannot judge"),
     (ComposeWarning::UNDECLARED_PROPERTY_CODE, "a read of a property no schema declares"),
     (super::expression::UNDECLARED_MEMBER_CODE, "a member read the known object type does not declare"),

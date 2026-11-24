@@ -212,7 +212,7 @@ record this output prints.
 | `actual_type` | for a call argument, the argument's type; for a contract mismatch, the kind of value found; otherwise `null` |
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
 | `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
-| `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
+| `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, and for a `dm.schema.*` problem on a frontmatter property whose value one `load_data` call returned directly, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
 | `grants_needed` | for `dm.schema.slot_approval_required`, the approvals any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file` or `url`; `target` is the file's path or the exact URL; `scope` is `once`, allow for this run, or `persisted`, "always allow" a file by saving it to `permissions.file-read`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
 | `schema_default` | for a `dm.schema.*` problem with a value a schema default supplied (a required property the document left out, filled from its `default(...)`), where that default is declared, as `{ "path", "schema_location", "schema_file" }`: `path` is the dotted property path, `schema_location` the JSON Pointer of the `default` keyword (for example `/properties/doc/default`), and `schema_file` the schema file that declares the default (for a default inside a type imported with `Name@file`, that import's file, not the importing schema), omitted for the document's inline schema or a compiled-in one. No authored text holds such a value, so `source` names the document with a `null` line and column. Absent, not `null`, on every other diagnostic |
 
@@ -367,7 +367,8 @@ warnings belong to the run's output rather than to composition:
 | Code | Warning |
 |---|---|
 | `dm.output.fractional_width` | `--width` was fractional and was rounded down |
-| `dm.config.missing` | `~/.darkmatter.yaml` does not exist, so every setting takes its default; names the file and `md init`. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
+| `dm.config.created` | `info`: `~/.darkmatter.yaml` did not exist, so this run created it with every setting at its default; names the file. Reported once, by the run that created it, for every command except `md init` |
+| `dm.config.missing` | `~/.darkmatter.yaml` does not exist and could not be created (or there is no home directory), so every setting takes its default; names the file and why. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
 | `dm.config.migration` | a legacy policy file (`.darkmatter-shell-whitelist`, `.darkmatter-shell-blacklist`, `.config/darkmatter/schema-read-policy`) was converted into the configuration, a line of it was dropped, a blacklist rule became a `!` exclusion, or a source was kept; one record per notice. See [Migrating Legacy Policy Files](../topics/configuration.md#migrating-legacy-policy-files-temporary) |
 | `dm.config.not_saved` | an "always allow" answer could not be saved to the user's `permissions`; the operation is still approved for this run. See [Saving an "Always Allow" Approval](../topics/configuration.md#saving-an-always-allow-approval) |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | a `register` entry's host could not be used, or a document's host could not be chosen; each distinct warning once per run. See [Host Registration](../topics/host-registration.md#diagnostics) |
@@ -536,9 +537,9 @@ discovers it, once per invocation, and not in the later files' records.
 ## Data errors
 
 [`load_data(file, as, options)`](../functions/load-data.md) reads a data file
-and checks it against the contract `as`; the optional
-[options](../topics/loading-data.md#options) choose the format, the CSV
-delimiter, and whether a CSV file has a header row. When the call fails, its
+and, when the optional contract `as` is given, checks it against `as`; the
+optional [options](../topics/loading-data.md#options) choose the format, the
+CSV delimiter, and how a CSV file names its columns. When the call fails, its
 diagnostic tells a script which part failed: the options, the contract, the
 data, or the file itself. This section lists
 every case, what each record carries, and how many records one failure produces.
@@ -549,7 +550,7 @@ apply to them.
 flowchart TD
     C["load_data(file, as, options)"] --> O{"are the option<br/>values usable?"}
     O -->|no| OE["dm.data.invalid_options"]
-    O -->|yes| K{"is as a container<br/>contract?"}
+    O -->|yes| K{"if as is given:<br/>is it a container contract?"}
     K -->|no| KE["contract errors"]
     K -->|yes| F{"can the file be found,<br/>read, or fetched?"}
     F -->|no| FE["dm.expression.evaluation_failure<br/>with reference fields"]
@@ -557,7 +558,7 @@ flowchart TD
     A -->|no| OE
     A -->|yes| P{"supported format,<br/>and does it parse?"}
     P -->|no| PE["dm.data.unsupported_format<br/>dm.data.malformed"]
-    P -->|yes| M{"does the data<br/>fit as?"}
+    P -->|yes| M{"if as is given:<br/>does the data fit it?"}
     M -->|no| ME["dm.data.contract_mismatch,<br/>one record per violation"]
     M -->|yes| V["the value"]
 ```
@@ -566,10 +567,10 @@ flowchart TD
 |---|---|---|
 | `dm.data.not_a_container` | `as` does not describe a [container](../topics/schemas/definition.md#container-types): a scalar such as `"string"`, `"unknown"` or `"null"` alone, a union with a scalar arm, or a named import that resolves to a scalar | no |
 | `dm.data.this_import_rejected` | `as` names a type of the calling document (`Os@this`, or a bare name such as `Os`). An inline contract has no types of its own, so import the type from a file (`Os@./types.yaml`). A misspelled type keyword reads as a bare name: `"strng[]"` fails here | no |
-| `dm.data.row_shape_conflict` | the file is CSV or TSV and `as` cannot choose one row shape: one arm reads rows as objects and another as lists, or an element is not a row; or `header: false` is given and `as` describes object rows | no |
+| `dm.data.row_shape_conflict` | the file is CSV or TSV and `as` cannot choose one row shape: one arm reads rows as objects and another as lists, or an element is not a row; or `header: false` is given and `as` describes object rows; or a `header` list is given and `as` describes list rows | no |
 | `dm.data.unsupported_format` | no `format` option is given and the file's extension names none of the [supported formats](../topics/loading-data.md#formats) (`.txt`, `.md`, no extension), whether or not the file exists | no |
-| `dm.data.invalid_options` | an [option](../topics/loading-data.md#options) value cannot be used (a `delimiter` that is not one ASCII character other than a double quote, CR, or LF), a TSV read is given a delimiter other than a tab, or `delimiter` or `header` is given for a format other than CSV and TSV. The message names the key | no |
-| `dm.data.malformed` | the content does not parse under its format's rules: invalid syntax, trailing text, an empty JSON or JSON5 file, a number the format cannot hold exactly, several YAML documents, a YAML duplicate key, non-string key, or tag, a TOML duplicate key, a CSV or TSV quote error or ragged row, or a local file that is not valid UTF-8 | yes |
+| `dm.data.invalid_options` | an [option](../topics/loading-data.md#options) value cannot be used (a `delimiter` that is not one ASCII character other than a double quote, CR, or LF), a TSV read is given a delimiter other than a tab, a `header` list is empty or holds an empty or repeated name, or `delimiter` or `header` is given for a format other than CSV and TSV. The message names the key | no |
+| `dm.data.malformed` | the content does not parse under its format's rules: invalid syntax, trailing text, an empty JSON or JSON5 file, a number the format cannot hold exactly, several YAML documents, a YAML duplicate key, non-string key, or tag, a TOML duplicate key, a CSV or TSV quote error or ragged row, CSV or TSV header names that collide or convert to nothing as camelCase keys, a `header` list whose length is not the first record's width, or a local file that is not valid UTF-8 | yes |
 | `dm.data.contract_mismatch` | the data parsed but does not fit `as` | yes, on each record but the overflow record |
 
 ### Contract errors
@@ -658,7 +659,7 @@ stderr, and prints:
       "severity": "error",
       "message": "load_data(): option `delimiter` is invalid: must be one ASCII character other than a double quote, CR, or LF (write a tab as \"\\t\")",
       "source": { "file": "/work/doc.md", "line": 1, "column": 55, "inserted": false },
-      "expected_type": "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null",
+      "expected_type": "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean | string[]} | null",
       "actual_type": "literal {\"delimiter\":\",,\"}",
       "span": null,
       "iteration_path": []
@@ -755,6 +756,67 @@ When two arms of a union are containers of the same kind
 so data that fits neither is one record at pointer `""` rather than one per row.
 Its message carries each arm's failure, cut to a few lines.
 
+### Destination schema failures
+
+A `load_data` call without `as` returns the data unchecked. When its result
+is stored in a frontmatter property that the schema declares, frontmatter
+validation judges it, and a value that does not fit is an ordinary schema
+problem, with a `dm.schema.*` code such as `dm.schema.type_mismatch`, never a
+`dm.data.*` code. That keeps a destination failure apart from a contract the
+call itself was given.
+
+When the property's whole value is one `{{ … }}` expression, the record is
+placed at that expression: `source.line` and `source.column` are the `{{`, and
+`span` is its authored range. When the expression is the `load_data` call
+itself, the call in parentheses, or a conditional whose selected arm is the
+call, the record also carries `data_location`. A value built from the data
+(by a callback, an object spread, `try`, `||`, or an index) has the expression
+location alone, as does a value a schema default supplied.
+
+Given `data.yaml`, whose line 4 is `  age: "old"`:
+
+```yaml
+- name: Ada
+  age: 36
+- name: Grace
+  age: "old"
+```
+
+and `doc.md`:
+
+```md
+---
+$schema:
+    direct: "{ name: string(required), age: number }[]"
+direct: "{{ load_data('data.yaml') }}"
+---
+Body
+```
+
+`md compose doc.md --output json` exits with status 1 and reports one record
+(abridged):
+
+```json
+{ "code": "dm.schema.type_mismatch",
+  "severity": "error",
+  "source": { "file": "/work/doc.md", "line": 4, "column": 10 },
+  "data_location": { "file": "/work/data.yaml", "pointer": "/1/age", "line": 4, "column": 8 } }
+```
+
+- `source` is the `{{` of the `direct` expression, line 4, column 10, not the
+  `direct:` key.
+- `data_location.pointer` is the value's place in the loaded data (`/1/age`),
+  without the property name; the problem's path in the frontmatter is
+  `/direct/1/age`.
+- `data_location` follows the same rules as for a data error (see
+  [Which value a record points at](#which-value-a-record-points-at)); a
+  wrapped scalar's element is the file's root, pointer `""`, and a CSV cell is
+  found through its camelCase or explicit key.
+
+The human-readable report shows the same two places: the problem's ` at 4:10`
+and a line `data: /work/data.yaml:4:8 (/1/age)`. See
+[Typing data with the destination schema](../topics/loading-data.md#typing-data-with-the-destination-schema).
+
 ### File errors
 
 A data file that cannot be found or read is not a `dm.data.*` problem. It keeps
@@ -825,9 +887,11 @@ prepare call `load_data`.
 
 `data_location` says where in a loaded data file a problem is, so an editor or a
 script can open the data at the right line. `source` still points at the
-`load_data` call in the Markdown document. It is present only on
-`dm.data.malformed` and `dm.data.contract_mismatch` records (other than the
-overflow record), and absent on every other diagnostic.
+`load_data` call, or the expression that holds it, in the Markdown document.
+It is present only on `dm.data.malformed` and `dm.data.contract_mismatch`
+records (other than the overflow record) and on the
+[destination schema failures](#destination-schema-failures) of a directly
+loaded value, and absent on every other diagnostic.
 
 | `data_location` field | Value |
 |---|---|

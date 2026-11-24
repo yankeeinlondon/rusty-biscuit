@@ -27,7 +27,7 @@ baseline: |-
                         : dirname(plan) + '/review-1.md'
     }}
 # The plan: the one passed in, else the plan that sits beside the baseline review.
-baseline_plan: |-
+baseline-plan: |-
     {{
         plan
             ? plan
@@ -69,10 +69,10 @@ The review _findings_ are here:
 
 - Review Findings: {{baseline}}
 
-::block when="file_exists(baseline_plan)"
+::block when="file_exists(baseline-plan)"
 These findings were turned into an implementation plan:
 
-- Implementation Plan: {{baseline_plan}}
+- Implementation Plan: {{baseline-plan}}
 ::end-block
 
 The findings have now been implemented in the source code. Treat completion
@@ -126,4 +126,4 @@ On the review file ({{output}}), set:
 - `ready` to `true` only when the `## Findings` section is empty, otherwise `false`
 - `findings` to a list with one short line per open finding (an empty list when there are none)
 
-On the baseline review ({{baseline}}), set `follow_up_review` to "{{basename(output)}}".
+On the baseline review ({{baseline}}), set `follow-up-review` to "{{basename(output)}}".

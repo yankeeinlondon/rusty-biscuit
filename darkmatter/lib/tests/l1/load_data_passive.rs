@@ -319,6 +319,31 @@ mod typing {
         assert!(nested.contains("host: unknown") && nested.contains("port: number"), "{nested}");
     }
 
+    /// The passive type of an uncontracted CSV read narrows only from
+    /// literal options it can prove: a literal `header: false` is
+    /// `unknown[][]`, a literal header record is open object rows, and
+    /// options it cannot prove (computed, or a string the binder would
+    /// convert) keep the general container, which admits every read.
+    #[test]
+    fn an_uncontracted_csv_read_narrows_only_from_provable_options() {
+        let general = type_text("load_data('t.json')");
+        assert_eq!(general, "unknown[] | {}");
+        assert_eq!(type_text("load_data('t.csv', null, {header: false})"), "(unknown[])[]");
+        let headed = type_text("load_data('t.csv')");
+        assert!(headed != general && headed != "(unknown[])[]", "{headed}");
+        let typed = |contract: &str, options: &str| type_text(&format!("load_data('t.csv', {contract}, {options})"));
+        // Literal spreads fold as they bind, later members winning.
+        assert_eq!(typed("null", "{...{header: false}}"), "(unknown[])[]");
+        assert_eq!(typed("null", "{header: true, ...{header: false}}"), "(unknown[])[]");
+        assert_eq!(typed("null", "{...{header: false}, header: true}"), headed);
+        assert_eq!(typed("(null)", "{header: false}"), "(unknown[])[]");
+        // Unprovable: the general container (or, for a computed contract,
+        // unknown), never a narrower type the read could contradict.
+        assert_eq!(typed("null", "opts"), general);
+        assert_eq!(typed("null", "{header: 'false'}"), general);
+        assert_eq!(typed("false ? 'number[]' : null", "{header: false}"), "unknown");
+    }
+
     #[test]
     fn a_computed_or_invalid_contract_is_unknown() {
         assert_eq!(type_text("load_data(\"h.yaml\", t)"), "unknown");

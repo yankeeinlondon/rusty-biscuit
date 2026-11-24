@@ -3,6 +3,9 @@
 //! Every child process sniff spawns goes through `run_with_timeout`. It is the
 //! single place that owns the deadline, the pipe draining, and process-tree
 //! termination/reaping, so a wedged or verbose child can never wedge a detection.
+//! It also removes the Git installation hint this process set for `gix`
+//! ([`crate::programs::git_program::forget_installation_hint`]), so a child
+//! sees the environment it would have inherited.
 //!
 //! The module's public items serve other crates' subprocesses:
 //!
@@ -313,9 +316,11 @@ where
 /// Runs a configured command under an explicit deadline, capturing both pipes.
 ///
 /// This is the builder-capable form of [`run_with_timeout`]. The caller's
-/// executable, arguments, working directory, and environment are preserved;
-/// this boundary owns stdin and captured stdout/stderr so it can enforce the
-/// same supervision contract for every subprocess.
+/// executable, arguments, working directory, and environment are preserved,
+/// except that an `EXEPATH` this process set for `gix` is removed (one the
+/// caller set is inherited); this boundary owns stdin and captured
+/// stdout/stderr so it can enforce the same supervision contract for every
+/// subprocess.
 ///
 /// ## Notes
 ///
@@ -332,6 +337,7 @@ pub(crate) fn run_command_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     TreeConfig::process_group().configure(command);
+    crate::programs::git_program::forget_installation_hint(command);
 
     let program = command.get_program().to_owned();
     let mut child = command.spawn().map_err(ProcessError::Spawn)?;
@@ -1008,6 +1014,87 @@ mod tests {
             }),
             "configured child output should contain the preserved cwd and environment"
         );
+    }
+
+    const HINT_HOLDER: &str = "process::tests::installation_hint_holder";
+    const EXEPATH_REPORTER: &str = "process::tests::exepath_reporter";
+    /// Tells [`installation_hint_holder`] who set `EXEPATH`: `sniff` (the
+    /// holder sets the hint itself) or `caller` (inherited from the test).
+    const HINT_ROLE: &str = "SNIFF_INSTALLATION_HINT_ROLE";
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn exepath_reporter() {
+        let exepath = std::env::var_os("EXEPATH");
+        println!(
+            "exepath={}|",
+            exepath.map_or("<unset>".into(), |value| value.to_string_lossy().into_owned())
+        );
+    }
+
+    /// Plays a sniff process: names the installation as `main` does, then
+    /// starts [`exepath_reporter`] through the chokepoint and checks what it
+    /// inherited. Off Windows nothing is ever named, so the `sniff` role
+    /// sets the hint directly.
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn installation_hint_holder() {
+        let role = std::env::var(HINT_ROLE).expect("run by the hint tests");
+        // SAFETY: this child process runs this one test (`--test-threads=1`)
+        // and has started nothing else yet.
+        unsafe { crate::programs::git_program::name_installation_for_gix() };
+        #[cfg(not(windows))]
+        if role == "sniff" {
+            // SAFETY: as above.
+            unsafe { crate::programs::git_program::set_installation_hint("sniff-hint".as_ref()) };
+        }
+        let own = std::env::var_os("EXEPATH").expect("EXEPATH is set in this process");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(test_child_args(EXEPATH_REPORTER));
+        let output = run_command_with_timeout(&mut command, Duration::from_secs(5))
+            .expect("reporter should complete");
+        assert!(output.status.success());
+        let expected = match role.as_str() {
+            "sniff" => "exepath=<unset>|".to_string(),
+            "caller" => format!("exepath={}|", own.to_string_lossy()),
+            other => panic!("{HINT_ROLE}={other}"),
+        };
+        assert!(output.stdout_lossy().contains(&expected), "{}", output.stdout_lossy());
+        // The hint stays in this process, where gix reads it.
+        assert_eq!(std::env::var_os("EXEPATH"), Some(own));
+    }
+
+    fn run_hint_holder(role: &str, exepath: Option<&str>) {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(test_child_args(HINT_HOLDER))
+            .arg("--test-threads=1")
+            .env(HINT_ROLE, role)
+            .env_remove("GIT_EXEC_PATH");
+        match exepath {
+            Some(value) => command.env("EXEPATH", value),
+            None => command.env_remove("EXEPATH"),
+        };
+        let output = run_command_with_timeout(&mut command, Duration::from_secs(5))
+            .expect("hint holder should complete");
+        let stdout = output.stdout_lossy();
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// On Windows the holder names this host's Git for Windows installation
+    /// for real, so the test needs one on `PATH`, as Windows CI has.
+    #[test]
+    fn a_child_does_not_inherit_the_installation_hint_sniff_set() {
+        run_hint_holder("sniff", None);
+    }
+
+    #[test]
+    fn a_child_inherits_the_installation_hint_its_caller_set() {
+        run_hint_holder("caller", Some("caller-hint"));
     }
 
     /// Tests inject a short deadline rather than sleeping for a production one.

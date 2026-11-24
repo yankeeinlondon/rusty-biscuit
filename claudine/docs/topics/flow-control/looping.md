@@ -324,10 +324,11 @@ For "did the agent actually succeed at its task?" — exit code is the wrong too
     until: "contains(loop.last_output, 'DONE')"
   ```
 
-- **Use `inline-compose` and have the agent set a sentinel frontmatter property**, then loop on that property:
+- **Use `inline-compose` and have the agent set a sentinel frontmatter property**, then loop on an explicit read of that property. A bare `done` would read the document as the loop retained it at startup, so it would never see the agent's edit (see [What each pass reads](#what-each-pass-reads)):
   ```yaml
+  # task.md
   loop:
-    until: "done == true"
+    until: "frontmatter('task.md', 'done') == true"
   done: false
   prompt: "If you finished the task, set frontmatter `done: true`."
   ```
@@ -419,6 +420,76 @@ Run with `claudine compose`, a pass that leaves `NEEDS_REVIEW.md` behind ends th
 - **No loop, no break.** A `break` fired outside any loop is a typed error of that event, `LifecycleBreakWithoutLoop`.
 
 [Flow Control — `break`](flow-control.md#break) covers concurrent groups, `break` from `initialize`, and exactly which events still fire.
+
+## What each pass reads
+
+This section covers which edits a document loop sees while it runs. A loop
+keeps the document it prepared for its first pass and composes every later
+pass from that same text. Values that belong to the run still change from pass
+to pass. Edits to the document's own file do not reach the next pass. They are
+seen by the next run.
+
+| What changes during a pass | Seen by the next pass? |
+| --- | --- |
+| `loop.*` values, a [`loop.action`](#actions), or a lifecycle `set` | yes |
+| the working tree (`ctx.untracked_files`, `ctx.branch`, …) | yes, captured again for each pass |
+| another file read explicitly (`frontmatter("progress.md", "done")`) or included with `::file` | yes, read when the pass uses it |
+| the looping document's own body, frontmatter, or lifecycle actions | no: the next run, a `retry` or `resume` of the pass, or a new sequence task sees it |
+
+The document a loop keeps is the one its first pass was judged from. For a
+document with an `initialize` stack, that is the document as `initialize` left
+it, so an edit `initialize` makes is used by every pass.
+
+Carry a value between passes with `set` or `loop.action`, and keep work that
+an agent updates in a separate file that the loop reads explicitly:
+
+```markdown
+---
+last_pass: none
+loop:
+    until: "frontmatter('progress.md', 'done') == true"
+    max: 5
+success:
+    - set:
+          last_pass: "{{ loop.count }}"
+---
+Pass {{ loop.count }}; the previous pass was {{ last_pass }}.
+Work through progress.md and set `done: true` in its frontmatter when finished.
+```
+
+Start with `progress.md` holding `done: false`. Suppose the agent rewrites this
+document during pass 1 and sets `done: true` in `progress.md` during pass 2:
+
+- pass 1 receives `Pass 1; the previous pass was none.`;
+- pass 2 receives `Pass 2; the previous pass was 1.`: the `set` from pass 1's
+  `success` carried the value, and the text is the original, not the rewrite;
+- the gate after pass 2 reads `progress.md` again, finds `done: true`, and ends
+  the loop;
+- the next `claudine compose` of the document composes the rewritten text.
+
+```mermaid
+flowchart TD
+    S[startup: read the document, run initialize, judge it] --> K[keep that document for the loop]
+    K --> P[prepare the pass: kept text + loop values + set writes + fresh ctx]
+    P --> R[run the pass]
+    R --> G{gate: condition reads files again}
+    G -->|another pass| P
+    G -->|done| E[loop ends]
+    R -. retry or resume .-> D[read the document from disk for that attempt]
+    D --> R
+```
+
+A `retry` or `resume` reads the document from disk for that attempt only: the
+next ordinary pass returns to the kept document. A `proxy` ends the loop and
+the target starts from its own file. Inside a sequence, each `prompt:` task
+reads its document when it starts, so a second task that names the same file
+sees an edit made during the first.
+
+`inline-compose` uses its file twice. The prompt instructions follow the rule
+above, but the file is also the deliverable: each pass compares the agent's
+result with the file as it stood when that pass started. A pass whose agent
+leaves the file unchanged fails with *document not updated*, even when an
+earlier pass edited it, and the earlier pass's edit is kept.
 
 ## Iteration cap
 

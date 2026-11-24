@@ -35,7 +35,8 @@ use std::path::Path;
 use tracing::info_span;
 
 use super::{
-    CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
+    CachedHarnessLoopContext, HarnessPromptState, LoopPassPreparation, MaterializedHarnessPrompt,
+    RetainedLoopSource, build_harness_launch,
     bootstrap_harness_prompt, execute_harness_attempt, harness_prompt_mode_label,
     preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
@@ -431,6 +432,10 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
 struct AttemptDocument {
     materialized: MaterializedHarnessPrompt,
     launch: RebuiltLaunchIdentity,
+    /// The fresh read this document was prepared from, with its approvals.
+    /// `None` for the command's seed. Only a successful first-attempt
+    /// stabilization hands it on ([`HarnessPromptState::stabilized_source`]).
+    retained: Option<RetainedLoopSource>,
 }
 
 struct PreparedHarnessAttempt {
@@ -617,6 +622,8 @@ fn prepare_attempt_phase(
     )? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }
+    install_recovery_preparation(&mut prompt, &mut lifecycle, &document.materialized)?;
+    publish_pass_preparation(prompt.prompt_state, lifecycle.guard, &document.materialized);
 
     let plan = prepare_harness_plan_phase(
         &mut prompt,
@@ -664,7 +671,6 @@ fn start_lifecycle_phase(
         return Ok(Some(LoopStep::Return((130, None, None, None))));
     }
     let start_outcome = run_start_lifecycle_event(
-        prompt_state,
         lifecycle_guard,
         materialized,
         &prompt_state.source_path,
@@ -872,7 +878,6 @@ fn settle_break_before_launch(
 
 #[allow(clippy::too_many_arguments)]
 fn run_start_lifecycle_event(
-    prompt_state: &HarnessPromptState,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
     source_path: &Path,
@@ -882,7 +887,6 @@ fn run_start_lifecycle_event(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    install_reentry_lifecycle_context(prompt_state, lifecycle_guard, materialized);
     run_lifecycle_event(
         lifecycle_guard,
         LifecycleSignal::Start,
@@ -896,26 +900,97 @@ fn run_start_lifecycle_event(
     )
 }
 
-/// A retried or resumed attempt is a new composition run: its lifecycle reads
-/// the attempt's own capture, not the snapshot of the attempt it replaced.
-fn install_reentry_lifecycle_context(
-    prompt_state: &HarnessPromptState,
-    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+/// Install a retried or resumed attempt's fresh read: its lifecycle actions
+/// and the context they were prepared against, before its plan is checked.
+///
+/// A recovery attempt is a new composition run, so its `start`, and the
+/// `blocked`/`finalize` a later setup failure routes through, read the
+/// attempt's own preparation rather than the attempt it replaced. Its refreshed
+/// lifecycle shell commands are audited first, under the policy frozen on the
+/// first attempt; a refusal leaves the previous actions and context in place
+/// for the failure route. Any other entry is left as installed.
+///
+/// ## Errors
+///
+/// A lifecycle shell command the frozen policy refuses, routed through the
+/// previous `blocked`/`finalize`.
+fn install_recovery_preparation(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    materialized: &MaterializedHarnessPrompt,
+) -> Result<()> {
+    let entry = match prompt.prompt_state.entry {
+        claudine::composition::DocumentEntryReason::Retry => EntryReason::Retry,
+        claudine::composition::DocumentEntryReason::Resume => EntryReason::Resume,
+        _ => return Ok(()),
+    };
+    let (Some(config), Some(context)) =
+        (materialized.lifecycle.clone(), materialized.compose_context.clone())
+    else {
+        return Ok(());
+    };
+    if let Err(error) = run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, entry, || {
+        claudine::composition::resolve_lifecycle_shell_approvals(
+            &config,
+            &prompt.prompt_state.source_path,
+            &LifecycleSignal::ALL,
+            prompt.harness_context.shell_options(),
+        )
+    }) {
+        let previous = recovery_failure_view(prompt.prompt_state);
+        return Err(bootstrap_blocked(prompt, lifecycle, &previous, &error));
+    }
+    crate::commands::wrap::composition::staged_boot::install_prepared_lifecycle(
+        lifecycle.guard,
+        config,
+        context,
+        materialized.document_epoch.as_ref(),
+        prompt.prompt_state.invocation_context.as_ref(),
+    );
+    Ok(())
+}
+
+/// Record the preparation this attempt is about to run with, for the owning
+/// loop's gate, condition, and actions: the context installed on the guard and
+/// the frontmatter and epoch of the same materialization.
+///
+/// Passthrough runs carry no loop feedback.
+fn publish_pass_preparation(
+    prompt_state: &mut HarnessPromptState,
+    guard: &claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) {
-    if matches!(
-        prompt_state.entry,
-        claudine::composition::DocumentEntryReason::Retry
-            | claudine::composition::DocumentEntryReason::Resume
-    ) && let Some(context) = materialized.compose_context.as_ref()
-    {
-        lifecycle_guard.set_run_prepared_context(context.clone());
-        if let Some(epoch) = materialized.document_epoch.as_ref() {
-            epoch.record_prepared_context_consumer(
-                claudine::invocation_context::PreparedContextConsumer::Lifecycle,
-            );
-        }
+    if matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+        return;
     }
+    let Some(context) = guard
+        .effective_prepared_context()
+        .or(materialized.compose_context.as_ref())
+        .cloned()
+    else {
+        return;
+    };
+    prompt_state.pass_preparation = Some(LoopPassPreparation {
+        context,
+        frontmatter: materialized.frontmatter.as_object().cloned().unwrap_or_default(),
+        document_epoch: materialized.document_epoch.clone(),
+    });
+}
+
+/// The document view a recovery attempt's failure routes through before its
+/// own preparation is installed: no frontmatter, and the epoch of the last
+/// preparation installed for this pass, which a recovery preflight may already
+/// have moved past.
+fn recovery_failure_view(prompt_state: &HarnessPromptState) -> MaterializedHarnessPrompt {
+    let mut view = empty_materialized_prompt(
+        prompt_state.file_resolution_context().clone(),
+        prompt_state.input_layers.loop_values.clone(),
+    );
+    view.document_epoch = prompt_state
+        .pass_preparation
+        .as_ref()
+        .and_then(|preparation| preparation.document_epoch.clone());
+    view
 }
 
 /// Stages 1-3 of the staged boot: the bootstrap read's narrow initialize-shell
@@ -1140,17 +1215,22 @@ fn bootstrap_adopted_document_phase(
     }
     // The stabilized reread replaces the document *and* the launch bundle
     // together: a launch plan rebuilt from the pre-`initialize` read would
-    // describe a document that is no longer the one about to run.
-    *document = materialize_attempt_prompt_phase(
+    // describe a document that is no longer the one about to run. The previous
+    // document stays in hand until the new one passes its audit, so a refusal
+    // is caught by the actions, frontmatter, context, and epoch that belong
+    // together.
+    let mut stabilized = materialize_attempt_prompt_phase(
         prompt,
         lifecycle,
         control,
         claudine::composition::SchemaStage::Validate,
     )?;
-    let materialized = &mut document.materialized;
-    let stabilized_lifecycle = match materialized.lifecycle.clone() {
-        Some(config) => config,
-        None => {
+    let (stabilized_lifecycle, stabilized_context) = match (
+        stabilized.materialized.lifecycle.clone(),
+        stabilized.materialized.compose_context.clone(),
+    ) {
+        (Some(config), Some(context)) => (config, context),
+        _ => {
             return Err(target_bootstrap_failed(
                 prompt,
                 control.coordinator,
@@ -1159,8 +1239,8 @@ fn bootstrap_adopted_document_phase(
         }
     };
 
-    // Stage 5 — the full audit. `set_config` re-points the guard at the
-    // stabilized surface without resetting its emission ledger, so
+    // Stage 5 — the full audit, then the stabilized actions and their context
+    // are installed together. The guard's emission ledger is kept, so
     // `initialize` is not fired a second time.
     if let Err(error) = run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, || {
         claudine::composition::resolve_lifecycle_shell_approvals(
@@ -1170,9 +1250,18 @@ fn bootstrap_adopted_document_phase(
             prompt.harness_context.shell_options(),
         )
     }) {
-        return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
+        return Err(bootstrap_blocked(prompt, lifecycle, &document.materialized, &error));
     }
-    lifecycle.guard.set_config(stabilized_lifecycle);
+    crate::commands::wrap::composition::staged_boot::install_prepared_lifecycle(
+        lifecycle.guard,
+        stabilized_lifecycle,
+        stabilized_context,
+        stabilized.materialized.document_epoch.as_ref(),
+        prompt.prompt_state.invocation_context.as_ref(),
+    );
+    let retained = stabilized.retained.take();
+    *document = stabilized;
+    let materialized = &mut document.materialized;
 
     // R6 — rebuild the target's launch identity from its own frontmatter now that
     // its document identity has stabilized. Recomputes provider/model (honoring
@@ -1191,9 +1280,9 @@ fn bootstrap_adopted_document_phase(
     //
     // Only a *proxied* target needs it. A directly-invoked document's launch
     // bundle was built from this same document by the command coordinator, and
-    // its lifecycle context is the prepared snapshot R5 pins; replacing either
-    // from here would substitute a second capture for the one the run was
-    // planned against. Its prompt was likewise already reported.
+    // its lifecycle already reads the context its stabilized reread prepared
+    // (installed above); the identity policy is the command's. Its prompt was
+    // likewise already reported.
     if stage != BootstrapStage::StabilizeOnly {
         let launch_area = lifecycle
             .guard
@@ -1217,6 +1306,9 @@ fn bootstrap_adopted_document_phase(
             Err(error) => return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error)),
         };
         apply_target_env_overrides(materialized, &rebuild.env_overrides);
+        // The rebuilt identity updates the installed pair and its
+        // materialization together.
+        materialized.compose_context = Some(rebuild.prepared_context.clone());
         lifecycle
             .guard
             .set_run_prepared_context(rebuild.prepared_context);
@@ -1242,6 +1334,14 @@ fn bootstrap_adopted_document_phase(
             false,
             lifecycle.term,
         );
+    }
+    // Saved before `start`: a provider or lifecycle action may rewrite the
+    // root during the attempt, and the owning loop must keep the read this
+    // boot validated.
+    if control.active.iteration().attempt().number() == 1
+        && !matches!(prompt.prompt_state.mode, HarnessPromptMode::Passthrough)
+    {
+        prompt.prompt_state.stabilized_source = retained;
     }
     Ok(None)
 }
@@ -1528,10 +1628,7 @@ fn preflight_fresh_document_phase(
     });
     if let Err(error) = result {
         let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
-        let empty = empty_materialized_prompt(
-            prompt_state.file_resolution_context().clone(),
-            prompt_state.input_layers.loop_values.clone(),
-        );
+        let empty = recovery_failure_view(prompt_state);
         return Err(emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,
@@ -1680,6 +1777,7 @@ fn materialize_attempt_prompt_phase(
         return Ok(AttemptDocument {
             materialized: seed,
             launch,
+            retained: None,
         });
     }
     // R8 — this is a fresh-read boundary: the document has just been re-read from
@@ -1716,11 +1814,11 @@ fn materialize_attempt_prompt_phase(
             Some(&select),
         )
     })
-    .and_then(|mut materialized| {
+    .and_then(|(mut materialized, retained)| {
         let launch = rebuild(&materialized).map_err(launch_plan_report)?;
         apply_target_env_overrides(&mut materialized, &launch.env_overrides);
-        // A fresh read — retry, resume, a stabilized reread, or loop refresh —
-        // is a new snapshot; already-queued phrases are not queued again.
+        // A fresh read — retry, resume, or a stabilized reread — is a new
+        // snapshot; already-queued phrases are not queued again.
         prewarm_materialized(
             lifecycle_guard.context().settings,
             prompt_state.invocation_context.as_ref(),
@@ -1729,6 +1827,7 @@ fn materialize_attempt_prompt_phase(
         Ok(AttemptDocument {
             materialized,
             launch,
+            retained: Some(retained),
         })
     })
     .map_err(|error| {
@@ -1759,10 +1858,7 @@ fn materialize_attempt_prompt_phase(
             }
             Err(other) => other,
         };
-        let empty = empty_materialized_prompt(
-            prompt_state.file_resolution_context().clone(),
-            prompt_state.input_layers.loop_values.clone(),
-        );
+        let empty = recovery_failure_view(prompt_state);
         match emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,
@@ -1828,7 +1924,11 @@ fn prepare_harness_plan_phase(
             term,
         );
     }
-    if !prompt_state.source_path.exists() {
+    // A later ordinary pass composes the source its loop retained at startup,
+    // so it needs no root on disk; every other entry still reads the file.
+    let composes_retained_source = matches!(prompt_state.mode, HarnessPromptMode::Compose)
+        && prompt_state.entry == claudine::composition::DocumentEntryReason::LoopIteration;
+    if !composes_retained_source && !prompt_state.source_path.exists() {
         if show_checks {
             claudine::harness::report::report_unhandled_failure(
                 "source file does not exist — cannot proceed",
@@ -1963,6 +2063,7 @@ fn execute_attempt_phase(
     let AttemptDocument {
         materialized,
         launch: rebuilt,
+        retained: _,
     } = document;
     let provider = rebuilt.provider;
     let profile = rebuilt.profile;

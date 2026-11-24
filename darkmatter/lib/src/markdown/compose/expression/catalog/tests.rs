@@ -857,7 +857,7 @@ fn load_data_options_parameter_is_a_closed_inline_object() {
     let descriptors = function_descriptors("load_data");
     assert_eq!(descriptors.len(), 1, "one overload");
     let descriptor = &descriptors[0];
-    assert_eq!(&*descriptor.signature, "load_data(file, as, [options])");
+    assert_eq!(&*descriptor.signature, "load_data(file, [as], [options])");
     let FunctionParameters::List(parameters) = &descriptor.function_type.parameters else {
         panic!("load_data declares parameters");
     };
@@ -911,7 +911,11 @@ fn load_data_options_bind_through_the_shared_binder() {
     };
     for options in [
         json!({"quote": ","}),
-        json!({"header": [1]}),
+        // An object converts to neither a boolean nor a name; a number does
+        // (`[1]` binds as `["1"]`).
+        json!({"header": [{}]}),
+        json!({"header": ["web", {}]}),
+        json!({"header": 5}),
         json!({"format": "CSV"}),
         json!({"format": " csv"}),
         json!({"format": "text"}),
@@ -932,8 +936,14 @@ fn load_data_options_bind_through_the_shared_binder() {
     }
     // The coercion engine's normal conversions apply to option fields, and
     // the handler reads the converted values: `5` splits on the character
-    // `5` (so each row is one cell), and `"false"` reads the header as a row.
-    for (options, code) in [(json!({"delimiter": 5}), "dm.data.contract_mismatch"), (json!({"header": "false"}), "dm.data.contract_mismatch")] {
+    // `5` (so each row is one cell), `"false"` reads the header as a row, and
+    // `[1]` is the name list `["1"]`, whose object rows this list contract
+    // cannot describe.
+    for (options, code) in [
+        (json!({"delimiter": 5}), "dm.data.contract_mismatch"),
+        (json!({"header": "false"}), "dm.data.contract_mismatch"),
+        (json!({"header": [1]}), "dm.data.row_shape_conflict"),
+    ] {
         match call(options.clone()) {
             Err(ExpressionError::Data(data)) => assert_eq!(data.code(), Some(code), "{options}: {data}"),
             other => panic!("{options} binds and is applied: {other:?}"),

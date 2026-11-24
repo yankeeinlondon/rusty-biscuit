@@ -2,15 +2,18 @@
 //!
 //! One call runs in this order, so a failure never depends on work a later
 //! step would do: a `null` file returns `null`; read the options object; prepare
-//! the contract; resolve the file or URL, let a slot's gate judge it, and
+//! the contract, when one is given (an omitted and a `null` `as` both skip
+//! it); resolve the file or URL, let a slot's gate judge it, and
 //! record it in the read set; choose the effective format (the `format`
 //! option, else the extension); check that the options apply to it; for
-//! CSV/TSV choose the row mode and, without a header, require positional
-//! rows; fetch a URL's text (its host policy is checked here, before any memo
+//! CSV/TSV choose the row mode (from the contract, else from the header
+//! mode) and check the header mode allows it; fetch a URL's text (its host policy is checked here, before any memo
 //! lookup); read and decode the source through the raw memo, parse it in the
-//! effective format and delimiter through the parse memo, and bind it to the
-//! contract with the effective header through the bind memo. Only a fully
-//! converted value is returned.
+//! effective format and delimiter through the parse memo, and bind it with the
+//! effective header mode through the bind memo: rows built, the root
+//! normalized to a container (a `null` root is `[]`, a scalar root a
+//! one-element array), then converted to the contract when there is one.
+//! Only a fully bound value is returned.
 //!
 //! A local file that resolves to nothing is judged by the same request checks
 //! ([`plan_read`]) before its miss is returned, against the extension of every
@@ -34,9 +37,9 @@ use biscuit_file::{DataFormat, DelimitedRecord, FileType};
 use serde_json::Value;
 use tracing::field::Empty;
 
-use super::contract::{PreparedContract, RowClassification, RowMode, judge_written_contract, require_positional_rows, written_contract};
+use super::contract::{PreparedContract, RowClassification, RowMode, judge_written_contract, require_header_rows, written_contract};
 use super::error::{DataError, TabularSource};
-use super::options::{DataOptions, effective_delimiter, effective_header};
+use super::options::{DataOptions, HeaderMode, effective_delimiter, effective_header};
 use super::parse::{decode_bytes, located_at, parse_text, strip_bom, utf8_failure};
 use super::runtime::{DataSourceIdentity, LoadedData, LoadedSource, RawSource, SourceContent, SourceKey};
 use crate::markdown::compose::expression::call_binding::{BoundCall, CallBindingError};
@@ -47,15 +50,16 @@ use crate::markdown::compose::expression::functions::{
 use crate::markdown::compose::expression::functions::ReadKind;
 use crate::markdown::compose::expression::read_gate::ReadLocation;
 use crate::markdown::compose::expression::resolve_ctx::is_remote_url;
-use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext};
+use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext, trace};
 
-pub(super) const FUNCTION: &str = "load_data";
+pub(crate) const FUNCTION: &str = "load_data";
 
-/// `load_data(file: file | null, as: type-definition(container), options?: {format, delimiter, header} | null) -> any | null`.
+/// `load_data(file: file | null, as?: type-definition(container) | null, options?: {format, delimiter, header} | null) -> any | null`.
 ///
 /// A `null` file returns `null` before the options are read, the contract is
 /// prepared, or anything is read; the binder has already refused a literal
-/// mistake. Each call opens a `load_data` debug span recording the source,
+/// mistake. An omitted and a `null` `as` are the same call: the data is
+/// parsed, its rows built, and its root normalized, but nothing converts it. Each call opens a `load_data` debug span recording the source,
 /// its effective format, delimiter, and header, its size and item count, and
 /// whether each memo layer answered.
 ///
@@ -90,27 +94,43 @@ pub(super) const FUNCTION: &str = "load_data";
     )
 )]
 pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    // Only a value this call read is a direct load; a `null` passthrough is not.
+    trace::derive();
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
     };
     let options = DataOptions::from_bound(call.args().get(2)).map_err(fail)?;
-    let written = call.args().get(1).and_then(written_contract).ok_or_else(|| ExpressionError::ContractViolation {
-        function: FUNCTION.to_string(),
-        message: "argument 1 did not bind to a type definition".to_string(),
-    })?;
-    let contract = ctx.data.prepare_contract(&written, ctx)?;
+    let contract = match call.args().get(1) {
+        None | Some(Value::Null) => None,
+        Some(carrier) => {
+            let written = written_contract(carrier).ok_or_else(|| ExpressionError::ContractViolation {
+                function: FUNCTION.to_string(),
+                message: "argument 1 did not bind to a type definition".to_string(),
+            })?;
+            Some(ctx.data.prepare_contract(&written, ctx)?)
+        }
+    };
+    let contract = contract.as_deref();
 
     let remote = is_remote_url(raw);
     let identity = match url::Url::parse(raw) {
         Ok(url) if remote => DataSourceIdentity::Remote(Box::new(url)),
         _ => {
             let file_ref = parse_file_ref(FUNCTION, raw, ctx)?;
-            let Some(path) = resolve_arg(FUNCTION, raw, ctx)? else {
+            // An editor observation asks its gate before each candidate is
+            // probed, and observes exactly the candidates it probed.
+            let resolved = match &ctx.editor {
+                Some(editor) => super::super::editor_reads::resolve_local(FUNCTION, raw, &file_ref, ctx, editor)?,
+                None => resolve_arg(FUNCTION, raw, ctx)?,
+            };
+            let Some(path) = resolved else {
                 // An invalid request is invalid whether or not the file
                 // exists, so it must not reach `try` as a miss.
-                check_absent_request(&file_ref, &options, &contract, ctx).map_err(fail)?;
+                check_absent_request(&file_ref, &options, contract, ctx).map_err(fail)?;
                 // Creating any probed candidate would change the answer.
-                record_probed_candidates(&file_ref, ctx);
+                if ctx.editor.is_none() {
+                    record_probed_candidates(&file_ref, ctx);
+                }
                 return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None));
             };
             DataSourceIdentity::local(&path)
@@ -135,7 +155,7 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     let span = tracing::Span::current();
     span.record("identity", tracing::field::display(&identity));
 
-    let ReadPlan { format, delimiter, header, row_mode } = plan_read(&options, &contract, extension_format(&identity))
+    let ReadPlan { format, delimiter, header, row_mode } = plan_read(&options, contract, extension_format(&identity))
         .map_err(|refusal| refusal.into_error(|| identity.clone()))
         .map_err(fail)
         .map_err(unread)?;
@@ -143,8 +163,8 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     if let Some(delimiter) = delimiter {
         span.record("delimiter", tracing::field::debug(char::from(delimiter)));
     }
-    if let Some(header) = header {
-        span.record("header", header);
+    if let Some(header) = &header {
+        span.record("header", tracing::field::debug(header));
     }
 
     // The fetch enforces host policy and is single-flight and cached by the
@@ -160,12 +180,34 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         },
     };
 
+    // An editor read that cannot complete is pending, not a data failure:
+    // the loader leaves a deferral (which the memo never stores) and the
+    // pending failure is returned in its place.
+    let editor_pending: std::cell::RefCell<Option<ExpressionError>> = std::cell::RefCell::new(None);
     let raw_source = ctx.data.load_raw(&identity, || match origin {
         Origin::Fetched(body) => Ok(RawSource {
             text: Ok(Arc::from(strip_bom(&body))),
             len: body.len(),
             hash: biscuit_hash::blake3_hash_bytes(body.as_bytes()),
         }),
+        Origin::Local(path) if ctx.editor.is_some() => {
+            let editor = ctx.editor.as_deref().expect("checked by the guard");
+            match super::super::editor_reads::read_local(FUNCTION, path, ctx, editor) {
+                Ok(bytes) => {
+                    Ok(RawSource { text: decode_bytes(&bytes), len: bytes.len(), hash: biscuit_hash::blake3_hash_bytes(&bytes) })
+                }
+                Err(pending) => {
+                    *editor_pending.borrow_mut() = Some(pending);
+                    Err(Arc::new(DataError::FileReference(file_reference_diagnostic(
+                        FUNCTION,
+                        raw,
+                        ctx,
+                        FileRefFailure::RemoteNotEnabled,
+                        None,
+                    ))))
+                }
+            }
+        }
         Origin::Local(path) => {
             let bytes = simplified_schema::resolve::buffers::read(path).map_err(|error| {
                 Arc::new(DataError::FileReference(file_reference_diagnostic(
@@ -181,7 +223,10 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     });
     let raw_source = match raw_source {
         Ok(entry) => entry,
-        Err(error) => return Err(unread(ExpressionError::from(error))),
+        Err(error) => {
+            let error = editor_pending.into_inner().unwrap_or_else(|| ExpressionError::from(error));
+            return Err(unread(error));
+        }
     };
     span.record("raw_memo", raw_source.answered_from_memo());
 
@@ -199,12 +244,25 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     span.record("bytes", source.value().bytes);
     span.record("source_memo", source.from_memo());
 
+    let contract_key = contract.map_or("", |contract| contract.key.as_str());
     let bound = ctx
         .data
-        .bind(&source, &contract.key, header, |loaded| bind_source(loaded, &contract, &identity, row_mode, header))
+        .bind(&source, contract_key, header.clone(), |loaded| {
+            bind_source(loaded, contract, &identity, row_mode, header.as_ref())
+        })
         .map_err(ExpressionError::from)?;
     span.record("items", bound.value().items);
     span.record("bind_memo", bound.from_memo());
+    trace::record_load(|| trace::LoadOrigin {
+        identity: identity.clone(),
+        format,
+        text: source.value().text.clone(),
+        table: bound.value().table.clone(),
+        wrapped: bound.value().wrapped,
+    });
+    if super::super::editor_reads::is_collecting_calls() {
+        super::super::editor_reads::note_read_mode(contract.is_none() && header == Some(HeaderMode::None));
+    }
     Ok(bound.value().value.clone())
 }
 
@@ -220,11 +278,12 @@ fn fail(error: DataError) -> ExpressionError {
 }
 
 /// How a request reads its source once the request checks pass.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadPlan {
     format: DataFormat,
     delimiter: Option<u8>,
-    header: Option<bool>,
+    /// The effective header mode; `None` for a format that is not tabular.
+    header: Option<HeaderMode>,
     /// The CSV/TSV row mode; `None` for a format that is not tabular.
     row_mode: Option<RowMode>,
 }
@@ -256,15 +315,15 @@ impl Refusal {
 /// read, and that a missing source passes before its miss is reported:
 /// choose the effective format (the `format` option, else `extension`'s),
 /// check that the options apply to it, and for CSV/TSV choose the row mode
-/// and, without a header, require positional rows. It reads nothing, so a
-/// present and an absent source are judged alike.
+/// ([`select_row_mode`]). It reads nothing, so a present and an absent
+/// source are judged alike.
 ///
 /// `extension` is the source's extension and the format it names (`Err`
 /// carrying the unreadable extension); it is ignored when a `format` option
 /// is given.
 fn plan_read(
     options: &DataOptions,
-    contract: &PreparedContract,
+    contract: Option<&PreparedContract>,
     extension: Result<DataFormat, Option<String>>,
 ) -> Result<ReadPlan, Refusal> {
     // An explicit format skips the extension entirely, so an extensionless
@@ -275,20 +334,34 @@ fn plan_read(
     };
     options.check_applicability(format).map_err(|error| Refusal::Invalid(Box::new(error)))?;
     let delimiter = effective_delimiter(format, options.delimiter);
-    let header = effective_header(format, options.header);
-    let row_shape =
-        |conflict| Refusal::Invalid(Box::new(DataError::RowShapeConflict { written: contract.written.clone(), conflict }));
-    let row_mode = match header {
-        Some(header) => {
-            let mode = contract.row_mode().map_err(row_shape)?;
-            if !header {
-                require_positional_rows(RowClassification::Known(mode)).map_err(row_shape)?;
-            }
-            Some(mode)
-        }
+    let header = effective_header(format, options.header.clone());
+    let row_mode = match &header {
+        Some(header) => Some(select_row_mode(contract, header).map_err(|error| Refusal::Invalid(Box::new(error)))?),
         None => None,
     };
     Ok(ReadPlan { format, delimiter, header, row_mode })
+}
+
+/// The row shape of a CSV/TSV read: the contract's, which the header mode
+/// must allow ([`require_header_rows`]), or without a contract the header
+/// mode's own (object rows for a header record or explicit names, lists of
+/// cells for `header: false`).
+///
+/// ## Errors
+///
+/// [`DataError::RowShapeConflict`] for a contract that selects no row shape,
+/// or whose shape the header mode cannot read.
+fn select_row_mode(contract: Option<&PreparedContract>, header: &HeaderMode) -> Result<RowMode, DataError> {
+    let Some(contract) = contract else {
+        return Ok(match header {
+            HeaderMode::FirstRecord | HeaderMode::Names(_) => RowMode::Object,
+            HeaderMode::None => RowMode::List,
+        });
+    };
+    let row_shape = |conflict| DataError::RowShapeConflict { written: contract.written.clone(), conflict };
+    let mode = contract.row_mode().map_err(row_shape)?;
+    require_header_rows(header, RowClassification::Known(mode)).map_err(row_shape)?;
+    Ok(mode)
 }
 
 /// Judges the request of a local source that resolved to nothing by every
@@ -305,14 +378,18 @@ fn plan_read(
 fn check_absent_request(
     file_ref: &biscuit_file::FileReference,
     options: &DataOptions,
-    contract: &PreparedContract,
+    contract: Option<&PreparedContract>,
     ctx: &ResolutionContext,
 ) -> Result<(), DataError> {
     judge_absent(absent_candidates(file_ref, ctx), options, contract)
 }
 
 /// [`check_absent_request`]'s verdict over `candidates`.
-fn judge_absent(candidates: Vec<AbsentCandidate>, options: &DataOptions, contract: &PreparedContract) -> Result<(), DataError> {
+fn judge_absent(
+    candidates: Vec<AbsentCandidate>,
+    options: &DataOptions,
+    contract: Option<&PreparedContract>,
+) -> Result<(), DataError> {
     let mut first_refusal = None;
     for candidate in candidates {
         match plan_read(options, contract, data_format_of(&candidate.path).ok_or_else(|| extension_text(&candidate.path))) {
@@ -406,36 +483,40 @@ pub(crate) fn data_format_of(path: &Path) -> Option<DataFormat> {
     }
 }
 
-/// Binds a parsed source to `contract`; a CSV/TSV table first becomes rows in
-/// `row_mode`, its first record a header unless `header` is `Some(false)`. A
-/// failure returns no value at all.
+/// Binds a parsed source: a CSV/TSV table first becomes rows in `row_mode`
+/// under the header mode `header`; the root is then normalized to a
+/// container (arrays and objects kept, `null` read as `[]`, any other scalar
+/// wrapped in a one-element array) and, when there is a `contract`,
+/// converted to it. A failure returns no value at all.
 fn bind_source(
     source: &LoadedSource,
-    contract: &PreparedContract,
+    contract: Option<&PreparedContract>,
     identity: &DataSourceIdentity,
     row_mode: Option<RowMode>,
-    header: Option<bool>,
+    header: Option<&HeaderMode>,
 ) -> Result<LoadedData, Arc<DataError>> {
-    let (value, table) = match &source.content {
-        SourceContent::Tree(value) => (Cow::Borrowed(value), None),
+    let (value, table, wrapped) = match &source.content {
+        SourceContent::Tree(Value::Null) => (Cow::Owned(Value::Array(Vec::new())), None, false),
+        SourceContent::Tree(value @ (Value::Array(_) | Value::Object(_))) => (Cow::Borrowed(value), None, false),
+        SourceContent::Tree(scalar) => (Cow::Owned(Value::Array(vec![scalar.clone()])), None, true),
         SourceContent::Table(data) => {
-            let mode = row_mode.map_or_else(|| contract.row_mode(), Ok).map_err(|conflict| {
-                Arc::new(DataError::RowShapeConflict { written: contract.written.clone(), conflict })
-            })?;
-            let table = TabularSource { mode, header: header.unwrap_or(true), data: data.clone() };
-            let rows = table_rows(&table, source, identity)?;
-            (Cow::Owned(rows), Some(table))
+            let header = header.cloned().unwrap_or(HeaderMode::FirstRecord);
+            let mode = match row_mode {
+                Some(mode) => mode,
+                None => select_row_mode(contract, &header).map_err(Arc::new)?,
+            };
+            let table = tabular_source(data, mode, &header, source, identity)?;
+            (Cow::Owned(table_rows(&table)), Some(table), false)
         }
+    };
+    let Some(contract) = contract else {
+        let value = value.into_owned();
+        return Ok(LoadedData { items: item_count(&value), value, wrapped, table });
     };
     match simplified_schema::coercion::bind(&contract.shape, &value) {
         Ok(bound) => {
             let value = bound.into_value();
-            let items = match &value {
-                Value::Array(items) => items.len(),
-                Value::Object(members) => members.len(),
-                _ => 0,
-            };
-            Ok(LoadedData { value, items })
+            Ok(LoadedData { items: item_count(&value), value, wrapped, table })
         }
         Err(failure) => Err(Arc::new(DataError::ContractMismatch {
             identity: identity.clone(),
@@ -444,74 +525,142 @@ fn bind_source(
             failure,
             text: source.text.clone(),
             table,
+            wrapped,
         })),
     }
 }
 
-/// The rows of a delimited table as values, read through its logical row
-/// view: objects keyed by the header in object mode, lists of cells in list
-/// mode (a header skipped; without one the first record is a row). A table
-/// with no records, or with a header alone, has no rows.
-fn table_rows(table: &TabularSource, source: &LoadedSource, identity: &DataSourceIdentity) -> Result<Value, Arc<DataError>> {
-    let cells = |row: &DelimitedRecord| row.fields.iter().map(|field| field.text.clone()).collect::<Vec<_>>();
-    let rows = (0..table.row_count()).filter_map(|index| table.row(index));
-    let rows = match table.mode {
-        RowMode::List => rows.map(|row| Value::from(cells(row))).collect(),
-        RowMode::Object => {
-            // Object rows exist only with a header (`header: false` refused
-            // them before the read).
-            let Some(header) = &table.data.headers else {
-                return Ok(Value::Array(Vec::new()));
-            };
-            check_header(header, source, identity)?;
-            rows.map(|row| {
-                let members = header.fields.iter().zip(&row.fields);
-                Value::Object(members.map(|(name, cell)| (name.text.clone(), Value::from(cell.text.clone()))).collect())
-            })
-            .collect()
-        }
-    };
-    Ok(Value::Array(rows))
+/// The number of top-level items: array elements or object members.
+fn item_count(value: &Value) -> usize {
+    match value {
+        Value::Array(items) => items.len(),
+        Value::Object(members) => members.len(),
+        _ => 0,
+    }
 }
 
-/// Object rows need a distinct, non-empty name for every column.
+/// The logical view of a delimited table read in `mode` under `header`: a
+/// header record is skipped only for [`HeaderMode::FirstRecord`], and object
+/// rows are keyed by the header's camelCase names ([`header_keys`]) or by an
+/// explicit name list, which must be as wide as the first record. Object
+/// rows under `header: false` were refused before the read.
 ///
 /// ## Errors
 ///
-/// [`DataError::Malformed`] naming every empty or repeated column, located at
-/// the first offending header field.
-fn check_header(header: &DelimitedRecord, source: &LoadedSource, identity: &DataSourceIdentity) -> Result<(), Arc<DataError>> {
-    let mut seen: HashMap<&str, usize> = HashMap::new();
+/// [`DataError::Malformed`] for header names that cannot key objects, and
+/// for an explicit name list whose length is not the first record's width.
+fn tabular_source(
+    data: &Arc<biscuit_file::DelimitedData>,
+    mode: RowMode,
+    header: &HeaderMode,
+    source: &LoadedSource,
+    identity: &DataSourceIdentity,
+) -> Result<TabularSource, Arc<DataError>> {
+    let keys = match (mode, header, &data.headers) {
+        (RowMode::List, ..) | (RowMode::Object, _, None) => None,
+        (RowMode::Object, HeaderMode::Names(names), Some(first)) => {
+            if first.fields.len() != names.len() {
+                return Err(malformed(
+                    source,
+                    identity,
+                    format!(
+                        "the `header` list names {} column{}, but the first record on line {} has {} field{}",
+                        names.len(),
+                        plural(names.len()),
+                        first.line,
+                        first.fields.len(),
+                        plural(first.fields.len())
+                    ),
+                    first.offset,
+                ));
+            }
+            Some(names.clone())
+        }
+        (RowMode::Object, HeaderMode::FirstRecord | HeaderMode::None, Some(first)) => {
+            Some(header_keys(first, source, identity)?)
+        }
+    };
+    Ok(TabularSource { mode, header: header.skips_first_record(), keys, data: data.clone() })
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+/// The rows of a delimited table as values, read through its logical row
+/// view: objects keyed by [`TabularSource::keys`] in object mode, lists of
+/// cells in list mode. A table with no records, or with a header alone, has
+/// no rows.
+fn table_rows(table: &TabularSource) -> Value {
+    let cells = |row: &DelimitedRecord| row.fields.iter().map(|field| field.text.clone()).collect::<Vec<_>>();
+    let rows = (0..table.row_count()).filter_map(|index| table.row(index));
+    Value::Array(match (table.mode, &table.keys) {
+        (RowMode::List, _) => rows.map(|row| Value::from(cells(row))).collect(),
+        (RowMode::Object, None) => Vec::new(),
+        (RowMode::Object, Some(keys)) => rows
+            .map(|row| {
+                let members = keys.iter().zip(&row.fields);
+                Value::Object(members.map(|(key, cell)| (key.clone(), Value::from(cell.text.clone()))).collect())
+            })
+            .collect(),
+    })
+}
+
+/// The object keys a header record gives its columns: each name in camelCase,
+/// by the `camel_case` expression function's rule. Every key must be
+/// non-empty and distinct.
+///
+/// ## Errors
+///
+/// [`DataError::Malformed`] naming every column whose name has no usable
+/// key and every pair whose keys collide, by their original header text,
+/// located at the first offending header field.
+fn header_keys(header: &DelimitedRecord, source: &LoadedSource, identity: &DataSourceIdentity) -> Result<Arc<[String]>, Arc<DataError>> {
+    let mut seen: HashMap<String, (usize, &str)> = HashMap::new();
+    let mut keys = Vec::with_capacity(header.fields.len());
     let mut problems = Vec::new();
     let mut first_offset = None;
     for (index, field) in header.fields.iter().enumerate() {
         let column = index + 1;
+        let key = crate::markdown::compose::expression::functions::strings::to_camel_case(&field.text);
         let problem = if field.text.is_empty() {
             Some(format!("column {column} has no name"))
-        } else if let Some(earlier) = seen.get(field.text.as_str()) {
-            Some(format!("column {column} repeats `{}` from column {earlier}", field.text))
+        } else if key.is_empty() {
+            Some(format!("column {column} (`{}`) has no letters or digits to name a field", field.text))
+        } else if let Some((earlier, original)) = seen.get(&key) {
+            Some(format!("columns {earlier} (`{original}`) and {column} (`{}`) both name the field `{key}`", field.text))
         } else {
-            seen.insert(&field.text, column);
+            seen.insert(key.clone(), (column, &field.text));
             None
         };
         if let Some(problem) = problem {
             first_offset.get_or_insert(field.offset);
             problems.push(problem);
         }
+        keys.push(key);
     }
     let Some(offset) = first_offset else {
-        return Ok(());
+        return Ok(keys.into());
     };
-    Err(Arc::new(DataError::Malformed {
-        identity: identity.clone(),
-        format: source.format,
-        message: format!(
-            "the header on line {} cannot name object fields: {}; read rows by position with a `tuple([…])[]` contract instead",
+    Err(malformed(
+        source,
+        identity,
+        format!(
+            "the header on line {} cannot name object fields: {}; name the columns with a `header` list, or read rows by position with `header: false` or a `tuple([…])[]` contract",
             header.line,
             problems.join("; ")
         ),
+        offset,
+    ))
+}
+
+fn malformed(source: &LoadedSource, identity: &DataSourceIdentity, message: String, offset: usize) -> Arc<DataError> {
+    Arc::new(DataError::Malformed {
+        identity: identity.clone(),
+        format: source.format,
+        message,
         location: located_at(&source.text, offset),
-    }))
+    })
 }
 
 /// Refines a failed binding of `load_data`'s `as` argument: a contract the
@@ -547,7 +696,7 @@ mod tests {
         CallBindingError::Type {
             function: FUNCTION.to_string(),
             candidates: vec![CandidateFailure {
-                signature: "load_data(file: file | null, as: type-definition(container), options?: {format: enum(yaml, yml, json, jsonl, ndjson, csv, tsv, toml, json5), delimiter: string, header: boolean} | null)".to_string(),
+                signature: "load_data(file: file | null, as?: type-definition(container) | null, options?: {format: enum(yaml, yml, json, jsonl, ndjson, csv, tsv, toml, json5), delimiter: string, header: boolean | string[]} | null)".to_string(),
                 problem: SignatureProblem::Arguments(vec![ArgumentError {
                     parameter: if index == 1 { "as" } else { "file" }.to_string(),
                     index,
@@ -583,15 +732,15 @@ mod tests {
     /// though `a.yaml` would refuse the delimiter.
     #[test]
     fn an_absent_source_is_a_miss_when_any_candidate_accepts_the_request() {
-        let verdict = judge_absent(planned(&["/d/a.yaml", "/d/b.csv"]), &semicolon(), &contract("tuple([string, string])[]"));
+        let verdict = judge_absent(planned(&["/d/a.yaml", "/d/b.csv"]), &semicolon(), Some(&contract("tuple([string, string])[]")));
         assert!(verdict.is_ok(), "{verdict:?}");
-        let unreadable_first = judge_absent(planned(&["/d/a.xyz", "/d/b.yaml"]), &DataOptions::default(), &contract("string[]"));
+        let unreadable_first = judge_absent(planned(&["/d/a.xyz", "/d/b.yaml"]), &DataOptions::default(), Some(&contract("string[]")));
         assert!(unreadable_first.is_ok(), "{unreadable_first:?}");
     }
 
     #[test]
     fn an_absent_source_reports_the_first_refusal_when_every_candidate_refuses() {
-        let error = judge_absent(planned(&["/d/a.xyz", "/d/b.json"]), &semicolon(), &contract("string[]")).unwrap_err();
+        let error = judge_absent(planned(&["/d/a.xyz", "/d/b.json"]), &semicolon(), Some(&contract("string[]"))).unwrap_err();
         match error {
             DataError::UnsupportedFormat { identity, extension } => {
                 assert_eq!(extension.as_deref(), Some("xyz"));
@@ -599,7 +748,7 @@ mod tests {
             }
             other => panic!("unsupported format first: {other:?}"),
         }
-        let error = judge_absent(planned(&["/d/a.json", "/d/b.xyz"]), &semicolon(), &contract("string[]")).unwrap_err();
+        let error = judge_absent(planned(&["/d/a.json", "/d/b.xyz"]), &semicolon(), Some(&contract("string[]"))).unwrap_err();
         assert_eq!(error.code(), Some("dm.data.invalid_options"));
     }
 
@@ -608,7 +757,7 @@ mod tests {
     #[test]
     fn an_authored_candidate_names_the_reference_as_written() {
         let candidates = vec![AbsentCandidate { path: "optional.xyz".into(), authored: Some("%optional.xyz".to_string()) }];
-        match judge_absent(candidates, &DataOptions::default(), &contract("string[]")).unwrap_err() {
+        match judge_absent(candidates, &DataOptions::default(), Some(&contract("string[]"))).unwrap_err() {
             DataError::UnsupportedFormat { identity, .. } => assert_eq!(identity.to_string(), "%optional.xyz"),
             other => panic!("unsupported format: {other:?}"),
         }
@@ -617,7 +766,7 @@ mod tests {
     #[test]
     fn a_format_option_judges_every_candidate_by_that_format() {
         let options = DataOptions { format: Some(DataFormat::Yaml), ..semicolon() };
-        let error = judge_absent(planned(&["/d/a.csv", "/d/b.xyz"]), &options, &contract("string[]")).unwrap_err();
+        let error = judge_absent(planned(&["/d/a.csv", "/d/b.xyz"]), &options, Some(&contract("string[]"))).unwrap_err();
         assert_eq!(error.code(), Some("dm.data.invalid_options"));
     }
 

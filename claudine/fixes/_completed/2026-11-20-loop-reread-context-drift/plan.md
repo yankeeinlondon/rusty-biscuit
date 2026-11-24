@@ -1,0 +1,191 @@
+---
+kind: plan
+created: 2026-11-21
+status: planned
+total_phases: 3
+phase: 4
+agent: codex/gpt-6.2-sol
+yolo: true
+source_files_during_phase_1:
+- claudine/cli/tests/l1/loop_startup_source.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/loop_cli.rs
+- claudine/cli/tests/bin/fake_goose/main.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/entry.rs
+- claudine/lib/src/composition/prepare/service.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/cli/src/commands/compose/mod.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/wrap/composition/mod.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/runner.rs
+- claudine/cli/src/commands/wrap/composition/staged_boot.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+- claudine/cli/src/commands/wrap/harness_orch/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/harness_orch/types.rs
+- claudine/cli/src/commands/wrap/wrapper_stages.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+- claudine-cli
+- claudine
+source_files_during_phase_3:
+- claudine/cli/tests/bin/fake_goose/main.rs
+- claudine/cli/tests/l1/loop_startup_source.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+docs_updated_during_phase_3:
+- claudine/docs/topics/flow-control/looping.md
+- claudine/docs/pipeline.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+source_code:
+- claudine/cli/tests/l1/loop_startup_source.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/loop_cli.rs
+- claudine/cli/tests/bin/fake_goose/main.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/entry.rs
+- claudine/lib/src/composition/prepare/service.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/cli/src/commands/compose/mod.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/wrap/composition/mod.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/runner.rs
+- claudine/cli/src/commands/wrap/composition/staged_boot.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+- claudine/cli/src/commands/wrap/harness_orch/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/harness_orch/types.rs
+- claudine/cli/src/commands/wrap/wrapper_stages.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+documentation:
+- claudine/docs/topics/flow-control/looping.md
+- claudine/docs/pipeline.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/README.md
+- .claude/skills/claudine/SKILL.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+completed_phase: 3
+implemented: true
+---
+
+# Keep loop prompts and lifecycle context in sync
+
+## Summary and Definition of Done
+
+A document loop retains the root source and approval basis that owned its first launch verdict. Each subsequent ordinary iteration composes that source with fresh working-tree evidence, current loop and runtime values, and the existing shell authorization checks. Its preparation records `LoopIteration` and carries no pending launch verdict. A proxy target with `initialize` must run two iterations successfully even when its first provider rewrites its root body, frontmatter, lifecycle actions, and schema declaration. A separate test must prove that a target whose verdict is delegated retains the exact source the harness validated.
+
+Every event uses the context and document epoch of the actions it runs. A stabilized read extends the existing snapshot and preserves earlier observations. The pass's gate, condition, and actions receive the preparation used by that pass, including work delegated to the harness. The event order and shell-free early cleanup remain intact. Retry and resume prepare from disk for the recovery attempt. A handoff starts the target's own startup. A fresh sequence task reads its own source at entry.
+
+An inline pass compares provider output with the deliverable at the start of that pass. A successful provider that makes no second edit gets the existing unchanged-body verdict and leaves the first pass's deliverable intact. The focused regressions and Claudine's full L1 suite pass. Current docs and caller guidance explain the read boundaries.
+
+## Phase 1 — Reproduce and pin the boundaries
+
+### Necessary Rules
+
+- **Startup source.** The command owns the retained source. Eager direct startup uses the caller-resolved source. The staged command route uses the source returned from `staged_boot::reread_and_audit`. The delegated route uses the source loaded and validated by `harness_orch/prompt.rs::materialize_harness_prompt_selecting` during `bootstrap_adopted_document_phase`. In `compose/prep.rs::prepare_and_run_active_document`, live documents with authored `initialize` stage at the command, and an eager proxy target gets `DeferToStabilizedReread`. For an owning loop, `build_and_run_loop` passes an external guard and no `adopted_handoff`, so the latter reaches `StabilizeOnly` through `runner.rs::run_composition_body` and `coordinator.rs::arm_stabilization`. Both startup routes need coverage. Preserve the loop frame, condition, actions, resolved cap, and control seed chosen before initialization. `build_and_run_loop` constructs them before dispatch, and the spec describes replacing the first pass preparation while keeping loop ownership and configuration.
+- **Retained data.** Define CLI-private `RetainedLoopSource { source: ResolvedCompositionSource, approvals: ShellPreApprovals }` in `wrap/harness_orch/types.rs` and re-export it there through `harness_orch/mod.rs`. Retain the resolved source including its overlaid Markdown, raw text, path, and reference. Take approvals from the preparation's `input_layers.pre_approved_commands`, where absence represents an empty set. Reapply caller records, resolution anchors, sequence bindings, and the anchored proxy overlay from the command's base `PrepareOptions`. Rebuild that pass's overrides using the loop frame and runtime cell. `CallerInputLayers::from_options` includes the pass's merged state and `loop_values`, so storing it wholesale would replay iteration 1's transient values. Keep deny-only template and lifecycle checks on each later pass, including a sequence's closed approval policy. The existing `audit_loop_iteration_template`, `frozen_loop_approvals`, and `resolve_shell_approvals` own those checks.
+- **Feedback and recovery.** Add CLI-private `LoopPassPreparation { context: ComposeContext, frontmatter: serde_json::Map<String, Value>, document_epoch: Option<DocumentEpoch> }` alongside `RetainedLoopSource`. Carry `stabilized_source: Option<RetainedLoopSource>` and `pass_preparation: Option<LoopPassPreparation>` on `HarnessPromptState` and `SingleCompositionOutcome`. The former is set only by successful attempt-1 stabilization. The latter describes the last successfully installed preparation for this pass, including recovery, and uses the preparation's effective frontmatter before event mutations. Event-time `set` still travels through the shared runtime cell. `runner.rs::run_composition_body` already consumes other results from that state after `run_harness_loop`, and `looping/engine.rs::execute_loop_with_lifecycle` already layers the loop control state above the pass frontmatter and runtime state above both at lookup. A recovered attempt can update the pass's gate inputs, while the startup source and approvals remain fixed. Recovery continues to validate its fresh read under the current `Retry` or `Resume` entry and shell policy. The existing surfaced-handoff branch exits before any source loop gate runs.
+- **Schema policy.** Add `SchemaStage::SkipLaunchVerdict` in `lib/src/composition/prepare/service.rs`. Set the public preparation deferral flag to false for ordinary loop iteration audit and return `schema_verdict_deferred == false`. Inside the skip branch only, pass Darkmatter its existing verdict-suppression setting. `darkmatter/lib/src/markdown/compose/schema_validation.rs::run_with_registry` applies defaults and coercion before checking that setting. Existing `prepare_without_schema` only bypasses Claudine's schema wrapper and still reaches Darkmatter's launch verdict when the option is false. Keep the schema resolution used for composition and the schema attached to each launch for completion. Keep `PrepareOptions::defer_schema_verdict` false for the skip stage, so `resolve_launch_schema` retains its typed errors. Pass a private `skip_launch_verdict: bool` to `prepare_direct_on` and `prepare_inline_on`, and set the Darkmatter option from `options.defer_schema_verdict || skip_launch_verdict` there. All existing calls pass false. Use a single canonical ordinary-pass call via `CompositionKind::prepare_staged` with `DocumentEntryReason::LoopIteration` and the new stage. Remove the previous helper whose only callers are the two later-pass arms. Keep `prepare_document(..., SchemaStage::Validate)` explicit for the existing service parity tests, including the one that supplies `LoopIteration` to exercise typed diagnostics.
+- **Contexts and accounting.** Use the prepared `ComposeContext` and its `DocumentEpoch`, including their target identity overrides. Create a fresh epoch at the start of each later ordinary pass from the retained root's requirements and install the finished preparation after its audits. When invocation context is absent, clear stale inherited prepared context and epoch on later passes and let canonical preparation derive its existing fallback. The schema policy is selected independently of epoch availability. For a stabilized read, `staged_boot::extend_epoch_context` and `prompt.rs::harness_prepare_options` already extend a snapshot in place; `DocumentEpoch::extend_launch_context` projects only missing groups. Record `Lifecycle` on the installed epoch, with the existing invocation fallback where available. Record `LoopCondition` at the pass handoff on the epoch used for its result, and keep bootstrap accounting where templated loop limits consume it. Keep `current.*` on the existing event-time authority. `run_lifecycle_event` gets early context from `guard.effective_prepared_context()` and event-time authority from the materialization's epoch.
+- **Failure routing.** Install actions and context together, preserving the guard's event ledger. A failed load, composition, or stabilized shell audit uses the prior lifecycle and its matching preparation. A successful stabilized audit selects the new pair before any later launch-plan check. The adopted target's successful identity overlay updates that pair and its materialization. These boundaries follow `loop_control.rs::bootstrap_adopted_document_phase`, which currently audits before `set_config` and catches a subsequent target launch rebuild failure after `set_config`. Preserve the successful command preparation's new pair for the runner's full lifecycle audit and its catch handlers. Keep command cancellation before staged installation on its existing bootstrap cleanup route. Preserve the shell-free early-event gate in `LifecycleRunGuard`. On retry and resume, audit refreshed lifecycle commands with the frozen harness policy before installing the refreshed actions and context. The current `install_reentry_lifecycle_context` runs only at `start` and updates context alone. Moving installation before harness plan parsing keeps its `blocked` and `finalize` on the selected preparation too.
+- **Inline baseline.** For later ordinary inline passes read the resolved path once immediately before inline composition and use those exact bytes for `InlineClosurePlan::original_document_text`, rehearsal, and the existing `Markdown::compute_hash` with `MdHashKind::Simple` and `closure::inline_hash_options`. Use the retained source for prompt composition, lifecycle, provenance, and schema. In `prepare_inline_on`, ordinary direct and startup inline routes already have their own fresh source bytes. In `loop_control.rs::run_harness_loop_inner`, an `InlineOperation` spans one ordinary pass including its retries and resumes. Keep its baseline and accumulated body-change evidence across those recovery attempts. The next ordinary pass starts a new operation, so the previous pass's edit cannot satisfy `reconcile_inline_artifact_with_evidence`. An unreadable live baseline fails before composition effects with `InlineArtifactUnreadable`. An unstampable baseline keeps `InlineBaselineUnstampable`. Both error variants already carry the document path.
+- **Root availability.** A later ordinary direct pass can use a retained root whose path was removed after startup. Limit the `prepare_harness_plan_phase` source-existence bypass to `HarnessPromptMode::Compose` with the `LoopIteration` entry. That check currently rereads only metadata and is the remaining root-availability dependency in ordinary direct execution. Inline requires its deliverable read, and a fresh startup, recovery, include, or explicit file read retains its existing error contract.
+- **Sequence scope.** Reuse the shared implementation without adding a sequence-specific preparation path. `task_run.rs::WrapperPromptRunner::run` resolves the referenced file just in time and sends an owning document loop through `run_looping_document` → `iterate.rs::run_step_document` → `prepare_and_run_active_document`. `body_only` belongs to the enclosing container's loop. `iterate.rs` reloads the step source before step composition, and `sequence_referenced_state.rs::a_looping_referenced_document_is_judged_again_at_its_next_pass` covers a container read boundary that must remain. The stale comment above `a_sequence_task_proxy_target_initialize_creates_a_file_its_body_includes` describes harness adoption. Its prompt task carries a task ledger through `task_run.rs`, so the committed handoff instead returns to the command coordinator. Treat that passing test as command-route evidence and correct the comment.
+- **Validation scope.** Use generated temporary Markdown and Git repositories with the shared CLI fixture and native fake binaries, plus in-process L1 for harness and schema seams. The spec identifies deterministic file mutations and requires no timing benchmark. No spike or wider measurement is required. The input robustness matrix is outside this change because the same Markdown and schema readers, field validators, and grammars remain in use. A rewritten root is an input to the control-flow regressions.
+
+### Wave 1
+
+- [x] **Startup process cases**
+  - Add `cli/tests/l1/loop_startup_source.rs` and register it in `cli/tests/l1/main.rs` under `test-fixtures`. Use `CliProcessFixture`, the native `claudine-fake-goose` launched as Goose, and its numbered prompt recordings. Add fixture-only `FAKE_FIRST_REWRITE_PATH` and `FAKE_FIRST_REWRITE_FROM` to `tests/bin/fake_goose/main.rs` plan mode. When both are set, copy the replacement bytes on launch 1 after recording the prompt and before exiting. Existing marker mode and invocations with neither variable keep their behavior. Use the fake editor and `FAKE_EDITOR_WRITE` with the non-interactive `code` fixture setup in `lifecycle_edit_action.rs::EditRun` for explicit init-time edits. Use ordered file markers and process output, with no sleeps. Seed context fixtures with the committed repository pattern from `ctx_per_run.rs::repo` and keep recordings outside the worktree being observed.
+  - Add `staged_proxy_loop_retains_its_first_validated_root`. Route from `initialize` to a loop-owning target whose own `initialize` logs once, creates an untracked marker, and uses the fake editor to install the stabilized root. Both root versions name `ctx.untracked_files`; only the stabilized one adds `ctx.hostname` in a lifecycle action. Compare the event's nonempty hostname and file list against the values in the composed prompt and assert that the init-created file is absent from pass 1's prepared file list. Extract the expected host value from the numbered prompt recording so the assertion is portable. Use the condition `loop.count >= required_passes` with `required_passes` supplied only by the stabilized root. Set max to 3 and assert exactly two launches, one target initialization, distinct `loop.count` markers, the stabilized lifecycle and body on both passes, and the init-created file in pass 2's working-tree view. Declare `caller_label: string(required)` and pass `caller_label=caller` on the command line. Give the target a distinct `proxy.with` field `proxy_label: proxy`. Assert both fields render in both prompts. The first provider writes a third root with a different body, frontmatter, start/failure actions, and a different valid root schema. Give that third root a one-pass loop and a unique marker. Finish with a fresh direct run against that third root using a separate recording directory and no rewrite variables. Assert its new body and actions run.
+  - Add `delegated_proxy_loop_retains_the_harness_read`. Route to a target with an owning loop and no authored `initialize`. Put `::shell rewrite-source target.md` in its originally resolved body, using the native fake editor binary installed under that name on the fixture PATH to write the second version via `FAKE_EDITOR_WRITE`. Use `--yolo` in this fixture. The loop seed and audit do not execute body directives. The first canonical command body does, immediately before the harness's `StabilizeOnly` read. Remove the directive from the second version. Make the second source require `proxy_label` under a root schema and provide it from the router. Have the first provider write a third version. Assert both numbered prompts and starts use the second marker with the expected loop and overlay values, and the third version remains on disk.
+  - Add `staged_single_uses_the_rewritten_lifecycle_context` with a direct document that uses the same fake editor boundary. Assert the rewritten `start` sees the same nonempty new group value as the body, retains the pre-initialize file-change observation, and fires once. Add a valid read followed by a denied lifecycle shell audit in the direct staged route. Give the rewritten `blocked` and `finalize` a new-group marker, preauthorize no shell commands, and assert both render it, no provider launches, and the early catch's shell command produces no effect. Keep `a_file_still_missing_after_initialize_blocks_once_without_launching` as the control for failure before a replacement preparation is available.
+  - Add `ordinary_direct_pass_uses_retained_root_after_removal`. Give a two-pass eager direct loop a pass-1 `success` action that invokes the native fake editor on the root with `FAKE_EDITOR_DELETE=1`. Assert both passes deliver the retained text, then assert a fresh invocation fails to load the deleted root.
+  - Add `sequence_task_reopens_root_between_invocations`. Use two sequential `prompt:` tasks referencing the same looping root. Launch 1 replaces the root with another valid two-pass prompt. Assert launches 1–2 use the initial body and 3–4 use the new body, each task with loop counts 1–2. Keep sequence and group reread positives in the existing L1 modules.
+  - Add `document_loop_retry_does_not_replace_startup_source`. Use a two-pass direct loop and fake provider plan `fail,ok,ok`. Launch 1 replaces the root with a body and lifecycle marker for recovery and a 1-pass loop declaration. Assert retry reads the new body and actions with the same pass number, the next ordinary pass restores the original body/actions at count 2, and initialization occurs once. Follow the existing resume and retry cases in `ctx_per_run.rs` and `lifecycle_traces.rs` for resume session evidence.
+- [x] **Harness guard coverage**
+  - Add `stabilized_harness_events_use_the_active_epoch` in `cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs`, using its fixture and the parent test module's `RecordingEmitter` and real guard. Seed the epoch from an initial root naming `ctx.untracked_files`, create a file, then replace the root with a valid body and lifecycle that also name `ctx.branch` and `env.MODEL`. Set the launch intent and explicit model to the fixture provider and model already used by the target-launch tests. Drive `bootstrap_adopted_document_phase` followed by the normal start dispatch. Assert the prepared prompt and guard render the same branch/model and earlier file list. Exercise `StabilizeOnly` and the adopted path that calls `rebuild_target_launch`. Use `DocumentEpoch::work_snapshot` to assert one observation each for `file_changes` and `git`, and a `Lifecycle` consumer on the stabilized epoch. The fixture already demonstrates a fresh read between bootstrap and stabilized materialization in `the_overlay_reaches_the_bootstrap_read_and_the_stabilized_reread`.
+  - Add a setup failure after installation by rewriting a target to set `timeout: 1s` and `step_timeout: 2s`. Both strings pass preparation. Their relation fails in `parse_harness_plan` after composition. Assert the rewritten `blocked` and `finalize` run with the new context once and no `start`. For the earlier shell-audit failure, give the stabilized `start` an unapproved `echo unauthorized` and assert the bootstrap event markers and context, as selected by `bootstrap_adopted_document_phase`. Give the successful harness fixture an approved `::shell echo approved-by-harness` that first appears on the stabilized read. Assert an early shell action never reaches the runner.
+- [x] **Inline reconciliation regression**
+  - Extend `cli/tests/l1/loop_cli.rs` beside `inline_compose_loop_runs_iterations`. Reuse its `InlineAgentStub` and count-file prelude. For launch 1 write a distinct body. At the second launch, increment the count and exit 0 before the stub writes anything. Assert two launches, a nonzero CLI exit with the existing unchanged-body diagnostic, and the exact first-pass deliverable bytes. Snapshot those bytes in the second prelude before exiting. Preserve the existing positive case with two writes.
+
+### Baseline checkpoint
+
+- [x] **Record baseline behavior**
+  - From `claudine/`, run `just test-cli loop_startup_source overlay_layering loop_cli`. Capture named outcomes before changing production paths. The staged root-edit case exercises inherited deferral; the delegated case additionally distinguishes the selected startup source from both adjacent disk versions. Passing controls remain in the suite. Record baseline outcomes and exact route evidence in `implementation-log.md` beside the plan. Proceed directly to Phase 2 after capturing the results.
+
+## Phase 2 — Align preparation and execution
+
+### Wave 2
+
+- [x] **Canonical iteration policy**
+  - In `lib/src/composition/prepare/service.rs`, implement `SkipLaunchVerdict` with canonical composition, setting the output deferral solely from the stage. Pass `skip_launch_verdict = true` to the mode-specific internals from this branch, with the options deferral flag false. Keep the legacy direct/inline wrappers and all existing seed, probe, and validating callers on `skip_launch_verdict = false`. Preserve the existing public direct/inline composers and bootstrap and probe behavior. Update the affected schema-stage and preparation doc comments.
+  - In `lib/src/composition/prepare.rs`, add the inline ordinary-pass baseline read on that stage only. Pass the bytes into `prepare_inline_on` as a private optional baseline, defaulting to the original source for its other callers. Rehearse and hash the baseline before composition side effects. Keep source-origin diagnostics and schema resolution on the retained source. Reuse the existing closure code and carry the resulting plan through `materialized_harness_prompt_from_prepared`.
+  - In `lib/src/composition/prepare/service/tests.rs`, add `loop_iteration_skips_the_launch_verdict_without_deferring_it`. Declare a missing `count: number(required)` and a `level: number(default(2))`. Assert the typed missing-property refusal under explicit `Validate`. Assert the same source under `SkipLaunchVerdict` prepares with `entry == LoopIteration`, `schema_verdict_deferred == false`, the schema attached, and the defaulted numeric `level` equal to 2. This tests the preparation boundary and detects a false pending flag paired with a real launch verdict. Keep explicit `Validate` tests for fresh recovery.
+- [x] **Harness lifecycle handoff**
+  - In `wrap/harness_orch/prompt.rs`, return the materialization and the owned resolved source plus approvals from the fresh canonical preparation in `materialize_harness_prompt_selecting`. Keep the test-only `materialize_harness_prompt` adapter returning just the prompt. Use an optional retained-source field on `AttemptDocument` in `loop_control.rs`. Seed materializations carry none. Only successful attempt-1 stabilization transfers it to `HarnessPromptState::stabilized_source`, after the full audit and selected launch preparation are ready. Save it before `start`; a provider or lifecycle action can rewrite the root during the attempt. Recovery and passthrough publish no retained source. Extend the harness guard test after adding the feedback field to assert that its stored source is the rewritten root and its exact approval set contains `echo approved-by-harness`.
+  - Add a crate-visible helper `install_prepared_lifecycle` in `wrap/composition/staged_boot.rs`, accepting the guard, owned `LifecycleConfig`, prepared context, epoch, and optional invocation for fallback accounting. Install the config and context without resetting the ledger. Use it for harness bootstrap after the narrow gate, stabilized materialization after the full audit, and audited recovery before harness-plan checks. In `bootstrap_adopted_document_phase`, hold the previous materialization through the audit so old-action cleanup uses its frontmatter, context, and epoch together. Keep the existing target launch rebuild and identity precedence. Install the stabilized pair before the target rebuild can fail, then update `materialized.compose_context` and the guard together with the rebuilt context on success. The `StabilizeOnly` path uses the prepared context and keeps its existing prompt reporting and launch identity policy. Remove the stale comment about replacing context with a second capture and the start-only `install_reentry_lifecycle_context`.
+  - In `prepare_attempt_phase`, publish `pass_preparation` after a preparation is selected for execution and before `start`. Take early context from the guard's installed snapshot and frontmatter/epoch from the same materialization. Run refreshed lifecycle shell audit before recovery installation using `CachedHarnessLoopContext::shell_options` after its existing freeze. Preserve the prior guard config and snapshot on earlier failures. Pass the prior materialization to stabilized-read error routing. For recovery read failures, keep the existing empty frontmatter view and take its epoch from the last installed `pass_preparation`, since preflight can already have advanced the preparation epoch. Keep `run_harness_loop`'s return tuple and both call signatures stable. Add fields to state initializers in `runner.rs`, `wrapper_stages.rs`, and the test builders in `harness_orch/prompt/tests.rs` and `loop_control/tests/{mod,requeue}.rs`. Initialize both to `None` and move them from state into the existing runner outcome. Populate `None` in all non-harness `SingleCompositionOutcome` constructors in `pipeline.rs`. Update the `AttemptDocument` destructure in `execute_attempt_phase`. Re-export the CLI-private types for the runner and command. Keep passthrough free of loop feedback and skip the existence test only on the ordinary direct entry described above.
+
+### Command integration
+
+- [x] **Wire command preparation**
+  - In `compose/prep.rs::build_and_run_loop`, use the one retained source and approval set for subsequent passes. For the eager first pass, save the original resolved source with the prepared template approvals when it owns the verdict. For the staged first pass, save the source and approvals returned by the command-level stabilized preparation. For the delegated first pass, consume `outcome.stabilized_source` once. Require initialized retention at the start of pass 2 and later. Use `CompositionError::LoopIterationFailed` with the iteration, source path, exit 1, and reason `startup preparation did not return a retained source` for an absent value there. Pass 1 can still report its own handoff, cancellation, or terminal failure. Delete the staged-only source fallback. The only producer of delegated retention is successful attempt-1 stabilization.
+  - Collapse the two later-pass arms to one. Select the retained source before calculating context requirements, clear the pending option independently, and begin the per-pass epoch. Reapply loop ambient values and state to fresh options with the same caller/proxy inputs and the startup approval basis. Audit template commands using the existing frozen options. Invoke `CompositionKind::prepare_staged` with `LoopIteration` and `SkipLaunchVerdict`, then audit the freshly prepared lifecycle command sites. Keep an existing conditional command's authorization attached to the new lifecycle. Remove `CompositionKind::prepare_without_schema` in `compose/mod.rs`. Keep the first pass's existing verdict timing for each startup route.
+  - In `build_and_run_loop` and `run_staged_single`, install the successful preparation through the shared lifecycle helper before entering the pipeline. In the external guard branch of `pipeline.rs`, hand the runner the same prepared context used for its own early catch handlers, including the existing missing-group extension and target env precedence. In that branch, set the guard context from `LifecyclePhase.context` before calling the runner. Record lifecycle consumption once at command installation for an external guard and keep pipeline accounting for pipeline-owned guards. For the staged loop, use `staged.bootstrap.compose_context` as the initialization guard and reread base. For the staged single route, seed the reread options with `StagedLifecycleRuntime.context`, including groups the bootstrap runtime extended for effective frontmatter. Keep the bootstrap config, prepared context, and matching frontmatter on pre-installation failure and cancellation.
+  - In `build_and_run_loop`, use the returned `pass_preparation` as the source of `LoopIterationOutput.context` and `frontmatter`; use the locally prepared pair for pre-harness outcomes. Continue to let the engine handle the output and terminal classification, including `downgraded_loop_iteration_output` failures that exit before evaluating the gate. Update comments around `build_and_run_loop`, `execute_composition_attempt`, and the loop-entry stage descriptions to distinguish iteration from recovery and full verdict from per-pass audit.
+
+### Implementation checkpoint
+
+- [x] **Verify focused paths**
+  - From `claudine/`, run `just test-library --features work-counters composition::prepare::service` and `just test-cli loop_startup_source overlay_layering loop_cli ctx_per_run lifecycle_traces loop_primitives loop_retry_passes sequence_referenced_state sequence_frozen_graph inline_prompt_shell_preflight`. Include the existing launch-anchor checks with `just test-cli ctx_launch_anchor`. Assert the original and adapted routes still produce the expected retry/resume, proxy, shell denial, and lifecycle ordering. Check that `ctx_per_run::a_later_loop_iteration_observes_the_previous_iterations_staging` passes with preserved launch identity.
+  - Confirm at the canonical boundary that the later pass has no pending verdict and takes the no-verdict branch. Use the schema control and the process tests as complementary evidence. Do not use a raw count of `harness_materialize_prompt`. Record the named results, work counters, and any spec departure with the implemented behavior in `implementation-log.md`. Proceed directly to documentation.
+
+## Phase 3 — Document and verify
+
+### Wave 3
+
+- [x] **Current loop documentation**
+  - In `docs/topics/flow-control/looping.md`, add a short executable example of editing the root after pass 1, observing that edit on the next run, and carrying a value between passes with `set`. Cross-link the existing `loop.action` example. Show an explicit `frontmatter("progress.md", "done")` read that sees the separate file's current data.
+  - In `docs/pipeline.md` B4 and `docs/topics/composition.md` under the entry matrix, staged boot, and inline completion, specify exactly which startup read is retained, which later entries read disk, which context crosses each boundary, and what live inline bytes are for. Show the startup and iteration flow in Mermaid using the existing diagrams as the starting point.
+  - In `docs/topics/flow-control/lifecycle.md`, qualify the current frontmatter-lifetime and pre-warming examples, including `Limits`. A `set_frontmatter` write to the root can affect the same live event state under the existing effect rules, and later root preparation sees disk changes at startup, retry or resume, or a new task invocation. An ordinary pass pre-warms from its own preparation of the retained root.
+- [x] **Repo guidance**
+  - Add a short retention summary and looping-guide link to `claudine/README.md`. Update `.claude/skills/claudine/SKILL.md` around its document-loop and sequence read boundaries with the startup source and epoch handoff. Fix the stale sequence test comment identified in Phase 1 in the same change.
+
+### Final checkpoint
+
+- [x] **Publish caller guidance**
+  - Update `docs/use-skills/use-claudine/lifecycle.md` under the document loop example with a concise paragraph that links to the looping guide and states the retained-root, recovery, and inline deliverable rules. Keep the executable examples in the canonical guide. From `claudine/`, run `just publish-skills "$(pwd)/../target/claudine-loop-skills"`. Check that the emitted `use-claudine/lifecycle.md` retains the existing expression example and the new retained-source, recovery, and inline rules. Keep publication artifacts out of the tracked change.
+- [x] **Run full verification**
+  - From `claudine/`, run `just test` and `just lint`. Use L1 fixture execution with no real provider, real editor, real terminal, or GUI focus. From the worktree root run `git diff --check` and inspect the plan, docs, and source changes for scope. Leave the implementation ready for review.
+  - Check off completed tasks and append full-suite results and concrete review material to `implementation-log.md`. Include the startup root-replacement and recovery traces, inline preservation assertion, context counter evidence, and the updated docs. Continuous execution completes every phase before review.

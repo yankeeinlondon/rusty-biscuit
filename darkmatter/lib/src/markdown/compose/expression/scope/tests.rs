@@ -227,3 +227,16 @@ mod member_declarations {
         Markdown::try_from(path).unwrap().with_source(ComposeSource::File(path.to_path_buf()))
     }
 }
+
+/// An observed value's shape is exact (literal leaves, closed objects) and
+/// bounded: an array with more distinct item shapes than the limit is an
+/// array of unknown items.
+#[test]
+fn an_observed_value_has_its_exact_bounded_shape() {
+    let rows = serde_json::json!([{ "name": "Ada" }, { "name": "Ada" }]);
+    let expected = Shape::array_of(&Shape::object_of(vec![("name".to_string(), Shape::of_literal(&serde_json::json!("Ada")))]));
+    assert_eq!(Shape::observed(&rows), expected);
+    let many = serde_json::Value::Array((0..=super::OBSERVED_ALTERNATIVES).map(|index| serde_json::json!(format!("v{index}"))).collect());
+    assert_eq!(Shape::observed(&many), Shape::array_of(&Shape::Unknown { non_null: false }));
+    assert_eq!(Shape::observed(&serde_json::Value::Null), Shape::of_literal(&serde_json::Value::Null));
+}

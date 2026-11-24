@@ -9,6 +9,11 @@
 //! actual types travel in the LSP diagnostic's `data` as
 //! `{"expected_type": …, "actual_type": …}`, `null` when unavailable.
 //!
+//! An object spread whose operand is provably neither an object nor `null`
+//! arrives the same way, as a check Darkmatter names
+//! [`SPREAD_CHECK_NAME`](darkmatter::markdown::compose::expression::SPREAD_CHECK_NAME)
+//! under its own code, ranged at the operand.
+//!
 //! The same entry point ([`call_diagnostics`]) carries Darkmatter's
 //! undeclared-member warnings ([`expression_member_diagnostics`]) for every
 //! branch and callback body of the expression, whatever

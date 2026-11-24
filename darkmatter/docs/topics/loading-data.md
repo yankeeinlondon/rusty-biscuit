@@ -5,12 +5,15 @@ kind: canonical-documentation
 # Loading Data
 
 `load_data(file, as, options)` reads a data file into an expression. The file
-can be YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5, `as` says what shape
-the data must have, and the optional [`options`](#options) object says how to
-read it when the file's extension is not enough: a format, a CSV delimiter, or
-a CSV file with no header row. The result is the parsed data, converted to that shape, or a
-failure that names the place in the file where the data breaks it. A partly
-valid file never produces a partial value.
+can be YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5. The optional `as`
+says what shape the data must have, and the optional [`options`](#options)
+object says how to read it when the file's extension is not enough: a format,
+a CSV delimiter, or how a CSV file names its columns. With `as`, the result is
+the parsed data, converted to that shape, or a failure that names the place in
+the file where the data breaks it. Without `as`, the result is the parsed data
+as the file holds it, and the schema of the property that receives it does the
+checking (see [With or without `as`](#with-or-without-as)). A partly valid
+file never produces a partial value.
 
 Given `os.yaml`:
 
@@ -23,13 +26,22 @@ Given `os.yaml`:
 a document can list it, or build anything else an expression can build:
 
 ```md
-Supported: {{ as_csv(load_data("os.yaml", "string[]")) }}
+Supported: {{ as_csv(load_data("os.yaml")) }}
 
 {{ map(load_data("hosts.csv", "{ name: string, port: number }[]"), h => h.name + ":" + h.port) }}
 ```
 
 ```text
 Supported: macOS, Linux, Windows
+```
+
+Or a frontmatter property can receive the data and let the document's schema
+declare its type once:
+
+```yaml
+$schema:
+    os: enum(macOS, Linux, Windows)[]
+os: "{{ load_data('os.yaml') }}"
 ```
 
 The signature, catalog examples, and aliases are on the generated
@@ -55,13 +67,16 @@ flowchart TD
     C --> D["resolve the file or URL<br/>and record it in the read set"]
     D --> E["choose the format:<br/>the format option, else the extension"]
     E --> P["check the options apply to that format<br/>(dm.data.invalid_options)"]
-    P --> R["CSV/TSV: choose the row shape<br/>(header: false needs list rows)"]
+    P --> R["CSV/TSV: choose the row shape<br/>(from as, else from header)"]
     R --> F{"URL?"}
     F -->|yes| G["check host policy, then fetch<br/>(remote runtime and transport cache)"]
     F -->|no| H
     G --> H["read and decode the source<br/>(raw memo)"]
     H --> I["parse in the format and delimiter<br/>(parse memo)"]
-    I --> K["convert and validate against as,<br/>with or without a header (bind memo)"]
+    I --> W["build rows, normalize the root:<br/>null becomes [], a scalar becomes [scalar]<br/>(bind memo)"]
+    W --> A{as given?}
+    A -->|no| U[returns the value unconverted]
+    A -->|yes| K["convert and validate against as"]
     K -->|fits| OK[returns the converted value]
     K -->|does not fit| X["fails with dm.data.contract_mismatch<br/>located in the data file"]
     I -->|cannot parse| M["fails with dm.data.malformed<br/>located in the data file"]
@@ -69,6 +84,74 @@ flowchart TD
 
 The [memo](#reading-a-file-once-per-command) and the
 [read set](#the-read-set) are described below.
+
+## With or without `as`
+
+`as` is optional. `load_data(file)`, `load_data(file, null)`, and a computed
+`as` that is `null` are the same call. To pass options without a contract,
+write `null` in its place: `load_data(file, null, options)`.
+
+The choice decides **when** the data is checked and converted:
+
+- **With `as`**, the call checks and converts the data before it returns. A
+  value that does not fit fails the call with `dm.data.contract_mismatch`.
+  Every expression that uses the result, callbacks included, sees converted
+  values.
+- **Without `as`**, the call checks nothing about the data's shape and
+  converts nothing. It still parses strictly, checks its options, records its
+  reads, and fails on malformed input. When the result becomes a frontmatter
+  property that the document's schema declares, the ordinary
+  [frontmatter validation](../inline/schema-validation.md) stage judges it and
+  converts it there (see
+  [Typing data with the destination schema](#typing-data-with-the-destination-schema)).
+
+```mermaid
+flowchart LR
+    L["load_data(file, as?)"] --> Q{as given?}
+    Q -->|yes| C["call converts and checks<br/>(dm.data.contract_mismatch)"]
+    Q -->|no| R["raw parsed value<br/>(CSV cells are text)"]
+    C --> E["the rest of the expression<br/>(callbacks, spreads, conditionals)"]
+    R --> E
+    E --> V["frontmatter validation against<br/>the property's declared type<br/>(dm.schema.*)"]
+    V --> B["composed frontmatter and body<br/>see the converted value"]
+```
+
+Given `rows.csv`:
+
+```text
+Name,Stars
+Ada,1000
+```
+
+| Expression | Value inside the expression | Stored value of a property declared `{ name: string, stars: number }[]` |
+| --- | --- | --- |
+| `load_data('rows.csv')` | `[{name: "Ada", stars: "1000"}]` | `[{name: "Ada", stars: 1000}]` |
+| `load_data('rows.csv', '{ name: string, stars: number }[]')` | `[{name: "Ada", stars: 1000}]` | `[{name: "Ada", stars: 1000}]` |
+
+Supply `as` when a callback needs converted values before the frontmatter is
+validated, for example to add numbers in `map(…)`, or when the result is not
+stored in a declared property at all, such as a call in the body.
+
+### Every result is a container
+
+`load_data` always returns an array or an object, whatever the file's root
+holds. This happens before `as` is judged, so a contract always describes a
+container:
+
+| File root | Result | Example |
+| --- | --- | --- |
+| an array or an object | kept as it is | `[1, 2]` stays `[1, 2]` |
+| `null`, including an empty YAML file and JSON `null` | `[]` | an empty `hosts.yaml` loads as `[]` |
+| any other scalar | a one-element array | a YAML file holding `5` loads as `[5]` |
+
+So `load_data("n.yaml", "number[]")` accepts a file holding `5`, and
+`load_data("n.yaml", "tuple([number, number])")` fails on it, at the file's
+root. Input a format cannot parse keeps its format's rule: an empty JSON
+file is still `dm.data.malformed`, not `[]` (see
+[What every format accepts](#what-every-format-accepts)).
+
+A `null` file argument is different: the call returns `null` before it reads
+anything, as before.
 
 ## Writing `as`
 
@@ -92,7 +175,7 @@ Every common container form works:
 | object | `"{ name: string, tags: string[] }"` | `{name: "Ada", tags: ["math"]}` |
 | tuple | `"tuple([string, number])"` | `["web", 8080]` |
 | dictionary | `"{ <string>: number }"` | `{web: 8080, db: 5432}` |
-| nullable | `"string[] \| null"` | `["macOS"]`, or an empty YAML file |
+| nullable | `"string[] \| null"` | `["macOS"]`; an empty YAML file loads as `[]`, so it needs no null arm |
 
 Write a tuple as `tuple([string, number])`. A bracket list such as
 `[string, number]` is not a tuple in SimplifiedSchema: in a schema and
@@ -194,7 +277,7 @@ decide the edge cases:
 | a byte-order mark at the start | stripped, in every format |
 | CRLF line endings | accepted, in every format |
 | a local file that is not valid UTF-8 | malformed, located by byte offset |
-| a zero-byte file | YAML: `null`; JSON and JSON5: malformed; JSON Lines, CSV, TSV: `[]`; TOML: `{}` |
+| a zero-byte file | YAML: `null`, returned as `[]`; JSON and JSON5: malformed; JSON Lines, CSV, TSV: `[]`; TOML: `{}` |
 | several YAML documents in one file | malformed |
 | YAML anchors and aliases | the aliases are expanded |
 | YAML merge keys (`<<: *b`) | not applied; `<<` is an ordinary key |
@@ -207,23 +290,29 @@ decide the edge cases:
 | a JSON Lines line holding only spaces, tabs, or a CR | skipped |
 | a JSON Lines line that is not one JSON value | malformed, at that line |
 
-An empty YAML file is `null`, so a contract for a YAML file that may be empty
-needs a null arm: `"string[] | null"`. Number rules are described in
+An empty YAML file parses as `null`, which `load_data` returns as `[]` (see
+[Every result is a container](#every-result-is-a-container)), so
+`"string[]"` accepts it without a null arm. Number rules are described in
 [Numbers](./numbers.md).
 
 Loaded values are data. A string in the file that contains `{{ … }}`,
 `$( … )`, or a directive is returned as that text, and a YAML mapping with a
-`kind` or `$schema` key selects no schema; only `as` supplies the contract.
+`kind` or `$schema` key selects no schema; only `as`, or the declared type of
+the property that receives the result, supplies one.
 
 ## CSV and TSV
 
-CSV and TSV rows carry no types. By default the **first row is a header**
-(see [Files without a header row](#files-without-a-header-row) to turn that
-off), and the element type of `as` decides what each row becomes:
+CSV and TSV rows carry no types. Each row becomes either an **object** keyed
+by column names or a **list of cells** in column order. When `as` is given,
+its element type decides:
 
-- an **object** element turns each row into an object keyed by the header;
-- a **tuple or array** element turns each row into a list of cells, and the
+- an **object** element turns each row into an object keyed by the column
+  names;
+- a **tuple or array** element turns each row into a list of cells, and a
   header row is skipped.
+
+Without `as`, the [`header` option](#how-columns-are-named) decides, and by
+default the first row is a header and rows are objects.
 
 Given `hosts.csv`:
 
@@ -234,46 +323,132 @@ db,5432
 ```
 
 ```md
+{{ load_data("hosts.csv") }}
 {{ load_data("hosts.csv", "{ name: string, port: number }[]") }}
 {{ load_data("hosts.csv", "tuple([string, number])[]") }}
 {{ load_data("hosts.csv", "{ <string>: string }[]") }}
 ```
 
 ```text
+[{name: "web", port: "8080"}, {name: "db", port: "5432"}]
 [{name: "web", port: 8080}, {name: "db", port: 5432}]
 [["web", 8080], ["db", 5432]]
 [{name: "web", port: "8080"}, {name: "db", port: "5432"}]
 ```
 
-Cells are text until `as` converts them, so `"8080"` becomes a number only
-where `as` asks for one. TSV uses the same quoting as CSV, with a tab as the
-delimiter.
+Cells are text until something converts them: `as` in the call, or the
+declared type of the property that stores the result. TSV uses the same
+quoting as CSV, with a tab as the delimiter.
+
+### How columns are named
+
+The `header` option says where an object row's keys come from. It accepts
+`true` (the default), `false`, or a list of column names:
+
+| `header` | The first record is | Each row becomes | Without `as` |
+| --- | --- | --- | --- |
+| `true`, omitted, or `null` | the header | an object keyed by the header's names in camelCase | object rows |
+| `['label', 'years']` | data | an object with exactly the names given | object rows |
+| `false` | data | a list of cells in column order | list rows (`unknown[][]` to the call check) |
+
+Given `export.csv`:
+
+```text
+First Name,Age
+Ada,36
+```
+
+```md
+{{ load_data("export.csv") }}
+{{ load_data("export.csv", null, {header: ['label', 'years']}) }}
+{{ load_data("export.csv", null, {header: false}) }}
+```
+
+```text
+[{firstName: "Ada", age: "36"}]
+[{label: "First Name", years: "Age"}, {label: "Ada", years: "36"}]
+[["First Name", "Age"], ["Ada", "36"]]
+```
+
+With `as`, the header mode must allow the row shape `as` asks for, or the call
+fails with `dm.data.row_shape_conflict` before the file is read:
+
+| `header` | Object-row `as` | List-row `as` |
+| --- | --- | --- |
+| `true` | rows keyed by camelCase names | rows of cells; the header record is skipped without reading its names |
+| a list of names | rows keyed by those names | conflict |
+| `false` | conflict | rows of cells, the first record included |
+
+### Header names become camelCase keys
+
+A header record's names are converted with the same rules as the
+[`camel_case`](./darkmatter-expressions.md#functions) function, so keys are
+predictable identifiers in expressions: `First Name`, `first_name`, and
+`first-name` all become `firstName`, and `Stars` becomes `stars`. This
+happens whether or not `as` is given, and the contract names the converted
+keys.
+
+Two header names that convert to the same key (`First Name` and `first_name`)
+fail with `dm.data.malformed` on the header record, naming both columns, as
+does a name with no letters or digits (`!!!`), which converts to nothing.
+This holds even when the file has no data rows.
+
+**Migrating a document written before this rule.** Object-row keys used to
+be the header's names exactly as written. A contract and every member access
+that used the old spelling must use the camelCase key instead. With
+`export.csv` above, `First Name` could not be named in an inline contract
+(SimplifiedSchema object keys are identifiers), so such a file was typically
+read as a dictionary and its column reached with a bracket key:
+
+```md
+<!-- before: keys were `First Name` and `Age` -->
+{{ map(load_data("export.csv", "{ <string>: string }[]"), p => p['First Name'] + " (" + p.Age + ")") }}
+
+<!-- after: keys are `firstName` and `age` -->
+{{ map(load_data("export.csv", "{ firstName: string, age: number }[]"), p => p.firstName + " (" + p.age + ")") }}
+```
+
+The dictionary contract still loads after the change, but `p['First Name']`
+and `p.Age` now read `null`. A contract that named an identifier header
+changes the same way: for a header `Name,Age`, `"{ Name: string, Age: number }[]"`
+becomes `"{ name: string, age: number }[]"`. The same applies to a property
+schema that declares the rows, to a `::map` item's members, and to any
+consumer of the composed frontmatter. A file with
+no header record whose columns need exact names can name them with a
+[`header` list](#naming-the-columns-yourself). List rows are unaffected:
+they never read the header's names.
 
 ### Choosing the row shape
 
-Every non-null arm of `as` must be an array or tuple whose elements all pick
-the same row shape. Anything else fails with `dm.data.row_shape_conflict`,
-which suggests `"{ <string>: string }[]"` or `"tuple([…])[]"`:
+Without `as`, the `header` option picks the row shape (see
+[How columns are named](#how-columns-are-named)). With `as`, every non-null
+arm of `as` must be an array or tuple whose elements all pick the same row
+shape, and the `header` option must allow it. Anything else fails with
+`dm.data.row_shape_conflict`, which suggests `"{ <string>: string }[]"` or
+`"tuple([…])[]"`:
 
 | `as` over a CSV | Result |
 | --- | --- |
+| omitted or `null` | object rows, or list rows with `header: false` |
 | `"{ name: string }[]"`, `"{ name: string }[] \| null"` | object rows |
 | `"tuple([string, number])[]"` | list rows |
 | `"{ a: string }[] \| tuple([string])[]"` | conflict: the arms disagree |
 | `"string[]"`, `"unknown[]"` | conflict: a scalar or `unknown` element is not a row |
 | `"object"`, `"{ <string>: string }"` | conflict: a top-level object is not a list of rows |
+| `"tuple([string])[]"` with a `header` list | conflict: named columns make object rows |
+| `"{ name: string }[]"` with `header: false` | conflict: there are no names to key objects with |
 
-When both `file` and `as` are literals, the call check knows the extension
-and reports the conflict before anything runs.
+When the format, the header mode, and the contract are all literal, the call
+check reports the conflict before anything runs.
 
 ### The strict rules
 
 | Case | Result |
 | --- | --- |
 | a header-only file | `[]` |
-| a duplicate or empty header name, object rows | malformed, naming the columns, on the header's line |
-| a duplicate or empty header name, list rows | allowed, because the header is skipped |
-| a row with more or fewer cells than the header | malformed, at that row |
+| two header names with the same camelCase key, or a name with no letters or digits, object rows | malformed, naming the columns, on the header's line |
+| the same header names, list rows | allowed, because the header is skipped unread |
+| a row with more or fewer cells than the header (or the first record, without a header) | malformed, at that row |
 | a blank line outside a quoted cell | skipped; it is never an empty header or row |
 | a line holding only delimiters (`,,`) | a row of empty cells |
 | an empty cell | `""`; `as` decides whether that is acceptable |
@@ -282,9 +457,10 @@ and reports the conflict before anything runs.
 | a quote inside an unquoted cell (`ab"c`) | malformed |
 | text between a closing quote and the next delimiter (`"ab"c`) | malformed |
 
-Cells and headers are never trimmed: `name, port` has a header named
-` port`. A file without a header row needs `{header: false}`; without it, the
-first row is read as the header.
+Cells and explicit `header` names are never trimmed. A header record's names
+lose their spaces and punctuation in the camelCase conversion, so
+`name, port` has the keys `name` and `port`. A file without a header row needs `{header: false}` or
+a list of names; without one, the first row is read as the header.
 
 ### How cell text converts
 
@@ -308,35 +484,39 @@ a YAML 1.1 style vocabulary, which can surprise a CSV author: `1` reads as
 
 The third argument is an object with up to three keys. Each key is optional,
 and leaving it out, or writing `null`, means its default. Omitting the whole
-object, or passing `null` or `{}`, reads the file exactly as a two-argument
-call does.
+object, or passing `null` or `{}`, reads the file exactly as a call without
+options does. To give options without a contract, pass `null` as `as`:
+`load_data("rows.csv", null, {delimiter: ";"})`.
 
 | Key | Values | Default | Applies to |
 | --- | --- | --- | --- |
 | `format` | `yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, and the aliases `yml` (for `yaml`) and `ndjson` (for `jsonl`) | chosen from the extension | every call |
 | `delimiter` | one ASCII character other than a double quote, CR, or LF | `,` for CSV, a tab for TSV | CSV and TSV only |
-| `header` | `true` or `false` | `true` | CSV and TSV only |
+| `header` | `true`, `false`, or a list of column names | `true` | CSV and TSV only |
 
 Format names are exact and lowercase: `"CSV"`, `" csv"`, and `"text"` are
 errors. An alias is the same format, not a variant: `{format: "yml"}` reads
 exactly as `{format: "yaml"}` does, and a message about it names `YAML`.
 
 The options object is closed. A key other than these three, or a value that
-cannot convert to its field's type (`{header: [1]}`, `{delimiter: {}}`), is
-refused like any other argument of the wrong type, before anything runs.
+cannot convert to its field's type (`{header: 5}`, `{header: [{}]}`,
+`{delimiter: {}}`), is refused like any other argument of the wrong type,
+before anything runs.
 
 Option values convert the way every function argument does, and every check
 judges the converted value, whether the call runs or is only checked:
-`{header: "false"}` is `{header: false}`, and `{delimiter: 5}` is
-`{delimiter: "5"}`. So `{delimiter: 10}` is the two-character delimiter
+`{header: "false"}` is `{header: false}`, `{header: [1, 2]}` names the
+columns `"1"` and `"2"`, and `{delimiter: 5}` is `{delimiter: "5"}`. So `{delimiter: 10}` is the two-character delimiter
 `"10"` and is refused, and `{header: "false"}` with an object-row contract
 is the headerless conflict described below.
 
 ### Files without a header row
 
 `{header: false}` reads every CSV or TSV record as a row, the first included.
-Rows are then lists of cells, so `as` must describe list rows, such as
-`"tuple([string, number])[]"`.
+Rows are then lists of cells, so `as`, when given, must describe list rows,
+such as `"tuple([string, number])[]"`. Without `as`, the result is a list of
+lists of text cells; the call check types it `unknown[][]`, and DMLS does not
+check its cells against the destination schema, though composition does.
 
 Given `ports.csv`:
 
@@ -363,6 +543,43 @@ Without a header, the first record sets the number of cells every other
 record must have, a file with no records (empty, or only blank lines) is `[]`,
 and positions count from the first record: in the file above, a bad `8080`
 is `/0/1` on line 1. The other [strict rules](#the-strict-rules) still apply.
+
+### Naming the columns yourself
+
+A list of names reads every record as data, the first included, and keys
+each row's cells by those names, in order. Use it for a file with no header
+record, or when the keys must be exact rather than camelCase.
+
+Given `ages.csv`:
+
+```text
+Ada,36
+Grace,85
+```
+
+```md
+{{ load_data("ages.csv", null, {header: ['label', 'years']}) }}
+{{ load_data("ages.csv", "{ label: string, years: number }[]", {header: ['label', 'years']}) }}
+```
+
+```text
+[{label: "Ada", years: "36"}, {label: "Grace", years: "85"}]
+[{label: "Ada", years: 36}, {label: "Grace", years: 85}]
+```
+
+- **Names are used verbatim.** `[' Label ', 'port']` keys the first cell
+  ` Label `, spaces included; nothing is converted to camelCase.
+- **Names must be usable.** An empty list, an empty name, or a name given
+  twice fails with `dm.data.invalid_options` on the options argument, before
+  any file is read.
+- **The count must match the data.** The number of names must equal the
+  number of cells in the first record, or the call fails with
+  `dm.data.malformed` at that record, naming both counts ("names 2 columns,
+  but the first record on line 1 has 3 fields"). Every later record must have
+  the same width, as usual.
+- **Object rows only.** With `as`, the contract must describe object rows;
+  a list-row contract fails with `dm.data.row_shape_conflict`.
+- A file with no records loads as `[]`, which a given `as` then judges.
 
 ### Another delimiter
 
@@ -395,7 +612,7 @@ accepted.
 
 `delimiter` and `header` only mean something for CSV and TSV. Either one on
 any other format fails with `dm.data.invalid_options`, even when its value is
-the default:
+the default; only `null`, which means "not given", is accepted:
 
 ```md
 {{ load_data("config.json", "{ hosts: string[] }", {header: true}) }}
@@ -467,9 +684,12 @@ An existence check only answers whether the file is there:
 | present but not a `string[]` (`dm.data.contract_mismatch`) | fails | `[]` |
 
 `try` recovers only failures of the data itself: a missing or unreadable
-file, a remote read that fails in transport, malformed data, and a contract
-mismatch. A mistake in the request still fails: an invalid `as`, bad
-options, a missing or invalid imported contract, and a denied host. The full
+file, a remote read that fails in transport, malformed data (header names
+that collide in camelCase and a `header` list that does not match the
+data's width included), and a contract mismatch. A mistake in the request
+still fails: an invalid `as`, bad options (an empty or repeated `header`
+name included), a row-shape conflict, a missing or invalid imported
+contract, and a denied host. The full
 list is in
 [Recovering from read failures](./darkmatter-expressions.md#which-failures-try-recovers).
 
@@ -552,19 +772,113 @@ The typing has limits:
   member read through a computed contract or a named reference is never
   reported, because its type is `unknown`. See
   [Misspelled members](./darkmatter-expressions.md#misspelled-members).
+- **A call without `as` is provisional.** Its type is an open object or a
+  list of unknown values (`unknown[]`), plus `null` when the file may be
+  `null`. A CSV or TSV read whose format and `header` are literal narrows to
+  rows: open objects, or `unknown[][]` for `header: false`. An open object
+  proves no member absent, so `h.nmae` on such a row is never reported.
 
 To type a `::map` region, load the data in frontmatter and declare the
 property in the document's schema; the region's item type comes from that
-schema:
+schema, so the call needs no `as`:
 
 ```md
 ---
-hosts: "{{ load_data('hosts.yaml', '{ name: string, port: number }[]') }}"
+$schema:
+    hosts: "{ name: string, port: number }[]"
+hosts: "{{ load_data('hosts.yaml') }}"
 ---
 ::map hosts
 - {{ i.name }}:{{ i.port }}
 ::end-map
 ```
+
+## Typing data with the destination schema
+
+A frontmatter property whose whole value is one `{{ … }}` expression keeps
+the expression's typed result, and frontmatter validation judges that result
+against the property's declared type, like any other value. So a document can
+declare the type once, in `$schema`, and let the data flow through ordinary
+expressions (callbacks, [object spread](../../../simplified-schema/docs/topics/expression-syntax.md#object-literals-and-spread),
+conditionals) on its way there.
+
+```yaml
+$schema:
+    direct: "{ name: string(required), age: number }[]"
+    additive: "{ name: string(required), age: number, color: string }[]"
+    conditional:
+        - "{ name: string(required), age: number }[]"
+        - "literal(foobar)"
+direct: "{{ load_data('data.yaml') }}"
+additive: "{{ map(load_data('data.yaml'), i => { ...i, color: 'blue' }) }}"
+conditional: "{{ file_exists('data.yaml') ? load_data('data.yaml') : 'foobar' }}"
+```
+
+With this `data.yaml`:
+
+```yaml
+- name: Ada
+  age: 36
+- name: Grace
+  age: 85
+```
+
+all three properties pass. `direct` and `conditional` hold the two rows, and
+`additive` holds them with `color: blue` added to each. `conditional` uses
+its fallback only when the file is absent.
+
+The destination applies every rule frontmatter validation applies, with the
+effective schema (the document's `$schema`, a configured baseline, a matched
+trigger, and imported types):
+
+- a CSV cell `"1000"` declared `number` is converted to `1000`;
+- a missing member with a declared `default(...)` is filled in;
+- a value outside an `enum`, or an extra member of an inline object, fails;
+- the stored, converted value is what the composed frontmatter and the body
+  see.
+
+### Where a destination failure points
+
+Change Grace's age on line 4 to `"old"` and all three properties fail, each
+with a `dm.schema.*` code such as `dm.schema.type_mismatch`. A schema code,
+not `dm.data.contract_mismatch`, marks a failure of the destination's type
+rather than of a contract the call was given.
+
+Every such failure is placed at the `{{ … }}` expression that produced the
+property. When the failing value came straight from the file, it also
+carries a `data_location` pointing into the data file:
+
+| The property's expression | `source` | `data_location` |
+| --- | --- | --- |
+| a `load_data` call: `{{ load_data('data.yaml') }}` | the expression | `data.yaml`, line 4, column 8, pointer `/1/age` |
+| the call in parentheses: `{{ (load_data('data.yaml')) }}` | the expression | the same |
+| a conditional whose selected arm is the call (`conditional` above) | the expression | the same |
+| a value built from the data: a callback (`additive` above), a spread, `try(…)`, `\|\|`, an index or member, `filter(…)` | the expression | none |
+
+The position follows the loader's rules: a missing member is placed at its
+parent row, an unexpected member at its value, a CSV cell at its original
+cell (through a camelCase or explicit key), and a wrapped scalar's element at
+the file's root. A problem whose value a schema default supplied has no
+`data_location`, because the file never held it. A property completed after a
+frontmatter `$( … )` command is placed the same way.
+
+The human-readable report shows both places. The problem's ` at L:C` names
+the expression, and one more line names the data:
+
+```text
+data: /work/data.yaml:4:8 (/1/age)
+```
+
+The record fields are in [Data Contracts](../cli/data-contracts.md#data-location).
+
+### In the editor
+
+DMLS can run the same check while you edit: it evaluates a whole-value
+`{{ … }}` property that loads data without `as`, using only reads your
+configuration has approved, and judges the result with the same validation
+rules as composition. When it cannot evaluate the property, it reports no
+schema verdict and composition remains the check. See
+[In the editor](./schemas/schema-slots.md#in-the-editor).
 
 ## Remote URLs
 
@@ -612,12 +926,14 @@ pre-flight walk, lifecycle events, and composition, so a
 | two different contracts | 1 | 1 | 2 |
 | `{delimiter: ","}` and `{delimiter: ";"}` | 1 | 2 | 2 |
 | `{header: true}` and `{header: false}`, both list rows | 1 | 1 | 2 |
+| `{header: ['a', 'b']}` and `{header: ['b', 'a']}` | 1 | 1 | 2 |
+| `load_data(f)`, `load_data(f, null)`, `load_data(f, null, {})` | 1 | 1 | 1 |
 | no options, `{}`, `{format: "csv"}` on `a.csv`, `{delimiter: ","}` | 1 | 1 | 1 |
 | `{format: "yml"}` and `{format: "yaml"}` | 1 | 1 | 1 |
 
 Options that mean the same thing share the work, because the memo is keyed
-by the effective format, delimiter, and header rather than by how the call
-spelled them. A failure is kept with its key too: a header-name failure under
+by the effective format, delimiter, and header (a list's names included)
+rather than by how the call spelled them. A failure is kept with its key too: a header-name failure under
 object rows does not affect a `header: false` call over the same file. This
 holds in every cache access mode, `Off` and `Refresh` included: those modes
 govern the composed-result cache, not this memo. Nothing is persisted.
@@ -721,12 +1037,16 @@ Each problem has its own code:
 | Code | Meaning |
 | --- | --- |
 | `dm.data.not_a_container` | `as` is not a container |
-| `dm.data.row_shape_conflict` | `as` cannot choose a CSV/TSV row shape, or describes object rows with `header: false` |
-| `dm.data.invalid_options` | an option value is not usable (a bad delimiter), or an option does not apply to the format read |
+| `dm.data.row_shape_conflict` | `as` cannot choose a CSV/TSV row shape, describes object rows with `header: false`, or describes list rows with a `header` list |
+| `dm.data.invalid_options` | an option value is not usable (a bad delimiter; an empty `header` list, or an empty or repeated name in it), or an option does not apply to the format read |
 | `dm.data.this_import_rejected` | `as` uses `Name@this` |
 | `dm.data.unsupported_format` | the extension names no supported format, and no `format` option was given |
-| `dm.data.malformed` | the file cannot be parsed under its format's rules |
+| `dm.data.malformed` | the file cannot be parsed under its format's rules, including CSV/TSV header names that collide or convert to nothing, and a `header` list whose length is not the first record's width |
 | `dm.data.contract_mismatch` | the parsed data does not fit `as` |
+
+A value that fits the call but not the property it is stored in is not a
+`dm.data.*` problem: frontmatter validation reports it with a `dm.schema.*`
+code (see [Where a destination failure points](#where-a-destination-failure-points)).
 
 A `dm.data.invalid_options` message names the key and the fix, for example
 ``load_data(): option `delimiter` is invalid: must be one ASCII character
@@ -756,7 +1076,8 @@ A data diagnostic points at two places. `source` is the call in the
 Markdown document. `data_location` points into the data file: its `file`,
 the JSON Pointer of the offending value (`/0/port`), and a `line` and
 `column`. A contract mismatch lists every violating location, in file order,
-up to 20 records, then one record counting the rest. The record fields are
+up to 20 records, then one record counting the rest. A destination schema
+failure on a directly loaded value carries the same `data_location`. The record fields are
 on [Data Contracts](../cli/data-contracts.md#data-errors) and
 [Data location](../cli/data-contracts.md#data-location).
 
@@ -851,6 +1172,8 @@ is reported at the slot. The full rules are in
   language and the other read-side functions
 - [Container types](schemas/definition.md#container-types): which type
   definitions `as` accepts
+- [Schema Validation](../inline/schema-validation.md): the frontmatter stage
+  that judges and converts a result loaded without `as`
 - [Data Contracts](../cli/data-contracts.md#data-errors): the `dm.data.*`
   records, `data_location`, and `read_set`
 - [Caching](./caching.md#the-load_data-memo) and

@@ -87,8 +87,11 @@ pub enum Expr {
     /// Immutable array literal: `[value, computed]`.
     ArrayLiteral(Vec<Expr>),
 
-    /// Immutable object literal: `{ key: value, "quoted-key": computed }`.
-    ObjectLiteral(Vec<(String, Expr)>),
+    /// Immutable object literal: `{ key: value, "quoted-key": computed, ...base }`.
+    ///
+    /// Entries keep their written order, which decides which entry supplies
+    /// a key that several provide (the last one wins).
+    ObjectLiteral(Vec<ObjectEntry>),
 
     /// Unary not expression: `!expr`.
     UnaryNot(Box<Expr>),
@@ -206,11 +209,14 @@ impl fmt::Display for Expr {
             }
             Expr::ObjectLiteral(entries) => {
                 write!(f, "{{")?;
-                for (index, (key, value)) in entries.iter().enumerate() {
+                for (index, entry) in entries.iter().enumerate() {
                     if index > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "\"{key}\": {value}")?;
+                    match entry {
+                        ObjectEntry::Field { key, value } => write!(f, "\"{key}\": {value}")?,
+                        ObjectEntry::Spread { operand } => write!(f, "...{operand}")?,
+                    }
                 }
                 write!(f, "}}")
             }
@@ -287,8 +293,9 @@ pub enum SpannedExprKind {
     BoolLiteral(bool),
     /// Immutable array literal. Each child retains its complete source span.
     ArrayLiteral(Vec<SpannedExpr>),
-    /// Immutable object literal. Keys and values retain their source spans.
-    ObjectLiteral(Vec<(Spanned<String>, SpannedExpr)>),
+    /// Immutable object literal in written order. Keys, values, and spread
+    /// operands retain their source spans.
+    ObjectLiteral(Vec<SpannedObjectEntry>),
     /// Unary not expression: `!expr`.
     UnaryNot(Box<SpannedExpr>),
     /// Unary minus expression: `-expr`.
@@ -385,12 +392,9 @@ impl SpannedExpr {
             SpannedExprKind::ArrayLiteral(items) => {
                 Expr::ArrayLiteral(items.iter().map(SpannedExpr::erase).collect())
             }
-            SpannedExprKind::ObjectLiteral(entries) => Expr::ObjectLiteral(
-                entries
-                    .iter()
-                    .map(|(key, value)| (key.value.clone(), value.erase()))
-                    .collect(),
-            ),
+            SpannedExprKind::ObjectLiteral(entries) => {
+                Expr::ObjectLiteral(entries.iter().map(SpannedObjectEntry::erase).collect())
+            }
             SpannedExprKind::UnaryNot(inner) => Expr::UnaryNot(Box::new(inner.erase())),
             SpannedExprKind::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(inner.erase())),
             SpannedExprKind::Paren(inner) => Expr::Paren(Box::new(inner.erase())),
@@ -433,6 +437,74 @@ impl SpannedExpr {
                 name: name.clone(),
                 args: args.iter().map(SpannedExpr::erase).collect(),
             },
+        }
+    }
+}
+
+/// One entry of an [`Expr::ObjectLiteral`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjectEntry {
+    /// A written field, `key: value` or the shorthand `key` (whose value is
+    /// the variable `key`). No two fields of one literal share a key.
+    Field {
+        /// The field name.
+        key: String,
+        /// The field's value expression.
+        value: Expr,
+    },
+    /// `...operand`: copies the operand's fields at this point in the order.
+    Spread {
+        /// The expression whose fields are copied.
+        operand: Expr,
+    },
+}
+
+impl ObjectEntry {
+    /// The field value or spread operand, for walkers that treat both alike.
+    pub fn value(&self) -> &Expr {
+        match self {
+            Self::Field { value, .. } => value,
+            Self::Spread { operand } => operand,
+        }
+    }
+}
+
+/// An [`ObjectEntry`] retaining its source spans. A spread's extent is its
+/// operand's span; the `...` token is not part of it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpannedObjectEntry {
+    /// See [`ObjectEntry::Field`]. A shorthand field's value carries the
+    /// key's span.
+    Field {
+        /// The field name and its authored span (including quotes).
+        key: Spanned<String>,
+        /// The field's value expression.
+        value: SpannedExpr,
+    },
+    /// See [`ObjectEntry::Spread`].
+    Spread {
+        /// The expression whose fields are copied.
+        operand: SpannedExpr,
+    },
+}
+
+impl SpannedObjectEntry {
+    /// The field value or spread operand, for walkers that treat both alike.
+    pub fn value(&self) -> &SpannedExpr {
+        match self {
+            Self::Field { value, .. } => value,
+            Self::Spread { operand } => operand,
+        }
+    }
+
+    /// Drops spans.
+    pub fn erase(&self) -> ObjectEntry {
+        match self {
+            Self::Field { key, value } => ObjectEntry::Field {
+                key: key.value.clone(),
+                value: value.erase(),
+            },
+            Self::Spread { operand } => ObjectEntry::Spread { operand: operand.erase() },
         }
     }
 }
@@ -756,6 +828,20 @@ mod tests {
             name: "name".to_string(),
         };
         assert_eq!(expr.to_string(), "items[0].name");
+    }
+
+    #[test]
+    fn display_object_literal_keeps_spreads_in_order() {
+        let expr = Expr::ObjectLiteral(vec![
+            ObjectEntry::Spread {
+                operand: Expr::Variable("base".to_string()),
+            },
+            ObjectEntry::Field {
+                key: "color".to_string(),
+                value: Expr::StringLiteral("blue".to_string()),
+            },
+        ]);
+        assert_eq!(expr.to_string(), "{...base, \"color\": \"blue\"}");
     }
 
     #[test]

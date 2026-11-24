@@ -10,7 +10,8 @@
 //! into a [`NamedTypeCatalog`]. Completion, hover, and go-to-definition read
 //! the catalog, so a request performs no file I/O, and the catalog's files are
 //! dependency edges: editing an imported file refreshes the assistance built
-//! from it.
+//! from it. Composition operands (`...Name@./types.yaml` spreads and
+//! `$extends` items) are targets like any other reference.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -19,8 +20,10 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
+use simplified_schema::simplified::LOCAL_REFERENCE;
+use simplified_schema::simplified::grammar::parse_extends_operand;
 use simplified_schema::{
-    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape,
+    CompositionOperand, LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape,
     SchemaSourceMap, SourceAware, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot,
     StandaloneSchemaDocument, TypeExpr, flow_collection_end, parse_property_definition,
     parse_schema_declaration_with_source,
@@ -178,10 +181,23 @@ impl NamedReference {
 
 /// The schema files a document's explicit named-type references import, read
 /// when the overlay was assembled.
+///
+/// Besides the files this document names ([`Self::externals`]), the catalog
+/// holds the files those files' exported aliases and compositions name, and
+/// so on, up to [`MAX_TRANSITIVE_FILES`] files: enough to follow a target's
+/// alias chain to its terminal definition ([`Self::imported_from`]). A file
+/// past that bound, or one that cannot be read, is absent, and a caller
+/// treats it as unknown.
 #[derive(Debug, Default)]
 pub struct NamedTypeCatalog {
     externals: Vec<ExternalNamespace>,
+    /// Files reached only through another external file, each keyed by the
+    /// target spelling of its first importer.
+    transitive: Vec<ExternalNamespace>,
 }
+
+/// How many files the catalog reads beyond the ones this document names.
+pub const MAX_TRANSITIVE_FILES: usize = 32;
 
 /// One imported schema file, keyed by the target spelling that selected it.
 #[derive(Debug)]
@@ -197,6 +213,9 @@ pub struct ExternalNamespace {
     /// Why the file is not usable as a schema document: its text is not YAML,
     /// or its recognized envelope is malformed.
     pub error: Option<Arc<SchemaError>>,
+    /// The explicit targets the file's exported aliases and compositions
+    /// name, each with the file it selects from this file's directory.
+    imports: Vec<(String, PathBuf)>,
 }
 
 impl ExternalNamespace {
@@ -277,26 +296,28 @@ impl NamedTypeCatalog {
         schema_roots: &[PathBuf],
         context: &FileResolutionContext,
     ) -> Self {
-        let externals = targets
+        let externals: Vec<ExternalNamespace> = targets
             .into_iter()
-            .filter_map(|target| {
-                let path = named_type_reference_path(&target, base_dir, schema_roots, context)
-                    .ok()
-                    .flatten()?;
-                // An open buffer in the snapshot in force replaces the file,
-                // as it does for the resolver.
-                let text: Arc<str> = match simplified_schema::resolve::buffers::text(&path) {
-                    Some(text) => text,
-                    None => Arc::from(crate::work_counters::read_to_string(&path).ok()?),
-                };
-                let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, &path) {
-                    Ok(document) => (document, None),
-                    Err(error) => (None, Some(Arc::new(error))),
-                };
-                Some(ExternalNamespace { target, path, text, document, error })
-            })
+            .filter_map(|target| ExternalNamespace::read(target, base_dir, schema_roots, context))
             .collect();
-        Self { externals }
+        let mut visited: BTreeSet<PathBuf> = externals.iter().map(|external| external.path.clone()).collect();
+        let mut pending: Vec<(String, PathBuf)> =
+            externals.iter().flat_map(|external| external.imports.iter().cloned()).collect();
+        let mut transitive = Vec::new();
+        // Breadth-first, so the bound keeps the files nearest this document.
+        let mut index = 0;
+        while index < pending.len() && transitive.len() < MAX_TRANSITIVE_FILES {
+            let (target, path) = pending[index].clone();
+            index += 1;
+            if !visited.insert(path.clone()) {
+                continue;
+            }
+            if let Some(external) = ExternalNamespace::at(target, path, schema_roots, context) {
+                pending.extend(external.imports.iter().cloned());
+                transitive.push(external);
+            }
+        }
+        Self { externals, transitive }
     }
 
     /// The imported file for an authored target.
@@ -309,20 +330,100 @@ impl NamedTypeCatalog {
         &self.externals
     }
 
-    /// The files the catalog read: dependency edges for the overlay cache.
+    /// The file `target` selects when it is written in `from`'s file, read
+    /// with the catalog; `None` when `from` names no such target in an
+    /// exported alias or composition, or the file is past the catalog's
+    /// bound or unreadable.
+    pub fn imported_from(&self, from: &ExternalNamespace, target: &str) -> Option<&ExternalNamespace> {
+        let target = target.trim();
+        let (_, path) = from.imports.iter().find(|(spelling, _)| spelling == target)?;
+        self.externals.iter().chain(&self.transitive).find(|external| external.path == *path)
+    }
+
+    /// The files the catalog read, transitive ones included: dependency edges
+    /// for the overlay cache.
     pub fn dependencies(&self) -> impl Iterator<Item = &PathBuf> {
-        self.externals.iter().map(|external| &external.path)
+        self.externals.iter().chain(&self.transitive).map(|external| &external.path)
     }
 }
+
+impl ExternalNamespace {
+    /// The file `target` selects from `base_dir`, or `None` when it selects
+    /// none or cannot be read.
+    fn read(target: String, base_dir: &Path, schema_roots: &[PathBuf], context: &FileResolutionContext) -> Option<Self> {
+        let path = named_type_reference_path(&target, base_dir, schema_roots, context).ok().flatten()?;
+        Self::at(target, path, schema_roots, context)
+    }
+
+    fn at(target: String, path: PathBuf, schema_roots: &[PathBuf], context: &FileResolutionContext) -> Option<Self> {
+        // An open buffer in the snapshot in force replaces the file, as it
+        // does for the resolver.
+        let text: Arc<str> = match simplified_schema::resolve::buffers::text(&path) {
+            Some(text) => text,
+            None => Arc::from(crate::work_counters::read_to_string(&path).ok()?),
+        };
+        let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, &path) {
+            Ok(document) => (document, None),
+            Err(error) => (None, Some(Arc::new(error))),
+        };
+        let mut external = Self { target, path, text, document, error, imports: Vec::new() };
+        external.imports = external.export_targets(schema_roots, context);
+        Some(external)
+    }
+
+    /// The explicit targets of the exported definitions that are aliases or
+    /// compose, resolved from this file's directory with the importer's
+    /// schema roots (the roots a file of its own folder would use are not
+    /// known here).
+    fn export_targets(&self, schema_roots: &[PathBuf], context: &FileResolutionContext) -> Vec<(String, PathBuf)> {
+        let Some(exports) = self.exports() else {
+            return Vec::new();
+        };
+        let mut targets = BTreeSet::new();
+        for definition in exports.properties.values() {
+            let PropertyDef::Single(atom) = definition else {
+                continue;
+            };
+            match &atom.ty {
+                TypeExpr::Imported { .. } if atom.ty.is_local_reference() => {}
+                TypeExpr::Imported { reference, .. } => {
+                    targets.insert(reference.trim().to_string());
+                }
+                TypeExpr::InlineObject(shape) => collect_composition_targets(shape, &mut targets),
+                _ => {}
+            }
+        }
+        let base_dir = self.path.parent().unwrap_or(&self.path);
+        targets
+            .into_iter()
+            .filter_map(|target| {
+                let path = named_type_reference_path(&target, base_dir, schema_roots, context).ok().flatten()?;
+                Some((target, path))
+            })
+            .collect()
+    }
+}
+
+/// The `$extends` key of a schema-object mapping.
+const EXTENDS: &str = "$extends";
 
 fn collect_yaml_targets(value: &serde_yaml_ng::Value, targets: &mut BTreeSet<String>) {
     match value {
         serde_yaml_ng::Value::Mapping(mapping) => {
             for (key, definition) in mapping {
-                if let Some(key) = key.as_str()
-                    && let Ok(definition) = parse_property_definition(key, definition)
-                {
-                    collect_definition_targets(&definition, targets);
+                let Some(key) = key.as_str() else {
+                    continue;
+                };
+                if key == EXTENDS {
+                    collect_extends_targets(definition, targets);
+                    continue;
+                }
+                match parse_property_definition(key, definition) {
+                    Ok(definition) => collect_definition_targets(&definition, targets),
+                    // A nested object with one malformed member still names
+                    // the targets of its others.
+                    Err(_) if definition.is_mapping() => collect_yaml_targets(definition, targets),
+                    Err(_) => {}
                 }
             }
         }
@@ -333,6 +434,20 @@ fn collect_yaml_targets(value: &serde_yaml_ng::Value, targets: &mut BTreeSet<Str
             }
         }
         _ => {}
+    }
+}
+
+/// The explicit targets of a `$extends` value, each operand parsed on its
+/// own so a malformed item does not hide the others.
+fn collect_extends_targets(value: &serde_yaml_ng::Value, targets: &mut BTreeSet<String>) {
+    let operands = match value {
+        serde_yaml_ng::Value::Sequence(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    for operand in operands.into_iter().filter_map(serde_yaml_ng::Value::as_str) {
+        if let Ok(operand) = parse_extends_operand(EXTENDS, operand) {
+            collect_operand_target(&operand, targets);
+        }
     }
 }
 
@@ -356,6 +471,21 @@ fn collect_shape_targets(shape: &SchemaShape, targets: &mut BTreeSet<String>) {
         .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def));
     for definition in definitions {
         collect_definition_targets(definition, targets);
+    }
+    collect_composition_targets(shape, targets);
+}
+
+/// The explicit targets of `shape`'s own composition operands.
+fn collect_composition_targets(shape: &SchemaShape, targets: &mut BTreeSet<String>) {
+    for operand in shape.composition.iter().flat_map(|composition| composition.operands()) {
+        collect_operand_target(operand, targets);
+    }
+}
+
+fn collect_operand_target(operand: &CompositionOperand, targets: &mut BTreeSet<String>) {
+    let reference = operand.resolved_reference().trim();
+    if reference != LOCAL_REFERENCE {
+        targets.insert(reference.to_string());
     }
 }
 
@@ -453,5 +583,72 @@ mod tests {
         let close = text.find('}').unwrap();
         assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 1).is_some());
         assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 2).is_none(), "the next line");
+    }
+
+    fn yaml(text: &str) -> serde_yaml_ng::Value {
+        serde_yaml_ng::from_str(text).expect("yaml")
+    }
+
+    const COMPOSING: &str = "\
+order: '{ ...a@./a.yaml, price: number }'
+$extends: e@./e.yaml
+nested:
+  $extends: [b@./b.yaml, local, c@this]
+  inner:
+    \"$extends\": d@./d.yaml
+";
+
+    #[test]
+    fn composition_operands_are_targets_of_the_authored_declaration() {
+        let schema = simplified_schema::parse_yaml_schema(&yaml(COMPOSING)).expect("schema");
+        let mut targets = BTreeSet::new();
+        collect_schema_targets(&schema, &mut targets);
+        assert_eq!(targets, BTreeSet::from(["./a.yaml", "./b.yaml", "./d.yaml", "./e.yaml"].map(String::from)));
+    }
+
+    /// A malformed sibling, at the root or inside a nested object, hides no
+    /// operand; a malformed `$extends` item hides only itself.
+    #[test]
+    fn tolerant_collection_keeps_operands_beside_malformed_members() {
+        let text = format!(
+            "{COMPOSING}  broken: 'string(('\nbad: 'number(('\nlist:\n  $extends: ['x y@./g.yaml', f@./f.yaml, 3]\n"
+        );
+        let mut targets = BTreeSet::new();
+        collect_yaml_targets(&yaml(&text), &mut targets);
+        assert_eq!(
+            targets,
+            BTreeSet::from(["./a.yaml", "./b.yaml", "./d.yaml", "./e.yaml", "./f.yaml"].map(String::from))
+        );
+    }
+
+    /// A target's exported alias or composition into another file reads that
+    /// file too, relative to the importing file and through cycles, and
+    /// every file read is a dependency.
+    #[test]
+    fn imported_aliases_and_compositions_hydrate_their_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("types.yaml"), "$schema:\n  base: obj@./sub/other.yaml\n").unwrap();
+        std::fs::write(root.join("sub/other.yaml"), "$schema:\n  obj: '{ ...deep@./deep.yaml }'\n").unwrap();
+        std::fs::write(root.join("sub/deep.yaml"), "$schema:\n  deep: '{ id: string }'\n  back: base@../types.yaml\n").unwrap();
+        let resolution = crate::context::test_support::resolution_in(&root, &root.join("doc.md"));
+        let context = resolution.context().expect("context");
+
+        let catalog = NamedTypeCatalog::build_tolerant(&yaml("order: '{ ...base@./types.yaml }'"), &root, &[], context);
+        assert_eq!(catalog.externals().len(), 1, "only the document's own targets are externals");
+        let types = catalog.get("./types.yaml").expect("direct target");
+        let other = catalog.imported_from(types, "./sub/other.yaml").expect("alias target");
+        assert_eq!(other.path, root.join("sub/other.yaml"));
+        assert!(other.definition("obj").is_some());
+        let deep = catalog.imported_from(other, "./deep.yaml").expect("composition target, relative to its importer");
+        assert_eq!(deep.path, root.join("sub/deep.yaml"));
+        assert_eq!(catalog.imported_from(deep, "../types.yaml").map(|file| &file.path), Some(&types.path));
+        assert!(catalog.imported_from(types, "./deep.yaml").is_none(), "a target is resolved from the file naming it");
+        let dependencies: BTreeSet<_> = catalog.dependencies().cloned().collect();
+        assert_eq!(
+            dependencies,
+            BTreeSet::from([root.join("types.yaml"), root.join("sub/other.yaml"), root.join("sub/deep.yaml")])
+        );
     }
 }

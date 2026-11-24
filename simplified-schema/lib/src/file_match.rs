@@ -495,7 +495,7 @@ fn admits(
     fallback: Option<&Path>,
     context: &FileResolutionContext,
 ) -> bool {
-    if crate::pending::holds_pending_syntax(value) {
+    if crate::pending::holds_pending_syntax(value) || super::validate::file_checks_unverified() {
         return true;
     }
     let Ok(path) = resolve_file_reference_in_context(value, base_dir, fallback, context) else {
@@ -645,6 +645,11 @@ struct MatchKeyword {
 
 impl MatchKeyword {
     fn check(&self, value: &str) -> bool {
+        // Judging a glob locates the value's file; unverified, nothing is
+        // located (`admits` also checks, for its public caller).
+        if super::validate::file_checks_unverified() {
+            return true;
+        }
         match &self.judged_in {
             JudgedIn::Syntax => super::format::context_free_path(value)
                 .filter(|path| path.exists())
@@ -788,6 +793,11 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("fixes/x")).unwrap();
         std::fs::write(dir.path().join("fixes/x/spec.md"), "").unwrap();
         assert!(file_match_admits("fixes/x/spec.md", &[&patterns[..]], &origin));
+        // Unverified, nothing is located, so a file outside the globs is admitted.
+        let unverified = crate::validate::with_unverified_file_checks(|| {
+            file_match_admits("features/x/spec.md", &[&patterns[..]], &origin)
+        });
+        assert!(unverified);
     }
 
     fn strings(patterns: &[&str]) -> Vec<String> {

@@ -56,7 +56,7 @@ use crate::commands::wrap::composition::{
     execute_composition_request_inner, execute_staged_composition,
     install_agent_env_for_composition, staged_boot,
 };
-use crate::commands::wrap::harness_orch::UnrecoveredLifecycleDowngrade;
+use crate::commands::wrap::harness_orch::{RetainedLoopSource, UnrecoveredLifecycleDowngrade};
 use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::wrap::wrap_terminal;
 use crate::output::emit_execution_header;
@@ -1002,11 +1002,15 @@ fn build_loop_options(
 
 /// Build the loop seed, lifecycle runtime context, and run the loop engine.
 ///
-/// Iteration 1 prepares at `schema_stage`; later iterations skip schema
-/// validation. Every iteration audits the shell commands its own state
-/// produces before it runs (see [`audit_loop_iteration_template`]); the loop
-/// engine emits `initialize` once and delegates `start`/terminal/`finalize` to
-/// the shared [`claudine::composition::LifecycleRunGuard`].
+/// Pass 1 prepares at `schema_stage` (or, staged, from its post-`initialize`
+/// reread) and fixes the loop's retained source: the read that owned the launch
+/// verdict. Every later ordinary pass composes that source with its own loop
+/// values and runtime state and reaches no verdict; a retry or resume inside a
+/// pass reads the document fresh from disk in the harness. Every pass audits
+/// the shell commands its own state produces before it runs (see
+/// [`audit_loop_iteration_template`]); the loop engine emits `initialize` once
+/// and delegates `start`/terminal/`finalize` to the shared
+/// [`claudine::composition::LifecycleRunGuard`].
 #[allow(clippy::too_many_arguments)]
 fn build_and_run_loop(
     source: &ResolvedCompositionSource,
@@ -1119,6 +1123,9 @@ fn build_and_run_loop(
     );
 
     let term = wrap_terminal();
+    // A staged document's `initialize` renders with its bootstrap read's
+    // context, the snapshot its stabilized reread then extends.
+    let initialize_context = staged.map_or(prepared_context, |staged| &staged.bootstrap.compose_context);
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &lifecycle_settings,
         messaging: &lifecycle_messaging,
@@ -1126,7 +1133,7 @@ fn build_and_run_loop(
         source_path: &source.resolved_path,
         repo_root: effective_repo_root,
         launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
-        context: Some(prepared_context),
+        context: Some(initialize_context),
     };
 
     // Lifecycle writes may land only inside the caller's launch scope (the
@@ -1148,10 +1155,12 @@ fn build_and_run_loop(
     // every committed `outputs` entry stay visible to later iterations. Inside a
     // sequence step that cell is the step's.
     let runtime_state = runtime_cell(step_scope);
-    // A staged document's stabilized reread and the approvals it earned. Later
-    // iterations compose from it, never from the pre-`initialize` snapshot.
-    let mut stabilized: Option<(ResolvedCompositionSource, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals)> =
-        None;
+    // The root source and approval basis every later ordinary pass composes
+    // from: the read that owned the first pass's launch verdict. An eager first
+    // pass that judged the document retains the caller-resolved source; a
+    // staged one retains its post-`initialize` reread; one that delegated the
+    // verdict to the harness retains the read the harness validated.
+    let mut retained: Option<RetainedLoopSource> = None;
     let staged_start = std::time::Instant::now();
 
     run_loop_with_overrides(
@@ -1169,33 +1178,32 @@ fn build_and_run_loop(
         &loop_prepare_options.file_resolution_context,
         loop_prepare_options.document_epoch.as_ref(),
         |ctx, guard| {
-            // The prepared snapshot of this iteration's run, reported to the
-            // loop gate that follows it.
-            let run_context;
             let prepared = {
                 let _span = match kind {
                     CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
                     CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
                 };
-                // Iteration 1 prepares at the stage the coordinator selected;
-                // re-entry passes skip schema validation because the
-                // seed/frontmatter state was already judged on iteration 1.
-                // Shell approval is never carried over: every iteration audits
-                // the commands its own state produces.
+                // Pass 1 prepares at the stage the coordinator selected; every
+                // later ordinary pass composes the retained source with its own
+                // loop values and runtime state, reaching no launch verdict
+                // (`SkipLaunchVerdict`) and owing none. Shell approval is never
+                // carried over wholesale: every pass audits the commands its own
+                // state produces against the startup approval basis.
                 //
-                // At the deferred stage iteration 1 is still a pre-`initialize`
-                // read of the document *body* — the engine emitted `initialize`
-                // just above, but this compose runs against the source snapshot
-                // taken before it. Recording the deferral on the prepared
-                // composition is what hands the verdict to the harness's
-                // stabilized reread (`stabilize_after_initialize` in
-                // `wrap::composition::runner`), which re-reads from disk, re-runs
-                // the full audit, and judges the document `initialize` left
-                // behind. Reaching the verdict here instead would put the schema
-                // ahead of `initialize` for every looping document (R4).
+                // At the deferred stage pass 1 is still a pre-`initialize` read
+                // of the document *body* — the engine emitted `initialize` just
+                // above, but this compose runs against the source snapshot taken
+                // before it. Recording the deferral on the prepared composition
+                // hands the verdict to the harness's stabilized reread
+                // (`stabilize_after_initialize` in `wrap::composition::runner`),
+                // which rereads from disk, reruns the full audit, judges the
+                // document `initialize` left behind, and returns that read as
+                // the loop's retained source. Reaching the verdict here instead
+                // would put the schema ahead of `initialize` for every looping
+                // document (R4).
                 //
-                // A staged document never takes that deferred read: iteration 1
-                // is its stabilized reread, taken here after the engine's
+                // A staged document never takes that deferred read: pass 1 is
+                // its stabilized reread, taken here after the engine's
                 // `initialize`, and it owns the verdict.
                 let mut iteration_options = loop_prepare_options.clone();
                 iteration_options.set_layered_overrides(
@@ -1205,38 +1213,14 @@ fn build_and_run_loop(
                         None,
                     ),
                 );
-                // The `loop` global for this iteration's body, compose-time
+                // The `loop` global for this pass's body, compose-time
                 // frontmatter, shell audit, and — carried on the prepared
                 // input layers — every lifecycle event it fires.
                 iteration_options.loop_values = Some(ctx.ambient.clone());
-                // Every iteration after the first is a composition run of its
-                // own: its epoch observes Git working state as the previous
-                // iterations left it, while stable launch evidence is reused.
-                if ctx.iteration > 1
-                    && let Some(invocation) = loop_prepare_options.invocation_context.as_ref()
-                {
-                    let live = match (staged, stabilized.as_ref()) {
-                        (Some(_), Some((fresh, _))) => fresh,
-                        _ => source,
-                    };
-                    let epoch = invocation.begin_document_epoch();
-                    let mut context = epoch.capture_launch_context(
-                        &darkmatter::markdown::compose::ContextRequirements::for_document(
-                            &live.markdown,
-                        ),
-                    );
-                    for (key, value) in env_overrides {
-                        context.env_mut().insert(key.clone(), value.clone());
-                    }
-                    // The iteration's events fire through the loop's guard,
-                    // which was built for iteration 1's run.
-                    guard.set_run_prepared_context(context.clone());
-                    iteration_options.prepared_context = Some(context);
-                    iteration_options.document_epoch = Some(epoch);
-                }
-                run_context = iteration_options.prepared_context.clone();
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
+                        // The reread extends the snapshot `initialize` ran with.
+                        iteration_options.prepared_context = Some(staged.bootstrap.compose_context.clone());
                         let read = run_check(claudine_preflight(), LAUNCH_SCHEMA, CheckStage::InRun, EntryReason::Initial, || {
                             staged_boot::reread_and_audit(
                                 &source.resolved_path,
@@ -1248,30 +1232,33 @@ fn build_and_run_loop(
                                 kind.mode(),
                             )
                             .and_then(|(fresh, options)| {
-                                let approved = options.pre_approved_commands.clone().unwrap_or_default();
                                 kind.prepare_staged(
                                     &fresh,
                                     options,
                                     entry,
                                     claudine::composition::SchemaStage::Validate,
                                 )
-                                .map(|prepared| (fresh, approved, prepared))
+                                .map(|prepared| (fresh, prepared))
                             })
                         });
                         match read {
-                            Ok((fresh, approved, prepared)) => {
-                                stabilized = Some((fresh, approved));
+                            Ok((fresh, prepared)) => {
+                                retained = Some(RetainedLoopSource {
+                                    source: fresh,
+                                    approvals: prepared.input_layers.pre_approved_commands.clone().unwrap_or_default(),
+                                });
                                 prepared
                             }
                             // The engine only records an iteration error, so the
-                            // document's `blocked`/`finalize` fire here, once.
+                            // document's `blocked`/`finalize` fire here, once,
+                            // with the bootstrap's actions and context.
                             Err(error) => {
                                 let document = staged_boot::StagedDocument {
                                     bootstrap: &staged.bootstrap,
                                     settings: &lifecycle_settings,
                                     messaging: &lifecycle_messaging,
                                     effect_engine: &effect_engine,
-                                    context: prepared_context,
+                                    context: &staged.bootstrap.compose_context,
                                     emitter: &emitter,
                                     term: &term,
                                     repo_root: effective_repo_root,
@@ -1285,22 +1272,6 @@ fn build_and_run_loop(
                             }
                         }
                     }
-                    (Some(staged), _) => {
-                        let (live, approved) = stabilized
-                            .as_ref()
-                            .map_or((source, &staged.approved), |(fresh, approved)| {
-                                (fresh, approved)
-                            });
-                        iteration_options.pre_approved_commands = Some(approved.clone());
-                        audit_loop_iteration_template(
-                            live,
-                            &mut iteration_options,
-                            approval_options,
-                            ctx.iteration,
-                            kind.mode(),
-                        )?;
-                        kind.prepare_without_schema(live, iteration_options)?
-                    }
                     (None, 1) => {
                         audit_loop_iteration_template(
                             source,
@@ -1309,25 +1280,76 @@ fn build_and_run_loop(
                             ctx.iteration,
                             kind.mode(),
                         )?;
-                        kind.prepare_staged(source, iteration_options, entry, schema_stage)?
+                        let prepared = kind.prepare_staged(source, iteration_options, entry, schema_stage)?;
+                        // A deferred first pass is retained from the harness's
+                        // stabilized read once the attempt returns.
+                        if schema_stage == claudine::composition::SchemaStage::Validate {
+                            retained = Some(RetainedLoopSource {
+                                source: source.clone(),
+                                approvals: prepared.input_layers.pre_approved_commands.clone().unwrap_or_default(),
+                            });
+                        }
+                        prepared
                     }
-                    (None, _) => {
+                    (_, iteration) => {
+                        let Some(startup) = retained.as_ref() else {
+                            return Err(CompositionError::LoopIterationFailed {
+                                iteration,
+                                prompt_path: source.resolved_path.clone(),
+                                exit_code: 1,
+                                reason: "startup preparation did not return a retained source".to_string(),
+                                exit_reason: None,
+                                snapshot: None,
+                            });
+                        };
+                        // A later pass owes no verdict, whatever its first pass
+                        // deferred.
+                        iteration_options.defer_schema_verdict = false;
+                        // Every later pass is a composition run of its own: its
+                        // epoch observes Git working state as the previous passes
+                        // left it, while stable launch evidence is reused. Without
+                        // an invocation, canonical preparation derives its own
+                        // fallback rather than reusing pass 1's snapshot.
+                        match loop_prepare_options.invocation_context.as_ref() {
+                            Some(invocation) => {
+                                let epoch = invocation.begin_document_epoch();
+                                let mut context = epoch.capture_launch_context(
+                                    &darkmatter::markdown::compose::ContextRequirements::for_document(
+                                        &startup.source.markdown,
+                                    ),
+                                );
+                                for (key, value) in env_overrides {
+                                    context.env_mut().insert(key.clone(), value.clone());
+                                }
+                                iteration_options.prepared_context = Some(context);
+                                iteration_options.document_epoch = Some(epoch);
+                            }
+                            None => {
+                                iteration_options.prepared_context = None;
+                                iteration_options.document_epoch = None;
+                            }
+                        }
+                        iteration_options.pre_approved_commands = Some(startup.approvals.clone());
                         audit_loop_iteration_template(
-                            source,
+                            &startup.source,
                             &mut iteration_options,
                             approval_options,
-                            ctx.iteration,
+                            iteration,
                             kind.mode(),
                         )?;
-                        kind.prepare_without_schema(source, iteration_options)?
+                        kind.prepare_staged(
+                            &startup.source,
+                            iteration_options,
+                            claudine::composition::DocumentEntryReason::LoopIteration,
+                            claudine::composition::SchemaStage::SkipLaunchVerdict,
+                        )?
                     }
                 }
             };
-            // Iteration 1's lifecycle is audited by the harness pre-flight.
-            // A later iteration re-stamps its lifecycle `shell` commands from
-            // its own state and skips that pre-flight, so its bytes are
-            // audited here; an approval earned for iteration 1's bytes never
-            // covers them.
+            // Pass 1's lifecycle is audited by the harness pre-flight. A later
+            // pass re-stamps its lifecycle `shell` commands from its own state
+            // and skips that pre-flight, so its bytes are audited here; an
+            // approval earned for pass 1's bytes never covers them.
             if ctx.iteration > 1 {
                 run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, || {
                     claudine::composition::resolve_shell_approvals(
@@ -1342,18 +1364,28 @@ fn build_and_run_loop(
 
             emit_compose_warnings(&prepared.warnings, prep_context.invocation.trigger_findings(), shared.silent);
 
-            // Repoint the guard at THIS iteration's freshly composed lifecycle.
-            // The guard was built from the seed (iteration-1) lifecycle, whose
-            // `{{ }}` interpolations are frozen at the seed frontmatter. Each
-            // iteration re-composes with the live frontmatter, so its
-            // `prepared.lifecycle` carries the current iteration's values
-            // (e.g. a `loop:` gate `'gate:{{phase}}'` resolves to the live
-            // `phase`). The loop gate fires through this same guard after the
-            // executor returns, so swapping here keeps both the per-iteration
-            // terminal events and the post-finalize gate on live state.
-            guard.set_config(prepared.lifecycle.clone());
-            // The gate after this pass reads the frontmatter it composed with.
-            let pass_frontmatter = prepared.effective_frontmatter.as_object().cloned();
+            // Repoint the guard at THIS pass's freshly composed lifecycle and
+            // the context it was prepared against, together. The guard was
+            // built from the seed lifecycle, whose `{{ }}` interpolations are
+            // frozen at the seed frontmatter; each pass's `prepared.lifecycle`
+            // carries its own values (a `loop:` gate `'gate:{{phase}}'` resolves
+            // to the live `phase`). The loop gate fires through this same guard
+            // after the executor returns, so both the per-pass terminal events
+            // and the post-finalize gate read this pass's state.
+            staged_boot::install_prepared_lifecycle(
+                guard,
+                prepared.lifecycle.clone(),
+                prepared_lifecycle_context(&prepared, env_overrides),
+                prepared.document_epoch.as_ref(),
+                Some(&prep_context.invocation),
+            );
+            // A pass that ends before the harness installs its own preparation
+            // reports this one to the gate.
+            let local_preparation = (
+                Some(prepared.compose_context.clone()),
+                prepared.effective_frontmatter.as_object().cloned(),
+            );
+            let pass_epoch = prepared.document_epoch.clone();
 
             let request = build_execution_request(
                 shared,
@@ -1389,18 +1421,17 @@ fn build_and_run_loop(
             {
                 let mut output =
                     downgraded_loop_iteration_output(ctx.iteration, &source.resolved_path, downgrade);
-                output.context = run_context;
-                output.frontmatter = pass_frontmatter;
+                (output.context, output.frontmatter) = local_preparation;
                 return Ok(output);
             }
-            let outcome = attempt.map_err(|e| {
+            let mut outcome = attempt.map_err(|e| {
                 // A concrete `CompositionError` keeps its own identity. Since
-                // iteration 1 may defer its verdict, the attempt itself now
-                // carries preparation failures the closure used to raise
-                // directly — a schema verdict from the staged boot's stabilized
-                // reread above all. Flattening those into `LoopIterationFailed`
-                // would make a looping document render a different diagnostic
-                // than the identical document without `loop:`.
+                // pass 1 may defer its verdict, the attempt itself now carries
+                // preparation failures the closure used to raise directly — a
+                // schema verdict from the staged boot's stabilized reread above
+                // all. Flattening those into `LoopIterationFailed` would make a
+                // looping document render a different diagnostic than the
+                // identical document without `loop:`.
                 //
                 // Everything else is pre-spawn execution wiring (binary lookup,
                 // env build). Those are runtime problems, not malformed loop
@@ -1420,14 +1451,55 @@ fn build_and_run_loop(
                     },
                 }
             })?;
+            // The delegated first pass's retained source is the read the
+            // harness validated, consumed once; it is never reloaded after the
+            // provider returns, which could adopt an edit made during the launch.
+            if ctx.iteration == 1 && retained.is_none() {
+                retained = outcome.stabilized_source.take();
+            }
+            // The gate reads the preparation the pass actually ran with: the
+            // harness's last installed one (a recovery attempt's, when one
+            // replaced it), else the one prepared above.
+            let (pass_context, pass_frontmatter) = match outcome.pass_preparation.take() {
+                Some(preparation) => {
+                    if let Some(epoch) = preparation.document_epoch.as_ref() {
+                        epoch.record_prepared_context_consumer(
+                            claudine::invocation_context::PreparedContextConsumer::LoopCondition,
+                        );
+                    }
+                    (Some(preparation.context), Some(preparation.frontmatter))
+                }
+                None => {
+                    if let Some(epoch) = pass_epoch.as_ref() {
+                        epoch.record_prepared_context_consumer(
+                            claudine::invocation_context::PreparedContextConsumer::LoopCondition,
+                        );
+                    }
+                    local_preparation
+                }
+            };
 
             let mut output =
                 build_loop_iteration_output(ctx.iteration, &source.resolved_path, outcome);
-            output.context = run_context;
+            output.context = pass_context;
             output.frontmatter = pass_frontmatter;
             Ok(output)
         },
     )
+}
+
+/// The lifecycle context a prepared composition's events render with: its
+/// prepared snapshot with the target's environment on top, as the pipeline
+/// builds it for a guard it owns.
+fn prepared_lifecycle_context(
+    prepared: &PreparedComposition,
+    env_overrides: &BTreeMap<String, String>,
+) -> darkmatter::markdown::compose::ComposeContext {
+    let mut context = prepared.compose_context.clone();
+    for (key, value) in env_overrides {
+        context.env_mut().insert(key.clone(), value.clone());
+    }
+    context
 }
 
 /// Build a [`CompositionExecutionRequest`] from the prepared state.
@@ -2047,6 +2119,12 @@ fn run_staged_single(
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
+        // The reread extends the context `initialize` ran with, including the
+        // groups the bootstrap runtime added for its effective frontmatter.
+        let options = PrepareOptions {
+            prepared_context: Some(runtime.context.clone()),
+            ..options
+        };
         run_check(claudine_preflight(), LAUNCH_SCHEMA, CheckStage::InRun, EntryReason::Initial, || {
             staged_boot::reread_and_audit(
                 &bootstrap.resolved_path,
@@ -2077,7 +2155,13 @@ fn run_staged_single(
         .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?;
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, prep_context.invocation.trigger_findings(), shared.silent);
-    guard.set_config(prepared.lifecycle.clone());
+    staged_boot::install_prepared_lifecycle(
+        &mut guard,
+        prepared.lifecycle.clone(),
+        prepared_lifecycle_context(&prepared, env_overrides),
+        prepared.document_epoch.as_ref(),
+        Some(&prep_context.invocation),
+    );
 
     let request = build_execution_request(
         shared,

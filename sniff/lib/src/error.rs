@@ -156,6 +156,14 @@ pub enum SniffError {
     #[error("package area '{area}' not found. Valid areas: {valid}")]
     UnknownPackageArea { area: String, valid: String },
 
+    /// A repository selector (package, package area, or worktree) named
+    /// nothing in this repository, or selectors that cannot be combined.
+    ///
+    /// The message is complete and user-facing, including the valid names,
+    /// and displays verbatim.
+    #[error("{0}")]
+    RepositorySelection(String),
+
     /// Error gathering system information.
     ///
     /// The `domain` field indicates which system area failed

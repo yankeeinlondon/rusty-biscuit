@@ -1,8 +1,9 @@
 //! The invocation's configuration on `md`'s result channels: a missing user
-//! file is one `dm.config.missing` warning per run (stderr for a formatted
-//! output, the envelope's `diagnostics` for a data output), never for help or a
-//! usage error; a repository without `.darkmatter.yaml` is normal; a user file
-//! that does not load stops a command that reads it with a located error; an
+//! file is created at its defaults and reported once, by the run that created
+//! it, as a `dm.config.created` info (stderr for a formatted output, the
+//! envelope's `diagnostics` for a data output), never for help or a usage
+//! error; a repository without `.darkmatter.yaml` is normal; a user file that
+//! does not load stops a command that reads it with a located error; an
 //! invalid `permissions` block refuses even a `--allow host=HOST` URL.
 
 use crate::common;
@@ -14,6 +15,7 @@ use std::path::Path;
 use std::process::Output;
 
 const DOCUMENT: &str = "---\ntitle: T\n---\n# Head\n\nbody\n";
+const CREATED: &str = "dm.config.created";
 const MISSING: &str = "dm.config.missing";
 
 fn stderr_of(output: &Output) -> String {
@@ -42,66 +44,83 @@ fn data_value(output: &Output, schema_text: &str) -> Value {
     value
 }
 
-fn missing_notices(value: &Value) -> Vec<&Value> {
-    value["diagnostics"].as_array().expect("diagnostics").iter().filter(|record| record["code"] == MISSING).collect()
+fn notices<'a>(value: &'a Value, code: &str) -> Vec<&'a Value> {
+    value["diagnostics"].as_array().expect("diagnostics").iter().filter(|record| record["code"] == code).collect()
 }
 
-/// The formatted warning names the file and the command that creates it.
-fn assert_one_missing_warning(fixture: &CliProcessFixture, output: &Output) {
+/// The user file exists with every setting written.
+fn assert_created(fixture: &CliProcessFixture) {
+    let text = std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).expect("the run created the user file");
+    assert!(text.contains("permissions:") && text.contains("register: []"), "{text}");
+}
+
+/// The formatted notice names the file it created, once, with no warning.
+fn assert_one_created_notice(fixture: &CliProcessFixture, output: &Output) {
     let stderr = stderr_of(output);
     let path = fixture.home().join(".darkmatter.yaml").display().to_string();
-    assert_eq!(stderr.matches("does not exist").count(), 1, "{stderr}");
-    assert!(stderr.contains(&path) && stderr.contains("md init"), "{stderr}");
+    assert_eq!(stderr.matches("created").count(), 1, "{stderr}");
+    assert!(stderr.contains(&path), "{stderr}");
+    assert!(!stderr.contains("does not exist"), "{stderr}");
 }
 
 #[test]
-fn a_composing_run_warns_once_on_stderr() {
+fn a_composing_run_creates_the_user_file_and_says_so_once() {
     let fixture = without_user_config("config-missing-compose");
 
-    let output = run(&fixture, &["compose", "doc.md"]);
+    let first = run(&fixture, &["compose", "doc.md"]);
+    let second = run(&fixture, &["compose", "doc.md"]);
 
-    assert!(output.status.success(), "{}", stderr_of(&output));
-    assert_one_missing_warning(&fixture, &output);
+    assert!(first.status.success(), "{}", stderr_of(&first));
+    assert_one_created_notice(&fixture, &first);
+    assert_created(&fixture);
+    assert!(second.status.success(), "{}", stderr_of(&second));
+    assert!(second.stderr.is_empty(), "only the creating run reports it: {}", stderr_of(&second));
 }
 
 #[test]
-fn a_composing_data_output_carries_the_warning_in_its_diagnostics() {
+fn a_composing_data_output_carries_the_notice_in_its_diagnostics() {
     let fixture = without_user_config("config-missing-compose-json");
 
     let output = run(&fixture, &["compose", "doc.md", "--output", "json"]);
 
     assert!(output.status.success());
     let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
-    let notices = missing_notices(&value);
-    assert_eq!(notices.len(), 1, "{value:#}");
-    assert_eq!(notices[0]["severity"], "warning");
+    let created = notices(&value, CREATED);
+    assert_eq!(created.len(), 1, "{value:#}");
+    assert!(notices(&value, MISSING).is_empty(), "{value:#}");
+    assert_eq!(created[0]["severity"], "info");
     assert_eq!(
-        notices[0]["source"]["file"].as_str(),
+        created[0]["source"]["file"].as_str(),
         Some(fixture.home().join(".darkmatter.yaml").to_str().unwrap())
     );
+    assert_created(&fixture);
 }
 
 #[test]
-fn a_command_that_composes_nothing_warns_too() {
-    let fixture = without_user_config("config-missing-hash");
+fn a_command_that_composes_nothing_creates_it_too() {
+    let formatted_fixture = without_user_config("config-missing-hash");
+    let data_fixture = without_user_config("config-missing-hash-json");
 
-    let formatted = run(&fixture, &["hash", "doc.md"]);
-    let data = run(&fixture, &["hash", "doc.md", "--output", "json"]);
+    let formatted = run(&formatted_fixture, &["hash", "doc.md"]);
+    let data = run(&data_fixture, &["hash", "doc.md", "--output", "json"]);
 
     assert!(formatted.status.success(), "{}", stderr_of(&formatted));
-    assert_one_missing_warning(&fixture, &formatted);
+    assert_one_created_notice(&formatted_fixture, &formatted);
+    assert_created(&formatted_fixture);
     let value = data_value(&data, include_str!("../../schemas/output/hash.yaml"));
-    assert_eq!(missing_notices(&value).len(), 1, "{value:#}");
+    assert_eq!(notices(&value, CREATED).len(), 1, "{value:#}");
+    assert_created(&data_fixture);
 }
 
 #[test]
-fn help_and_usage_errors_report_no_configuration() {
+fn help_and_usage_errors_report_no_configuration_and_create_nothing() {
     let fixture = without_user_config("config-missing-help");
 
     for args in [&["--help"][..], &["compose", "--help"], &["compose", "doc.md", "--no-such-flag"]] {
         let output = run(&fixture, args);
-        assert!(!stderr_of(&output).contains("does not exist"), "{args:?}: {}", stderr_of(&output));
-        assert!(!String::from_utf8_lossy(&output.stdout).contains(MISSING), "{args:?}");
+        assert!(!stderr_of(&output).contains("created"), "{args:?}: {}", stderr_of(&output));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(CREATED), "{args:?}");
+        assert!(!fixture.home().join(".darkmatter.yaml").exists(), "{args:?} wrote the user file");
     }
 }
 

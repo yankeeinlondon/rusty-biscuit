@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-11-15T00:00:00Z
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); object composition (`...name` spreads, `$extends`, `ObjectComposition`, `InvalidCompositionTarget`); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-11-22T00:00:00Z
 ---
 
 # simplified-schema
@@ -88,6 +88,36 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   gate). Any other `{{`/`}}` end detector (`rfind("{{")`, a private depth
   scan) is a second rule: route it through these. Tests:
   `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
+- **Object entries are fields or spreads, never merged.** `Expr::ObjectLiteral`
+  holds `ObjectEntry::{Field { key, value }, Spread { operand }}` in written
+  order (`SpannedObjectEntry` keeps the key, value, and operand spans; a
+  spread's span is its operand's). The parser's duplicate check covers written
+  keys only, across spreads. Every walker of object literals (lint,
+  dependency, permission, and read scans, passive typing, editor support,
+  `literal_to_json`) must visit spread operands too, including ones whose keys
+  a later entry overwrites; `entry.value()` yields both. Only a walker that
+  needs keys matches on `Field`. Syntax rules and host semantics:
+  [Object literals and spread](../../../simplified-schema/docs/topics/expression-syntax.md#object-literals-and-spread).
+  Tests: `parser::tests::object_spread`, `tests/l1/expression_syntax.rs`.
+- **Object composition is authored, then assembled.** The parser records
+  `SchemaShape::composition` (`Option<Box<ObjectComposition>>`: `Inline`
+  spreads with their positions, or `Extends` scalar/sequence) and never
+  merges. `resolve/composition.rs::ImportEngine::assemble` picks winners
+  (last declaration per literal key and per `emitted_pattern_key`, first
+  position kept), each keeping its declaring namespace and path, and every
+  resolver walk reads those winners; the resolved shape has `composition:
+  None`, and lowering refuses a shape that still has one. Export writes the
+  authored form (`schema/export.rs`), and `$extends` is reserved only in
+  `MappingMode::Object` (a `types` table is `Table`, and so is a
+  `schema(mapping)` value, which is how envelope admission judges `types`:
+  `format.rs::SchemaOptions::judge`, `triggers/matcher.rs::scalar_conforms`).
+  Table mode refuses `$constraints` and pattern keys of its own
+  (`simplified/mod.rs::parse_schema_shape`), and `parse_schema_table` /
+  `parse_schema_table_with_source` are its public parsers (DMLS uses them for
+  `schema(mapping)` values, `FrontmatterSchemaValue::table`).
+  A composition hop never descends, so a spread/alias-only loop is `NonDescendingCycle`. Rules and
+  errors: [Object Composition](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#object-composition-name-and-extends).
+  Tests: `tests/l1/{object_composition,object_composition_export}.rs`.
 - **Templates are passive, resolution replays, and a template type is the
   pending type.** `{{ … }}` template constraints and template types parse
   without evaluating anything, every lowering entry fails with
@@ -136,6 +166,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Build from a file (`file` feature) | `try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve` (by extension), each taking `impl Into<SchemaSource>` |
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
+| Resolve against a checked bundle's bytes only (listed `./`/`../` members and host built-ins; everything else refused unread) | `resolve::bundle::with(&BundleSources::on_disk(root, bytes)?, \|\| …)` → `(T, BundleReads { attempted, missing, served })`; `BundleSources::embedded(name, bytes)` for a virtual root ([details](../../../simplified-schema/docs/topics/selecting-schema-files.md#resolving-inside-a-bundle)) |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template, drop replaced properties, slot positions and texts | see [templates.md](templates.md#slot-and-template-apis) |
@@ -145,7 +176,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Inspect | `query(path)`, `property`, `properties`, `named_type` → `TypeDefinition`; `FunctionView` |
 | Export | `to_json_schema()`, `to_simplified_yaml()`; `provenance()` lists files read |
 | Lower-level compile once | `Prepared::new(Arc<Value>, base_dir, ctx)` then `validate_strict`/`validate_soft` |
-| Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_property_definition`, `parse_standalone_schema_document` |
+| Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_schema_table`, `parse_property_definition`, `parse_standalone_schema_document` |
 | Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
 | Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
 
@@ -195,7 +226,7 @@ CI test-input rules.
 
 Topic pages (`simplified-schema/docs/topics/`): [README](../../../simplified-schema/README.md) · [`SimplifiedSchema` object](../../../simplified-schema/docs/topics/simplified-schema-struct.md) · [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) (defaults, the required/`null` table, export limits) · [Conversion](../../../simplified-schema/docs/topics/conversion.md) · [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) · [Property paths](../../../simplified-schema/docs/topics/property-paths.md) · [Setter values](../../../simplified-schema/docs/topics/setter-values.md) · [Language core](../../../simplified-schema/docs/topics/language-core.md) · [Features](../../../simplified-schema/docs/topics/features.md) · [Foundations](../../../simplified-schema/docs/topics/foundations.md) · [Expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md) · [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) · [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md).
 
-Language reference (`docs/topics/language/`): [Index](../../../simplified-schema/docs/topics/language/index.md) (start here) · [Types and constraints](../../../simplified-schema/docs/topics/language/types.md) (null admission, `not-empty`, phases) · [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) · [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) (defaults in unions) · [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) · [Slots](../../../simplified-schema/docs/topics/language/slots.md) · [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md).
+Language reference (`docs/topics/language/`): [Index](../../../simplified-schema/docs/topics/language/index.md) (start here) · [Types and constraints](../../../simplified-schema/docs/topics/language/types.md) (null admission, `not-empty`, phases) · [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) (object composition) · [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) (defaults in unions) · [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) · [Slots](../../../simplified-schema/docs/topics/language/slots.md) · [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md).
 
 Code maps in this skill: [defaults.md](defaults.md) (presence, `null`, default application) · [declaration-narrowing.md](declaration-narrowing.md) (`not-empty`, `closed`, meta-type options, `claimed_values`) · [schema-documents.md](schema-documents.md) · [templates.md](templates.md) · [build-and-guards.md](build-and-guards.md) · [shipped-and-identities.md](shipped-and-identities.md). Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/definition.md).
 

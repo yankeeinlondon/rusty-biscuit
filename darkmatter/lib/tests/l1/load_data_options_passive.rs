@@ -452,7 +452,10 @@ mod binder {
         for source in [
             "load_data('rows.csv', 'tuple([string])[]', {delimiter: [',']})",
             "load_data('rows.csv', 'tuple([string])[]', {delimiter: {}})",
-            "load_data('rows.csv', 'tuple([string])[]', {header: [1]})",
+            // A number converts to a name (`[1]` is `["1"]`); an object
+            // converts to nothing.
+            "load_data('rows.csv', 'tuple([string])[]', {header: [{}]})",
+            "load_data('rows.csv', '{ <string>: string }[]', {header: ['a', {}]})",
             "load_data('rows.csv', 'tuple([string])[]', {format: ['csv']})",
             "load_data('rows.csv', 'tuple([string])[]', 5)",
             "load_data('rows.csv', 'tuple([string])[]', [])",

@@ -641,12 +641,17 @@ pub(crate) fn setter_block(argument: &str, path: &str, reason: &str) -> StatusBl
 /// line so authors see the root cause instead of an empty problem list, and
 /// `preparation_hint` (the preparation error's own hint, when it has one)
 /// replaces the generic hint.
+///
+/// A problem on a property a whole-value `{{ … }}` produced is placed at the
+/// expression, and a direct load's problem adds a linked data file position,
+/// projected exactly as the structured diagnostics project it.
 pub(crate) fn schema_validation_failed_block(
     path: &std::path::Path,
     problems: &[ValidationProblem],
     summary: &str,
     description: &Option<String>,
     preparation_hint: Option<&'static str>,
+    expression_origins: &std::collections::BTreeMap<String, crate::markdown::ExpressionMetadata>,
 ) -> StatusBlock {
     let path_attr = Prose::quoted_attr(&path.to_string_lossy());
     let path_escaped = Prose::escape_text(&path.to_string_lossy());
@@ -698,10 +703,14 @@ pub(crate) fn schema_validation_failed_block(
     // `ValidationProblem::kind` rather than inferred from `property.is_some()`
     // or substring-matched against `message`, so the renderer cannot drift
     // when the underlying validator surfaces new error shapes.
+    let mut projector = crate::markdown::compose::report_diagnostics::ExpressionProjector::new(expression_origins);
     for problem in problems {
-        let loc = match (problem.line, problem.column) {
-            (Some(l), Some(c)) => format!(" at {l}:{c}"),
-            (Some(l), None) => format!(" at {l}:1"),
+        let expression = projector.project(problem);
+        let authored = expression.as_ref().and_then(|expression| expression.span.as_ref());
+        let loc = match (authored, problem.line, problem.column) {
+            (Some(span), ..) => format!(" at {}:{}", span.line(), span.column()),
+            (None, Some(l), Some(c)) => format!(" at {l}:{c}"),
+            (None, Some(l), None) => format!(" at {l}:1"),
             _ => String::new(),
         };
 
@@ -743,6 +752,21 @@ pub(crate) fn schema_validation_failed_block(
         };
 
         body_lines.push(bullet);
+        if let Some(data) = expression.and_then(|expression| expression.data) {
+            let position = match (data.line, data.column) {
+                (Some(line), Some(column)) => format!(":{line}:{column}"),
+                (Some(line), None) => format!(":{line}"),
+                _ => String::new(),
+            };
+            let pointer = data.pointer.as_deref().filter(|pointer| !pointer.is_empty()).map(|pointer| format!(" ({pointer})"));
+            body_lines.push(format!(
+                "<dim>data:</dim> <blue><a href={}>{}{}</a></blue>{}",
+                Prose::quoted_attr(&data.file),
+                Prose::escape_text(&data.file),
+                position,
+                Prose::escape_text(&pointer.unwrap_or_default()),
+            ));
+        }
 
         // Per-problem declared description, reusing the dimmed-italic treatment
         // the document-level `description:` line above already uses. Enrichment
@@ -1288,7 +1312,7 @@ mod tests {
     fn schema_validation_failed_block_renders_summary_when_problems_empty() {
         let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
         let summary = "schema could not be prepared: could not resolve ./missing.yaml";
-        let block = schema_validation_failed_block(&path, &[], summary, &None, None);
+        let block = schema_validation_failed_block(&path, &[], summary, &None, None, &Default::default());
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
         assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
@@ -1300,7 +1324,7 @@ mod tests {
     #[test]
     fn schema_validation_failed_block_handles_empty_summary() {
         let path = std::path::PathBuf::from("/tmp/test/empty.md");
-        let block = schema_validation_failed_block(&path, &[], "", &None, None);
+        let block = schema_validation_failed_block(&path, &[], "", &None, None, &Default::default());
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
     }
@@ -1332,7 +1356,7 @@ mod tests {
     fn schema_validation_failed_block_renders_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(Some("The headline shown in listing pages"));
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None, &Default::default());
         let out = render_block(&block);
         assert!(out.contains("type"), "missing problem bullet: {out}");
         assert!(
@@ -1353,7 +1377,7 @@ mod tests {
             std::slice::from_ref(&problem),
             "",
             &doc_description,
-            None,
+            None, &Default::default(),
         );
         let out = render_block(&block);
         assert!(
@@ -1372,7 +1396,7 @@ mod tests {
     fn schema_validation_failed_block_omits_absent_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(None);
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None, &Default::default());
         let out = render_block(&block);
         // The bullet is present, but no extra description text rides beneath it.
         assert!(out.contains("type"), "missing problem bullet: {out}");
@@ -1399,7 +1423,7 @@ mod tests {
             nested("/content_policy/0", ValidationProblemKind::Missing, Some("rule")),
             nested("", ValidationProblemKind::Missing, Some("title")),
         ];
-        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None, None));
+        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None, None, &Default::default()));
         assert!(out.contains("invalid content_policy/1/rule: "), "{out}");
         assert!(out.contains("missing content_policy/0/rule: "), "{out}");
         assert!(out.contains("missing title: "), "{out}");

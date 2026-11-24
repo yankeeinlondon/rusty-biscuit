@@ -96,14 +96,60 @@ error, deliberately — "trailing commas are not supported".
 
 ### Objects
 
-`{ key: value, "quoted-key": computed }`.
+`{ key: value, "quoted-key": computed, shorthand, ...base }`.
+
+```text
+object_literal  := "{" ( entry ( "," entry )* )? "}"
+entry           := "..." expression | key ":" expression | IDENT
+key             := IDENT | STRING
+```
 
 - A **bare** key must be a single `Variable` token containing no `.`, starting
   with an ASCII letter or `_`.
 - A **quoted** key may be any string, which is the way to write a key the bare
   form cannot express.
-- Duplicate keys are a parse error, reported at the offending key's offset.
-- Trailing commas are a parse error.
+- A **shorthand** entry `id` means `id: id`; only an identifier key has one.
+- A **spread** entry `...expression` copies every field of the operand's
+  value at that point in the order. Its operand is a whole expression,
+  running to the next `,` or `}`. `...` anywhere else, including an array
+  literal, is a parse error.
+- Duplicate written keys are a parse error, even when a spread separates
+  them, reported at the offending key's offset.
+- Trailing commas are a parse error, after a spread as after a field.
+
+What a spread does at evaluation time is described in
+[Object literals and spread](../../../../../simplified-schema/docs/topics/expression-syntax.md#object-literals-and-spread).
+
+### `...` in a schema type string is a different grammar
+
+A SimplifiedSchema type string such as `"{ ...events, price: number }"` looks
+like an object literal but is not an expression and is never parsed by this
+grammar. There, `...name` copies the **declared members** of a named object
+type into the inline object, and a YAML schema mapping can do the same with a
+`$extends` directive. The type grammar's rules for it are:
+
+```text
+inline_object   := "{" ws* member_list? ws* "}" postfix?
+member_list     := member ( "," ws* member )* ","?
+member          := property_def | "..." operand
+operand         := identifier ( "@" fileref )?
+                   (no constraint list, "[]", "->" description, or "{{ }}" slot)
+
+extends_value   := operand                       (one YAML string)
+                 | "[" operand ( "," operand )* "]"
+                                                 (a nonempty YAML flow or block sequence)
+```
+
+| | Expression object literal | Schema inline object |
+| --- | --- | --- |
+| spread operand | any expression: `...a \|\| b` | a named type: `...events`, `...events@./types.yaml` |
+| copies | a runtime value's fields | a type's declared properties and pattern keys |
+| trailing comma | parse error | allowed: `{ ...events, }` |
+| YAML mapping form | none | `$extends: events` or `$extends: [events, audit]` |
+
+The full rules (scope, replacement order, eligible targets, errors, and
+export) are in
+[Object Composition](../../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#object-composition-name-and-extends).
 
 ## Function calls
 

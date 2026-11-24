@@ -2,7 +2,8 @@
 //! (`main.rs::refresh_host_registration`): a substantive command publishes
 //! the binary's revision under the fixture home when it is missing or stale,
 //! writes nothing when it is current, only warns when it cannot publish, and
-//! never writes `~/.darkmatter.yaml`. Hooks, `steer`, and completion stay
+//! never registers itself in `~/.darkmatter.yaml` (which the startup load
+//! creates at its defaults when it is missing). Hooks, `steer`, and completion stay
 //! passive. `claudine errors` is the substantive command: it needs an
 //! existing configuration and launches nothing.
 
@@ -89,7 +90,7 @@ fn publication_exists(home: &Path) -> bool {
 }
 
 #[test]
-fn host_registration_refresh_first_launch_publishes_and_leaves_darkmatter_config_absent() {
+fn host_registration_refresh_first_launch_publishes_and_registers_nothing_in_darkmatter_config() {
     let fixture = configured("host-refresh-first");
     std::fs::remove_file(fixture.home().join(".darkmatter.yaml")).unwrap();
 
@@ -100,7 +101,10 @@ fn host_registration_refresh_first_launch_publishes_and_leaves_darkmatter_config
     let revision = revisions_dir(home).join(HostRevision::claudine().directory_name());
     assert!(revision.join("schemas").is_dir(), "{} exists", revision.display());
     assert_loads(home);
-    assert!(!home.join(".darkmatter.yaml").exists(), "the refresh never writes ~/.darkmatter.yaml");
+    // The startup load creates the missing file at its defaults; the refresh
+    // adds nothing to it.
+    let config = std::fs::read_to_string(home.join(".darkmatter.yaml")).expect("created at its defaults");
+    assert!(config.contains("register: []"), "the refresh never registers in ~/.darkmatter.yaml: {config}");
     assert!(!home.join("schemas").exists(), "nothing is copied into ~/schemas");
 }
 

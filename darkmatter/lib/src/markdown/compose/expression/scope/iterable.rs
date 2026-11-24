@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use super::projection::item_shape;
+use super::projection::{SpreadFields, item_shape, spread_fields};
 use super::{LexicalTypes, Polarity, Shape, TypeScope, TypedLocal};
 use simplified_schema::expression::ast::{BindingPattern, Callback, SpannedBindingPattern, SpannedCallback};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
@@ -214,6 +214,15 @@ fn member_definition(shape: &Shape) -> PropertyDef {
     }
 }
 
+/// One entry of an object literal, typed for [`Shape::object_of_entries`].
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ObjectEntryType {
+    /// A written field and its value's type.
+    Field(String, Shape),
+    /// The type of a spread operand.
+    Spread(Shape),
+}
+
 impl Shape {
     /// The type of an object literal whose members have the given types, in
     /// order: a closed object declaring each member.
@@ -222,6 +231,96 @@ impl Shape {
         for (name, shape) in members {
             object.properties.insert(name, member_definition(&shape));
         }
+        Shape::of_type(&PropertyDef::Single(PropertyAtom::bare_inline_object(object)))
+    }
+
+    /// The type of an object literal whose entries, in written order, are
+    /// `entries`: written fields and the types of spread operands.
+    ///
+    /// Entries apply in order, as evaluation does. A written field sets its
+    /// key's type exactly. A spread replaces a key only when every
+    /// alternative of the operand writes it; otherwise (an optional field, a
+    /// `null` operand, an alternative that does not declare the key but may
+    /// write any) the incoming type widens the key's previous type, or
+    /// `null` for a key not yet written. An operand of unknown type, or an
+    /// alternative that may write undeclared keys, widens every earlier key
+    /// to `unknown` and leaves the result open (`<string>: unknown`), so a
+    /// later key is never reported missing. An alternative that is not an
+    /// object contributes nothing: spreading it fails.
+    pub(crate) fn object_of_entries(entries: Vec<ObjectEntryType>, definitions: &DefinitionTable) -> Shape {
+        let mut fields: Vec<(String, Shape)> = Vec::new();
+        let mut open = false;
+        let absent = Shape::of_literal(&serde_json::Value::Null);
+        for entry in entries {
+            let (name, shape) = match entry {
+                ObjectEntryType::Field(name, shape) => (name, shape),
+                ObjectEntryType::Spread(operand) => {
+                    let arms = match spread_fields(&operand, definitions) {
+                        Some(arms) => arms.into_iter().filter_map(Result::ok).collect::<Vec<_>>(),
+                        None => vec![SpreadFields { fields: Vec::new(), open: true }],
+                    };
+                    // `null` (or a non-object, which fails) writes nothing.
+                    let may_skip = operand.admits_null();
+                    let mut names: Vec<String> = fields.iter().map(|(name, _)| name.clone()).collect();
+                    for arm in &arms {
+                        for (name, _, _) in &arm.fields {
+                            if !names.contains(name) {
+                                names.push(name.clone());
+                            }
+                        }
+                    }
+                    for name in names {
+                        let mut always = !may_skip && !arms.is_empty();
+                        let mut incoming: Option<Shape> = None;
+                        for arm in &arms {
+                            let written = match arm.fields.iter().find(|(field, _, _)| *field == name) {
+                                Some((_, shape, required)) => {
+                                    always &= *required;
+                                    Some(shape.clone())
+                                }
+                                None => {
+                                    always = false;
+                                    arm.open.then_some(Shape::Unknown { non_null: false })
+                                }
+                            };
+                            if let Some(written) = written {
+                                incoming = Some(incoming.map_or(written.clone(), |shape| shape.union(&written)));
+                            }
+                        }
+                        let Some(incoming) = incoming else {
+                            continue;
+                        };
+                        let position = fields.iter().position(|(field, _)| *field == name);
+                        let updated = match (always, position) {
+                            (true, _) => incoming,
+                            (false, Some(index)) => fields[index].1.union(&incoming),
+                            (false, None) => absent.union(&incoming),
+                        };
+                        match position {
+                            Some(index) => fields[index].1 = updated,
+                            None => fields.push((name, updated)),
+                        }
+                    }
+                    open |= arms.iter().any(|arm| arm.open);
+                    continue;
+                }
+            };
+            match fields.iter().position(|(field, _)| *field == name) {
+                Some(index) => fields[index].1 = shape,
+                None => fields.push((name, shape)),
+            }
+        }
+        if !open {
+            return Shape::object_of(fields);
+        }
+        let mut object = SchemaShape::new();
+        for (name, shape) in fields {
+            object.properties.insert(name, member_definition(&shape));
+        }
+        object.pattern_keys.push(simplified_schema::PatternKeyDef {
+            key: PatternKey::CatchAll,
+            def: PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Unknown)),
+        });
         Shape::of_type(&PropertyDef::Single(PropertyAtom::bare_inline_object(object)))
     }
 
@@ -258,6 +357,52 @@ impl Shape {
             }
         };
         Shape::Arms { arms: vec![atom], nullable: false }
+    }
+
+    /// The shape of an observed value (an editor's evaluation of a
+    /// property): each scalar its literal, each object its exact fields
+    /// (closed), each array the union of its items' shapes. The walk is
+    /// bounded: past [`OBSERVED_DEPTH`] levels, or where an array's items
+    /// have more than [`OBSERVED_ALTERNATIVES`] distinct shapes, the part is
+    /// `unknown`, so a large value is summarized rather than copied.
+    pub fn observed(value: &serde_json::Value) -> Shape {
+        observed_at(value, 0)
+    }
+}
+
+/// How deep [`Shape::observed`] follows containers.
+pub const OBSERVED_DEPTH: usize = 8;
+/// How many distinct item shapes [`Shape::observed`] keeps per array.
+pub const OBSERVED_ALTERNATIVES: usize = 8;
+
+fn observed_at(value: &serde_json::Value, depth: usize) -> Shape {
+    if depth >= OBSERVED_DEPTH {
+        return Shape::Unknown { non_null: !value.is_null() };
+    }
+    match value {
+        serde_json::Value::Object(members) => {
+            Shape::object_of(members.iter().map(|(key, member)| (key.clone(), observed_at(member, depth + 1))).collect())
+        }
+        serde_json::Value::Array(items) => {
+            let mut joined: Option<Shape> = None;
+            let mut alternatives: Vec<Shape> = Vec::new();
+            for item in items {
+                let shape = observed_at(item, depth + 1);
+                if alternatives.contains(&shape) {
+                    continue;
+                }
+                if alternatives.len() == OBSERVED_ALTERNATIVES {
+                    return Shape::array_of(&Shape::Unknown { non_null: false });
+                }
+                joined = Some(match joined {
+                    Some(joined) => joined.union(&shape),
+                    None => shape.clone(),
+                });
+                alternatives.push(shape);
+            }
+            Shape::array_of(&joined.unwrap_or(Shape::Unknown { non_null: false }))
+        }
+        scalar => Shape::of_literal(scalar),
     }
 }
 

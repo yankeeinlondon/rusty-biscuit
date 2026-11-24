@@ -23,6 +23,7 @@ use simplified_schema::simplified::{
 };
 
 use super::error::DataError;
+use super::options::HeaderMode;
 use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def_with_definitions};
 use crate::markdown::compose::expression::FileReferenceDiagnostic;
 
@@ -122,6 +123,12 @@ pub enum RowShapeConflict {
         "`header: false` reads rows by position, but this contract describes rows as objects; use a `tuple([…])[]` contract, or read an input that has a header"
     )]
     HeaderlessObjectRows,
+    /// `header: [names…]` reads rows as objects keyed by those names, but the
+    /// contract's rows are lists.
+    #[error(
+        "a `header` list names the columns, so rows are objects, but this contract describes rows as lists; use an object-row contract such as `{{ <string>: string }}[]`, or `header: false` to read rows by position"
+    )]
+    NamedListRows,
 }
 
 /// The rule for `header: false`: rows are read by position, so a contract
@@ -136,6 +143,26 @@ pub fn require_positional_rows(class: RowClassification) -> Result<(), RowShapeC
     match class {
         RowClassification::Known(RowMode::Object) => Err(RowShapeConflict::HeaderlessObjectRows),
         RowClassification::Known(RowMode::List) | RowClassification::Provisional => Ok(()),
+    }
+}
+
+/// The row rule of a `header` mode, shared by the passive check and the
+/// read plan: the first record as a header suits either row shape,
+/// `header: false` needs positional rows ([`require_positional_rows`]), and a
+/// list of names needs object rows. A provisional classification stays open.
+///
+/// ## Errors
+///
+/// [`RowShapeConflict::HeaderlessObjectRows`] or
+/// [`RowShapeConflict::NamedListRows`].
+pub(crate) fn require_header_rows(header: &HeaderMode, class: RowClassification) -> Result<(), RowShapeConflict> {
+    match header {
+        HeaderMode::FirstRecord => Ok(()),
+        HeaderMode::None => require_positional_rows(class),
+        HeaderMode::Names(_) => match class {
+            RowClassification::Known(RowMode::List) => Err(RowShapeConflict::NamedListRows),
+            RowClassification::Known(RowMode::Object) | RowClassification::Provisional => Ok(()),
+        },
     }
 }
 

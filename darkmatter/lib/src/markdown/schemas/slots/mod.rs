@@ -15,6 +15,8 @@
 //! - [`dependencies`] records what evaluations consumed besides the files
 //!   they observed (captured calls, volatility, context inputs), for the
 //!   cache.
+//! - [`observe`] evaluates a document's whole-value frontmatter
+//!   properties for an editor, on guarded reads that never ask or fetch.
 //! - [`observations`] captures the structured observations a slot's calls
 //!   read, when a slot first needs them.
 //! - [`session`] resolves a command's templates, pinning one snapshot per
@@ -29,6 +31,7 @@ pub(crate) mod dependencies;
 pub(crate) mod evaluator;
 pub mod grants;
 pub mod host;
+pub mod observe;
 pub(crate) mod observations;
 pub(crate) mod pending_report;
 pub mod session;

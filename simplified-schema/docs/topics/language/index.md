@@ -83,6 +83,7 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
 | a nested object | `author: "{ name: string(required), email: email }"` | [Inline object literals](./objects-and-named-types.md#inline-object-literals) |
 | a reusable or imported type | `author: person`, `owner: person@./types.yaml` | [Cross-file named-type imports](./objects-and-named-types.md#cross-file-named-type-imports-namefile) |
 | a type that contains itself | `children: node[]` inside `node` | [Recursive named types](./objects-and-named-types.md#recursive-named-types) |
+| an object that reuses another object's properties | `"{ ...events, price: number }"`, or `$extends: events` in a mapping | [Object composition](./objects-and-named-types.md#object-composition-name-and-extends) |
 | either of two types | `id: "string \| number"` | [Unions](./unions.md#unions) |
 | a whole document of one of several shapes | a YAML list at `$schema` | [Root-level unions](./unions.md#root-level-unions) |
 | a path to a file | `source: file`, `source: file(eager)` | [Files](./types.md#files) |
@@ -96,7 +97,8 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
   accepts, and how each lowers to Draft 2020-12 JSON Schema.
 - [Objects and Named Types](./objects-and-named-types.md): inline objects,
   named types, cross-file imports, recursive and shared types, pattern keys,
-  and key-count constraints.
+  key-count constraints, and object composition with `...name` and
+  `$extends`.
 - [Local Type References](./local-type-references.md): bare local names,
   where they resolve, and how reused types inherit constraints.
 - [Unions and Function Signatures](./unions.md): property and root unions,
@@ -137,6 +139,12 @@ These are limits of the language itself; a host built on it may add its own.
 - **Root schemas allow extra keys unless closed.** A root, or one root-union
   arm, rejects undeclared keys only with
   [`$constraints: { closed: true }`](./objects-and-named-types.md#closed-roots-closed).
+- **Composition copies and replaces, never removes.** `...name` and
+  `$extends` copy the members of one named object; an override replaces a
+  property's definition but the property stays declared. Lists, unions, and
+  primitives cannot be composed, and `$extends` is reserved inside schema
+  mappings (see
+  [Migrating a literal `$extends` property](./objects-and-named-types.md#migrating-a-literal-extends-property)).
 - **Inline objects nest at most 32 levels.** Deeper nesting is
   `SchemaError::Grammar`. Use a
   [recursive named type](./objects-and-named-types.md#recursive-named-types)

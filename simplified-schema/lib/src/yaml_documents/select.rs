@@ -4,9 +4,14 @@
 //! flowchart TD
 //!     Y[YAML document] --> M{root is a mapping?}
 //!     M -- no --> N[not validated]
-//!     M -- yes --> K{top-level kind claimed<br/>by a yaml-schema?}
+//!     M -- yes --> K{top-level kind claimed by a<br/>shipped or local yaml-schema?}
 //!     K -- yes --> V1["the claiming definition only<br/>(a root $schema is an ordinary property)"]
-//!     K -- no --> S{root $schema?}
+//!     K -- no --> U{registry establishes<br/>the kind unclaimed?}
+//!     U -- no --> E[KindSelection error]
+//!     U -- yes --> G{claimed by a<br/>registered definition?}
+//!     G -- one --> V1
+//!     G -- "several different" --> E
+//!     G -- no --> S{root $schema?}
 //!     S -- yes --> V2["that schema; $schema is stripped<br/>from the validation copy"]
 //!     S -- no --> N
 //! ```
@@ -15,22 +20,25 @@
 //! non-string `kind` claims nothing. A kind whose claim is ambiguous or
 //! failed, or that the registry cannot rule out because a definition or root
 //! failed, is a [`SchemaError::KindSelection`], never a fall-through to the
-//! `$schema` route or to "no schema". A document with neither a string `kind`
-//! nor a `$schema` is never affected by a registry failure.
+//! registered tier, the `$schema` route, or "no schema". A document with
+//! neither a string `kind` nor a `$schema` is never affected by a registry
+//! failure.
 
 use std::sync::Arc;
 
 use serde_yaml_ng::Value as YamlValue;
 use crate::{KindSelectionCause, SchemaError};
 
-use super::registry::{Claim, KindDefinition, KindRegistry};
+use super::registry::{Claim, KindDefinition, KindRegistry, RegisteredKinds};
 use crate::slots::{SLOT_NOT_ALLOWED_IN_KIND_CODE, slots_not_allowed_message};
 
 /// The route a document selected.
 pub enum Selection<'a> {
     /// Not validated.
     NoSchema,
-    /// Its `kind` is claimed by `definition`.
+    /// Its `kind` is claimed by `definition`; a registered host's definition
+    /// has a [`DefinitionSource::Registered`](super::DefinitionSource::Registered)
+    /// source naming the host.
     Kind { kind: String, definition: Arc<KindDefinition> },
     /// No claimed `kind`; its root `$schema` value is the contract.
     RootSchema(&'a YamlValue),
@@ -45,6 +53,22 @@ pub enum Selection<'a> {
 /// as unclaimed (a definition failed before revealing its claim, or a schema
 /// root could not be read).
 pub fn select<'a>(registry: &KindRegistry, document: &'a YamlValue) -> Result<Selection<'a>, SchemaError> {
+    select_with_registered(registry, None, document)
+}
+
+/// [`select`], then, for a string `kind` that `registry` establishes is
+/// unclaimed, `registered`'s claim on it.
+///
+/// ## Errors
+///
+/// Every [`select`] error, which `registered` never shadows, and
+/// [`SchemaError::KindSelection`] with [`KindSelectionCause::Duplicate`] for
+/// an unclaimed kind that two or more different registered definitions claim.
+pub fn select_with_registered<'a>(
+    registry: &KindRegistry,
+    registered: Option<&RegisteredKinds>,
+    document: &'a YamlValue,
+) -> Result<Selection<'a>, SchemaError> {
     let Some(map) = document.as_mapping() else {
         return Ok(Selection::NoSchema);
     };
@@ -69,6 +93,16 @@ pub fn select<'a>(registry: &KindRegistry, document: &'a YamlValue) -> Result<Se
                 if let Some(failure) = registry.incomplete().first() {
                     let (defect, code) = described(&failure.problem);
                     return Err(refused(KindSelectionCause::Unavailable { file: failure.file.clone(), defect, code }));
+                }
+                match registered.and_then(|registered| registered.claim(kind)) {
+                    Some(Claim::Healthy(definition)) => {
+                        return Ok(Selection::Kind { kind: kind.to_string(), definition: Arc::clone(definition) });
+                    }
+                    Some(Claim::Duplicate(files)) => {
+                        return Err(refused(KindSelectionCause::Duplicate { files: files.clone() }));
+                    }
+                    // `RegisteredKinds` holds only prepared definitions.
+                    Some(Claim::Reserved { .. }) | None => {}
                 }
             }
         }

@@ -33,7 +33,7 @@ types:
         reference: string -> the reference as written
         failure: string -> file-reference failure class, e.g. no-match
         included_via: trail-step[] -> outermost first
-        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
+        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed, dm.data.contract_mismatch, and a schema problem on a property whose value is one load_data call's result
         grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
         schema_default: schema-default -> the schema default that supplied the problem's value; schema problems with an inserted default only
     source:

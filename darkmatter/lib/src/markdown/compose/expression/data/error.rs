@@ -151,6 +151,9 @@ pub enum DataError {
         /// [`TabularSource::row`] `i`, whose fields carry their raw source
         /// offsets. `None` for every other format.
         table: Option<TabularSource>,
+        /// Whether the parsed root was a scalar wrapped in a one-element
+        /// array: a pointer under `/0` then names the document's root.
+        wrapped: bool,
     },
 
     /// An option of the options object cannot apply to this call. It names no
@@ -175,8 +178,8 @@ pub enum DataError {
     },
 }
 
-/// The delimited table a CSV or TSV value was built from, its row mode, and
-/// whether its first record was a header.
+/// The delimited table a CSV or TSV value was built from, its row mode,
+/// whether its first record was a header, and the key of each column.
 ///
 /// Rows are read only through [`Self::row_count`] and [`Self::row`], the one
 /// logical view binding and diagnostic lookup share: row `i` of the value is
@@ -186,9 +189,12 @@ pub enum DataError {
 pub struct TabularSource {
     /// How each row became a value.
     pub mode: RowMode,
-    /// Whether the first record is a header (and so not a row). Object rows
-    /// always have one.
+    /// Whether the first record is a header (and so not a row).
     pub header: bool,
+    /// In object mode, the key of each column in column order: the header's
+    /// names in camelCase, or an explicit `header` list verbatim. `None` in
+    /// list mode, and for an object read with no records.
+    pub keys: Option<Arc<[String]>>,
     /// The first record and the records after it, with their raw field
     /// offsets.
     pub data: Arc<DelimitedData>,

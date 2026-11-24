@@ -176,6 +176,11 @@ pub struct StartupHooks {
     /// this receives a message or disconnects, so a test can hold a
     /// schema-slot resolution while requests and edits proceed.
     pub slot_gate: Option<Receiver<()>>,
+    /// When set, the slot worker answers property observations' remote
+    /// reads from the transport cache under this cache root (as
+    /// `md compose --cache-root` would) instead of each document's base
+    /// folder, so a test can seed a temporary cache.
+    pub slot_cache_root: Option<PathBuf>,
     /// Receives a [`StartupEvent`] as each background step completes.
     pub observer: Option<Sender<StartupEvent>>,
 }
@@ -341,6 +346,10 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         workspace: workspace.clone(),
         dispatch: dispatch.clone(),
     });
+    // The slot store's expiry deadlines and observation times read the
+    // server's clock (wall and monotonic, paired).
+    overlay.slots().set_clock(Arc::clone(&options.clock));
+    overlay.slots().set_cache_root(options.startup.slot_cache_root.clone());
     let slot_jobs = {
         let internal = internal_tx.clone();
         let observer = options.startup.observer.clone();
@@ -1807,6 +1816,16 @@ impl Router {
     /// Runs until `shutdown`/`exit` (Ok) or a protocol-fatal error.
     pub fn run(mut self) -> Result<(), ServerError> {
         loop {
+            // An installed property observation whose cached remote response
+            // expires is refreshed at that instant, by its document's own
+            // refresh path.
+            // The deadline is on the store's clock, which a test advances by
+            // hand, so the wait is measured from that clock's now.
+            let slots = self.state.overlay.slots();
+            let expiry = match slots.next_deadline() {
+                Some(deadline) => crossbeam_channel::after(deadline.saturating_duration_since(slots.clock().now())),
+                None => crossbeam_channel::never(),
+            };
             let message = crossbeam_channel::select! {
                 recv(self.connection.receiver) -> message => {
                     message.map_err(|_| ServerError::ChannelClosed)?
@@ -1817,6 +1836,10 @@ impl Router {
                         // The background worker is gone; stop selecting on it.
                         Err(_) => self.internal = crossbeam_channel::never(),
                     }
+                    continue;
+                }
+                recv(expiry) -> _ => {
+                    self.expire_observations();
                     continue;
                 }
             };
@@ -1936,6 +1959,18 @@ impl Router {
             let typ = if missing { MessageType::WARNING } else { MessageType::INFO };
             show_message(&self.connection.sender, typ, format!("dmls: {}: {}", notice.code, notice.message));
         }
+    }
+
+    /// Withdraws every installed property observation whose cached remote
+    /// response has expired and refreshes its open document, which demands
+    /// a new observation.
+    fn expire_observations(&mut self) {
+        for uri in self.state.overlay.slots().expire_due() {
+            if self.state.documents.is_open(&uri) {
+                self.state.refresh_diagnostics(&uri);
+            }
+        }
+        self.dispatch_slot_jobs();
     }
 
     /// Sends every schema-slot job demanded since the last message to the
@@ -2068,11 +2103,20 @@ impl Router {
             Internal::IndexRound { build, facts } => self.finish_index_round(build, facts),
             Internal::SlotPrepared(result) => {
                 let uri = result.uri.clone();
-                let installed = self.state.overlay.slots().install(*result);
-                if installed && self.state.documents.is_open(&uri) {
+                let outcome = self.state.overlay.slots().install_checked(*result);
+                let installed = outcome == crate::slot_jobs::InstallOutcome::Installed;
+                // An outdated result left its entry stale: refreshing the
+                // document demands the job again.
+                let refresh = installed || outcome == crate::slot_jobs::InstallOutcome::Outdated;
+                if refresh && self.state.documents.is_open(&uri) {
                     self.state.refresh_diagnostics(&uri);
                 }
                 self.notify_observer(StartupEvent::SlotPrepared { installed });
+                // The refresh may have demanded a job (an outdated result, or
+                // an input that changed before the install's re-`stat`).
+                if refresh {
+                    self.dispatch_slot_jobs();
+                }
             }
         }
     }

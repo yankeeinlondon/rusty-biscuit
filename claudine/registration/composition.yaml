@@ -1,0 +1,8 @@
+kind: schema-trigger
+description: a schema that is triggered for composable claudine documents that are _not_ "inline" composable documents.
+match:
+
+$schema:
+    $extends: common-attributes@./shared.yaml
+    prompt: null
+    sections: null

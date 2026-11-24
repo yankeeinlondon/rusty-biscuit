@@ -354,3 +354,39 @@ fn a_local_read_is_late_and_never_a_frontmatter_read() {
     let bare = phrase_in(LifecycleSignal::Success, json!("{{ title }}"));
     assert_eq!(classify(scope, &bare, &inputs()), early("Widget"));
 }
+
+#[test]
+fn object_spread_operand_call_is_classified_even_when_overwritten() {
+    // The later `k` replaces every key the operand supplies, but the operand
+    // still runs, so its call disqualifies the phrase exactly as a direct one.
+    assert_rows(
+        LifecycleSignal::Success,
+        &inputs(),
+        &[
+            (json!("{{ { k: upper(title) } }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ { ...{ k: upper(title) }, k: 1 } }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ { ...upper(title), k: 1 } }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ { ...{ k: date() }, k: 1 } }}"), skip(SkipReason::FunctionCall)),
+        ],
+    );
+}
+
+#[test]
+fn object_spread_operand_reads_are_classified_even_when_overwritten() {
+    let mut inputs = inputs();
+    inputs.sequence_injected_keys = BTreeSet::from(["task_input".to_string()]);
+    let injected = || skip(SkipReason::SequenceInjected("task_input".to_string()));
+    assert_rows(
+        LifecycleSignal::Failure,
+        &inputs,
+        &[
+            (json!("{{ { k: task_input } }}"), injected()),
+            (json!("{{ { ...{ k: task_input }, k: 1 } }}"), injected()),
+            (json!("{{ { ...task_input, k: 1 } }}"), injected()),
+            (json!("{{ { ...{ k: fm.task_input }, k: 1 } }}"), injected()),
+            (json!("{{ { ...fm, k: 1 } }}"), skip(SkipReason::TaskDependentRead)),
+            (json!("{{ { ...{ k: err.msg }, k: 1 } }}"), late("err")),
+            (json!("{{ { ...err, k: 1 } }}"), late("err")),
+        ],
+    );
+}

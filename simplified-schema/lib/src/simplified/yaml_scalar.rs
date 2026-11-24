@@ -252,8 +252,50 @@ pub fn decode_scalar_node(
     let start = skip_node_properties(bytes, start)?;
     match *bytes.get(start)? {
         b'|' | b'>' => decode_block_scalar(source, start, parent_indent),
-        b'\'' | b'"' => decode_flow_quoted(source, start),
+        b'\'' | b'"' => decode_flow_quoted(source, start, false),
         _ => decode_plain_content(source, start, parent_indent),
+    }
+}
+
+/// The part of the scalar node at byte `start` of `source` authored before
+/// `cursor`, for an editor reading a value while it is being typed.
+///
+/// The node is decoded as [`decode_scalar_node`] decodes it (every plain,
+/// quoted, literal, and folded presentation, with `parent_indent` meaning the
+/// same), except that a quoted scalar is read only up to `cursor`, so one
+/// whose closing quote has not been typed yet still decodes. A cursor after
+/// the scalar's last authored byte, separated from it only by spaces and
+/// tabs, keeps the whole scalar and those blanks.
+///
+/// ## Returns
+///
+/// `None` when `start` does not begin a scalar [`decode_scalar_node`] models,
+/// begins an alias (whose text is authored elsewhere), or is an empty value
+/// (a line break or blank, after which a later line is another node), and
+/// when `cursor` lies outside the scalar: before its first content byte, past
+/// its closing quote, or past its last line.
+pub fn decode_scalar_node_prefix(
+    source: &str,
+    start: usize,
+    parent_indent: usize,
+    cursor: usize,
+) -> Option<DecodedScalar> {
+    let bytes = source.as_bytes();
+    if bytes.get(start) == Some(&b'*') {
+        return None;
+    }
+    let content = skip_node_properties(bytes, start)?;
+    match *bytes.get(content)? {
+        // An empty value: whatever follows on later lines is another node.
+        b'\n' | b'\r' | b' ' | b'\t' => None,
+        b'\'' | b'"' if content < cursor => {
+            let typed = source.get(..cursor)?;
+            if decode_flow_quoted(typed, content, false).is_some() {
+                return None;
+            }
+            decode_flow_quoted(typed, content, true).map(|(scalar, _)| scalar)
+        }
+        _ => decode_scalar_node(source, start, parent_indent)?.0.prefix_at(source, cursor),
     }
 }
 
@@ -583,7 +625,10 @@ fn at_document_marker(source: &str, at: usize) -> bool {
         && is_blankz(bytes, at + 3)
 }
 
-fn decode_flow_quoted(source: &str, start: usize) -> Option<(DecodedScalar, usize)> {
+/// The flow-quoted scalar opened at `start`. A `tolerant` read of text that
+/// ends before the closing quote (or inside an escape) decodes everything
+/// authored so far, ending at the end of `source`.
+fn decode_flow_quoted(source: &str, start: usize, tolerant: bool) -> Option<(DecodedScalar, usize)> {
     let bytes = source.as_bytes();
     let quote = bytes[start];
     let single = quote == b'\'';
@@ -591,8 +636,11 @@ fn decode_flow_quoted(source: &str, start: usize) -> Option<(DecodedScalar, usiz
     let mut fold = FoldState::default();
     let mut pos = start + 1;
     loop {
-        if at_document_marker(source, pos) || pos >= bytes.len() {
+        if at_document_marker(source, pos) {
             return None;
+        }
+        if pos >= bytes.len() {
+            return tolerant.then(|| (out.finish(), pos));
         }
         fold.leading_blanks = false;
         while !is_blankz(bytes, pos) {
@@ -607,7 +655,9 @@ fn decode_flow_quoted(source: &str, start: usize) -> Option<(DecodedScalar, usiz
                 fold.leading_blanks = true;
                 break;
             } else if !single && bytes[pos] == b'\\' {
-                let (value, consumed) = decode_yaml_escape(&source[pos..])?;
+                let Some((value, consumed)) = decode_yaml_escape(&source[pos..]) else {
+                    return tolerant.then(|| (out.finish(), pos));
+                };
                 out.push(&value, pos..pos + consumed);
                 pos += consumed;
             } else {
@@ -615,7 +665,7 @@ fn decode_flow_quoted(source: &str, start: usize) -> Option<(DecodedScalar, usiz
             }
         }
         if pos >= bytes.len() {
-            return None;
+            return tolerant.then(|| (out.finish(), pos));
         }
         if bytes[pos] == quote {
             return Some((out.finish(), pos + 1));
@@ -1424,5 +1474,48 @@ mod tests {
         assert!(decode_scalar_node("entry: &e 'string'\n", start, 0).is_some());
         let (_, start) = both_decoders("anchor: &e string\nentry: *e\n", "entry");
         assert!(decode_scalar_node("anchor: &e string\nentry: *e\n", start, 0).is_some());
+    }
+
+    /// The prefix of each presentation at a cursor after `...b` on its
+    /// continuation line, with LF and CRLF breaks.
+    #[test]
+    fn scalar_node_prefix_reads_every_presentation_up_to_the_cursor() {
+        for (value, decoded) in [
+            ("'{ at: string,\n    ...b }'", "{ at: string, ...b"),
+            ("\"{ at: string,\n    ...b }\"", "{ at: string, ...b"),
+            ("'{ at: string,\n    ...b", "{ at: string, ...b"),
+            ("\"{ at: string,\n    ...b", "{ at: string, ...b"),
+            (">-\n    { at: string,\n      ...b }", "{ at: string,\n  ...b"),
+            (">\n    { at: string,\n    ...b }\n", "{ at: string, ...b"),
+            ("|-\n    { at: string,\n      ...b }", "{ at: string,\n  ...b"),
+            ("|2+\n    { at: string,\n    ...b }\n", "  { at: string,\n  ...b"),
+            ("at string,\n    ...b more", "at string, ...b"),
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let source = format!("event: {value}").replace('\n', newline);
+                let cursor = source.find("...b").unwrap() + 4;
+                let prefix = decode_scalar_node_prefix(&source, 7, 0, cursor)
+                    .unwrap_or_else(|| panic!("{source:?} decodes"));
+                assert_eq!(prefix.decoded(), decoded, "{source:?}");
+                assert_eq!(prefix.project(decoded.len() - 1..decoded.len()), Some(cursor - 1..cursor), "{source:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_node_prefix_rejects_a_cursor_outside_the_scalar() {
+        let closed = "event: 'a\n  b' x";
+        assert!(decode_scalar_node_prefix(closed, 7, 0, closed.len()).is_none());
+        assert!(decode_scalar_node_prefix(closed, 7, 0, 7).is_none());
+        let block = "event: >-\n  a\nnext: b";
+        assert!(decode_scalar_node_prefix(block, 7, 0, block.len()).is_none());
+        assert_eq!(decode_scalar_node_prefix(block, 7, 0, 13).map(|prefix| prefix.decoded().to_string()), Some("a".into()));
+        let empty = "event:\n  - item\n  more";
+        assert!(decode_scalar_node_prefix(empty, 6, 0, empty.len()).is_none());
+        let alias = "a: &x v\nevent: *x";
+        assert!(decode_scalar_node_prefix(alias, 15, 0, alias.len()).is_none());
+        // A half-typed escape keeps what decoded before it.
+        let escape = "event: \"a\n  b\\u00";
+        assert_eq!(decode_scalar_node_prefix(escape, 7, 0, escape.len()).map(|prefix| prefix.decoded().to_string()), Some("a b".into()));
     }
 }

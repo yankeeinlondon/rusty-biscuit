@@ -440,13 +440,32 @@ fn a_continuation_line_grammar_error_converts_through_the_negotiated_encoding() 
     }
 }
 
-/// When the strict locator cannot read the document (here, a quoted scalar
+/// A quoted value or flow collection wrapped across lines is ranged at the
+/// rejected token on its continuation line, like a continued plain value.
+#[test]
+fn a_wrapped_quoted_or_flow_value_ranges_its_grammar_error_at_the_token() {
+    for text in [
+        "kind: schema\ntypes:\n  t: '{ a: string,\n    n: string(bogus(2)) }'\n",
+        "kind: schema\ntypes:\n  t: \"{ \\u0061: string,\n    n: string(bogus(2)) }\"\n",
+        "kind: schema\ntypes:\n  t: [number,\n    'string(bogus(2))']\n",
+    ] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = start(&workspace, "utf-8");
+        let uri = open(&fixture, &workspace, "wrapped.yaml", text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        assert_eq!(diagnostics.len(), 1, "{text:?}: {diagnostics:#?}");
+        assert_eq!(diagnostics[0]["range"], range_of(text, "bogus", 0, "utf-8"), "{text:?}: {diagnostics:#?}");
+        fixture.shutdown();
+    }
+}
+
+/// When the strict locator cannot read the document (here, a tagged scalar
 /// continued across lines for a sibling definition), the token cannot be
 /// projected, so the diagnostic keeps its existing whole-value fallback and
 /// code. It is never an empty or fabricated range.
 #[test]
 fn an_unprojectable_grammar_error_keeps_the_whole_value_fallback() {
-    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: \"boolean -> a\n    b\"\n";
+    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: !!str boolean -> a\n    b\n";
     let workspace = LspWorkspace::new();
     let mut fixture = start(&workspace, "utf-8");
     let uri = open(&fixture, &workspace, "block-sibling.yaml", text);

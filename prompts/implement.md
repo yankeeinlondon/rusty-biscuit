@@ -16,24 +16,24 @@ description: |-
         - if there is no associated spec then we will look for an associated review
         - if neither spec or review's are found nearby we'll implement the plan without linked/associated content
 
-pending_review: |-
+pending-review: |-
     {{ 
         spec && file_exists(spec)
-            ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') 
+            ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review-iterations') || 1) + '.md') 
             : null 
     }}
 
 initialize: 
-    - when: "spec && pending_review && file_exists(pending_review) && !frontmatter(pending_review, 'implemented')"
+    - when: "spec && pending-review && file_exists(pending-review) && !frontmatter(pending-review, 'implemented')"
       then:
         - info: |-
-            found the specification review that needs implementation: {{link(pending_review)}}. Will route to the **implement-suggestions** prompt for completion
+            found the specification review that needs implementation: {{link(pending-review)}}. Will route to the **implement-suggestions** prompt for completion
         - ensure_file: "{{ dirname(spec) + '/implementation-log.md' }}"
         - proxy:
               target: ./_implement/implement-suggestions.md
               with:
-                  review: "{{ pending_review }}"
-                  iteration: "{{ file_index(pending_review) }}"
+                  review: "{{ pending-review }}"
+                  iteration: "{{ file_index(pending-review) }}"
                   log: "{{ dirname(spec) + '/implementation-log.md' }}"
     # - when: "spec && frontmatter(spec, 'implemented')"
     #   then: 

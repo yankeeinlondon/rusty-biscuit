@@ -5324,7 +5324,26 @@ mod group_framing {
     }
 
     fn run(commands: &[&str], execution: &str, sink: &Arc<FrameSink>) -> TaskOutcome {
-        run_on(commands, execution, sink, Terminal::default())
+        run_on(commands, execution, sink, unicode_terminal())
+    }
+
+    /// The ambient terminal with Unicode glyphs pinned on.
+    ///
+    /// These cases assert the Unicode header marker, while the detected
+    /// default follows the host locale and selects the ASCII marker under
+    /// `LC_ALL=C`. The ASCII fallback is the renderer's contract, tested in
+    /// `render::task_stream::tests`.
+    fn unicode_terminal() -> Terminal {
+        Terminal::builder().supports_unicode(true).build()
+    }
+
+    /// [`Terminal::new_forced`] with Unicode glyphs pinned on, which
+    /// `new_forced` leaves to the host locale.
+    fn forced_unicode_terminal() -> Terminal {
+        Terminal {
+            supports_unicode: true,
+            ..Terminal::new_forced()
+        }
     }
 
     /// [`run`], rendering against an explicitly constructed terminal.
@@ -5377,7 +5396,7 @@ mod group_framing {
             &["alpha", "bravo", "charlie"],
             "parallel",
             &sink,
-            Terminal::new_forced(),
+            forced_unicode_terminal(),
         );
 
         let bars: Vec<String> = sink
@@ -5398,7 +5417,10 @@ mod group_framing {
     #[test]
     fn a_no_color_terminal_still_attributes_every_task_by_name() {
         let sink = Arc::new(FrameSink::default());
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = Terminal::builder()
+            .color_depth(ColorDepth::None)
+            .supports_unicode(true)
+            .build();
         run_on(&["alpha", "bravo", "charlie"], "parallel", &sink, term);
 
         let lines = sink.lines();
@@ -5589,7 +5611,7 @@ mod group_framing {
             &["alpha", "bravo", "charlie"],
             "parallel",
             &sink,
-            Terminal::new_forced(),
+            forced_unicode_terminal(),
         );
 
         // The bar prefix each body line carries must be the same prefix that

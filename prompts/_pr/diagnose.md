@@ -3,13 +3,13 @@ name: Diagnose a Blocked Push
 description: |-
     Reached from `_pr/push.md` by proxy when the pre-push hook blocked the push. Explains every failure (what, why, and where it came from), decides which branch each repair belongs on, and writes the briefing a fixing agent will work from. It repairs nothing.
 
-    `on_failure` chooses what follows: `ask` hands the diagnosis to the interactive `_pr/triage.md`, `fix` goes straight to `_pr/fix.md`, and `stop` ends the flow with the diagnosis.
+    `on-failure` chooses what follows: `ask` hands the diagnosis to the interactive `_pr/triage.md`, `fix` goes straight to `_pr/fix.md`, and `stop` ends the flow with the diagnosis.
 $schema:
     base: string(required) -> the branch the pull request targets
     report: file(required) -> the report file shared by every stage of the PR flow
-    on_failure: enum(ask, fix, stop) -> what happens once the diagnosis is complete
+    on-failure: enum(ask, fix, stop) -> what happens once the diagnosis is complete
     committed: boolean -> whether `commit.md` already ran in this invocation (a proxy chain can visit it only once)
-on_failure: ask
+on-failure: ask
 committed: false
 branch: "{{ frontmatter(report, 'branch') }}"
 log: "{{ frontmatter(report, 'log') }}"
@@ -21,9 +21,9 @@ start:
 success:
     # Same single nudge as the push stage: the agent's session still holds the
     # investigation, so ask once before treating a missing verdict as an error.
-    - when: "frontmatter(report, 'status') != 'diagnosed' && !frontmatter(report, 'diagnosis_nudged')"
+    - when: "frontmatter(report, 'status') != 'diagnosed' && !frontmatter(report, 'diagnosis-nudged')"
       then:
-          - set_frontmatter: ["{{ report }}", "diagnosis_nudged", "{{ true }}"]
+          - set_frontmatter: ["{{ report }}", "diagnosis-nudged", "{{ true }}"]
           - warn: "the diagnosing agent finished without completing the report; asking it to finish"
           - resume: "You ended the session before the diagnosis was recorded. In the frontmatter of {{ report }}, fill in `failures`, `summary`, and `issue` as the report contract describes, put the detailed write-up in the body, set `status: diagnosed`, and then stop."
     - when: "frontmatter(report, 'status') != 'diagnosed'"
@@ -37,12 +37,12 @@ success:
 
           {{ frontmatter(report, 'summary') }}
     - say: "The blocked push has been diagnosed. {{ frontmatter(report, 'summary') }}"
-    - when: "on_failure == 'stop'"
+    - when: "on-failure == 'stop'"
       then:
           - info: "the PR for `{{branch}}` is paused with its diagnosis in {{report}}"
           - message: "⏸️  the PR for `{{branch}}` is paused with its diagnosis in `{{report}}`"
           - stop
-    - when: "on_failure == 'fix'"
+    - when: "on-failure == 'fix'"
       then:
           - proxy:
                 target: ./fix.md
@@ -83,7 +83,7 @@ failure:
 1. Read `{{report}}` and `{{log}}`.
 2. Diagnose every failure as described above.
 3. Record the result in the report:
-    - fill `failures` with one entry per failing test or gate, each with its `fix_branch` where a repair is needed
+    - fill `failures` with one entry per failing test or gate, each with its `fix-branch` where a repair is needed
     - write `summary` as a short, plain-language count of the distinct problems and their attributions (for example "2 problems: a stale fixture introduced by this branch, and a flaky L2 terminal test")
     - write `issue` as described above
     - put the detailed write-up, grouped by problem, in the report body

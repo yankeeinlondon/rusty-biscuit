@@ -531,11 +531,74 @@ fn compose_invalid_option_json_envelope() {
     assert_eq!(record["source"]["inserted"], false, "{record:#}");
     assert_eq!(
         record["expected_type"],
-        "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null",
+        "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean | string[]} | null",
         "{record:#}"
     );
     assert_eq!(record["actual_type"], "literal {\"delimiter\":\",,\"}", "{record:#}");
     assert!(record.get("data_location").is_none(), "no data file was read: {record:#}");
     assert_eq!(envelope["summary"], Value::Null, "{envelope:#}");
     assert_eq!(envelope["read_set"], json!([]), "the call check ran nothing: {envelope:#}");
+}
+
+// ── 9. Explicit header names and destination schemas ──────────────────────
+
+/// An explicit header list narrower than the first record fails at that
+/// record, naming both counts, and the later command never runs.
+#[test]
+fn an_explicit_name_list_of_the_wrong_width_is_located() {
+    let fixture = sentinel_fixture("load_data_header_width", "[]\n");
+    fixture.write_file("cwd/data.csv", "\na,b,c\n1,2,3\n");
+    fixture.write_file(
+        "cwd/doc.md",
+        "Rows: {{ load_data(\"data.csv\", null, {header: [\"x\", \"y\"]}) }}\n\n::shell argv-recorder sentinel\n",
+    );
+    let envelope = run_sentinel(&fixture, 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_failed(&envelope);
+    let record = only_record(&envelope);
+    assert_eq!(record["code"], "dm.data.malformed", "{record:#}");
+    assert!(record["message"].as_str().unwrap_or_default().contains("names 2 columns, but the first record on line 2 has 3 fields"), "{record:#}");
+    let data = fixture.cwd().join("data.csv");
+    assert_eq!(record["data_location"], json!({ "file": read_entry(&data), "line": 2, "column": 1 }), "{record:#}");
+    assert!(!fixture.cwd().join("sentinel").exists(), "the later command must not run: {envelope:#}");
+}
+
+/// The worked example's direct load with Grace's age `"old"` on line 4.
+const DESTINATION_DOC: &str = "---\n$schema:\n    direct: \"{ name: string(required), age: number }[]\"\ndirect: \"{{ load_data('data.yaml') }}\"\n---\nBody\n";
+const OLD_PEOPLE: &str = "- name: Ada\n  age: 36\n- name: Grace\n  age: \"old\"\n";
+
+/// A destination schema failure is a schema code at the authored
+/// expression (line 4, column 10), with the data file's coordinates.
+#[test]
+fn a_destination_schema_failure_names_the_expression_and_the_data() {
+    let fixture = CliProcessFixture::named("load_data_destination_json");
+    fixture.write_file("cwd/data.yaml", OLD_PEOPLE);
+    fixture.write_file("cwd/doc.md", DESTINATION_DOC);
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_failed(&envelope);
+    let record = only_record(&envelope);
+    assert!(record["code"].as_str().unwrap_or_default().starts_with("dm.schema."), "{record:#}");
+    assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&json!(4), &json!(10)), "{record:#}");
+    let data = fixture.cwd().join("data.yaml");
+    assert_eq!(
+        record["data_location"],
+        json!({ "file": read_entry(&data), "pointer": "/1/age", "line": 4, "column": 8 }),
+        "{record:#}"
+    );
+}
+
+/// The Markdown-mode report shows the same two positions.
+#[test]
+fn a_destination_schema_failure_report_shows_both_positions() {
+    let fixture = CliProcessFixture::named("load_data_destination_report");
+    fixture.write_file("cwd/data.yaml", OLD_PEOPLE);
+    fixture.write_file("cwd/doc.md", DESTINATION_DOC);
+    let output = fixture.command().args(["compose", "doc.md"]).output().expect("md runs");
+    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
+    assert!(output.stdout.is_empty(), "no composed document: {}", String::from_utf8_lossy(&output.stdout));
+    let report = stderr_of(&output);
+    assert!(report.contains(" at 4:10"), "{report}");
+    let data = read_entry(&fixture.cwd().join("data.yaml"));
+    assert!(report.contains(&format!("{data}:4:8 (/1/age)")), "{report}");
 }

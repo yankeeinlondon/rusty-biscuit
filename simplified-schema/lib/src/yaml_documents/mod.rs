@@ -4,7 +4,9 @@
 //! A YAML document selects its schema by its top-level `kind` when a
 //! `kind: yaml-schema` definition claims it, and otherwise by a root
 //! `$schema`; a document with neither is not validated ([`select`]). The
-//! claims of one document context are its [`KindRegistry`]. The language's
+//! claims of one document context are its [`KindRegistry`]; registered
+//! hosts' definitions ([`RegisteredKinds`]) claim only kinds it leaves
+//! unclaimed ([`select_with_registered`]). The language's
 //! own kinds (`schema`, `schema-trigger`, `yaml-schema`) then get the checks
 //! their definitions cannot state ([`semantic`]).
 //!
@@ -29,10 +31,10 @@ pub mod semantic;
 
 pub use load::{LoadedYaml, first_tag_start, load_yaml_document, locating_problem, pointer_string};
 pub use registry::{
-    Claim, DefinitionSource, Incomplete, KindDefinition, KindHost, KindRegistry, RegistryScope, ShippedDefinition,
-    prepare_shipped, prepare_shipped_definitions,
+    Claim, DefinitionSource, Incomplete, KindDefinition, KindHost, KindRegistry, RegisteredDefinition, RegisteredKinds,
+    RegisteredSource, RegistryScope, ShippedDefinition, prepare_shipped, prepare_shipped_definitions,
 };
-pub use select::{Selection, select};
+pub use select::{Selection, select, select_with_registered};
 pub use semantic::{CHECKED_KINDS, FILE_READING_KINDS};
 
 /// A whole YAML document admitted by the one YAML document loader, ready

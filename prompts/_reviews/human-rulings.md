@@ -1,26 +1,26 @@
 ---
 description: |-
     Runs an interactive session that collects the author's rulings on the
-    `human_in_the_loop` items of a feature or fix review, records them under the
-    review's `## Human rulings` heading, and sets `human_resolved` so the
+    `human-in-the-loop` items of a feature or fix review, records them under the
+    review's `## Human rulings` heading, and sets `human-resolved` so the
     review/fix cycle (`just fix`) can continue.
 $schema:
-    review: file(required; match(**/review-*.md)) -> the review whose `human_in_the_loop` items need rulings
+    review: file(required; match(**/review-*.md)) -> the review whose `human-in-the-loop` items need rulings
     spec: file(required; match(**/*spec*.md)) -> the specification the review is based on
 dir: "{{dirname(review)}}"
 interactive: true
 initialize:
-    - when: "is_empty(frontmatter(review, 'human_in_the_loop'))"
+    - when: "is_empty(frontmatter(review, 'human-in-the-loop'))"
       then:
-          - error: "{{basename(review)}} has no `human_in_the_loop` items to rule on"
+          - error: "{{basename(review)}} has no `human-in-the-loop` items to rule on"
 start:
     stderr: "{{basename(review)}} of `{{parent_dir(spec)}}` needs your rulings before the review/fix cycle can continue."
     say: "A review needs your rulings. Please stand by while the questions are prepared."
 success:
-    - when: "frontmatter(review, 'human_resolved') == true"
+    - when: "frontmatter(review, 'human-resolved') == true"
       then:
           - message: "the rulings for {{basename(review)}} of `{{parent_dir(spec)}}` are recorded; the review/fix cycle continues ({{ctx.agent}}/{{ctx.model}})"
-    - when: "frontmatter(review, 'human_resolved') != true"
+    - when: "frontmatter(review, 'human-resolved') != true"
       then:
           - warn: "{{basename(review)}} of `{{parent_dir(spec)}}` still has items without a ruling; the review/fix cycle stays stopped"
 ---
@@ -38,7 +38,7 @@ the context you give and brief in everything else.
 
 ## Important Constraints
 
-- Ask only about the review's `human_in_the_loop` items. Do not open new
+- Ask only about the review's `human-in-the-loop` items. Do not open new
   topics, re-ask an item an earlier review already ruled on, or review code.
 - Do not convert an item into a ruling unless the author explicitly chooses
   it. "Go with your recommendation" is an explicit choice.
@@ -60,7 +60,7 @@ the context you give and brief in everything else.
 
 1. **Contemplate**
 
-    Read the review's `human_in_the_loop` items, the findings that wait on
+    Read the review's `human-in-the-loop` items, the findings that wait on
     them, the parts of the spec they touch, and the implementation log's
     evidence for them. For each item, establish what is decided, what
     evidence exists, and what changes depending on the answer.
@@ -106,10 +106,10 @@ the context you give and brief in everything else.
 
 5. **Finalize**
 
-    - If every item has a ruling, set `human_resolved` to `true` in
-      {{review}}'s frontmatter. Leave `human_in_the_loop`, `findings`,
+    - If every item has a ruling, set `human-resolved` to `true` in
+      {{review}}'s frontmatter. Leave `human-in-the-loop`, `findings`,
       `ready`, and `implemented` unchanged; the repair step reads them.
-    - If the author chose to leave any item undecided, set `human_resolved`
+    - If the author chose to leave any item undecided, set `human-resolved`
       to `false`, keep its `Ruling: (pending)` line, and tell the author the
       cycle stays stopped until it is ruled on.
     - Summarize the rulings to the author in one short list and tell them the

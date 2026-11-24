@@ -765,6 +765,199 @@ the smaller allowance is never reused by a command. A newer edit of the
 template cancels a resolution still running, and only the newest result is
 installed.
 
+### Observed properties
+
+The editor normally leaves a frontmatter value written as `{{ … }}` alone,
+because its value exists only once the document is composed. One kind of
+property is the exception: when the expression loads data without a
+contract, its type comes only from the data it loads. For those, the same
+background worker evaluates the expression under the rules a slot follows,
+and the editor judges the result against the schema exactly as
+`md compose` would, so you see a wrong row while you type instead of at
+compose time:
+
+```yaml
+---
+$schema:
+    people: "{ name: string(required), age: number }[]"
+people: "{{ load_data('people.yaml') }}"
+---
+```
+
+and beside it a `people.yaml` that `permissions.file-read` pre-approves:
+
+```yaml
+- name: Ada
+  age: 36
+- name: Grace
+  age: "old"
+```
+
+`people` gets a `dm.schema.type_mismatch` error at its `{{ … }}`, with a
+related location at `age: "old"` on line 4 of `people.yaml`. Hover on
+`people` shows the declared type followed by a preview of the loaded rows,
+and completion after `i.` in `{{ map(load_data('people.yaml'), i => i.) }}`
+offers the members the rows hold, `name` and `age`.
+What each surface shows is described in
+[Diagnostics](../../../dmls/docs/diagnostics.md#observed-property-values),
+[Autocomplete](../../../dmls/docs/autocomplete.md#members-of-a-loaded-value),
+and [Hover](../../../dmls/docs/hover.md#observed-values).
+
+The whole cycle, from the edit that asks for an observation to the change
+that makes it out of date:
+
+```mermaid
+flowchart TD
+    D["open or edit a document with an eligible property"] --> Q[queue a job on the slot worker]
+    Q --> A{"every function and name in the expression is one the editor runs?"}
+    A -- no --> P["pending: no verdict, no observed members"]
+    A -- yes --> G{"each read approved without asking?<br/>a URL: allowed, with a fresh cached response?"}
+    G -- no --> P
+    G -- yes --> E[evaluate the expression]
+    E -- "a missing file, not recovered" --> M[missing-file warning]
+    E -- "another failure" --> F["the failure's own code"]
+    E -- value --> V{"can the schema judge it here?"}
+    V -- "no: deferred" --> N[value for completion and hover only]
+    V -- yes --> J[verdict against the schema]
+    P --> I{"newest job, and nothing it read changed since it started?"}
+    M --> I
+    F --> I
+    N --> I
+    J --> I
+    I -- no --> Q
+    I -- yes --> S[serve completion, hover, diagnostics]
+    S --> C{"a read file, open buffer, approval, configuration, or schema changes, or a cached response expires"}
+    C --> W[withhold the observation] --> Q
+```
+
+**Which properties are observed.** A top-level key whose entire value is one
+`{{ … }}` expression that calls `load_data` anywhere (inside a callback or an
+object spread too) with no `as` contract, a literal `null` one, or a computed
+one that might be `null`. The schema does not need to hold slots.
+
+| Property | Observed |
+| --- | --- |
+| `rows: "{{ load_data('d.yaml') }}"` | yes |
+| `rows: "{{ map(load_data('d.yaml'), r => r.name) }}"` | yes |
+| `rows: "{{ load_data('d.yaml', t) }}"` | yes: `t` may be `null` |
+| `rows: "{{ load_data('d.yaml', 'string[]') }}"` | no: the contract already types it |
+| `title: "Rows: {{ load_data('d.yaml') }}"` | no: the expression is embedded in text |
+| `nested: { inner: "{{ load_data('d.yaml') }}" }` | no: not a top-level key |
+
+Embedded and nested expressions keep their compose-time checks. An observed
+expression may read another whole-value property by its bare name
+(`{{ map(people, p => p.name) }}`), which is evaluated when the read is
+reached; `fm.people` reads the authored value instead, so it leaves the
+property pending while `people` is still a template. Properties that read
+each other are pending.
+
+**What an observation may read.** The same approvals decide as for a slot
+(see [What a slot may read](#what-a-slot-may-read)), judged for the
+document, and nothing is ever asked:
+
+- A local file, read by `load_data` or checked by `file_exists`, is read only
+  when `permissions.file-read` pre-approves it or an approval given in this
+  server session (`dmls.grantSlotRead`) allows it. A read nothing approves
+  leaves the property pending, and the file is never opened or even checked
+  for existence. A pending property gets no diagnostic and no quick fix;
+  approving the file in your configuration refreshes it. An open buffer is
+  read instead of the file on disk.
+- A URL is read only when it is allowed (`permissions.network: allow`, or an
+  approval of that URL in this session), and only from a fresh entry of the
+  [remote transport cache](../caching.md#editor-reads), the one
+  `md compose --cache-root` fills under the document's repository root. A
+  missing, expired, or `no-cache` entry, or a URL that is not allowed, leaves
+  the property pending; the editor never fetches or revalidates. When the
+  cached response it used expires, the observation is withdrawn and the
+  property observed again.
+- Only pure functions, `load_data`, and `file_exists` run. Evaluation
+  follows ordinary branch selection, short-circuiting, and `try` recovery,
+  and each call and name is judged only when evaluation reaches it. A
+  reached one the editor does not evaluate leaves the property pending
+  before it has any effect: an effectful or volatile function, a listing
+  (`find_files`, …), `ctx`, a host or runtime-only binding, a property absent
+  from the document, `current` or `local` outside a callback, and a recursive
+  (`%`) reference. `try` never turns that into its fallback. The same names
+  in a branch, fallback, recovery argument, or callback body that does not
+  run change nothing:
+
+  ```yaml
+  a: "{{ true ? load_data('people.yaml') : ctx.cwd }}"          # observed: the other arm never runs
+  b: "{{ load_data('people.yaml') || find_files('*.yaml') }}"   # observed: the fallback is not needed
+  c: "{{ false ? load_data('people.yaml') : ctx.cwd }}"         # pending: `ctx` is reached
+  ```
+
+  The [call check](../../inline/call-check.md) is separate and passive: a
+  call that can never bind is still an error in a branch that does not
+  run.
+- All observed properties of a document share one work allowance (the same
+  25,000 visits and 4 MiB as a slot, file bytes included). A pass that runs out
+  leaves the rest pending, without a prompt or an error.
+
+**No verdict without a value.** A pending property, and one whose
+observation is out of date while a refresh runs, gets no schema verdict and
+no members inferred from data the editor has not seen. Completion and hover
+fall back to the declared type. The editor never reports a schema error from
+types alone; compose remains the check.
+
+**A missing file.** An executed `load_data` of a local file that provably
+does not exist is a `dm.expression.evaluation_failure` **warning** at the
+expression; the same document fails `md compose` with an error there. It is
+reported only when the read runs and nothing recovers it:
+
+```yaml
+a: "{{ load_data('gone.yaml') }}"                                        # warning
+b: "{{ try(load_data('gone.yaml'), []) }}"                               # nothing: try recovers it
+c: "{{ file_exists('gone.yaml') ? load_data('gone.yaml') : 'none' }}"   # nothing: the branch is not taken
+```
+
+The missing file gets no schema verdict, even when the property is declared
+as a non-container type such as `string`; that mismatch appears once the file
+exists, or at compose. A file that exists but cannot be read (an I/O error, a
+file that vanished during the read) is pending rather than missing. Creating
+the file refreshes the property. Any other evaluation failure (malformed data,
+a contract that does not match) is an error with its own code, such as
+`dm.data.malformed`, unless the passive call check already reports that
+code at the same place.
+
+**What is checked, and what is deferred.** An observed value is checked by
+the ordinary frontmatter validation, with the same conversion, defaults, and
+constraints as compose: a missing field with a default passes, `"1000"`
+converts to a number, an unexpected field fails in a closed object, and a
+string the data holds is data even when it contains `{{`. The editor gives no
+verdict when it cannot reach the same answer as compose:
+
+- the schema does not declare the property;
+- the declaration checks a file (an eager `file` or a `match()` glob,
+  including through a referenced type), which would need reads the editor
+  does not make;
+- the schema's root ties properties together (a root union, `anyOf`,
+  `oneOf`, `allOf`, `if`/`then`/`else`, `not`, or a dependency) and another
+  property is still a `{{ … }}` or `$( … )` value, or any property of the
+  document is file-dependent: then every observed property waits;
+- the evaluation ran a `load_data` call that read a CSV or TSV file with no
+  contract (`as` omitted or `null`) and `header: false`: its type stays
+  `unknown[][]` and no cell is judged, while compose checks every cell the
+  schema covers. What counts is the read the call actually made, after its
+  arguments are bound, so `{header: "false"}`, options held in another
+  property, and options built by a spread are all headerless, and
+  `{...{header: false}, header: true}` is not. A headerless call in a branch
+  that did not run changes nothing: in
+  `true ? load_data('t.csv') : load_data('t.csv', null, {header: false})`
+  the headed result is judged. A property that reads another property's
+  headerless result gets no verdict either.
+
+**What refreshes an observation.** Everything that refreshes a slot
+resolution (see **What refreshes a resolution** above): a saved
+change to a file it read, the creation of a file it found missing, an unsaved
+edit to an open buffer it read, and, for a client that cannot watch files,
+the `stat` check on each save. A configuration change, a `dmls.grantSlotRead`
+approval, `dmls.refreshSchemaSlots`, a change to the document's schema, and
+the expiry of a cached response it used refresh it too. A result from a job
+that started before something it read changed is discarded and the job run
+again, and only the newest job installs. Until the refresh installs, the old
+observation is withheld.
+
 ## Failures
 
 A failed slot is reported at the slot, in the file it is written in. The

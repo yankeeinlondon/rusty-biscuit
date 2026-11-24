@@ -102,6 +102,34 @@ detector's cached `rush.json` (JSONC, via `repo::jsonc`). A corroborating
 request also reads `pnpm-config.json` and `subspaces.json`, each counted as
 `REPO_MANIFEST_PARSES`.
 
+### Focused status: stages, snapshot timing, and visits
+
+`sniff repo git-status` runs `filesystem::detect_repo_git_status` inside one
+`CliPerf::collect` and calls `CliPerf::build_report` only after it returns, so
+the one report (text on stdout, JSON's embedded `performance`, and the JSON
+stderr diagnostic) covers selection and linking. Earlier the renderer's
+`commit_links_at` ran after the snapshot and its seconds of ancestry walks were
+invisible. Stages under `detect.filesystem`:
+
+- `filesystem.git.initial`: the Git worker (status, history, refs)
+- `filesystem.git.selection`: package/area, branch, and worktree selectors
+- `filesystem.git.commit_links`: the linking pass, absent for `--plain`,
+  `--json`, `--history 0`, an empty display, or a snapshot without remote tips
+
+`filesystem.git` itself is deliberately unmeasured in this mode: the perf tree
+sums an unmeasured parent's children, while a measured parent shows its own
+duration only. Other modes keep the measured `filesystem.git`.
+
+`git.commit_visits` counts every Git walk, history and path selection
+included, so a nonzero value alone does not prove linking ran. The linking
+share is the difference against an equivalent `--plain` or `--json` request;
+with an unpushed displayed commit that difference equals the number of
+distinct commits reachable from the remote-tracking tips (16,682 on this
+monorepo on 2026-11-21, against 342,614 for independent walks). Ordinary and
+detached status each record one `git.repository_discoveries` and one
+`git.ref_walks`; selecting a linked worktree adds one discovery, and a second
+ref walk only when its refs cannot be shared.
+
 ## Known baseline boundaries
 
 - Early filesystem baselines undercount manifest-index file opens and bytes.

@@ -127,12 +127,47 @@ rules:
 
 - Linking walks remote-tracking tips in `preferred_remote_order`. Within a
   remote, it walks the `refs/remotes/<r>/HEAD` default branch first.
-- All walks share `COMMIT_VISIT_BUDGET` (5,000,000) through
-  `remote_refresh::walk_ancestry`, the same walker the deep tier uses.
+- All walks share `COMMIT_VISIT_BUDGET` (5,000,000) and their visits: each
+  completed walk's commits go into a set that
+  `remote_refresh::walk_ancestry_with_filter` prunes before queueing, and a
+  covered tip is skipped, so a pass visits each reachable commit once. A
+  partial walk never publishes its visits. After a `Failed` walk the set is
+  dropped and the remaining tips walk independently. The deep tier's
+  `populate_recent_commit_remotes_from_snapshot` keeps the unfiltered
+  `walk_ancestry`, since it records every containing remote.
 - `remote` is `false` only when every walk completed. An exhausted budget or an
-  unreadable ancestor gives `null`.
+  unreadable ancestor gives `null`. A `RefSnapshot` that did not observe
+  remote branches (`has_remote_branch_tips()` false, such as a default or
+  decoration-only snapshot) links every target `null`; an observed empty set
+  proves absence.
+- `link_commits_from_snapshot_with_walk` is the private seam: tests switch
+  sharing off for an independent control or inject a failing walk.
 - `commit_browser_url` and CLI `repo git-status` link a commit only when a
   remote-tracking ref contains it.
+- Focused status is a library operation: `filesystem::detect_repo_git_status`
+  (`git/status_report.rs`) runs `detect_filesystem_with_request_inner` in
+  `FilesystemGitMode::Status`. The Git worker calls
+  `GitRepo::detect_with_ref_snapshot(request, include_link_tips)`, which
+  folds remote-tip demand into the one `RefSnapshot` (needed on detached
+  `HEAD`, where tracking does not ask for tips) and returns it.
+  `finish_status` then applies package/area path history, `--branch`
+  (`discovery::get_commits_for_branch_from_snapshot`, captured tips and
+  decorations), and `--worktree`, in that order, and links only the first
+  `history_count` entries of the final list into a map keyed by full SHA.
+  The renderer only looks links up. Package/area resolution lives in
+  `repo/scope.rs::resolve_package_and_area` (`SniffError::RepositorySelection`);
+  a nested package or area yields a `/`-terminated prefix and a root package
+  (`relative` empty) the empty prefix, which every path matches. Never build
+  a prefix with a bare `format!("{}/", relative)`: for the root it is `"/"`.
+- A selected linked worktree reuses the initial snapshot (with `is_head`
+  re-marked by `RefSnapshot::with_head_branch`) only when both handles have
+  equal canonical common dirs, namespaces, and effective object
+  replacements, neither has a private admin `refs/` directory, and the
+  snapshot is `is_worktree_independent()` (its only symbolic refs are
+  `<remote>/HEAD` aliases of directly observed branches). Otherwise it takes
+  one snapshot on the selected handle; a failure there gives undecorated
+  history and no links. URLs always come from the selected handle's config,
+  so `config.worktree` remotes are honored.
 - Older single-purpose parsers remain outside linking and were deliberately
   not consolidated: `GitInfo.org`/`repo` (`types.rs::parse_org_repo`),
   provider host classification (`extract_remote_host`), and the identity
@@ -275,7 +310,12 @@ Windows App Paths behavior.
 All subprocesses go through `process::run_with_timeout` or
 `process::run_command_with_timeout`. These helpers own deadlines, concurrent
 pipe draining, process-tree termination, and reaping on macOS, Linux, and
-Windows. Preserve caller cwd and environment when using the builder form.
+Windows. Preserve caller cwd and environment when using the builder form;
+the one exception is the `EXEPATH` that
+`programs::git_program::name_installation_for_gix` set for `gix` (CLI
+`main`, before the Tokio runtime is built), which `run_command_with_timeout` strips with
+`forget_installation_hint`. A new spawn that bypasses the helpers must call
+that hook itself. `wt` re-exports these and `git_program::command`.
 
 `process` is public for three things. The process-tree owner
 (`ProcessTree`, `TreeConfig`, `TreeIsolation`, `CleanupScan`,

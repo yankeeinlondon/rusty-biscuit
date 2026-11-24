@@ -263,7 +263,9 @@ fn hover_on_load_data_shows_the_options_parameter_and_its_defaults() {
         assert!(hover.contains(key), "{key} in {hover}");
     }
     assert!(hover.contains("default a comma"), "{hover}");
-    assert!(hover.contains("(default `true`)"), "{hover}");
+    assert!(hover.contains("`true` (the default"), "{hover}");
+    assert!(hover.contains("[as: type-definition(container) | null]"), "the contract is optional and nullable: {hover}");
+    assert!(hover.contains("header: boolean | string[]"), "{hover}");
 
     session.shutdown();
 }
@@ -434,5 +436,76 @@ fn both_arities_keep_null_file_typing() {
     assert_eq!(computed_two, computed_three);
     assert_eq!(computed_three, ["h.name"], "a possibly-null file keeps the contract's members");
 
+    session.shutdown();
+}
+
+/// An omitted or `null` contract is the same call: neither is a diagnostic,
+/// and options still apply after a `null` contract.
+#[test]
+fn an_omitted_or_null_contract_is_no_diagnostic() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "# Doc\n\n",
+        "{{ load_data(\"rows.json\") }}\n\n",
+        "{{ load_data(\"rows.json\", null) }}\n\n",
+        "{{ load_data(\"rows.csv\", null, {header: false}) }}\n\n",
+        "{{ load_data(\"rows.csv\", null, {header: [\"label\", \"port\"]}) }}\n",
+    );
+    let session = Session::open(&workspace, text);
+    let errors: Vec<&Value> = session
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == json!(1))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    session.shutdown();
+}
+
+/// A `null` contract still gets the options checks, on the options.
+#[test]
+fn options_after_a_null_contract_are_ranged_on_the_third_argument() {
+    assert_error_at(r#"load_data("rows.json", null, {header: false})"#, "{header", "dm.data.invalid_options");
+}
+
+/// A header list is checked before anything runs: names that cannot key
+/// objects are invalid options, and a list contract cannot read named rows.
+#[test]
+fn header_list_problems_are_ranged_like_composition() {
+    for (call, argument, code) in [
+        (r#"load_data("rows.csv", null, {header: []})"#, "{header", "dm.data.invalid_options"),
+        (r#"load_data("rows.csv", null, {header: ["a", ""]})"#, "{header", "dm.data.invalid_options"),
+        (r#"load_data("rows.csv", null, {header: ["a", "a"]})"#, "{header", "dm.data.invalid_options"),
+        (r#"load_data("rows.csv", null, {header: ["a", {}]})"#, "{header", "dm.expression.incompatible_call"),
+        (r#"load_data("rows.csv", "tuple([string])[]", {header: ["a"]})"#, r#""tuple"#, "dm.data.row_shape_conflict"),
+        (r#"load_data("rows.json", null, {header: ["a"]})"#, "{header", "dm.data.invalid_options"),
+    ] {
+        assert_error_at(call, argument, code);
+    }
+}
+
+/// A list `header` value offers no boolean completion inside the list.
+#[test]
+fn a_header_list_value_offers_no_boolean_items() {
+    let workspace = LspWorkspace::new();
+    let text = "# Doc\n\n{{ load_data(\"rows.csv\", null, {header: [\"a\", ]}) }}\n";
+    let mut session = Session::open(&workspace, text);
+    let labels = labels(&session.completion(after(text, "[\"a\", ")));
+    assert!(!labels.iter().any(|label| label == "true" || label == "false"), "{labels:?}");
+    session.shutdown();
+}
+
+/// An uncontracted load proves no member absent: a callback over it offers
+/// no members and reports nothing.
+#[test]
+fn an_uncontracted_load_is_provisional_for_members() {
+    let workspace = LspWorkspace::new();
+    let text = "# Doc\n\n{{ map(load_data(\"hosts.yaml\"), h => h.name) }}\n";
+    let session = Session::open(&workspace, text);
+    let findings: Vec<&Value> = session
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == json!(1) || diagnostic["severity"] == json!(2))
+        .collect();
+    assert!(findings.is_empty(), "{findings:#?}");
     session.shutdown();
 }

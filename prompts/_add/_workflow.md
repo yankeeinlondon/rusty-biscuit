@@ -1,8 +1,8 @@
 ---
 description: |-
     Shared process partial for the `_add/*` prompts. The parent document supplies `kind`
-    (singular noun), `kinds` (plural), `catalog_command` (the `claudine context` report that
-    lists the catalog being extended), `spec_dir` (where the feature spec is written), and
+    (singular noun), `kinds` (plural), `catalog-command` (the `claudine context` report that
+    lists the catalog being extended), `spec-dir` (where the feature spec is written), and
     `requirements` (the caller's raw ask). Do not set those keys here: a child's hardcoded
     frontmatter overrides the parent's during transclusion.
 ---
@@ -26,7 +26,7 @@ description: |-
 1. Read the caller's requirements above and restate them in your own words as a numbered list
    of **candidate {{kinds}}**, one item per name. Give each item a working name that follows
    the catalog's naming style (snake_case, no abbreviations, US English).
-2. Run `{{catalog_command}}` and check every candidate against the existing catalog:
+2. Run `{{catalog-command}}` and check every candidate against the existing catalog:
     - an exact name collision is a **change** to an existing entry, not an addition, and needs
       the caller's explicit confirmation;
     - a near-duplicate (same fact under another spelling, or an existing entry that already
@@ -58,7 +58,7 @@ into the spec's "Open Questions" section with your recommendation and do **not**
 
 ## Phase 3 — Specification
 
-Write the spec to `{{spec_dir}}/spec.md` before touching code. It follows the repo's feature
+Write the spec to `{{spec-dir}}/spec.md` before touching code. It follows the repo's feature
 conventions (a dated directory under the package area's `features/`, `spec.md` inside) and
 has these sections:
 
@@ -77,7 +77,7 @@ has these sections:
 8. **Open Questions** — anything left unruled, with your recommendation.
 
 Set the spec's frontmatter: `created: {{ctx.today}}`, `status: draft`,
-`clarified_by: "{{ctx.agent}}/{{ctx.model}}"`, and `requirements` holding the caller's
+`clarified-by: "{{ctx.agent}}/{{ctx.model}}"`, and `requirements` holding the caller's
 original text verbatim (use a `|-` block scalar).
 
 Show the caller the Definitions and Rulings sections and get a **go** before Phase 4.
@@ -124,7 +124,7 @@ cd sniff      && just test && just lint      # when Sniff changed
 
 Then prove the catalog surface end to end:
 
-- `{{catalog_command}}` lists every new entry exactly once, in the intended category;
+- `{{catalog-command}}` lists every new entry exactly once, in the intended category;
 - `claudine context --values` shows the observed value when this host can observe it;
 - `md compose <fixture.md>` composes a fixture that uses each new entry, and the output
   shows the expected value rather than a leaked `{{{ … }}}` span.
@@ -134,9 +134,9 @@ red test to get green; report it.
 
 ## Closure
 
-Update `{{spec_dir}}/spec.md` frontmatter: `implemented: true`,
-`implemented_by: "{{ctx.agent}}/{{ctx.model}}"`, `status: "implemented, ready for review"`,
-and `human_review_items` only for a design decision taken without a ruling that is hard to
+Update `{{spec-dir}}/spec.md` frontmatter: `implemented: true`,
+`implemented-by: "{{ctx.agent}}/{{ctx.model}}"`, `status: "implemented, ready for review"`,
+and `human-review-items` only for a design decision taken without a ruling that is hard to
 reverse, departs from a recorded decision, changes scope, touches safety or trust, or that you
 genuinely doubt; at most 3 items, and none for a choice you would simply recommend keeping or
 that is cheap to change later (write each item as a `|-` block so it reads well; explain it

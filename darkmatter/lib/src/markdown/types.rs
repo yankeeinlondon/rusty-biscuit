@@ -120,6 +120,22 @@ fn blocked_message(blocking: &[crate::markdown::compose::ComposeWarning]) -> Str
     format!("{count} blocking {noun} under the deny policy; first: {first}")
 }
 
+/// The whole-value expression that produced a top-level frontmatter
+/// property whose value failed the destination schema
+/// ([`MarkdownError::SchemaValidationFailed`]'s `expression_origins`).
+#[derive(Debug, Clone)]
+pub struct ExpressionMetadata {
+    /// Where the `{{ … }}` was authored in the document; `None` when its
+    /// position is not proven.
+    pub span: Option<AuthoredSpan>,
+    /// The source of a value that is, unchanged, one `load_data` call's
+    /// result; `None` for a value the expression derived.
+    pub load: Option<std::sync::Arc<crate::markdown::compose::expression::trace::LoadOrigin>>,
+    /// The property's value as validated: a problem path's segments are read
+    /// against it as object keys or array indexes.
+    pub value: serde_json::Value,
+}
+
 /// Errors that can occur when working with Markdown documents.
 #[derive(Error, Debug)]
 pub enum MarkdownError {
@@ -316,6 +332,13 @@ pub enum MarkdownError {
         /// `Box` itself as the trait object, so that downcast would miss.
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        /// For each failing top-level property whose value one whole-value
+        /// `{{ … }}` produced, keyed by the decoded property name: where the
+        /// expression was authored and, for a direct `load_data` result,
+        /// where its data came from. Shared by every problem under that
+        /// property; empty for a preparation failure. Boxed to keep the
+        /// error within the workspace's `large-error-threshold`.
+        expression_origins: Box<std::collections::BTreeMap<String, ExpressionMetadata>>,
     },
 
     /// A present caller override changed file mode after the first
@@ -845,12 +868,13 @@ impl BlockError for MarkdownError {
                 // programmatic recovery; the styled block renders `summary`
                 // and `problems`, and reads the source only for its hint.
                 source,
+                expression_origins,
             } => {
                 let hint = source
                     .as_deref()
                     .and_then(|source| source.downcast_ref::<simplified_schema::SchemaError>())
                     .and_then(simplified_schema::SchemaError::preparation_hint);
-                blocks::schema_validation_failed_block(path, problems, summary, description, hint)
+                blocks::schema_validation_failed_block(path, problems, summary, description, hint, expression_origins)
             }
             MarkdownError::CallerFileClassificationChanged { property } => {
                 blocks::caller_file_classification_changed_block(property)

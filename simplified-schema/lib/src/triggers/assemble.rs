@@ -65,6 +65,8 @@ pub struct TriggerTrace {
 pub struct TriggerTraceEntry {
     /// The trigger envelope's schema-root file or bundle document.
     pub source: TriggerSource,
+    /// The envelope's `name` label.
+    pub name: Option<String>,
     /// Whether every top-level condition matched.
     pub matched: bool,
     /// Whether the payload is a template (it holds `{{ … }}` slots): it is
@@ -137,6 +139,7 @@ pub fn trace_registry(
                 .collect::<Vec<_>>();
             TriggerTraceEntry {
                 source: trigger.source.clone(),
+                name: trigger.envelope.name.clone(),
                 matched: conditions.iter().all(|condition| condition.matched),
                 pending: pre_resolved && registry.payloads[idx].pending.is_some(),
                 conditions,
@@ -299,6 +302,7 @@ pub fn resolve_trigger_payload(
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
             return resolve_embedded_payload(
                 trigger.envelope.payload.as_ref(),
+                trigger.envelope.types.as_ref(),
                 bundle,
                 name,
                 crate::shipped::PreparationMode::Runtime,
@@ -317,7 +321,15 @@ pub fn resolve_trigger_payload(
     let Some(payload) = trigger.envelope.payload.as_ref() else {
         return Ok(ResolvedPayload::matcher_only());
     };
-    file_payload_memo::resolve(source, payload, trigger.text.as_ref(), schema_roots, context, sources)
+    file_payload_memo::resolve(
+        source,
+        payload,
+        trigger.envelope.types.as_ref(),
+        trigger.text.as_ref(),
+        schema_roots,
+        context,
+        sources,
+    )
 }
 
 /// Empties the process-wide trigger payload memo (see
@@ -326,12 +338,13 @@ pub(crate) fn reset_process_caches() {
     file_payload_memo::clear();
 }
 
-/// [`resolve_trigger_payload`] for a schema-root file, uncached. `text` is
-/// the file's text as discovery read it: an inline payload's slots are
-/// positioned in it.
+/// [`resolve_trigger_payload`] for a schema-root file, uncached. `types` is
+/// the trigger's local `types` table. `text` is the file's text as
+/// discovery read it: an inline payload's slots are positioned in it.
 fn resolve_file_payload(
     source: &Path,
     payload: &YamlValue,
+    types: Option<&YamlValue>,
     text: Option<&std::sync::Arc<str>>,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
@@ -348,9 +361,10 @@ fn resolve_file_payload(
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
     // refusal is reported as the cycle it is.
-    let resolved = match crate::resolve::resolve_authored_yaml_schema(
+    let resolved = match crate::resolve::resolve_trigger_payload_value(
         payload,
-        crate::resolve::InlineOwner::Trigger(source),
+        types,
+        source,
         authored.as_ref(),
         base_dir,
         schema_roots,
@@ -482,6 +496,8 @@ mod file_payload_memo {
     struct Key {
         source: PathBuf,
         payload: YamlValue,
+        /// The trigger's local `types` table.
+        types: Option<YamlValue>,
         /// The trigger file's text: a template payload's slots carry their
         /// ranges in it, so an edit elsewhere in the file is a miss.
         text: Option<std::sync::Arc<str>>,
@@ -501,6 +517,7 @@ mod file_payload_memo {
         fn new(
             source: &Path,
             payload: &YamlValue,
+            types: Option<&YamlValue>,
             text: Option<&std::sync::Arc<str>>,
             schema_roots: &[PathBuf],
             original: &FileResolutionContext,
@@ -511,6 +528,7 @@ mod file_payload_memo {
             Self {
                 source: source.to_path_buf(),
                 payload: payload.clone(),
+                types: types.cloned(),
                 text: text.cloned(),
                 schema_roots: schema_roots.to_vec(),
                 tree: original.base_dir().to_path_buf(),
@@ -539,12 +557,13 @@ mod file_payload_memo {
     pub(super) fn resolve(
         source: &Path,
         payload: &YamlValue,
+        types: Option<&YamlValue>,
         text: Option<&std::sync::Arc<str>>,
         schema_roots: &[PathBuf],
         original: &FileResolutionContext,
         sources: ShippedSources,
     ) -> Result<ResolvedPayload, SchemaError> {
-        let key = Key::new(source, payload, text, schema_roots, original, sources);
+        let key = Key::new(source, payload, types, text, schema_roots, original, sources);
         let held = {
             let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
             entries
@@ -565,7 +584,7 @@ mod file_payload_memo {
         }
 
         tally::record_miss();
-        let resolved = resolve_file_payload(source, payload, text, schema_roots, original, sources)?;
+        let resolved = resolve_file_payload(source, payload, types, text, schema_roots, original, sources)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
         entries.retain(|entry| entry.key != key);
@@ -819,6 +838,7 @@ pub fn resolve_embedded_trigger_payload(
     match (&trigger.source, trigger.bundle) {
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(
             trigger.envelope.payload.as_ref(),
+            trigger.envelope.types.as_ref(),
             bundle,
             name,
             crate::shipped::PreparationMode::Runtime,
@@ -838,13 +858,15 @@ pub fn resolve_embedded_trigger_payload(
 /// (`payload.yaml`, `./payload.yaml`); a mapping is an inline schema whose
 /// `Name@./file.yaml` imports and `@this` resolve among the bundle's
 /// documents. Nothing falls back to the disk, the schema roots, or the
-/// network. Errors carry the virtual path `{bundle}/{name}` where a
+/// network. A mapping names the trigger's `types` table as its own named
+/// types. Errors carry the virtual path `{bundle}/{name}` where a
 /// [`SchemaError`] field needs a path. `mode` and `cache` are the resolution
 /// mode and the validator cache of the compile check: a generation passes
 /// [`PreparationMode::Uncached`](crate::shipped::PreparationMode::Uncached)
 /// and a private cache.
 pub(super) fn resolve_embedded_payload(
     payload: Option<&YamlValue>,
+    types: Option<&YamlValue>,
     bundle: EmbeddedSchemaBundle,
     name: &str,
     mode: crate::shipped::PreparationMode<'_>,
@@ -883,7 +905,16 @@ pub(super) fn resolve_embedded_payload(
             crate::resolve::prepare_embedded_schema_with_mode(&target, documents, bundle.name(), sources, mode)
         }
         YamlValue::Mapping(_) => {
-            crate::resolve::prepare_embedded_inline_schema_with_mode(payload, &importer, documents, bundle.name(), sources, mode)
+            let types = types.map(crate::resolve::parse_trigger_types).transpose()?;
+            crate::resolve::prepare_embedded_inline_with_types(
+                payload,
+                types.as_ref(),
+                &importer,
+                documents,
+                bundle.name(),
+                sources,
+                mode,
+            )
         }
         YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
             path: importer_path.clone(),
@@ -1433,5 +1464,31 @@ mod tests {
             payload_suggestion(Path::new("/repo/schemas/x.trigger.yml")),
             "x.yml"
         );
+    }
+
+    /// A composed embedded payload reads the trigger, its operand, and the
+    /// operand's own operand as virtual bundle paths, and names no file.
+    #[test]
+    fn composition_in_an_embedded_payload_reads_bundle_documents_only() {
+        const FILES: &[(&str, &str)] = &[
+            ("base.yaml", "kind: schema\ntypes:\n  base: \"{ origin: string }\"\n"),
+            ("shared.yaml", "kind: schema\ntypes:\n  common: \"{ ...base@./base.yaml, id: string(required) }\"\n"),
+            ("trigger.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  $extends: common@./shared.yaml\n"),
+        ];
+        let bundle = crate::embedded::EmbeddedSchemaBundle::new("composed", FILES);
+        let envelope = parse_trigger_envelope_from_str(FILES[2].1).unwrap().expect("a trigger");
+        let trigger = LoadedTrigger {
+            source: TriggerSource::Embedded { bundle: "composed".into(), name: "trigger.yaml".into() },
+            envelope,
+            pattern_cwd: PathBuf::new(),
+            bundle: Some(bundle),
+            text: None,
+        };
+        let (payload, reads) = resolve_embedded_trigger_payload(&trigger, ShippedSources::NONE).expect("resolves");
+        assert!(payload.dependencies.is_empty(), "{:?}", payload.dependencies);
+        let mut reads: Vec<String> = reads.iter().map(|path| path.display().to_string()).collect();
+        reads.sort();
+        assert_eq!(reads, ["composed/base.yaml", "composed/shared.yaml", "composed/trigger.yaml"]);
+        assert_eq!(payload.json_schema["required"], serde_json::json!(["id"]));
     }
 }

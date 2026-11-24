@@ -6,7 +6,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
-use sniff::filesystem::git::BehindStatus;
+use sniff::filesystem::git::{BehindStatus, FileStatus};
 use sniff::filesystem::repo::{DependencyEntry, MonorepoStandard, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
@@ -822,20 +822,27 @@ pub fn render_filesystem_section(
             }
         }
 
-        // Show dirty file details at verbose level 1+
-        if verbose > 0
-            && let Some(status) = git.status.as_ref()
-            && !status.dirty.is_empty()
-        {
+        // `file_changes` lists every changed path; `status.dirty` carries only
+        // the optional patch text (deep requests), so it supplies diffs alone.
+        let dirty_files: Vec<_> = git
+            .file_changes
+            .iter()
+            .filter(|change| change.status != FileStatus::Untracked)
+            .collect();
+        if verbose > 0 && !dirty_files.is_empty() {
             writeln!(out, "  Dirty files:").unwrap();
-            for dirty_file in &status.dirty {
-                writeln!(out, "    - {}", dirty_file.filepath.display()).unwrap();
-                // Show diff at verbose level 2+
-                if verbose > 1 && !dirty_file.diff.is_empty() {
-                    for line in dirty_file.diff.lines().take(5) {
+            for change in dirty_files {
+                writeln!(out, "    - {}", change.path.display()).unwrap();
+                let diff = git
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.dirty.iter().find(|d| d.filepath == change.path))
+                    .map_or("", |dirty_file| dirty_file.diff.as_str());
+                if verbose > 1 && !diff.is_empty() {
+                    for line in diff.lines().take(5) {
                         writeln!(out, "      {}", line).unwrap();
                     }
-                    let line_count = dirty_file.diff.lines().count();
+                    let line_count = diff.lines().count();
                     if line_count > 5 {
                         writeln!(out, "      ... ({} more lines)", line_count - 5).unwrap();
                     }
@@ -843,23 +850,19 @@ pub fn render_filesystem_section(
             }
         }
 
-        // Show untracked files at verbose level 1+
-        if verbose > 0
-            && let Some(status) = git.status.as_ref()
-            && !status.untracked.is_empty()
-        {
+        let untracked: Vec<_> = git
+            .file_changes
+            .iter()
+            .filter(|change| change.status == FileStatus::Untracked)
+            .collect();
+        if verbose > 0 && !untracked.is_empty() {
             writeln!(out, "  Untracked files:").unwrap();
-            let show_count = 5.min(status.untracked.len());
-            for untracked in status.untracked.iter().take(show_count) {
-                writeln!(out, "    - {}", untracked.filepath.display()).unwrap();
+            let show_count = 5.min(untracked.len());
+            for change in untracked.iter().take(show_count) {
+                writeln!(out, "    - {}", change.path.display()).unwrap();
             }
-            if status.untracked.len() > show_count {
-                writeln!(
-                    out,
-                    "    ... and {} more",
-                    status.untracked.len() - show_count
-                )
-                .unwrap();
+            if untracked.len() > show_count {
+                writeln!(out, "    ... and {} more", untracked.len() - show_count).unwrap();
             }
         }
 

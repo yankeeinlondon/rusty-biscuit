@@ -11,6 +11,7 @@
 #[path = "../../benches/support/builder.rs"]
 mod builder;
 
+mod aggregate_changes;
 mod bench_fixtures;
 mod bench_ids_sync;
 mod bench_plans;

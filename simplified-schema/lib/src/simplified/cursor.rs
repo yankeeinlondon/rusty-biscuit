@@ -66,6 +66,31 @@ pub enum SchemaCursorRole {
         /// The named type authored to the left of `@`.
         name: String,
     },
+    /// A composition operand: the text after `...` in an inline object, or
+    /// a `$extends` value or sequence item read by
+    /// [`locate_composition_operand_cursor`]. Only a named object type can
+    /// be written here, never a type keyword or a constraint.
+    CompositionOperand {
+        /// Which half of `Name@reference` the cursor is in.
+        part: CompositionOperandPart,
+        /// The authored document range of the operand from its first byte
+        /// up to the cursor (after `...` and any blank before the name), so
+        /// a completion can replace the whole operand typed so far.
+        /// [`SchemaCursor::token_span`] covers only the active half.
+        operand_span: Range<usize>,
+    },
+}
+
+/// The half of a composition operand a cursor is in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompositionOperandPart {
+    /// The type name, before any `@`.
+    Name,
+    /// The reference after `@`: `this`, a file path, or an embedded name.
+    Reference {
+        /// The named type authored to the left of `@`.
+        name: String,
+    },
 }
 
 /// A tolerant reading of the structural state at a cursor.
@@ -152,16 +177,17 @@ pub fn locate_schema_declaration_cursor(
     locate_in(&value_source[..relative], value_offset, SchemaSourcePath::root(), true)
 }
 
-/// Locates the authoring state of `cursor` inside a plain scalar already
-/// decoded from `source`, as [`locate_type_definition_cursor`] does for raw
-/// value text.
+/// Locates the authoring state of `cursor` inside a scalar already decoded
+/// from `source`, as [`locate_type_definition_cursor`] does for raw value
+/// text.
 ///
 /// `scalar` is the result of
-/// [`decode_plain_scalar_node`](super::decode_plain_scalar_node) on `source`,
-/// so a value that continues onto later lines is read as YAML folds it and any
-/// anchor or tag before it stays outside every reported range. Use it when the
-/// value cannot be read from a parsed document, such as a definition still
-/// being typed.
+/// [`decode_plain_scalar_node`](super::decode_plain_scalar_node) or
+/// [`decode_scalar_node_prefix`](super::decode_scalar_node_prefix) on
+/// `source`, so a value that continues onto later lines is read as YAML folds
+/// it and any anchor or tag before it stays outside every reported range. Use
+/// it when the value cannot be read from a parsed document, such as a
+/// definition still being typed.
 ///
 /// ## Returns
 ///
@@ -177,14 +203,97 @@ pub fn locate_type_definition_cursor_in_scalar(
     scan_decoded(&scalar.prefix_at(source, cursor)?, 0, SchemaSourcePath::root())
 }
 
-/// [`locate_schema_declaration_cursor`] for a plain scalar already decoded
-/// from `source`; see [`locate_type_definition_cursor_in_scalar`].
+/// [`locate_schema_declaration_cursor`] for a scalar already decoded from
+/// `source`; see [`locate_type_definition_cursor_in_scalar`].
 pub fn locate_schema_declaration_cursor_in_scalar(
     source: &str,
     scalar: &DecodedScalar,
     cursor: usize,
 ) -> Option<SchemaCursor> {
     whole_decoded(&scalar.prefix_at(source, cursor)?, 0, SchemaSourcePath::root())
+}
+
+/// Locates the authoring state of a cursor inside one partially authored
+/// `$extends` operand: a scalar `$extends` value, or one item of its
+/// sequence, which the caller has already framed.
+///
+/// `value_source` is the operand's authored text (quoted or plain, never
+/// line-ending-normalized), `value_offset` its byte offset in the caller's
+/// document, and `cursor` a document byte offset at or inside it. The role
+/// is always [`SchemaCursorRole::CompositionOperand`], and its ranges are
+/// authored document ranges.
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::{CompositionOperandPart, SchemaCursorRole, locate_composition_operand_cursor};
+///
+/// let value = "'audit@./sha";
+/// let state = locate_composition_operand_cursor(value, 10, 10 + value.len()).unwrap();
+/// assert_eq!(state.token, "./sha");
+/// assert_eq!(state.token_span, 17..22);
+/// assert!(matches!(
+///     state.role,
+///     SchemaCursorRole::CompositionOperand { part: CompositionOperandPart::Reference { .. }, .. }
+/// ));
+/// ```
+///
+/// ## Returns
+///
+/// `None` when `cursor` is outside `value_source` or not on a character
+/// boundary, and when the text before the cursor is not the start of an
+/// operand: a postfix, description, or slot after the name, or blank text
+/// after a complete name.
+pub fn locate_composition_operand_cursor(
+    value_source: &str,
+    value_offset: usize,
+    cursor: usize,
+) -> Option<SchemaCursor> {
+    let relative = cursor.checked_sub(value_offset)?;
+    if relative > value_source.len() || !value_source.is_char_boundary(relative) {
+        return None;
+    }
+    let (scalar, _) = decode_partial_scalar_at(&value_source[..relative], 0);
+    operand_decoded(&scalar, value_offset)
+}
+
+/// [`locate_composition_operand_cursor`] for a scalar already decoded from
+/// `source`; see [`locate_type_definition_cursor_in_scalar`].
+pub fn locate_composition_operand_cursor_in_scalar(
+    source: &str,
+    scalar: &DecodedScalar,
+    cursor: usize,
+) -> Option<SchemaCursor> {
+    operand_decoded(&scalar.prefix_at(source, cursor)?, 0)
+}
+
+/// Reads a whole decoded operand prefix with the grammar's identifier rule.
+fn operand_decoded(scalar: &DecodedScalar, offset: usize) -> Option<SchemaCursor> {
+    let src = scalar.decoded();
+    let mut lex = Lexer::new(src);
+    lex.skip_ws();
+    let operand_start = lex.pos;
+    let (name, name_span) = lex.read_ident();
+    let (part, token, token_span) = if lex.pos == src.len() {
+        (CompositionOperandPart::Name, name, name_span)
+    } else {
+        lex.skip_ws();
+        if name.is_empty() || lex.peek_byte() != Some(b'@') {
+            return None;
+        }
+        let reference = lex.pos + 1;
+        let lead = reference + src[reference..].len() - src[reference..].trim_start().len();
+        (CompositionOperandPart::Reference { name }, src[lead..].to_string(), lead..src.len())
+    };
+    Some(SchemaCursor {
+        path: SchemaSourcePath::root(),
+        role: SchemaCursorRole::CompositionOperand {
+            part,
+            operand_span: shift(scalar.project(operand_start..src.len())?, offset),
+        },
+        token,
+        token_span: shift(scalar.project(token_span)?, offset),
+    })
 }
 
 /// Walks the YAML shape layer (a flow sequence is a union) and then reads the
@@ -310,7 +419,15 @@ fn expression_flow_arm_starts(body: &str) -> Vec<usize> {
 #[derive(Debug, Clone)]
 enum Frame {
     /// Inside `{ … }`. `key` is the property being defined once `:` is typed.
-    InlineObject { key: Option<String>, in_value: bool },
+    /// `spreads` counts the `...` operands seen so far, and `spread` is the
+    /// decoded offset just past the `...` of the member being typed, when it
+    /// is one.
+    InlineObject {
+        key: Option<String>,
+        in_value: bool,
+        spreads: usize,
+        spread: Option<usize>,
+    },
     /// Inside a `(…)` constraint list attached to `subject`. `group` holds
     /// the entries of the list's leading group with their spans, until a `;`
     /// ends that group (`None`).
@@ -364,6 +481,19 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
             stack.last(),
             Some(Frame::ArgList { .. } | Frame::ConstraintList { .. })
         );
+        // `...` in key position starts a composition operand, read as a type
+        // name and an optional `@` reference like any other.
+        if let Some(Frame::InlineObject { in_value: false, spreads, spread, .. }) = stack.last_mut()
+            && spread.is_none()
+            && src[start..].starts_with("...")
+        {
+            lex.pos += 3;
+            *spreads += 1;
+            *spread = Some(lex.pos);
+            last_word = None;
+            token = None;
+            continue;
+        }
         let arrow = byte == b'-' && bytes.get(start + 1) == Some(&b'>');
         let structural = if in_list {
             matches!(byte, b'(' | b')' | b',' | b';' | b'\'' | b'"')
@@ -405,7 +535,7 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
         match byte {
             b'{' => {
                 lex.pos += 1;
-                stack.push(Frame::InlineObject { key: None, in_value: false });
+                stack.push(Frame::InlineObject { key: None, in_value: false, spreads: 0, spread: None });
                 subject = None;
                 saw_array = false;
                 token = None;
@@ -461,9 +591,10 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
             }
             b',' => {
                 lex.pos += 1;
-                if let Some(Frame::InlineObject { key, in_value }) = stack.last_mut() {
+                if let Some(Frame::InlineObject { key, in_value, spread, .. }) = stack.last_mut() {
                     *key = None;
                     *in_value = false;
+                    *spread = None;
                     subject = None;
                     saw_array = false;
                 }
@@ -478,7 +609,7 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
             }
             b':' => {
                 lex.pos += 1;
-                if let Some(Frame::InlineObject { key, in_value }) = stack.last_mut() {
+                if let Some(Frame::InlineObject { key, in_value, .. }) = stack.last_mut() {
                     *key = last_word.clone();
                     *in_value = true;
                 }
@@ -542,9 +673,12 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
     let token_span = scalar.project(decoded_span.clone())?;
     let mut path = path;
     for frame in &stack {
-        if let Frame::InlineObject { key: Some(key), in_value: true } = frame {
+        if let Frame::InlineObject { key: Some(key), in_value: true, .. } = frame {
             path = path.property(key);
         }
+    }
+    if let Some(Frame::InlineObject { in_value: false, spreads, spread: Some(_), .. }) = stack.last() {
+        path = path.spread(spreads - 1);
     }
     let role = match stack.last() {
         Some(Frame::ArgList { subject, constraint, array_level }) => SchemaCursorRole::Argument {
@@ -563,6 +697,16 @@ fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -
                         .map(|(word, _)| word.clone())
                         .collect()
                 }),
+            }
+        }
+        Some(Frame::InlineObject { in_value: false, spread: Some(after_dots), .. }) => {
+            let operand_start = after_dots + src[*after_dots..].len() - src[*after_dots..].trim_start().len();
+            SchemaCursorRole::CompositionOperand {
+                part: match import_name {
+                    Some(name) => CompositionOperandPart::Reference { name },
+                    None => CompositionOperandPart::Name,
+                },
+                operand_span: shift(scalar.project(operand_start..src.len())?, offset),
             }
         }
         Some(Frame::InlineObject { in_value: false, .. }) => SchemaCursorRole::InlineObjectKey,
@@ -1252,5 +1396,202 @@ mod tests {
                 leading_group: Some(Vec::new()),
             }
         );
+    }
+
+    // ── Composition operands ────────────────────────────────────────────
+
+    fn operand(part: CompositionOperandPart, operand_span: Range<usize>) -> SchemaCursorRole {
+        SchemaCursorRole::CompositionOperand { part, operand_span }
+    }
+
+    fn reference(name: &str) -> CompositionOperandPart {
+        CompositionOperandPart::Reference { name: name.into() }
+    }
+
+    /// `(value, cursor, token, token text in value, role)` for a cursor at
+    /// `cursor` bytes into `value`; spans are checked against the value text.
+    fn assert_spread(value: &str, cursor: usize, token: &str, role: SchemaCursorRole, path: SchemaSourcePath) {
+        let state = locate_type_definition_cursor(value, 0, cursor).unwrap_or_else(|| panic!("{value:?}"));
+        assert_eq!(state.role, role, "{value:?} at {cursor}");
+        assert_eq!(state.token, token, "{value:?} at {cursor}");
+        assert_eq!(&value[state.token_span.clone()], token, "{value:?} at {cursor}");
+        assert_eq!(state.path, path, "{value:?} at {cursor}");
+    }
+
+    #[test]
+    fn composition_cursor_after_an_ellipsis_names_an_operand() {
+        let root = SchemaSourcePath::root;
+        // Empty, right after `...`, and after a blank.
+        assert_spread("{ ...", 5, "", operand(CompositionOperandPart::Name, 5..5), root().spread(0));
+        assert_spread("{ ... ", 6, "", operand(CompositionOperandPart::Name, 6..6), root().spread(0));
+        // A partial name, and the second spread of an object.
+        assert_spread("{ ...ba", 7, "ba", operand(CompositionOperandPart::Name, 5..7), root().spread(0));
+        assert_spread(
+            "{ ...a, id: string, ...common-att",
+            33,
+            "common-att",
+            operand(CompositionOperandPart::Name, 23..33),
+            root().spread(1),
+        );
+        // Before and after `@`: the name half, then the reference half.
+        assert_spread("{ ...base@", 10, "", operand(reference("base"), 5..10), root().spread(0));
+        assert_spread("{ ...base@th", 12, "th", operand(reference("base"), 5..12), root().spread(0));
+        assert_spread(
+            "{ ...audit@./types/sha",
+            22,
+            "./types/sha",
+            operand(reference("audit"), 5..22),
+            root().spread(0),
+        );
+        // A cursor inside the name of a complete object, before its postfix:
+        // only the text up to the cursor is read.
+        let value = "{ ...base, id: string }(closed)";
+        assert_spread(value, 8, "bas", operand(CompositionOperandPart::Name, 5..8), root().spread(0));
+        let value = "{ ...base@./a.yaml }(min-keys(1)) -> described";
+        assert_spread(value, 13, "./a", operand(reference("base"), 5..13), root().spread(0));
+    }
+
+    #[test]
+    fn composition_cursor_follows_nested_objects_arrays_and_union_arms() {
+        let root = SchemaSourcePath::root;
+        // A spread inside an object nested in an array of objects.
+        assert_spread(
+            "{ rows: { ...ro",
+            15,
+            "ro",
+            operand(CompositionOperandPart::Name, 13..15),
+            root().property("rows").spread(0),
+        );
+        assert_spread(
+            "{ rows: { ...row }[], more: { a: string, ...ot",
+            46,
+            "ot",
+            operand(CompositionOperandPart::Name, 44..46),
+            root().property("more").spread(0),
+        );
+        // A flow-sequence union arm, and a `|` union option.
+        assert_spread(
+            "[string, { ...ba",
+            16,
+            "ba",
+            operand(CompositionOperandPart::Name, 14..16),
+            root().union_arm(1).spread(0),
+        );
+        assert_spread("string | { ...ba", 16, "ba", operand(CompositionOperandPart::Name, 14..16), root().spread(0));
+        // A spread after a completed one returns to key position after `,`.
+        let state = at_end("{ ...base, na");
+        assert_eq!(state.role, SchemaCursorRole::InlineObjectKey);
+        assert_eq!(state.token, "na");
+    }
+
+    #[test]
+    fn composition_cursor_projects_through_quoted_and_multiline_scalars() {
+        // Quoted scalars: the ranges are authored bytes.
+        for value in ["'{ a: string, ...ba", "\"{ a: string, ...ba"] {
+            let state = at_end(value);
+            assert_eq!(state.token, "ba", "{value:?}");
+            assert_eq!(&value[state.token_span.clone()], "ba", "{value:?}");
+            let SchemaCursorRole::CompositionOperand { operand_span, part } = &state.role else {
+                panic!("{value:?}: {:?}", state.role);
+            };
+            assert_eq!(part, &CompositionOperandPart::Name);
+            assert_eq!(&value[operand_span.clone()], "ba", "{value:?}");
+        }
+        // An escape before the operand shifts the authored range.
+        let value = "\"{ a: string -> caf\\u00e9, ...audit@./sh";
+        let state = at_end(value);
+        assert_eq!(state.token, "./sh");
+        assert_eq!(&value[state.token_span.clone()], "./sh");
+        // A plain scalar continued on the next line (a plain scalar cannot
+        // start with `{`, which opens a YAML flow mapping, or hold `: `).
+        let source = "t: string | { ...base,\n  ...comm\n";
+        let scalar = decoded_plain(source, "t: ", 0);
+        let cursor = source.find("comm").unwrap() + 4;
+        let state = locate_type_definition_cursor_in_scalar(source, &scalar, cursor).unwrap();
+        assert_eq!(state.token, "comm");
+        assert_eq!(state.token_span, cursor - 4..cursor);
+        assert_eq!(state.role, operand(CompositionOperandPart::Name, cursor - 4..cursor));
+        assert_eq!(state.path, SchemaSourcePath::root().spread(1));
+        // A folded operand: the name and reference on separate lines.
+        let source = "t: string | { ...base@\n  ./ty\n";
+        let scalar = decoded_plain(source, "t: ", 0);
+        let cursor = source.find("./ty").unwrap() + 4;
+        let state = locate_type_definition_cursor_in_scalar(source, &scalar, cursor).unwrap();
+        assert_eq!(state.token, "./ty");
+        assert_eq!(state.token_span, cursor - 4..cursor);
+        assert!(matches!(
+            state.role,
+            SchemaCursorRole::CompositionOperand { part: CompositionOperandPart::Reference { ref name }, .. } if name == "base"
+        ));
+    }
+
+    #[test]
+    fn composition_cursor_ignores_keys_descriptions_and_document_data() {
+        // A bare literal key and a key after a completed spread.
+        assert_eq!(at_end("{ na").role, SchemaCursorRole::InlineObjectKey);
+        assert_eq!(at_end("{ ...base, ").role, SchemaCursorRole::InlineObjectKey);
+        // An ellipsis in a description is prose: inside it there is no
+        // state, and after its `,` the cursor is at a key.
+        assert_eq!(locate_type_definition_cursor("{ a: string -> wait...", 0, 22), None);
+        assert_eq!(locate_type_definition_cursor("string -> and so on...", 0, 22), None);
+        assert_eq!(at_end("{ a: string -> wait..., b").role, SchemaCursorRole::InlineObjectKey);
+        // Outside an object, and in a property value, `...` is not a spread.
+        for value in ["...data", "{ a: ...b"] {
+            assert!(
+                !matches!(at_end(value).role, SchemaCursorRole::CompositionOperand { .. }),
+                "{value:?}: {:?}",
+                at_end(value).role
+            );
+        }
+        // An argument that contains an ellipsis stays an argument.
+        assert!(matches!(at_end("{ a: enum(x, ...y").role, SchemaCursorRole::Argument { .. }));
+    }
+
+    #[test]
+    fn composition_cursor_reads_a_whole_extends_operand() {
+        let at = |value: &str, cursor: usize| locate_composition_operand_cursor(value, 0, cursor);
+        for (value, cursor, token, part) in [
+            ("", 0, "", CompositionOperandPart::Name),
+            ("ev", 2, "ev", CompositionOperandPart::Name),
+            ("events@", 7, "", reference("events")),
+            ("events@thi", 10, "thi", reference("events")),
+            ("audit@./a.yaml", 9, "./a", reference("audit")),
+            ("'audit@./sh", 11, "./sh", reference("audit")),
+            ("\"audit@./sh", 11, "./sh", reference("audit")),
+            ("  audit @ ./sh", 14, "./sh", reference("audit")),
+        ] {
+            let state = at(value, cursor).unwrap_or_else(|| panic!("{value:?}"));
+            assert_eq!(state.token, token, "{value:?}");
+            assert_eq!(&value[state.token_span.clone()], token, "{value:?}");
+            assert_eq!(state.path, SchemaSourcePath::root(), "{value:?}");
+            let SchemaCursorRole::CompositionOperand { part: found, operand_span } = &state.role else {
+                panic!("{value:?}: {:?}", state.role);
+            };
+            assert_eq!(found, &part, "{value:?}");
+            assert_eq!(operand_span.end, cursor, "{value:?}");
+            assert!(value[operand_span.clone()].ends_with(token), "{value:?}");
+        }
+        // The document offset shifts every range.
+        let state = locate_composition_operand_cursor("base", 40, 43).unwrap();
+        assert_eq!(state.token_span, 40..43);
+        assert_eq!(state.role, operand(CompositionOperandPart::Name, 40..43));
+        // Postfixes, a description, a slot, and blank text after a complete
+        // name are not an operand being typed; a cursor outside is refused.
+        for (value, cursor) in [("base(", 5), ("base[]", 6), ("base -> d", 9), ("{{ x", 4), ("base ", 5)] {
+            assert_eq!(at(value, cursor), None, "{value:?}");
+        }
+        assert_eq!(locate_composition_operand_cursor("base", 10, 9), None);
+        assert_eq!(locate_composition_operand_cursor("base", 0, 5), None);
+        // A multiline plain scalar, read from its decoded node.
+        // The anchor stays outside every range, and the folded line break
+        // is a blank between `@` and the reference.
+        let source = "$extends: &e common-attributes@\n  ./sha\n";
+        let scalar = decoded_plain(source, "$extends: ", 0);
+        let cursor = source.find("./sha").unwrap() + 5;
+        let state = locate_composition_operand_cursor_in_scalar(source, &scalar, cursor).unwrap();
+        assert_eq!(state.token, "./sha");
+        assert_eq!(state.token_span, cursor - 5..cursor);
+        let name_start = source.find("common").unwrap();
+        assert_eq!(state.role, operand(reference("common-attributes"), name_start..cursor));
     }
 }

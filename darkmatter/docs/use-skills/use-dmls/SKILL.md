@@ -72,7 +72,10 @@ list-item-padding = "none"
 
 - **The editor can't find `dmls`.** GUI-launched editors don't inherit your
   shell's `PATH`. Set the absolute path, usually `~/.cargo/bin/dmls`: in VS
-  Code it's `dmls.server.path`, and in Zed it's `lsp.dmls.binary.path`.
+  Code it's `dmls.server.path`, and in Zed it's `lsp.dmls.binary.path`. In
+  Zed, write it as `~/.cargo/bin/dmls` rather than an absolute path: the
+  setting follows you into remote (SSH) projects, and `~` is expanded against
+  that host's home directory.
 - **YAML files get no DMLS by default.** The shipped VS Code and Zed
   extensions attach DMLS only to Markdown. The server can validate whole
   `.yaml` files (trigger files, `kind:`-typed YAML), but you only get that in

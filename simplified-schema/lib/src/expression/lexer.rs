@@ -54,6 +54,10 @@ pub enum Token {
     /// `.` cannot be absorbed into a variable, such as after `]` or `)`.
     Dot,
 
+    /// Three adjacent dots, `...`, which only an object literal accepts, at
+    /// the start of an entry (object spread).
+    Ellipsis,
+
     /// Left bracket `[`.
     LBracket,
 
@@ -118,6 +122,7 @@ impl fmt::Display for Token {
             Token::RParen => write!(f, ")"),
             Token::Comma => write!(f, ","),
             Token::Dot => write!(f, "."),
+            Token::Ellipsis => write!(f, "..."),
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
             Token::LBrace => write!(f, "{{"),
@@ -289,6 +294,10 @@ impl<'a> Lexer<'a> {
                 Ok(Token::Comma)
             }
             '.' => {
+                if self.input[self.pos..].starts_with("...") {
+                    self.pos += 3;
+                    return Ok(Token::Ellipsis);
+                }
                 self.advance();
                 Ok(Token::Dot)
             }

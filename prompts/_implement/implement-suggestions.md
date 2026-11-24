@@ -10,18 +10,18 @@ description: |-
     Implements the findings in a review which was conducted to determine the drift between
     what was actually implemented versus the specification that was being targetted in that
     implementation.
-iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') || 1 : 1 }}"
+iteration: "{{ frontmatter(spec, 'review-iterations') ? frontmatter(spec, 'review-iterations') || 1 : 1 }}"
 review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 log: {{ dirname(spec) + '/log.md' }}
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 yolo: true
-feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+feature-or-fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
     - ensure_file: '{{log}}'
-    - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop')) && frontmatter(review, 'human_resolved') != true"
+    - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human-in-the-loop')) && frontmatter(review, 'human-resolved') != true"
       then:
           - warn: "{{basename(review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings before repairing it"
           - error: "{{basename(review)}} is waiting on a human"
@@ -50,7 +50,7 @@ failure:
 
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 
-> - **{{capitalize(feature_or_fix)}}:** `{{parent_dir(review)}}`
+> - **{{capitalize(feature-or-fix)}}:** `{{parent_dir(review)}}`
 > - **Iteration:** {{iteration}}
 > - **Log File:** {{log}}
 
@@ -115,7 +115,7 @@ In order to track progress of this task we are using the '{{log}}' as a log file
 > - be sure to use the Markdown H2/H3 headings recommended so that the document has the right structure
 
 ::block when="ready"
-The review marked the {{feature_or_fix}} **production ready**: a ready review has no findings, so there is nothing to repair. Explain the current state of this review/implement cycle and exit.
+The review marked the {{feature-or-fix}} **production ready**: a ready review has no findings, so there is nothing to repair. Explain the current state of this review/implement cycle and exit.
 ::end-block
 
 
@@ -235,14 +235,14 @@ decision, the alternatives, and why in the ledger row. Only when the decision
 passes the readiness rules' **worth the author's time** test (it is hard to
 reverse, departs from a decision, changes scope, touches safety or trust, or
 you genuinely doubt it) also add a one-line summary to the review's
-`human_review_items` and set its `human_review` to `true`, keeping that list at
+`human-review-items` and set its `human-review` to `true`, keeping that list at
 3 items or fewer; a choice you would simply recommend keeping stays in the
 ledger only. When the spec pre-authorizes
 bounded implementer autonomy and the choice meets its conditions, also amend
 the spec as that decision directs.
 
 A finding is **blocked** only when it waits on an item in the review's
-`human_in_the_loop` that has no ruling yet, or on a prerequisite this cycle
+`human-in-the-loop` that has no ruling yet, or on a prerequisite this cycle
 cannot produce (an unavailable host or account). A review that calls a
 finding blocked, or a decision "the author's", without such an item does not
 block it: the review asked for no ruling, so you make the decision as above
@@ -250,8 +250,8 @@ and repair the finding. Recording the same finding as blocked in two
 consecutive cycles stops the loop and costs the author a cycle; do not do it
 for anything you could decide.
 
-::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop'))"
-**The author has ruled on this review's `human_in_the_loop` items** under its
+::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human-in-the-loop'))"
+**The author has ruled on this review's `human-in-the-loop` items** under its
 `## Human rulings` heading. A ruling has the same authority as the spec and
 wins where they disagree. Before any code change, add each ruling that
 requires a change to the ledger as a **high** row titled `carry out ruling on
@@ -320,7 +320,7 @@ Now your task is to:
       is not necessarily implemented.
 
     - if host load prevents a legitimate required performance measurement,
-      record the deferral, set `deferred_perf_measurement` to `true` on the log,
+      record the deferral, set `deferred-perf-measurement` to `true` on the log,
       and create or append to `{{ dirname(spec) + '/deferred-performance.md' }}`
       with the measurement details, finding ID, and review file ({{review}})
 
@@ -333,7 +333,7 @@ Now your task is to:
         - set the `log` frontmatter to '{{log}}'
         - set `implemented` to `true` only for a complete cycle as defined above;
           otherwise set it to `false` so incomplete work remains selectable
-        - set the `implemented_by` frontmatter to `{{ ctx.agent }}/{{ ctx.model }}`
+        - set the `implemented-by` frontmatter to `{{ ctx.agent }}/{{ ctx.model }}`
         - preserve the reviewer's readiness judgment, findings, and body; your
           ledger is the repair claim and the next review verifies it independently
     - update the log file's metadata ({{log}}):

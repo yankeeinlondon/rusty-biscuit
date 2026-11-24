@@ -9,7 +9,7 @@ description: |-
     2. `_pr/push.md` settles which branch is being proposed and pushes it. The repository's pre-push hook runs the local test gates on this host first, so **the push is the local test run**.
     3. `_pr/open.md` opens the pull request once local testing has passed, which hands the work to CI/CD.
     4. `_pr/diagnose.md` runs instead when the hook blocked the push: it explains what failed, why, and whether this branch caused it.
-    5. `_pr/triage.md` presents that diagnosis in an interactive session and asks whether to fix it (`on_failure=ask`, the default).
+    5. `_pr/triage.md` presents that diagnosis in an interactive session and asks whether to fix it (`on-failure=ask`, the default).
     6. `_pr/fix.md` repairs the chosen problems, proves the repair, stages it, and hands off to `commit.md`.
 
     A proxy chain may visit a document only once, and every commit goes through `commit.md`. A run that needed a fix therefore ends with the fix committed, and the caller runs this prompt again to push it. That second run is cheap: the hook reuses the passing evidence the first run produced.
@@ -20,10 +20,10 @@ $schema:
     branch: string -> the name for the proposed branch when the push stage has to create one (you are on the base branch); derived from the commits when omitted
     title: string -> an optional pull request title; derived from the commits when omitted
     about: string -> optional context from the caller about what this work is
-    on_failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed; `ask` opens an interactive triage session, `fix` goes straight to the fix stage, `stop` ends with the diagnosis
+    on-failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed; `ask` opens an interactive triage session, `fix` goes straight to the fix stage, `stop` ends with the diagnosis
     report: string -> the report file shared by every stage of the PR flow; created fresh for each run
 base: main
-on_failure: ask
+on-failure: ask
 report: "{{ ctx.repo_root + '/.claudine/tmp/pr/' + kebab_case(ctx.branch) + '-' + ctx.timestamp + '.md' }}"
 initialize:
     - when: "!ctx.branch"
@@ -50,7 +50,7 @@ initialize:
                     branch: "{{ branch || '' }}"
                     title: "{{ title || '' }}"
                     about: "{{ about || '' }}"
-                    on_failure: "{{ on_failure }}"
+                    on-failure: "{{ on-failure }}"
                     report: "{{ report }}"
     - proxy:
           target: ./_pr/push.md
@@ -59,7 +59,7 @@ initialize:
               branch: "{{ branch || '' }}"
               title: "{{ title || '' }}"
               about: "{{ about || '' }}"
-              on_failure: "{{ on_failure }}"
+              on-failure: "{{ on-failure }}"
               report: "{{ report }}"
 blocked:
     message: "💥  the PR flow for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }} was **blocked** before any stage started: {{err.msg}}"

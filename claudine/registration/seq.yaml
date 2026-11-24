@@ -1,0 +1,14 @@
+kind: namespace-schema
+namespace: seq
+$schema:
+    name: "string -> The current step's name; null in a sequence's own events."
+    id: "string -> The step's unique id: its dasherized name, suffixed -2, -3, … on repeats."
+    index: "number(integer; min(1)) -> The step's one-based position."
+    count: "number(integer; min(0)) -> The number of steps in the sequence."
+    is_first: "boolean -> Whether this is the first step."
+    is_last: "boolean -> Whether this is the last step."
+    previous: "object -> The previous step's row, or null at the start."
+    next: "object -> The next step's row, or null at the end."
+    run_id: "string -> One token per invocation, shared by every nested sequence."
+    outputs: "unknown[] -> One result per executed child, in order."
+    "<string>": "unknown -> An authored step field, read as `seq.<field>`."

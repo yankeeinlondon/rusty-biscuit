@@ -800,6 +800,117 @@ fn a_deferred_read_still_coerces_declared_types() {
     );
 }
 
+/// An ordinary later loop pass composes its retained source without reaching
+/// the launch verdict and without leaving one pending.
+///
+/// The control is the same source under `Validate`, which refuses the missing
+/// `count`. The skipped read still applies the schema's defaults (`level`) and
+/// keeps the resolved schema for the completion verdict, so a pending flag left
+/// `true` here would hand a second verdict to the harness.
+#[test]
+fn loop_iteration_skips_the_launch_verdict_without_deferring_it() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n    count: 'number(required)'\n    level: 'number(default(2))'\n---\nlevel={{ level }}\n",
+    );
+
+    let err = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::LoopIteration,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
+        options: options_in(dir.path()),
+    })
+    .expect_err("the validating read refuses the missing required value");
+    assert!(
+        matches!(&err, CompositionError::MissingProperties { missing, .. }
+            if missing.iter().any(|property| property.name == "count")),
+        "the control reaches the typed verdict; got {err:?}"
+    );
+
+    let prepared = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::LoopIteration,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::SkipLaunchVerdict,
+        options: options_in(dir.path()),
+    })
+    .expect("a later loop pass reaches no launch verdict");
+
+    assert_eq!(prepared.entry, DocumentEntryReason::LoopIteration);
+    assert!(
+        !prepared.schema_verdict_deferred,
+        "a later pass owes no verdict, so none may be marked pending"
+    );
+    assert!(prepared.launch_schema.is_some(), "the schema stays attached for completion");
+    assert_eq!(
+        prepared.effective_frontmatter.get("level"),
+        Some(&serde_json::json!(2)),
+        "defaults still apply on the skipped read"
+    );
+    assert_eq!(prepared.prompt.trim(), "level=2");
+}
+
+/// An ordinary later inline pass takes its reconciliation baseline from the
+/// file as it reads now, while its prompt still comes from the retained source.
+///
+/// The retained source and the file on disk differ in body here, exactly as
+/// after a pass whose provider edited the deliverable.
+#[test]
+fn a_later_inline_pass_baselines_on_the_live_deliverable() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\nprompt: 'edit the body'\n---\nretained body\n",
+    );
+    let live = "---\nprompt: 'edit the body'\n---\nfirst pass deliverable\n";
+    fs::write(&source.resolved_path, live).unwrap();
+
+    let prepared = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::LoopIteration,
+        mode: CompositionMode::InlineFrontmatterPrompt,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::SkipLaunchVerdict,
+        options: options_in(dir.path()),
+    })
+    .expect("the later inline pass prepares");
+
+    let crate::composition::types::CompositionClosurePlan::Inline(plan) = &prepared.closure else {
+        panic!("an inline pass carries an inline closure plan");
+    };
+    assert_eq!(plan.original_document_text, live, "the baseline is the live deliverable");
+    assert_eq!(
+        plan.original_hash,
+        darkmatter::markdown::Markdown::from(live).compute_hash(
+            darkmatter::markdown::hash::MdHashKind::Simple,
+            &crate::composition::closure::inline_hash_options(),
+        ),
+        "the baseline hash is the live deliverable's"
+    );
+    assert!(prepared.prompt.contains("edit the body"), "the prompt comes from the retained source");
+
+    fs::remove_file(&source.resolved_path).unwrap();
+    let err = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::LoopIteration,
+        mode: CompositionMode::InlineFrontmatterPrompt,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::SkipLaunchVerdict,
+        options: options_in(dir.path()),
+    })
+    .expect_err("an unreadable deliverable fails before composition");
+    assert!(
+        matches!(&err, CompositionError::InlineArtifactUnreadable { path, .. } if *path == source.resolved_path),
+        "the unreadable baseline names the document; got {err:?}"
+    );
+}
+
 /// A composed prompt body resolves `current.<key>` through the invocation's
 /// launch evidence, while `ctx.<key>` stays the stored snapshot.
 ///

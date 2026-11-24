@@ -19,7 +19,9 @@ use url::Url;
 
 use super::ComposeWarning;
 use super::cache::FileStore;
-use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
+use super::cache::remote_cache::{
+    CacheOnlyMiss, FreshCachedBody, RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache, lookup_fresh_bounded,
+};
 use super::expression::{ExpressionError, RemoteReadKind};
 use super::remote::{RemoteReadConfig, RemoteReadError};
 use crate::config::network::NetworkPermission;
@@ -163,6 +165,40 @@ struct RemoteFetchInner {
     store: Option<Arc<FileStore>>,
     /// TTL, refresh, and freshness-mode inputs for cache evaluation.
     cache_config: RemoteCacheConfig,
+    /// Set by [`RemoteFetchRuntime::cache_only`]: registration never starts
+    /// a fetch, and reads go through [`RemoteFetchRuntime::cached_text_bounded`].
+    cache_only: bool,
+}
+
+/// Why [`RemoteFetchRuntime::cached_text_bounded`] has no body to offer. Every case
+/// leaves a cache-only reader's result pending; none is a read failure.
+#[derive(Debug, Clone)]
+pub(crate) enum CacheOnlyPending {
+    /// The URL is not HTTP(S), so no transport cache entry can exist.
+    NotHttp,
+    /// The run may not read the URL: an invalid `network` permission or a
+    /// host the policy does not allow. Decided before the store is touched.
+    Refused(RemoteReadError),
+    /// The runtime has no transport store.
+    NoStore,
+    /// The store has no fresh entry.
+    Miss(CacheOnlyMiss),
+    /// The entry is larger than the reader's byte limit
+    /// ([`RemoteFetchRuntime::cached_text_bounded`]).
+    TooLarge,
+}
+
+impl CacheOnlyPending {
+    /// Why there is no body, in words, for logging.
+    pub(crate) fn describe(&self) -> String {
+        match self {
+            Self::NotHttp => "not an HTTP(S) URL".to_string(),
+            Self::Refused(error) => format!("refused: {error}"),
+            Self::NoStore => "no transport cache".to_string(),
+            Self::Miss(miss) => format!("cache miss: {miss:?}"),
+            Self::TooLarge => "the entry is larger than the remaining allowance".to_string(),
+        }
+    }
 }
 
 /// Provider query slots store the typed expression error so a focused
@@ -474,6 +510,73 @@ impl RemoteFetchRuntime {
         Self::build(policy, NetworkPermission::Deny, 4, store, cache_config)
     }
 
+    /// A runtime that serves only fresh transport-cache entries from
+    /// `store` and never fetches, revalidates, or writes: the editor's
+    /// remote reads. `policy` and `network` authorize each URL before the
+    /// store is read.
+    pub(crate) fn cache_only(policy: FetchPolicy, network: NetworkPermission, store: Option<Arc<FileStore>>) -> Self {
+        let mut runtime = Self::build(
+            policy,
+            network,
+            1,
+            store,
+            RemoteCacheConfig {
+                ttl_override: None,
+                refresh: false,
+                mode: super::remote::RemoteFreshnessMode::Strict,
+            },
+        );
+        Arc::get_mut(&mut runtime.inner)
+            .expect("a runtime just built is not shared")
+            .cache_only = true;
+        runtime
+    }
+
+    /// [`Self::cache_only`] over the transport store a composition with
+    /// `--cache-root cache_root` fills (`<cache_root>/.darkmatter/cache/v…`).
+    /// Nothing is created: a missing store is a cache miss.
+    pub(crate) fn cache_only_under(policy: FetchPolicy, network: NetworkPermission, cache_root: &std::path::Path) -> Self {
+        let store = FileStore::at(FileStore::resolve_cache_root(cache_root, None));
+        Self::cache_only(policy, network, Some(Arc::new(store)))
+    }
+
+    /// Whether this runtime was built by [`Self::cache_only`].
+    pub(crate) fn is_cache_only(&self) -> bool {
+        self.inner.cache_only
+    }
+
+    /// [`Self::cached_text_bounded`] with no byte limit.
+    #[cfg(test)]
+    pub(crate) fn cached_text(&self, url: &Url, now: std::time::SystemTime) -> Result<FreshCachedBody, CacheOnlyPending> {
+        self.cached_text_bounded(url, now, u64::MAX)
+    }
+
+    /// The fresh cached body for `url` at `now`, without any network access
+    /// or store write, reading at most `limit` bytes of the entry's manifest
+    /// and of its body before decoding either; a larger entry is
+    /// [`CacheOnlyPending::TooLarge`].
+    ///
+    /// The URL's scheme, the configured `network` permission, and the host
+    /// policy are checked, in that order, before the store is opened, so a
+    /// refused URL never reveals whether it is cached.
+    pub(crate) fn cached_text_bounded(
+        &self,
+        url: &Url,
+        now: std::time::SystemTime,
+        limit: u64,
+    ) -> Result<FreshCachedBody, CacheOnlyPending> {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(CacheOnlyPending::NotHttp);
+        }
+        self.check_allowed(url).map_err(CacheOnlyPending::Refused)?;
+        let store = self.inner.store.as_deref().ok_or(CacheOnlyPending::NoStore)?;
+        match lookup_fresh_bounded(store, url, now, limit) {
+            Ok(fresh) => Ok(fresh),
+            Err(CacheOnlyMiss::TooLarge) => Err(CacheOnlyPending::TooLarge),
+            Err(miss) => Err(CacheOnlyPending::Miss(miss)),
+        }
+    }
+
     fn build(
         policy: FetchPolicy,
         network: NetworkPermission,
@@ -499,6 +602,7 @@ impl RemoteFetchRuntime {
                 peak_in_flight: AtomicUsize::new(0),
                 store,
                 cache_config,
+                cache_only: false,
             }),
         }
     }
@@ -508,6 +612,9 @@ impl RemoteFetchRuntime {
     /// state: the runtime schema slots fetch through, whose hosts are the
     /// slot grants', so a slot grant never widens the document's reads.
     pub(crate) fn with_other_policy(&self, policy: FetchPolicy) -> Self {
+        if self.inner.cache_only {
+            return Self::cache_only(policy, self.inner.network.clone(), self.inner.store.clone());
+        }
         Self::build(
             policy,
             self.inner.network.clone(),
@@ -590,8 +697,13 @@ impl RemoteFetchRuntime {
     ///
     /// If the URL is already registered (in-flight or completed), this is a
     /// no-op. If the host is not in the policy allowlist, the slot is
-    /// immediately filled with a policy-denial error.
+    /// immediately filled with a policy-denial error. A
+    /// [cache-only](Self::cache_only) runtime registers nothing, so
+    /// [`Self::get_content`] reports the URL as never registered.
     pub fn register_and_fetch(&self, url: Url) {
+        if self.inner.cache_only {
+            return;
+        }
         let key = url.to_string();
 
         if let Err(err) = self.check_allowed(&url) {
@@ -2321,5 +2433,278 @@ mod persistent_cache_tests {
         assert_eq!(warnings[0].code.as_deref(), Some("dm.remote_cache.io_failure"));
         assert_eq!(warnings[0].message, stats.cache_warnings[0]);
         assert!(RemoteFetchStats::default().cache_compose_warnings().next().is_none());
+    }
+}
+
+#[cfg(test)]
+mod cache_only_tests {
+    use super::*;
+    use crate::config::load::{ConfigError, ConfigErrorKind, ConfigRevision};
+    use crate::markdown::compose::cache::manifest::{CACHE_VERSION, RemoteUrlManifest, redact_url};
+    use crate::markdown::compose::cache::types::ArtifactClass;
+    use crate::markdown::compose::remote::RemoteReadError;
+    use biscuit_hash::xx_hash;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use wiremock::matchers::any;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// The injected clock every lookup reads.
+    fn now() -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(1_000_000)
+    }
+
+    struct Seed<'a> {
+        body: &'a [u8],
+        cache_control: Option<&'a str>,
+        expires_at: Option<SystemTime>,
+        version: u16,
+    }
+
+    impl Default for Seed<'_> {
+        fn default() -> Self {
+            Self {
+                body: b"remote: true\n",
+                cache_control: Some("max-age=60"),
+                expires_at: Some(now() + Duration::from_secs(60)),
+                version: CACHE_VERSION,
+            }
+        }
+    }
+
+    /// Writes the manifest and body blob a normal fetch would have stored.
+    fn seed(store: &FileStore, url: &Url, seed: Seed<'_>) {
+        let content_hash = biscuit_hash::xx_hash_bytes(seed.body);
+        let manifest = RemoteUrlManifest {
+            cache_version: seed.version,
+            redacted_url: redact_url(url),
+            source_id_hash: xx_hash(url.as_str()),
+            status: 200,
+            etag: None,
+            last_modified: None,
+            cache_control: seed.cache_control.map(str::to_string),
+            fetched_at: now() - Duration::from_secs(1),
+            expires_at: seed.expires_at,
+            content_hash,
+            body_blob_hash: content_hash,
+            size_bytes: seed.body.len() as u64,
+        };
+        store
+            .write_artifact(ArtifactClass::RemoteUrl, xx_hash(url.as_str()), &manifest, seed.body, content_hash, "remote")
+            .unwrap();
+    }
+
+    /// Every file under `root` with its bytes and modification time, so any
+    /// write, purge, or rewrite shows up as a difference.
+    fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>, SystemTime)> {
+        let mut files = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.map(Result::unwrap) {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let modified = entry.metadata().unwrap().modified().unwrap();
+                    files.push((path.clone(), std::fs::read(&path).unwrap(), modified));
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    fn invalid_network() -> NetworkPermission {
+        NetworkPermission::Invalid(ConfigError::unlocated(
+            ConfigErrorKind::InvalidSetting,
+            Path::new(".darkmatter.yaml"),
+            ConfigRevision::User,
+            "network: invalid".to_string(),
+        ))
+    }
+
+    /// A server that fails the test if any request reaches it.
+    async fn silent_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("from the network"))
+            .expect(0)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+        store: Arc<FileStore>,
+        url: Url,
+        server: MockServer,
+    }
+
+    async fn build_fixture(seed_with: Option<Seed<'_>>) -> Fixture {
+        let server = silent_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let root = FileStore::resolve_cache_root(dir.path(), None);
+        let store = Arc::new(FileStore::at(root.clone()));
+        let url = Url::parse(&format!("{}/data.yaml", server.uri())).unwrap();
+        if let Some(seed_with) = seed_with {
+            seed(&store, &url, seed_with);
+        }
+        Fixture { _dir: dir, root, store, url, server }
+    }
+
+    fn allowed(fixture: &Fixture) -> RemoteFetchRuntime {
+        RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            NetworkPermission::Deny,
+            Some(Arc::clone(&fixture.store)),
+        )
+    }
+
+    /// Runs `lookup` and proves it neither wrote the store nor sent a
+    /// request, including when the caller also asks the runtime to fetch.
+    async fn observe(
+        fixture: &Fixture,
+        runtime: &RemoteFetchRuntime,
+    ) -> Result<FreshCachedBody, CacheOnlyPending> {
+        let before = snapshot(&fixture.root);
+        let result = runtime.cached_text(&fixture.url, now());
+        runtime.register_and_fetch(fixture.url.clone());
+        runtime.register_nested(fixture.url.clone());
+        assert!(runtime.registered_urls().is_empty(), "a cache-only runtime registers no fetch");
+        assert_eq!(runtime.get_content(&fixture.url), Ok(None));
+        assert_eq!(snapshot(&fixture.root), before, "the store is unchanged");
+        let stats = runtime.stats();
+        assert_eq!((stats.fetched, stats.revalidations, stats.cache_hits), (0, 0, 0));
+        fixture.server.verify().await;
+        result
+    }
+
+    #[tokio::test]
+    async fn a_fresh_entry_returns_its_body_and_expiry() {
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let runtime = allowed(&fixture);
+        assert!(runtime.is_cache_only());
+        let body = observe(&fixture, &runtime).await.unwrap();
+        assert_eq!(body.body, "remote: true\n");
+        assert_eq!(body.expires_at, now() + Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn an_entry_expiring_now_or_earlier_or_without_a_lifetime_is_expired() {
+        for expires_at in [Some(now()), Some(now() - Duration::from_secs(1)), None] {
+            let fixture = build_fixture(Some(Seed { expires_at, ..Seed::default() })).await;
+            let result = observe(&fixture, &allowed(&fixture)).await;
+            assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Expired))), "{expires_at:?}: {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_entry_or_store_is_pending() {
+        let fixture = build_fixture(None).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Absent))), "{result:?}");
+        assert!(!fixture.root.exists(), "a miss creates no store directory");
+
+        let storeless = RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            NetworkPermission::Deny,
+            None,
+        );
+        let result = observe(&fixture, &storeless).await;
+        assert!(matches!(result, Err(CacheOnlyPending::NoStore)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_denied_host_is_refused_before_the_cache_is_read() {
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let runtime = RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("example.test"),
+            NetworkPermission::Deny,
+            Some(Arc::clone(&fixture.store)),
+        );
+        let result = observe(&fixture, &runtime).await;
+        assert!(
+            matches!(&result, Err(CacheOnlyPending::Refused(RemoteReadError::DeniedByPolicy { host })) if host == "127.0.0.1"),
+            "{result:?}"
+        );
+        assert_eq!(runtime.stats().policy_denials, 1);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_network_permission_outranks_an_allowed_host() {
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let runtime = RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            invalid_network(),
+            Some(Arc::clone(&fixture.store)),
+        );
+        let result = observe(&fixture, &runtime).await;
+        assert!(
+            matches!(&result, Err(CacheOnlyPending::Refused(RemoteReadError::InvalidConfiguration { message, .. })) if message.contains("network: invalid")),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_store_and_no_cache_entries_are_never_served_or_purged() {
+        let fixture = build_fixture(Some(Seed { cache_control: Some("max-age=60, no-store"), ..Seed::default() })).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::NoStore))), "{result:?}");
+        // A legacy no-store entry from another version is still no-store.
+        let fixture = build_fixture(Some(Seed { cache_control: Some("no-store"), version: CACHE_VERSION + 1, ..Seed::default() })).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::NoStore))), "{result:?}");
+
+        // `no-cache` needs revalidation even with a future expiry.
+        let fixture = build_fixture(Some(Seed { cache_control: Some("no-cache"), ..Seed::default() })).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::NoCache))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn corrupt_or_foreign_entries_are_unusable() {
+        // A body that is not UTF-8.
+        let fixture = build_fixture(Some(Seed { body: b"\xff\xfe", ..Seed::default() })).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Unusable))), "{result:?}");
+
+        // A manifest whose body blob is gone.
+        let fixture = build_fixture(Some(Seed::default())).await;
+        std::fs::remove_dir_all(fixture.root.join("blobs")).unwrap();
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Unusable))), "{result:?}");
+
+        // A manifest from another cache version.
+        let fixture = build_fixture(Some(Seed { version: CACHE_VERSION + 1, ..Seed::default() })).await;
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Unusable))), "{result:?}");
+
+        // A manifest file that is not JSON reads as absent.
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let manifests = snapshot(&fixture.root.join("manifests"));
+        assert_eq!(manifests.len(), 1);
+        std::fs::write(&manifests[0].0, "{ not json").unwrap();
+        let result = observe(&fixture, &allowed(&fixture)).await;
+        assert!(matches!(result, Err(CacheOnlyPending::Miss(CacheOnlyMiss::Absent))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_non_http_url_never_reaches_the_cache() {
+        let fixture = build_fixture(None).await;
+        let runtime = allowed(&fixture);
+        let file = Url::parse("file:///tmp/data.yaml").unwrap();
+        assert!(matches!(runtime.cached_text(&file, now()), Err(CacheOnlyPending::NotHttp)));
+        assert_eq!(runtime.stats().policy_denials, 0);
+    }
+
+    #[tokio::test]
+    async fn a_derived_slot_runtime_stays_cache_only() {
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let derived = allowed(&fixture).with_other_policy(FetchPolicy::deny_all().allow_host("127.0.0.1"));
+        assert!(derived.is_cache_only());
+        assert_eq!(observe(&fixture, &derived).await.unwrap().body, "remote: true\n");
     }
 }

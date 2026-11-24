@@ -93,6 +93,7 @@ pub(crate) fn remote_text_error(
             kind: failure.kind,
             message: failure.message,
         },
+        RemoteTextError::Pending(pending) => *pending.0,
     }
 }
 
@@ -227,10 +228,16 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
             Err(error) => Err(remote_text_error("file_exists", raw, ctx, error)),
         };
     }
-    let found = resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-        .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))?;
+    // An editor observation asks its gate before each candidate is probed,
+    // and observes exactly the candidates it probed.
+    let found = match &ctx.editor {
+        Some(editor) => super::super::editor_reads::resolve_local("file_exists", raw, &file_ref, ctx, editor)?,
+        None => resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+            .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))?,
+    };
     match &found {
         Some(path) => ctx.data.observe_existence(path, true),
+        None if ctx.editor.is_some() => {}
         None => record_probed_candidates(&file_ref, ctx),
     }
     Ok(Value::Bool(found.is_some()))

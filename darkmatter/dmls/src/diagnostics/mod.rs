@@ -10,6 +10,7 @@
 pub(crate) mod call_check;
 pub mod codes;
 pub mod frontmatter;
+pub(crate) mod observed;
 pub(crate) mod named_types;
 pub(crate) mod nested_span;
 pub mod slots;

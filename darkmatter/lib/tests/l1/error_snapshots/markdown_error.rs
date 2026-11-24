@@ -154,6 +154,7 @@ fn schema_validation_missing_required_renders_block() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Planner prompt".to_string()),
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -184,6 +185,7 @@ fn schema_validation_wrong_type_renders_block() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -221,6 +223,7 @@ fn schema_validation_format_failure_renders_block() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -257,6 +260,7 @@ fn schema_validation_format_failure_escapes_markup() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     // If the renderer did not escape the message, `<red>...<\/red>` would be
@@ -282,6 +286,7 @@ fn schema_validation_preparation_failure_renders_summary() {
             .to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -295,6 +300,7 @@ fn schema_validation_preparation_failure_with_description_renders_summary() {
         summary: "schema could not be prepared: could not resolve ./missing.yaml".to_string(),
         description: Some("Planner prompt".to_string()),
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -329,6 +335,7 @@ fn schema_validation_root_union_arm_index_renders_block() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -379,6 +386,7 @@ fn schema_validation_multiple_problems_renders_block() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -432,6 +440,7 @@ fn schema_validation_default_problem_hint_names_the_schema_default() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
     let mixed = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/doc.md"),
@@ -439,6 +448,7 @@ fn schema_validation_default_problem_hint_names_the_schema_default() {
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
         source: None,
+        expression_origins: Default::default(),
     };
 
     let only_default = render(&only_default);

@@ -19,6 +19,12 @@
 //!
 //! Each launch writes `launch-<n>.txt` (its prompt) and `pid-<n>.txt` into
 //! `FAKE_DIR`, and `done-<n>.txt` only when it exits on its own.
+//!
+//! With both `FAKE_FIRST_REWRITE_PATH` and `FAKE_FIRST_REWRITE_FROM` set,
+//! launch 1 copies the `FROM` file's bytes over the `PATH` file after
+//! recording its prompt, so a test can rewrite a document while its first
+//! provider session runs. `FAKE_SECOND_REWRITE_PATH` and
+//! `FAKE_SECOND_REWRITE_FROM` do the same on launch 2.
 
 use std::{env, fs, thread, time::Duration};
 
@@ -66,6 +72,16 @@ fn main() {
         previous = Some(argument);
     }
     fs::write(dir.join(format!("launch-{n}.txt")), &prompt).unwrap();
+    let rewrite = match n {
+        1 => Some(("FAKE_FIRST_REWRITE_PATH", "FAKE_FIRST_REWRITE_FROM")),
+        2 => Some(("FAKE_SECOND_REWRITE_PATH", "FAKE_SECOND_REWRITE_FROM")),
+        _ => None,
+    };
+    if let Some((path, from)) = rewrite
+        && let (Some(target), Some(source)) = (env::var_os(path), env::var_os(from))
+    {
+        fs::copy(source, target).expect("rewrite the file during this launch");
+    }
     let plan = env::var("FAKE_PLAN").unwrap_or_default();
     let step = plan.split(',').nth(n - 1).unwrap_or("ok").trim().to_string();
     let code = if step == "fail" {

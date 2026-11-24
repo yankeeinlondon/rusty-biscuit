@@ -308,6 +308,19 @@ pub enum ExpressionError {
         op: &'static str,
     },
 
+    /// An object spread (`{ ...operand }`) evaluated an operand that is
+    /// neither an object nor `null`. Reported under
+    /// [`INVALID_SPREAD_OPERAND_CODE`](super::call_check::INVALID_SPREAD_OPERAND_CODE)
+    /// at the operand, the code the passive check uses when the operand's
+    /// type proves the same failure.
+    #[error("object spread requires an object or null, found {found}")]
+    InvalidSpreadOperand {
+        /// The operand's JSON type (`number`, `string`, `boolean`, `array`).
+        found: &'static str,
+        /// Which operand of the expression failed.
+        site: super::spread::SpreadSite,
+    },
+
     /// A focused remote-provider query failed (`pr`, `pr_list`, `cicd`,
     /// `cicd_list`, `branch_exists_on_remote`, `remote_vendor`).
     ///
@@ -357,6 +370,22 @@ pub enum ExpressionError {
         target: Box<super::read_gate::ReadTarget>,
         /// Why.
         refusal: super::read_gate::GateRefusal,
+    },
+
+    /// An editor observation stopped before it could produce a value: a read
+    /// its approvals do not cover, an input it cannot inspect, a remote body
+    /// with no fresh cache entry, or an operation the editor does not run
+    /// (see [`editor_reads`](super::editor_reads)). Only the editor's
+    /// property observation raises it. Like
+    /// [`SlotReadRefused`](Self::SlotReadRefused) it is never recovered into
+    /// a value, so `try` cannot turn an unapproved read into a known
+    /// fallback.
+    #[error("{function}(): the editor cannot observe this value yet: {reason}")]
+    ObservationPending {
+        /// The function (or binding) that could not be observed.
+        function: String,
+        /// Why the observation is pending.
+        reason: super::editor_reads::PendingReason,
     },
 
     /// A call that breaks a function's specified contract where the
@@ -657,6 +686,10 @@ impl ExpressionError {
     /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
     ///   document before evaluation, so no lenient surface may keep it.
     ///
+    /// - [`InvalidSpreadOperand`] — the passive check rejects a spread whose
+    ///   operand's type proves it; one found only when evaluated is the same
+    ///   mistake, so it is fatal too rather than a value with fields missing.
+    ///
     /// - [`Data`] and [`NestedData`] — a `load_data` contract, format,
     ///   syntax, or contract-fit failure. No partial value may stand in for
     ///   data that did not load. A contract import that cannot be read is
@@ -682,6 +715,7 @@ impl ExpressionError {
     /// [`Binding`]: ExpressionError::Binding
     /// [`Call`]: ExpressionError::Call
     /// [`CallCheck`]: ExpressionError::CallCheck
+    /// [`InvalidSpreadOperand`]: ExpressionError::InvalidSpreadOperand
     /// [`Data`]: ExpressionError::Data
     /// [`NestedData`]: ExpressionError::NestedData
     /// [`Other`]: ExpressionError::Other
@@ -701,6 +735,7 @@ impl ExpressionError {
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
             ExpressionError::CallCheck(_) => true,
+            ExpressionError::InvalidSpreadOperand { .. } => true,
             ExpressionError::Data(data) | ExpressionError::NestedData(data) => match &**data {
                 super::data::DataError::ContractImport(diagnostic) => file_reference_is_fatal(diagnostic),
                 _ => true,
@@ -776,9 +811,11 @@ impl ExpressionError {
             | Self::InvalidCallback { .. }
             | Self::IterationLimit(_)
             | Self::Arithmetic { .. }
+            | Self::InvalidSpreadOperand { .. }
             | Self::Provider { .. }
             | Self::ContextNotCaptured { .. }
             | Self::SlotReadRefused { .. }
+            | Self::ObservationPending { .. }
             | Self::ContractViolation { .. }
             | Self::FunctionContextNotCaptured { .. }
             | Self::ContextProjectionInvariant { .. }
@@ -841,6 +878,21 @@ impl ExpressionError {
         match self {
             Self::Callback { source, .. } => source.without_callbacks(),
             other => other,
+        }
+    }
+
+    /// This error with a failing spread's [site](super::spread::SpreadSite)
+    /// placed in `root`, the expression whose evaluation raised it.
+    pub(crate) fn placed_in(mut self, root: &super::Expr) -> Self {
+        self.place(root);
+        self
+    }
+
+    fn place(&mut self, root: &super::Expr) {
+        match self {
+            Self::Callback { source, .. } => source.place(root),
+            Self::InvalidSpreadOperand { site, .. } => site.place_in(root),
+            _ => {}
         }
     }
 
@@ -1211,6 +1263,14 @@ mod tests {
                 ),
                 ("Arithmetic", ExpressionError::Arithmetic { op: "Addition" }, false),
                 (
+                    "InvalidSpreadOperand",
+                    ExpressionError::InvalidSpreadOperand {
+                        found: "number",
+                        site: crate::markdown::compose::expression::spread::SpreadSite::of(&crate::markdown::compose::expression::Expr::NumberLiteral(1.0)),
+                    },
+                    false,
+                ),
+                (
                     "Provider transport",
                     ExpressionError::Provider {
                         function: "pr".into(),
@@ -1314,6 +1374,7 @@ mod tests {
                         failure: simplified_schema::coercion::ConversionError { failures: Vec::new() },
                         text: Arc::from("[1]"),
                         table: None,
+                        wrapped: false,
                     }),
                     true,
                 ),

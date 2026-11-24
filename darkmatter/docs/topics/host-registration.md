@@ -10,7 +10,8 @@ running the host.
 This page covers:
 
 - [registering a host](#registering-a-host) in `.darkmatter.yaml`,
-- [the manifest format](#the-manifest),
+- [the manifest format](#the-manifest), and
+  [format 2](#manifest-format-2), the verified bundle format that replaces it,
 - [the identifying trigger](#the-identifying-trigger) that decides which
   documents belong to the host,
 - [how a registration loads](#how-a-registration-loads), from Rust,
@@ -53,7 +54,13 @@ it publishes `~/.claudine/darkmatter-host.yaml`, then registers it.
 ## The manifest
 
 The host writes the manifest and every file it names; you never edit them by
-hand. Every field is required, and no other field is allowed:
+hand. This section describes **format 1**, the format `register` entries load
+into host profiles today. [Format 2](#manifest-format-2) is the format the
+shipped envelope schema now describes; loading it into host profiles is
+**planned**, and from then on a format 1 manifest is refused with a request
+to rerun the host's setup.
+
+In format 1, every field is required, and no other field is allowed:
 
 ```yaml
 # ~/.acme/darkmatter-host.yaml (written by the acme program)
@@ -91,7 +98,147 @@ trigger's file, so library files sit beside the triggers. A remote member
 
 The schema of the envelope ships with Darkmatter
 (`darkmatter/schemas/darkmatter-host.yaml`) and is importable as
-`darkmatter-host@darkmatter:host`.
+`darkmatter-host@darkmatter:host`. That shipped schema is the format 2
+contract; format 1 manifests are still checked against the format 1 shape
+above.
+
+### Manifest format 2
+
+A format 2 manifest lists every file of the host's **bundle** (the
+manifest's directory and everything below it) together with the BLAKE3
+digest of each file's exact bytes. A reader checks every file against its
+digest before using any of it, so it never mixes files from two releases of
+the host, even while the host is publishing a new one.
+
+```yaml
+# ~/.acme/registration/manifest.yaml (written by the acme program)
+kind: darkmatter-host
+format_version: 2
+host: acme
+version: "1.2.0"
+files:
+    - ./schemas/widget.yaml
+    - ./schemas/library.yaml
+lifecycle: ./globals.lifecycle.json
+functions:
+    - catalog: ./functions/catalog.yaml
+      facts: ./functions/facts.json
+digests:
+    ./schemas/widget.yaml: "<64 lowercase hex digits>"
+    ./schemas/library.yaml: "<64 lowercase hex digits>"
+    ./globals.lifecycle.json: "<64 lowercase hex digits>"
+    ./functions/catalog.yaml: "<64 lowercase hex digits>"
+    ./functions/facts.json: "<64 lowercase hex digits>"
+```
+
+| Field | What it holds |
+| --- | --- |
+| `kind` | always `darkmatter-host` |
+| `format_version` | the integer `2` (not `"2"`, not `2.0`) |
+| `host` | the host's identifier, a nonempty string |
+| `version` | the host release that wrote the manifest, a nonempty string |
+| `files` | the bundle's schema files; their order has no effect; may be `[]` |
+| `lifecycle` | the host's lifecycle artifact; always required |
+| `functions` | function catalogs, each a closed `{catalog, facts}` pair; write `functions: []` for none |
+| `digests` | one entry per member entry above, keyed by the reference exactly as written |
+
+Every field is required, no other field is allowed, and `files: null` or
+`functions: null` is refused: write `[]`. A member without a digest, or a
+digest for no member, refuses the manifest at that entry. A digest is the
+BLAKE3 hash of the file's bytes as 64 lowercase hexadecimal digits
+(`biscuit_hash::blake3_hash_bytes`); `ABC…` or a short digest is refused.
+
+**Member paths** are written so that one manifest works on macOS, Linux, and
+Windows alike:
+
+| Rule | Accepted | Refused |
+| --- | --- | --- |
+| starts with `./` or `../` | `./schemas/a.yaml` | `schemas/a.yaml`, `/abs/a.yaml` |
+| forward slashes only | `./schemas/a.yaml` | `./schemas\a.yaml` |
+| names use `A-Z`, `a-z`, `0-9`, `.`, `_`, `-` | `./schemas/my_type-2.yaml` | `./schemas/my type.yaml`, `./schémas/a.yaml` |
+| no empty segment or trailing `.` | | `./schemas//a.yaml`, `./schemas/a.yaml.` |
+| no Windows device name, with any extension or case | `./schemas/console.yaml` | `./schemas/CON.yaml`, `./aux`, `./com1.json` |
+| stays inside the bundle | `./schemas/../a.yaml`, `../registration/a.yaml` (when the manifest sits in `registration/`) | `../a.yaml` |
+| local only | | `https://…` (never fetched) |
+
+After `.` and `..` are applied, each member is known by its path from the
+bundle root (`schemas/a.yaml`). Two entries naming the same file
+(`./a.yaml` and `./x/../a.yaml`, or a function's `facts` equal to its
+`catalog`) are refused, and so are names that differ only in letter case
+(`./Schemas/a.yaml` beside `./schemas/b.yaml`), because a case-insensitive
+file system would merge them. A symbolic link, or on Windows a junction or
+other reparse point, anywhere between the bundle root and a member is
+refused; it is never followed.
+
+#### Reading a format 2 bundle
+
+`config::registration::bundle::load_snapshot(manifest, context)` reads a
+format 2 manifest and its members into a `VerifiedSnapshot`, or refuses it
+with a `SnapshotRefusal` (code `dm.host.registration`, located in the
+manifest at the failing field). It parses no member; the snapshot holds each
+member's verified bytes for the code that does.
+
+```rust
+use std::path::Path;
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::registration::bundle::load_snapshot;
+
+fn show(manifest: &Path, context: &FileResolutionContext) {
+    match load_snapshot(manifest, context) {
+        Ok(snapshot) => println!("{} {} revision {}", snapshot.host(), snapshot.version(), snapshot.revision()),
+        Err(refusal) => eprintln!("{}:{:?}: {}", refusal.file.display(), refusal.line, refusal.message),
+    }
+}
+```
+
+Each file is read once and hashed once. When a member is missing or does
+not match its digest, the host may be in the middle of publishing (it
+replaces members first and the manifest last), so the reader reads the
+manifest once more:
+
+```mermaid
+flowchart TD
+    A[read manifest] --> B{valid format 2?}
+    B -- no --> R[refuse]
+    B -- yes --> C[read and hash every member]
+    C --> D{all present and matching?}
+    D -- yes --> S[VerifiedSnapshot]
+    D -- no --> E[read manifest again]
+    E --> F{bytes changed?}
+    F -- no --> R
+    F -- yes --> G[verify everything again<br/>against the new manifest only]
+    G --> H{all present and matching?}
+    H -- yes --> S
+    H -- no --> R
+```
+
+The retry happens at most once, and the second attempt reads every member
+again, so a snapshot never combines files from two manifests. Other
+problems (a bad path, a symbolic link, an unreadable file) refuse at once.
+
+What a snapshot records:
+
+- `files()` in authored order and `sorted_files()`, `lifecycle()`,
+  `functions()`: each a `BundleMember` with its manifest field
+  (`functions[0].facts`), the reference as written, its bundle-relative
+  path, and the line and column of its entry in the manifest.
+- `bytes()`: the verified bytes of every member, by bundle-relative path.
+- `revision()`: a digest of the host, version, format, sorted file paths,
+  lifecycle path, function pairs (sorted by catalog, then facts), and every
+  member's digest. Reordering `files`, reformatting the manifest, or
+  copying the bundle to another directory keeps it; changing any member
+  byte changes it.
+- `manifest_hash()`: the digest of the manifest's own bytes, which does
+  change with layout and comments.
+- `dependencies()` and `candidates()`: every file read (with the hash of
+  its latest read) and every location looked at, from both attempts when
+  the reader retried. A refusal carries the same two lists, so a caller can
+  watch for a missing member to appear.
+
+A format 1 manifest given to this reader is refused before the format 2
+rules are checked, with one warning at its `format_version`. The warning
+tells the user to run the host's setup or update the host (for `acme`: run
+`acme setup`, or update `acme`) and sets `SnapshotRefusal::legacy_format`.
 
 ## The identifying trigger
 
@@ -227,7 +374,7 @@ also report the selection warnings of the documents they judge.
 
 | Code | When |
 | --- | --- |
-| `dm.host.registration` | a manifest or member is missing, invalid, or remote; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
+| `dm.host.registration` | a manifest or member is missing, invalid, or remote; a format 2 member does not match its digest; a format 1 manifest is read as format 2; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
 | `dm.host.identify_too_broad` | the identifying trigger could match on keys `md` owns alone |
 | `dm.host.ambiguous` | two or more hosts identify the same document; it is analyzed as an `md` document |
 | `dm.host.foreign_document` | `md compose` composes a document a registered host identifies; an `info` notice, once per run, naming the host's own command (see [below](#md-compose-of-a-hosts-document)) |

@@ -168,6 +168,9 @@ fn option_matrix_control_row() {
 enum Refuser {
     Binder,
     Delimiter,
+    /// A name list that binds but cannot name columns (empty, an empty
+    /// name, a repeated name).
+    Header,
 }
 
 /// Every invalid cell, spelled once: the text is both an expression literal
@@ -193,9 +196,15 @@ const INVALID_CELLS: &[(&str, Refuser)] = &[
     ("{delimiter: \"\\r\"}", Refuser::Delimiter),
     ("{delimiter: \"\\n\"}", Refuser::Delimiter),
     ("{header: 5}", Refuser::Binder),
-    ("{header: []}", Refuser::Binder),
     ("{header: {}}", Refuser::Binder),
     ("{header: \"\"}", Refuser::Binder),
+    // An element that converts to no name: one of several, or every one.
+    ("{header: [\"name\", {}]}", Refuser::Binder),
+    ("{header: [{}]}", Refuser::Binder),
+    ("{header: []}", Refuser::Header),
+    ("{header: [\"\"]}", Refuser::Header),
+    ("{header: [\"name\", \"\"]}", Refuser::Header),
+    ("{header: [\"name\", \"name\"]}", Refuser::Header),
 ];
 
 /// Each invalid cell, written literally (refused by the passive check) and
@@ -223,9 +232,10 @@ fn option_matrix_invalid_cells_read_nothing() {
                 assert_eq!(codes(&failure), [EVALUATION_FAILURE], "computed {cell}");
                 assert!(failure.error.to_string().contains("options (argument 3)"), "computed {cell}: {}", failure.error);
             }
-            Refuser::Delimiter => {
+            Refuser::Delimiter | Refuser::Header => {
                 assert_eq!(codes(&failure), [INVALID_OPTIONS], "computed {cell}");
-                assert_eq!(invalid_option(&failure).0, "delimiter", "computed {cell}");
+                let key = if refuser == Refuser::Header { "header" } else { "delimiter" };
+                assert_eq!(invalid_option(&failure).0, key, "computed {cell}");
             }
         }
         assert_nothing_read(&computed, cell);
@@ -887,7 +897,7 @@ fn object_header_failure_does_not_poison_positional_mode() {
     let object = "load_data(\"dup.csv\", \"{a: string}[]\")";
     let failure = failed(dir.path(), &runtime, "", object);
     assert_eq!(codes(&failure), ["dm.data.malformed"]);
-    assert!(failure.error.to_string().contains("repeats `a`"), "{}", failure.error);
+    assert!(failure.error.to_string().contains("columns 1 (`a`) and 2 (`a`) both name the field `a`"), "{}", failure.error);
     let positional = "\"tuple([string, string])[]\"";
     let headerless = loaded(dir.path(), &runtime, "", &format!("load_data(\"dup.csv\", {positional}, {{header: false}})"));
     assert_eq!(headerless, json!([["a", "a"], ["1", "2"]]));

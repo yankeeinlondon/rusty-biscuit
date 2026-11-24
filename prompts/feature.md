@@ -1,7 +1,7 @@
 ---
 stage: "tech-design"
 feature: 
-base_dir: 
+base-dir: 
 ---
 
 # Feature

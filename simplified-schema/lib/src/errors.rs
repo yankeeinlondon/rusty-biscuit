@@ -21,6 +21,7 @@
 //!   fails the dialect's meta-schema.
 //! - [`SchemaError::RemoteUnsupported`] — a `$schema` value is an `http(s)://`
 //!   URL; remote schemas are not supported in v1.
+//! - [`SchemaError::BundleBoundary`] — a bundle scope refused a reference.
 //! - [`SchemaError::Baseline`] — the baseline schema could not be loaded or
 //!   violates the "simple object schema" restriction.
 //! - [`SchemaError::BuildValidator`] — `jsonschema` rejected the lowered JSON
@@ -82,6 +83,37 @@ use super::simplified::{
     SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaReferenceSite,
     SchemaSourceId, SchemaUnionRejection, Slot,
 };
+
+/// What a rejected composition target is
+/// ([`SchemaError::InvalidCompositionTarget`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompositionTargetKind {
+    /// A list (`T[]`) or a tuple, whatever its items are.
+    Array,
+    /// A union, including a union of objects.
+    Union,
+    /// A primitive type such as `string`.
+    Primitive,
+    /// `object`, whose members are not declared.
+    OpaqueObject,
+    /// A `function(...)` signature.
+    Callable,
+    /// A type supplied entirely by a `{{ … }}` template.
+    Template,
+}
+
+impl fmt::Display for CompositionTargetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Array => "a list, not an object",
+            Self::Union => "a union, not a single object",
+            Self::Primitive => "a primitive type, not an object",
+            Self::OpaqueObject => "`object`, which declares no members",
+            Self::Callable => "a function signature, not an object",
+            Self::Template => "supplied by a template, so its members are unknown",
+        })
+    }
+}
 
 
 /// A conflict participant's diagnostic excerpt as a Markdown code span,
@@ -152,6 +184,10 @@ pub enum NotSchemaReason {
     /// applied to documents by their `kind`, so it is neither a `$schema`
     /// target nor a `Name@file` import source.
     SelectedByKind,
+    /// A `kind: namespace-schema` document: it declares a host namespace
+    /// for a host's global catalog, so it is neither a `$schema` target nor
+    /// a `Name@file` import source, and its `types` are private to it.
+    NamespaceCatalog,
 }
 
 impl NotSchemaReason {
@@ -163,7 +199,7 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
             NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
             NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
-            NotSchemaReason::SelectedByKind => {
+            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog => {
                 Some("move shared types into a `kind: schema` file and import them from there")
             }
             NotSchemaReason::NotAMapping | NotSchemaReason::NoSchemaProperty => None,
@@ -188,6 +224,9 @@ impl fmt::Display for NotSchemaReason {
             NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",
             NotSchemaReason::SelectedByKind => {
                 "it is a `yaml-schema`; it is selected by `kind`, not referenced"
+            }
+            NotSchemaReason::NamespaceCatalog => {
+                "it is a `namespace-schema`; it declares a host namespace and is read only by a host's catalog"
             }
         })
     }
@@ -560,6 +599,11 @@ pub enum SchemaError {
     #[error("remote $schema references are not supported in this version: `{reference}`")]
     RemoteUnsupported { reference: String },
 
+    /// A [`bundle`](crate::resolve::bundle) scope in force refused a schema
+    /// reference before anything was probed or read.
+    #[error("schema reference `{reference}` is refused: {boundary}")]
+    BundleBoundary { reference: String, boundary: crate::resolve::bundle::BundleBoundary },
+
     /// The baseline schema could not be loaded, parsed, or violates the
     /// "simple object schema" restriction documented in the spec.
     ///
@@ -709,6 +753,42 @@ pub enum SchemaError {
         rejection: Box<SchemaUnionRejection>,
         site: SchemaReferenceSite,
         definition: Box<SchemaReferenceSite>,
+    },
+
+    /// A composition operand (`...name` or a `$extends` item) resolved to a
+    /// named type that is not a single object with a declared shape.
+    ///
+    /// `name` is the operand as written, `site` the operand itself, and
+    /// `definition` the declaration that decided the rejection: the target,
+    /// or, through aliases, the concrete type they reach.
+    #[error("{}: `{name}` cannot be composed into an object: it is {reason}", site.path)]
+    InvalidCompositionTarget {
+        name: String,
+        site: SchemaReferenceSite,
+        definition: Box<SchemaReferenceSite>,
+        reason: CompositionTargetKind,
+    },
+
+    /// A composition operand could not be looked up: its namespace failed to
+    /// resolve or load, or the chain of composition and alias hops exceeded
+    /// the named-type depth limit. `operand` is the reference as written,
+    /// `site` the operand, and `source` the original cause.
+    #[error("{}: cannot compose `{operand}`: {source}", site.path)]
+    CompositionReference {
+        operand: String,
+        site: SchemaReferenceSite,
+        #[source]
+        source: Box<SchemaError>,
+    },
+
+    /// Lowering failed inside a member an object copied through composition.
+    /// `site` is the member's declaration; `source` the failure, whose
+    /// property path names the receiving object.
+    #[error("{source} (declared at {} in {})", site.path, site.source)]
+    ComposedMember {
+        site: SchemaReferenceSite,
+        #[source]
+        source: Box<SchemaError>,
     },
 
     /// A `$schema` file-reference chain revisits a file it is already
@@ -1291,6 +1371,15 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 )))
                 .hint("Download the schema locally and reference it with a relative or absolute path."),
 
+            SchemaError::BundleBoundary { reference, boundary } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema reference outside the bundle"))
+                .body(Prose::new(format!(
+                    "<cyan>{}</cyan> is refused: {}",
+                    Prose::escape_text(reference),
+                    Prose::escape_text(&boundary.to_string())
+                )))
+                .hint("Name a listed member of the bundle with a `./` or `../` reference from the file that uses it."),
+
             SchemaError::Baseline { message, source } => {
                 let mut body = vec![Prose::new(format!(
                     "<dim>Reason:</dim> {}",
@@ -1482,6 +1571,61 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                          constraints. Put value constraints on the union's arms.",
                     )
             }
+
+            SchemaError::InvalidCompositionTarget { name, site, definition, reason } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "invalid composition target"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<cyan>{}</cyan> composes <cyan>{}</cyan>, which is {}.",
+                            Prose::escape_text(&site.path.to_string()),
+                            Prose::escape_text(name),
+                            Prose::escape_text_outside_code_spans(&reason.to_string())
+                        )),
+                        Prose::new(format!(
+                            "<dim>Defined at:</dim> {} in {}",
+                            Prose::escape_text(&definition.path.to_string()),
+                            Prose::escape_text_outside_code_spans(&definition.source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "<cyan>...name</cyan> and <cyan>$extends</cyan> copy the members of a named \
+                         object type such as <cyan>events: \"{ id: string }\"</cyan>. Reference a \
+                         list, union, or primitive as an ordinary property type instead.",
+                    )
+            }
+
+            SchemaError::CompositionReference { operand, site, source } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unresolved composition operand"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<cyan>{}</cyan> cannot compose <cyan>{}</cyan>.",
+                            Prose::escape_text(&site.path.to_string()),
+                            Prose::escape_text(operand)
+                        )),
+                        Prose::new(format!(
+                            "<dim>Cause:</dim> {}",
+                            Prose::escape_text_outside_code_spans(&source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "Every composition operand must resolve, even when later members replace \
+                         all of its properties. Check the name and the file after <cyan>@</cyan>.",
+                    )
+            }
+
+            SchemaError::ComposedMember { site, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "invalid composed member"))
+                .body(vec![
+                    Prose::new(Prose::escape_text_outside_code_spans(&source.to_string())),
+                    Prose::new(format!(
+                        "<dim>Declared at:</dim> {} in {}",
+                        Prose::escape_text(&site.path.to_string()),
+                        Prose::escape_text_outside_code_spans(&site.source.to_string())
+                    )),
+                ])
+                .hint("Fix the member where it is declared; every object that composes it receives the fix."),
 
             SchemaError::ReferenceCycle { chain } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "$schema reference cycle"))
@@ -2012,6 +2156,40 @@ mod tests {
             source: SchemaSourceId::InlineDocument,
             path: crate::SchemaSourcePath::root().property(property),
         }
+    }
+
+    #[test]
+    fn composition_errors_name_the_operand_the_declaration_and_the_cause() {
+        let definition = SchemaReferenceSite {
+            source: SchemaSourceId::File(PathBuf::from("types.yaml")),
+            path: crate::simplified::SchemaSourcePath::root().property("types").property("rows"),
+        };
+        let invalid = SchemaError::InvalidCompositionTarget {
+            name: "rows@./types.yaml".into(),
+            site: site("order"),
+            definition: Box::new(definition.clone()),
+            reason: CompositionTargetKind::Array,
+        };
+        assert_eq!(invalid.to_string(), "order: `rows@./types.yaml` cannot be composed into an object: it is a list, not an object");
+        let out = render(&invalid);
+        assert!(out.contains("invalid composition target") && out.contains("types.rows") && out.contains("types.yaml"), "{out}");
+
+        let reference = SchemaError::CompositionReference {
+            operand: "base@./missing.yaml".into(),
+            site: site("order"),
+            source: Box::new(SchemaError::NoMatch { reference: "./missing.yaml".into(), bare_name: false }),
+        };
+        assert!(std::error::Error::source(&reference).is_some(), "the cause stays in the chain");
+        let out = render(&reference);
+        assert!(out.contains("unresolved composition operand") && out.contains("base@./missing.yaml"), "{out}");
+        assert!(out.contains("missing.yaml"), "{out}");
+
+        let member = SchemaError::ComposedMember {
+            site: definition,
+            source: Box::new(SchemaError::Convert { property: "order.f".into(), message: "a function".into() }),
+        };
+        assert!(member.to_string().contains("declared at types.rows"), "{member}");
+        assert!(render(&member).contains("Declared at"), "{}", render(&member));
     }
 
     #[test]

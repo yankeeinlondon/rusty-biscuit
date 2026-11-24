@@ -126,7 +126,7 @@ fn expression_uses_known_features(expr: &Expr) -> bool {
         Expr::Paren(inner) => expression_uses_known_features(inner),
         Expr::ArrayLiteral(elements) => elements.iter().any(expression_uses_known_features),
         Expr::ObjectLiteral(entries) => {
-            entries.iter().any(|(_, value)| expression_uses_known_features(value))
+            entries.iter().any(|entry| expression_uses_known_features(entry.value()))
         }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)

@@ -28,6 +28,7 @@
 //! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
 //! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
 //! | `dm.collection.malformed`, `dm.expression.invalid_callback`, `dm.collection.invalid_source`, `dm.collection.pattern_mismatch`, `dm.collection.invalid_sort_key`, `dm.collection.untyped_*_source` | `ERROR` | A `::map` / `::filter` region composition rejects. Darkmatter owns each code and span; DMLS reports the same. |
+//! | `dm.expression.invalid_spread_operand` | `ERROR` | An object spread whose operand is provably neither an object nor `null` (`{ ...5 }`), ranged at the operand; composition rejects the document under the same code. |
 //! | `dm.lifecycle.incomplete_analysis` | `WARNING` | No host catalog's lifecycle artifact could be used (missing, stale, or invalid), so lifecycle stacks are analyzed as the `md` host's, which may not be the document's host. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
@@ -99,7 +100,10 @@ pub mod code {
     pub const FM_YAML_PARSE: &str = darkmatter::markdown::compose::report_diagnostics::FRONTMATTER_PARSE_CODE;
     /// The `$schema` value is not a valid schema shape.
     pub const SCHEMA_INVALID_SHAPE: &str = "dm.schema.invalid_schema_shape";
-    /// A semantic `type-definition` value does not parse as one property definition.
+    /// A semantic `type-definition` value does not parse as one property
+    /// definition, or a named-type reference or composition operand does not
+    /// resolve to a usable definition (unknown name, conflict, cycle, a
+    /// composed target that is no object or cannot be looked up).
     pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
     pub const SCHEMA_PREPARE: &str = simplified_schema::SCHEMA_PREPARE_CODE;
@@ -216,6 +220,11 @@ pub mod code {
     /// A callback that does not parse or binds a protected name.
     pub const EXPRESSION_INVALID_CALLBACK: &str =
         darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_CALLBACK_CODE;
+    /// An object spread whose operand is provably neither an object nor
+    /// `null`, ranged at the operand. The code is Darkmatter's, which
+    /// composition reports under too.
+    pub const EXPRESSION_INVALID_SPREAD_OPERAND: &str =
+        darkmatter::markdown::compose::expression::INVALID_SPREAD_OPERAND_CODE;
     /// A pattern that cannot bind its input or result.
     pub const COLLECTION_PATTERN_MISMATCH: &str =
         darkmatter::markdown::compose::collection_blocks::diagnostics::PATTERN_MISMATCH_CODE;

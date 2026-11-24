@@ -548,14 +548,18 @@ async fn dispatch(
     if !matches!(cli.command, Some(Commands::Completions(_) | Commands::Complete(_))) {
         let config = request::darkmatter_config().map_err(|error| Report::new(error.clone()))?;
         // A provider hook and `steer` answer a machine on their streams, so
-        // only a run a person reads hears about the missing file.
-        if !matches!(cli.command, Some(Commands::Handle(_) | Commands::Steer(_)))
-            && let Some(path) = config.user_config_missing()
-        {
-            log::warn(&format!(
-                "`{}` does not exist, so every Darkmatter setting takes its default; `claudine init` creates it",
-                path.display()
-            ));
+        // only a run a person reads hears that the load created the user
+        // file, or could not.
+        if !matches!(cli.command, Some(Commands::Handle(_) | Commands::Steer(_))) {
+            for notice in config.diagnostics() {
+                if notice.code == darkmatter::config::load::CONFIG_CREATED_CODE {
+                    log::message(&format!("Darkmatter configuration: {}", notice.message));
+                } else if notice.code == darkmatter::config::load::CONFIG_MISSING_CODE
+                    && config.user_config_missing().is_some()
+                {
+                    log::warn(&format!("Darkmatter configuration: {}", notice.message));
+                }
+            }
         }
     }
 

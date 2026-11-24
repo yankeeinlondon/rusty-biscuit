@@ -813,10 +813,18 @@ fn package_contains_path(pkg: &Package, path: &str, packages: &[Package]) -> boo
     if prefix.is_empty() {
         return !packages.iter().any(|other| {
             let other_prefix = other.relative.trim_start_matches("./");
-            !other_prefix.is_empty() && path.starts_with(other_prefix)
+            !other_prefix.is_empty() && path_is_within(path, other_prefix)
         });
     }
-    path == prefix || path.starts_with(&format!("{prefix}/"))
+    path_is_within(path, prefix)
+}
+
+/// Whether `path` is `dir` or lies below it, compared on whole path segments
+/// so `area/member` does not contain `area/member2/src/lib.rs`.
+fn path_is_within(path: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches(std::path::is_separator);
+    path.strip_prefix(dir)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(std::path::is_separator))
 }
 
 #[cfg(test)]
@@ -1522,5 +1530,47 @@ mod tests {
             bare_aggregate_version(&packages, root),
             Some("0.1.0".to_string())
         );
+    }
+
+    fn owned_at(name: &str, relative: &str, area: &str) -> Package {
+        Package {
+            relative: relative.to_string(),
+            ..pkg(name, area, &[])
+        }
+    }
+
+    fn attribution(packages: &[Package], paths: &[&str]) -> PathAttribution {
+        let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        attribute_paths(packages, &paths)
+    }
+
+    #[test]
+    fn attribute_paths_respects_path_segment_boundaries() {
+        let packages = vec![
+            owned_at("member", "area/member", "area"),
+            owned_at("member2", "area/member2", "area"),
+        ];
+
+        let found = attribution(&packages, &["area/member2/src/lib.rs"]);
+
+        assert_eq!(found.packages, vec!["member2".to_string()]);
+    }
+
+    #[test]
+    fn attribute_paths_gives_the_root_package_only_unclaimed_paths() {
+        let packages = vec![
+            owned_at("root-app", "", ""),
+            owned_at("member", "area/member", "area"),
+        ];
+
+        assert_eq!(
+            attribution(&packages, &["area/member/src/lib.rs"]).packages,
+            vec!["member".to_string()]
+        );
+        // `area/member2` shares a string prefix with `member` but not a
+        // directory, so it belongs to the root package.
+        let sibling = attribution(&packages, &["area/member2/src/lib.rs", "src/lib.rs"]);
+        assert_eq!(sibling.packages, vec!["root-app".to_string()]);
+        assert_eq!(sibling.package_areas, vec![String::new()]);
     }
 }

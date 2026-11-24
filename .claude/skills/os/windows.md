@@ -202,7 +202,9 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `git.exe`, `conhost.exe`; cached per process). Its `--exec-path` fallback
   now derives the same prefix as the hint, so a test that the hint is used
   must assert that no such process started, not compare prefixes. Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
-  `wt` sets it to the installation's `<top>` in `main`. In a short-lived
+  `wt` and `sniff` set it to the installation's `<top>` in `main`
+  (`sniff::programs::git_program::name_installation_for_gix`, before any
+  thread starts). In a short-lived
   process that opens no other repository, "read it in-process" turns one
   `rev-parse` into three. Diagnose with `GIT_TRACE2_EVENT=<dir>` (one file per
   git process, with `cmd_ancestry`; a parent that wrote no trace is the

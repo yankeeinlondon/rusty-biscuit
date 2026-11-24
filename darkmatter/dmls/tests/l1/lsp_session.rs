@@ -4952,7 +4952,9 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
     // (file, text, line of the first pattern key)
     let standalone = [
         ("pure.yaml", format!("$schema:\n{BODY}"), 1u32),
-        ("tagged.yaml", format!("kind: schema\ntypes:\n{BODY}"), 2),
+        // Pattern keys belong to a schema object, so the tagged envelope
+        // exports them through `$schema`; a `types` table refuses them.
+        ("tagged.yaml", format!("kind: schema\n$schema:\n{BODY}"), 2),
     ];
 
     let mut fixture = LspFixture::start(&workspace);

@@ -12,6 +12,10 @@
 
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
+use std::ops::Range;
+use std::sync::Arc;
+
+use super::expression::trace::LoadOrigin;
 
 /// Where a caller-supplied override value came from.
 ///
@@ -215,11 +219,28 @@ pub(crate) struct FrontmatterProvenance {
     authored: HashMap<String, String>,
     /// Leaves that are data. Grows as scans produce values.
     data: DataPaths,
+    /// The expression that produced each top-level key's current value, for
+    /// a key whose authored value is wholly one `{{ expr }}`.
+    expressions: HashMap<String, ExpressionOrigin>,
+}
+
+/// The whole-value `{{ expr }}` that produced a top-level key's value: where
+/// it was authored and, for a direct `load_data` result, the source the
+/// value was read from. Destination schema failures on the key name both.
+#[derive(Debug, Clone)]
+pub(crate) struct ExpressionOrigin {
+    /// The string the expression was scanned in, which the authored scalar
+    /// must still decode to for [`Self::span`] to project.
+    pub(crate) scanned: String,
+    /// Byte range of the `{{ … }}` in [`Self::scanned`].
+    pub(crate) span: Range<usize>,
+    /// The source of a direct load.
+    pub(crate) load: Option<Arc<LoadOrigin>>,
 }
 
 impl FrontmatterProvenance {
     pub(crate) fn new(authored: HashMap<String, String>, data: DataPaths) -> Self {
-        Self { authored, data }
+        Self { authored, data, expressions: HashMap::new() }
     }
 
     /// The provenance of a frontmatter whose every value is authored.
@@ -241,6 +262,7 @@ impl FrontmatterProvenance {
     /// Records `value` as the authored text of top-level `key`, which a person
     /// has just supplied; a non-string value has no authored text.
     pub(crate) fn set_authored_source(&mut self, key: &str, value: Option<&Value>) {
+        self.expressions.remove(key);
         match value.and_then(Value::as_str) {
             Some(text) => self.authored.insert(key.to_string(), text.to_string()),
             None => self.authored.remove(key),
@@ -251,6 +273,20 @@ impl FrontmatterProvenance {
     /// candidate. See [`authored_shell_candidate`].
     pub(crate) fn is_authored_shell_candidate(&self, key: &str) -> bool {
         self.authored_source(key).is_some_and(authored_shell_candidate)
+    }
+
+    /// Records the expression that produced top-level `key`'s value, or that
+    /// no whole-value expression did (`None`).
+    pub(crate) fn set_expression_origin(&mut self, key: &str, origin: Option<ExpressionOrigin>) {
+        match origin {
+            Some(origin) => self.expressions.insert(key.to_string(), origin),
+            None => self.expressions.remove(key),
+        };
+    }
+
+    /// Every top-level key whose value a whole-value expression produced.
+    pub(crate) fn expression_origins(&self) -> &HashMap<String, ExpressionOrigin> {
+        &self.expressions
     }
 
     pub(crate) fn data(&self) -> &DataPaths {

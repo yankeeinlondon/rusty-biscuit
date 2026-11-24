@@ -523,11 +523,33 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
     evaluator: &Evaluator<L>,
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
-    mut before_eval: BeforeEval<'_>,
+    before_eval: BeforeEval<'_>,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedInterpolationError> {
+    interpolate_value_traced(input, evaluator, policy, warning_stage, before_eval)
+        .map(|(value, count, warnings, _)| (value, count, warnings))
+}
+
+/// What a successful whole-value `{{ expr }}` produced its value from.
+#[derive(Debug, Clone)]
+pub(crate) struct WholeValueTrace {
+    /// Byte range of the `{{ … }}` in the interpolated input.
+    pub span: std::ops::Range<usize>,
+    /// The source of a direct `load_data` result ([`trace`](crate::markdown::compose::expression::trace)).
+    pub load: Option<std::sync::Arc<crate::markdown::compose::expression::trace::LoadOrigin>>,
+}
+
+/// [`interpolate_value_guarded`], also returning the trace of a whole-value
+/// expression (`None` for mixed text and a whole-value literal).
+pub(crate) fn interpolate_value_traced<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+    mut before_eval: BeforeEval<'_>,
+) -> Result<(Value, usize, Vec<ComposeWarning>, Option<WholeValueTrace>), LocatedInterpolationError> {
     if is_whole_value_literal(input) {
         let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
-        return Ok((Value::String(result.output), result.replacements, result.warnings));
+        return Ok((Value::String(result.output), result.replacements, result.warnings, None));
     }
     if let Some(loc) = whole_value_span(input) {
         let located = |error| LocatedInterpolationError::new(error, Some(loc.start..loc.end));
@@ -544,17 +566,17 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
         let mut warnings = evaluator.collect_context_warnings(&expr, warning_stage);
         let mut shown = 0;
         show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
-        let value = evaluator.eval_json(&expr);
+        let (value, load) = crate::markdown::compose::expression::trace::traced(|| evaluator.eval_json(&expr));
         warnings.extend(evaluator.member_warnings(&loc.expression, &(loc.start..loc.end)));
         let value = match value {
             Ok(value) => value,
             Err(cause) => return Err(located(interpolation_error(&loc.expression, cause)).after(warnings)),
         };
         show_new_warnings(&mut before_eval, &warnings, &mut shown).map_err(|failure| failure.after(warnings.clone()))?;
-        return Ok((value, 1, warnings));
+        return Ok((value, 1, warnings, Some(WholeValueTrace { span: loc.start..loc.end, load })));
     }
     let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
-    Ok((Value::String(result.output), result.replacements, result.warnings))
+    Ok((Value::String(result.output), result.replacements, result.warnings, None))
 }
 
 /// Returns `true` when `input`'s trimmed content is exactly one interpolation

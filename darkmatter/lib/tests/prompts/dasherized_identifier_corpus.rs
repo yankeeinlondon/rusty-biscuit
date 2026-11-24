@@ -50,7 +50,7 @@ use darkmatter::markdown::compose::{
     ComposeSource, FrontmatterShellBody, parse_frontmatter_shell_value_spanned,
 };
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, effective_property_shape};
-use simplified_schema::expression::ast::{SpannedCallArgument, SpannedExprKind};
+use simplified_schema::expression::ast::{SpannedCallArgument, SpannedExprKind, SpannedObjectEntry};
 use simplified_schema::frontmatter_expression_values;
 use serde_json::Value;
 
@@ -579,7 +579,10 @@ fn project_logical_or(expr: &SpannedExpr) -> (SpannedExpr, HashSet<(usize, usize
                 items.iter_mut().for_each(|item| project(item, synthesized));
             }
             SpannedExprKind::ObjectLiteral(entries) => {
-                entries.iter_mut().for_each(|(_, value)| project(value, synthesized));
+                entries.iter_mut().for_each(|entry| match entry {
+                    SpannedObjectEntry::Field { value, .. } => project(value, synthesized),
+                    SpannedObjectEntry::Spread { operand } => project(operand, synthesized),
+                });
             }
             SpannedExprKind::UnaryNot(inner)
             | SpannedExprKind::UnaryMinus(inner)

@@ -241,7 +241,7 @@ fn contains_call(expr: &SpannedExpr) -> bool {
         | SpannedExprKind::NumberLiteral(_)
         | SpannedExprKind::BoolLiteral(_) => false,
         SpannedExprKind::ArrayLiteral(items) => items.iter().any(contains_call),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().any(|(_, value)| contains_call(value)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().any(|entry| contains_call(entry.value())),
         SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
         | SpannedExprKind::Paren(inner)
@@ -303,8 +303,8 @@ fn frontmatter_reads(expr: &SpannedExpr, view: &BindingView, reads: &mut Vec<Fro
             }
         }
         SpannedExprKind::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                frontmatter_reads(value, view, reads);
+            for entry in entries {
+                frontmatter_reads(entry.value(), view, reads);
             }
         }
         SpannedExprKind::CallbackCall { .. } => {

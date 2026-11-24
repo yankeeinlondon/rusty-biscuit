@@ -162,7 +162,7 @@ fn is_pure(expr: &SpannedExpr) -> bool {
         }
         SpannedExprKind::Variable(_) | SpannedExprKind::CallbackCall { .. } => false,
         SpannedExprKind::ArrayLiteral(items) => items.iter().all(is_pure),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().all(|(_, value)| is_pure(value)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().all(|entry| is_pure(entry.value())),
         SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
         | SpannedExprKind::Paren(inner)
@@ -177,5 +177,26 @@ fn is_pure(expr: &SpannedExpr) -> bool {
         SpannedExprKind::FunctionCall { name, args } => {
             slot_class(name) == Some(SlotClass::Pure) && args.iter().all(is_pure)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A read in a spread operand is collected, even when a later field
+    /// overwrites the key it supplies.
+    #[test]
+    fn object_spread_operand_reads_are_collected_even_when_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let parsed = parse_spanned("{ ...{ k: load_data('./a.yaml', 'string[]') }, ...{ k: frontmatter(name) }, k: 1 }").unwrap();
+        let reads = reads_of(&parsed, dir.path(), &context);
+        let [CollectedRead::Known(known), CollectedRead::Computed { function }] = reads.as_slice() else {
+            panic!("{reads:?}");
+        };
+        assert_eq!(known.function, "load_data");
+        assert_eq!(known.location, ReadLocation::Local(dir.path().join("./a.yaml")));
+        assert_eq!(function, "frontmatter");
     }
 }

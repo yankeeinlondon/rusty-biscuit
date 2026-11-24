@@ -305,6 +305,28 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// Like [`LspFixture::start_with_slot_gate`] (without a gate unless
+    /// `gated`), with the slot worker answering remote reads from the
+    /// transport cache under `cache_root` and the server timed by `clock`
+    /// (wall and monotonic time together, for observation expiry).
+    pub fn start_with_slot_options(
+        workspace: &'workspace LspWorkspace,
+        snapshot: RequestSnapshot,
+        gated: bool,
+        cache_root: Option<std::path::PathBuf>,
+        clock: Option<Arc<dyn dmls::clock::Clock>>,
+    ) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks {
+            slot_gate: gated.then_some(gate_rx),
+            slot_cache_root: cache_root,
+            ..dmls::StartupHooks::default()
+        };
+        let mut fixture = Self::spawn_with_clock(workspace, Duration::ZERO, snapshot, hooks, clock);
+        fixture.slot_gate = gated.then_some(gate_tx);
+        fixture
+    }
+
     /// Lets one held schema-slot job through.
     pub fn release_slot_job(&self) {
         if let Some(gate) = &self.slot_gate {

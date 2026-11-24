@@ -1,12 +1,12 @@
 ---
 $schema:
-    review_file: file
+    review-file: file
 area: "{{ctx.area}}"
-review_file: "{{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md"
+review-file: "{{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md"
 start: 
     message: "👓 starting a comprehensive review of the **{{ctx.area}}** package area"
 success:
-    message: "✅ the comprehensive review for **{{ctx.area}}** completed: `{{review_file}}`"
+    message: "✅ the comprehensive review for **{{ctx.area}}** completed: `{{review-file}}`"
 
 failure:
     message: "💥 the comprehensive review in {{ctx.area}} did not finish successfully!"

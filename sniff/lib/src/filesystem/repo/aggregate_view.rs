@@ -148,7 +148,7 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
         performance::record_logged_stage("detect.total", started.elapsed(), tracing::Level::INFO);
     }
     let evidence = detected
-        .git
+        .aggregate_git
         .as_ref()
         .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
     let aggregate = project_repo_aggregate(dir, Some(&detected.filesystem), evidence)?;
@@ -312,20 +312,37 @@ fn observe_cwd_context(
 }
 
 /// The `dirty` / `has_source_code_changes` pair for one resolved package
-/// area, projected from the already-observed status and file changes.
+/// area, projected from the already-observed file changes.
+///
+/// Indeterminate facts (see [`area_changed_paths`]) report `false`, mirroring
+/// the focused commands.
+fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (bool, bool) {
+    let Some(paths) = git.and_then(|git| area_changed_paths(repo, area, git)) else {
+        return (false, false);
+    };
+    let dirty = !paths.is_empty();
+    let has_source_changes = paths.iter().any(|path| is_source_code_path(path));
+    (dirty, has_source_changes)
+}
+
+/// Distinct changed paths (staged, unstaged, untracked, or conflicted) inside
+/// one package area, in `file_changes` order.
 ///
 /// A path counts when its components place it under the area path — or, for
-/// the top-level `""` area, when it sits under no other area. Without a computed
-/// status (an identity-only request) both facts are indeterminate and report
-/// `false`, mirroring the focused commands.
-fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (bool, bool) {
-    let Some(git) = git else {
-        return (false, false);
-    };
-    let Some(status) = git.status.as_ref() else {
-        return (false, false);
-    };
-
+/// the top-level `""` area, when it sits under no other area.
+///
+/// ## Returns
+///
+/// `None` when the answer is indeterminate rather than empty: see
+/// [`observed_scope_paths`].
+pub fn area_changed_paths<'a>(
+    repo: &RepoInfo,
+    area: &str,
+    git: &'a GitInfo,
+) -> Option<Vec<&'a Path>> {
+    if !file_changes_observed(git) {
+        return None;
+    }
     let area_path = (!area.is_empty()).then(|| Path::new(area));
     let in_area = |path: &Path| {
         if let Some(area_path) = area_path {
@@ -339,23 +356,42 @@ fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (boo
         }
     };
 
-    let mut dirty = false;
-    let mut has_source_changes = false;
-    let paths = status
-        .dirty
-        .iter()
-        .map(|d| d.filepath.as_path())
-        .chain(status.untracked.iter().map(|u| u.filepath.as_path()))
-        .chain(git.file_changes.iter().map(|change| change.path.as_path()));
-    for path in paths {
-        if in_area(path) {
-            dirty = true;
-            if is_source_code_path(path) {
-                has_source_changes = true;
-            }
-        }
-    }
-    (dirty, has_source_changes)
+    let mut seen = std::collections::HashSet::new();
+    Some(
+        git.file_changes
+            .iter()
+            .map(|change| change.path.as_path())
+            .filter(|path| in_area(path) && seen.insert(*path))
+            .collect(),
+    )
+}
+
+/// The paths in `scope` from the already-collected `file_changes`, or `None`
+/// when they were not observed.
+///
+/// `file_changes` is the complete changed-path set whenever a request sets
+/// `include_file_changes`; `RepoStatus::dirty` / `untracked` are patch-only
+/// detail and are empty without `include_file_diffs`, so they are never read
+/// here.
+///
+/// ## Returns
+///
+/// `None` when no status was computed (an identity-only request), or when the
+/// status is dirty but carries no file changes (a request without
+/// `include_file_changes`). Either way an empty list would wrongly claim the
+/// scope is clean.
+pub fn observed_scope_paths(
+    git: &GitInfo,
+    scope: crate::filesystem::blast_radius::ChangeScope,
+) -> Option<Vec<std::path::PathBuf>> {
+    file_changes_observed(git).then(|| scope_paths(&git.file_changes, scope))
+}
+
+/// Whether `git.file_changes` is a trustworthy changed-path set.
+fn file_changes_observed(git: &GitInfo) -> bool {
+    git.status
+        .as_ref()
+        .is_some_and(|status| !status.is_dirty || !git.file_changes.is_empty())
 }
 
 /// Reject a `GitInfo` whose request did not collect per-file changes.

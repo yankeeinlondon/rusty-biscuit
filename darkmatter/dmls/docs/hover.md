@@ -114,12 +114,12 @@ back to the expression hover.
 ### Function signatures with an options object
 
 Hovering a function name shows its typed signature and catalog description.
-For `load_data`, the signature shows the optional third parameter in
-brackets with its declared keys, and the description gives each key's
-default:
+For `load_data`, the signature shows the optional `as` and `options`
+parameters in brackets, the options with their declared keys, and the
+description gives each key's default:
 
 ```markdown
-load_data(file: file | null, as: type-definition(container), [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null]) -> unknown | null | error
+load_data(file: file | null, [as: type-definition(container) | null], [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean | string[]} | null]) -> unknown | null | error
 ```
 
 The description says that `format` overrides the file extension, that
@@ -210,6 +210,42 @@ _Schema slots pending: only the schema's literal parts are known._
 
 Once the slot resolves, the hover is the resolved type's, as for any
 property. See [Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
+
+### Observed values
+
+A top-level property whose whole value is a `{{ … }}` calling `load_data`
+without a contract is evaluated in the background by the slot worker (see
+[Observed properties](../../docs/topics/schemas/schema-slots.md#observed-properties)).
+Once its value is observed, hovering the property shows its schema hover
+first, unchanged, so the declared type stays visible, and then an
+**Observed value** section with a JSON preview of what was loaded. For
+`ids: "{{ load_data('ids.json') }}"` over a file holding the numbers 1
+to 20, the appended section reads:
+
+````markdown
+**Observed value**
+
+```json
+[1, 2, 3, 4, 5, 6, 7, 8, …12 more]
+```
+````
+
+The preview is bounded so a large file never makes a slow or huge hover,
+and it is built from those bounded parts without formatting the whole
+value first:
+
+| Limit | Shown past it |
+| --- | --- |
+| 8 entries of a list or object | the rest counted, `…N more` |
+| 3 levels of nesting | a deeper list or object as its size, `[…N items]` or `{…N fields}` |
+| 120 characters of a string | the rest counted, `…(+N chars)` |
+
+A property the schema does not declare shows the preview alone. Nothing is
+previewed while the property is pending (an unapproved read, a URL with no
+fresh cached response, a function the editor does not run) or while its
+observation is being refreshed. A property whose evaluation ran a CSV or
+TSV read with `header: false` and no contract still shows its raw preview,
+although its type stays `unknown[][]` and its cells are not judged.
 
 ## Value versus key hover
 

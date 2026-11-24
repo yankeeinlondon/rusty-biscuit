@@ -15,6 +15,35 @@ pub(crate) struct UnrecoveredLifecycleDowngrade {
     pub(crate) message: String,
 }
 
+/// The root source a document loop composes its later ordinary passes from,
+/// and the shell approvals it earned when it was validated.
+///
+/// Taken from the read that owned the loop's first launch verdict, so a later
+/// pass never rereads the root from disk: an edit to the root after startup
+/// takes effect on a new run, not mid-loop. Retry and resume still prepare
+/// their recovery attempt from disk; that read is never retained.
+#[derive(Debug, Clone)]
+pub(crate) struct RetainedLoopSource {
+    /// The resolved document, with its caller and proxy overlay merged into
+    /// its authored frontmatter.
+    pub(crate) source: claudine::composition::ResolvedCompositionSource,
+    pub(crate) approvals: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
+}
+
+/// The preparation one loop pass actually ran with, for the loop gate,
+/// condition, and actions that follow that pass.
+///
+/// Recorded after the pass's preparation is installed on the lifecycle guard
+/// and before `start`, so a recovery attempt (retry, resume) replaces it with
+/// its own fresh read. `frontmatter` is the effective frontmatter before any
+/// event mutation; event-time `set` writes travel through the runtime cell.
+#[derive(Debug, Clone)]
+pub(crate) struct LoopPassPreparation {
+    pub(crate) context: darkmatter::markdown::compose::ComposeContext,
+    pub(crate) frontmatter: serde_json::Map<String, serde_json::Value>,
+    pub(crate) document_epoch: Option<claudine::invocation_context::DocumentEpoch>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessPromptMode {
     Passthrough,
@@ -105,9 +134,9 @@ pub(crate) struct HarnessPromptState {
     /// Seeded from the caller's canonical preparation
     /// ([`PreparedComposition::compose_context`][pcs]) for a directly-invoked
     /// document and constructed at a fresh epoch's first read otherwise
-    /// (adopted proxy target, retry, resume). The stabilized reread and every
-    /// loop refresh extend this exact snapshot rather than constructing a new
-    /// one, so one epoch owns one capture. Cleared when the coordinator
+    /// (adopted proxy target, retry, resume). The stabilized reread extends
+    /// this exact snapshot rather than constructing a new one, so one epoch
+    /// owns one capture. Cleared when the coordinator
     /// repoints the run at a new document and when retry/resume dispatch starts
     /// a fresh epoch for the active document.
     ///
@@ -116,6 +145,14 @@ pub(crate) struct HarnessPromptState {
         Option<darkmatter::markdown::compose::ComposeContext>,
     /// Work recorder paired with `epoch_context` for this exact epoch.
     pub(crate) document_epoch: Option<claudine::invocation_context::DocumentEpoch>,
+    /// The source the harness's stabilized reread validated, set only by a
+    /// successful first-attempt stabilization; the owning loop composes its
+    /// later passes from it. `None` for every other route.
+    pub(crate) stabilized_source: Option<RetainedLoopSource>,
+    /// The last preparation this run installed for execution (its first
+    /// attempt, or the recovery attempt that replaced it). `None` until one is
+    /// installed, and for passthrough.
+    pub(crate) pass_preparation: Option<LoopPassPreparation>,
 }
 
 impl HarnessPromptState {

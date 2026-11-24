@@ -1,0 +1,8 @@
+kind: schema
+types:
+    agent:
+        - string -> the CLI agent to use as a default when executing this document
+        - string[] -> A list of CLI agents which should be tried in order. Agents not installed on the host will be skipped.
+    model:
+        - string -> the LLM model to use as a default when executing this document
+        - string[] -> A list of LLM models which should be tried in order. Agents not installed on the host will be skipped.

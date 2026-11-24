@@ -83,7 +83,7 @@ pub use toc::{
     CodeBlockInfo, HeadingRecord, InternalLinkInfo, MarkdownToc, MarkdownTocNode,
     extract_headings, generate_heading_slug,
 };
-pub use types::{AuthoredSpan, FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
+pub use types::{AuthoredSpan, ExpressionMetadata, FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
 #[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
