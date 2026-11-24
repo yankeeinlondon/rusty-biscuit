@@ -1727,6 +1727,14 @@ they never use some files of one publish and some of another. Until it is
 fixed, Claudine documents get no Claudine schemas in `md` or the editor.
 `claudine` runs are unaffected, because they use the compiled-in copy.
 
+To find out what is wrong, run [`claudine doctor`](../cli/doctor.md). Its
+`registration` row compares every published file with the binary's copy,
+lists extra files in the folder and leftovers of the format 1 registration,
+and checks the `register` entry; it changes nothing. `claudine doctor --fix`
+repairs all of it in one step: it publishes, removes extra files inside
+`~/.claudine/registrations/darkmatter/`, writes the `register` entry, checks
+each step from disk, and only then removes the format 1 files.
+
 To recover, publish again. Each of these rewrites only the files that
 differ from the binary's copy, removes leftover temporary files, and writes
 the manifest last:
@@ -1740,6 +1748,7 @@ the manifest last:
 | `md` or the editor warns that `~/.claudine/darkmatter-host.yaml` is a format 1 manifest (registered by an earlier release) | `claudine setup` |
 | `~/.darkmatter.yaml` lost Claudine's `register` entry | `claudine setup` (it keeps your settings), or add `~/.claudine/registrations/darkmatter/manifest.yaml` to its `register` list by hand; `registrations publish` never edits `~/.darkmatter.yaml` |
 | a publish reports a symbolic link or junction | remove or replace the link it names, then publish again |
+| you are not sure which of these applies | `claudine doctor`, then `claudine doctor --fix` |
 
 **To change what a Claudine property accepts, override it; do not edit the
 registration.** Two overrides are supported, and both apply above the
@@ -1756,7 +1765,8 @@ registered schemas without touching them:
 
 A file placed inside `~/.claudine/registrations/darkmatter/` is not an
 override. One the manifest does not list is ignored by `md` and DMLS and
-left alone by the publisher; editing one it does list disables the whole
+left alone by the publisher, but `claudine doctor` warns about it and
+`claudine doctor --fix` removes it; editing one it does list disables the whole
 registration, as described above.
 
 ### The authored `$schema` applies last

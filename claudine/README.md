@@ -298,6 +298,21 @@ option maps exactly to it (same output, final answer, and exit code as
     - It is also recommended to install shell completions for full laziness/productivity (`claudine completions --help`)
 
 
+## Troubleshooting
+
+Run `claudine doctor` when something does not work as expected. It checks
+your configuration files, the schemas Claudine registers with Darkmatter,
+the permissions handoff, speech, and whether `claudine` is on your `PATH`,
+and prints a remedy for every problem (exit status `1` while an error
+remains). `claudine doctor --fix` repairs the registration and the
+permissions handoff, and `--json` prints the report for scripts. See
+[`claudine doctor`](./docs/cli/doctor.md).
+
+```sh
+claudine doctor          # inspect; changes nothing
+claudine doctor --fix    # repair what can be repaired, then report
+```
+
 ## Configuration
 
 Hook configuration is stored in `~/.claudine/config.yaml` (user-scoped) or `<repo>/.claudine/config.yaml` (project-scoped). See [Configuration](./docs/topics/configuration.md) for how these files are read, validated, and converted from an older `config.json`.

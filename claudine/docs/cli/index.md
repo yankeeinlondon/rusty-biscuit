@@ -43,6 +43,7 @@ Administration:
   config            Manage Claudine configuration with a TUI
   sync              Re-sync hook registrations with detected agents
   setup             Set up Claudine with Darkmatter; safe to rerun, keeps settings
+  doctor            Check configuration, registration, speech, and PATH; --fix repairs
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
@@ -54,6 +55,11 @@ Administration:
 
 [`claudine setup`](./setup.md) sets Claudine up with Darkmatter again, for
 example after an upgrade.
+
+[`claudine doctor`](./doctor.md) checks your configuration, Claudine's
+Darkmatter registration and permissions, speech, and `PATH` in one run, and
+`claudine doctor --fix` repairs what it safely can. It works even when the
+configuration is missing or broken.
 
 One maintenance command is hidden from this list:
 [`claudine registrations`](./registrations.md) lists, prints, and publishes

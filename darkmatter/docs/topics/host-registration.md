@@ -83,7 +83,8 @@ register:
 ```
 
 An explicit repair that must never create a configuration file (Claudine's
-`doctor --fix`, for example) calls
+[`doctor --fix`](../../../claudine/docs/cli/doctor.md#registration-repair),
+for example) calls
 `darkmatter::config::init::replace_manifest_registration_existing` with the
 same arguments. It makes the same edit, but refuses a missing file (a read
 error of kind `NotFound`) and edits only while the file still holds the bytes

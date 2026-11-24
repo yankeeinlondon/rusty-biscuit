@@ -189,11 +189,24 @@ providers (a recognized name pins to that one, as `SpecificProvider` does);
 Windows only, `sniff::programs::windows_shells::{detect, probe}` (a miss
 there is `warn`). Tests inject both slices; library tests of the file rows
 run `doctor::file_checks()` (the registry without `tts`/`path`) so no test
-starts a shell.
+starts a shell. The CLI adapter `cli/src/commands/doctor.rs` only renders
+`claudine::doctor::run(request::snapshot(), fix)`: `main.rs::dispatch`
+returns it right after `registrations`, before `request::darkmatter_config()`
+and `ensure_config_exists`, so a broken home is diagnosed with no setup,
+conversion, created `~/.darkmatter.yaml`, or refresh (its `Commands` arm is
+`unreachable!`). It writes stdout directly (not `log::data`, which drops
+errors) so a failed write is a top-level error, exit 1; report exit is 1 on
+any `error` row, else 0. Human output turns plain when stdout is not a
+terminal (`log::set_plain`). Tests: `cli/tests/l1/doctor.rs` (the held-lock
+repair case waits out Darkmatter's 2 s `LOCK_DEADLINE`; the `/dev/full`
+write-error case is Linux-only; every spawned case but the healthy home sets
+the `test-fixtures` seam `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES`, read in
+`doctor/path.rs`, so a Windows child starts no real shell); user docs
+`claudine/docs/cli/doctor.md`.
 `claudine setup` (`cli/src/commands/setup.rs`, outside `needs_config`, never
 prompts) is the repeatable route to all of this for a configured home, and
 the command Darkmatter's format 1 warning names; tests
-`cli/tests/l1/setup_command.rs`. The only other publisher is the hidden `claudine registrations [<filepath>|publish]`
+`cli/tests/l1/setup_command.rs`. Besides `doctor --fix` (`repair_registration`), the only other publisher is the hidden `claudine registrations [<filepath>|publish]`
 (`cli/src/commands/registrations.rs`, dispatched before configuration
 loads): listing and detail read only `RegistrationInventory::claudine()`
 (XXH64 seed 0 as 16 hex digits), `publish` calls the same

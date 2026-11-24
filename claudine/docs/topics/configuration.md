@@ -67,6 +67,15 @@ flowchart TD
   patterns and `allow_paths`, exit-expression regexes and `scope` agents, and
   that the active messenger route exists.
 
+To check every file at once without running anything else, use
+[`claudine doctor`](../cli/doctor.md). It reads the user files, and inside a
+repository its files too, with these same rules, but never stops at the
+first problem and never writes: a missing file is not created and a legacy
+`config.json` is not converted. Unknown keys are listed, with their line and
+column, under its `stray-config-keys` row. It shows where each problem is and
+what kind it is, never the value; any other `claudine` command prints the
+full message.
+
 ## Defaults and inheritance
 
 An explicit `null` is the same value as leaving the key out, at every level
@@ -283,6 +292,16 @@ does the same with `{repo-root}/.darkmatter.yaml` and
 and fails before writing anything outside a repository. With no home
 directory, setup writes only Claudine's file and says that Darkmatter's was
 not set up.
+
+`claudine doctor` reports the state of this handoff for the user scope, and
+for a repository whose two files both exist, in its
+`darkmatter-permissions` row. `claudine doctor --fix` makes the same move
+as setup when Darkmatter's file has no `permissions` or an inline block
+Claudine can take over, with the same order and the same guarantee that a
+failed second write leaves the original block in force. Unlike setup, it
+edits only existing, valid files, never writes through a symbolic link, and
+never resolves a conflict: two different blocks stay an error until you
+keep one. See [`claudine doctor` → Permissions repair](../cli/doctor.md#permissions-repair).
 
 The same steps are available to Rust callers as
 `claudine::config::setup::setup_with_darkmatter(context, scope, write)`,

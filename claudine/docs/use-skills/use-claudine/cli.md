@@ -146,6 +146,43 @@ They take every wrapper switch above, plus:
 | `claudine logs [today\|week\|sessions\|tools\|errors\|trends\|session <id>…] [--json]` | query the logs in `~/.claudine/logs/` |
 | `claudine context [--values\|--expressions\|--side-effects]` | the `ctx.*` variables (with current values), the expression functions, and the side-effect verbs available to documents |
 | `claudine errors [--json]` | every diagnostic code, and what it means |
+| `claudine doctor [--fix] [--json]` | check the whole setup in one run; see below |
+
+### Checking the setup: `claudine doctor`
+
+`claudine doctor` reports seven rows, always in this order: `config`,
+`registration`, `darkmatter-permissions`, `repo-config`,
+`stray-config-keys`, `tts`, `path`. Each row has a `severity` (`ok`,
+`info`, `warn`, `error`) and remedies for what it found. It works with a
+missing or broken configuration, never prompts, and without `--fix` writes
+nothing (no default config, no `config.json` conversion, no registration
+refresh), makes no network request, and plays no sound. Reports never show
+configuration values or permission contents.
+
+- Exit status: `0` when no row is an `error` (warnings are fine), `1` when
+  any error remains (including a failed repair), `2` for a usage error.
+- `--json` prints one array of `{id, severity, summary, detail, fixable}`
+  objects; branch on `id`, `severity`, and `fixable`, not on the wording.
+- `--fix` repairs only two rows: `registration` (republishes Claudine's
+  schema files under `~/.claudine/registrations/darkmatter/`, writes the
+  `register` entry in an existing `~/.darkmatter.yaml`, then removes the
+  format 1 `~/.claudine/darkmatter-host*` files) and
+  `darkmatter-permissions` (moves an inline `permissions` block from
+  `~/.darkmatter.yaml` into Claudine's file, as `claudine setup` does). The
+  exit status reflects the state after the repairs, and a second `--fix`
+  changes nothing. Everything else needs a manual fix; a missing
+  configuration's remedy is `claudine setup`.
+- `path` is an `error` when this process cannot find `claudine` on `PATH`.
+  On native Windows it also asks each installed PowerShell, Git Bash/MSYS2,
+  and Cygwin (without their startup files, 2 s limit); those results are
+  at most `warn`.
+- `tts` is an `error` only when hook speech is on (`tts: true` or an
+  object) and no provider is available; it checks prerequisites, not a
+  working voice.
+
+```bash
+claudine doctor --json | jq -r '.[] | select(.severity == "error") | .id'
+```
 
 ## Environment variables you may set
 

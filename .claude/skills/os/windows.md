@@ -215,6 +215,16 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   after `cargo` exits. A rig script that runs `cargo nextest` through
   `Start-Process -Wait` reports nothing until then. Use `-PassThru` without
   `-Wait` and call `$p.WaitForExit()`, which waits for that process alone.
+- **A probed PowerShell writes into `%LOCALAPPDATA%` even with
+  `-NoProfile -NonInteractive`.** `pwsh` and Windows PowerShell refresh their
+  startup JIT cache, `AppData\Local\Microsoft\PowerShell\StartupProfileData-NonInteractive`,
+  on every start. `CliProcessFixture` points `USERPROFILE` at the fixture home,
+  so a test that snapshots the home before and after a run that starts
+  PowerShell (for example `claudine doctor`'s `path` row) finds a new
+  `AppData` tree there, and only on Windows. Each real shell probe also costs
+  about 0.5–1 s. `claudine doctor` CLI tests set the `test-fixtures` seam
+  `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES` and test probe outcomes through
+  the library; the one case that keeps real probes excludes `AppData`.
 - **Defender is about a quarter of a parallel test run's CPU on
   `build-win-native`** (`MsMpEng` 120–145 of ~575 CPU-s; Search, `System`,
   and `svchost` another 80–90). Roughly 5 ms per process start, 2–5 ms per
