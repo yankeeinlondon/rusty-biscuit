@@ -4,7 +4,7 @@ area: claudine
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -51,6 +51,58 @@ packages:
 - darkmatter-cli
 - darkmatter-lsp
 - simplified-schema
+- sniff
+source_files_during_phase_2:
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/composition/registration/legacy.rs
+- claudine/lib/src/composition/registration/inspect.rs
+- claudine/lib/src/composition/registration/repair.rs
+- claudine/lib/src/composition/registration/repair_tests.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/src/doctor/mod.rs
+- claudine/lib/src/doctor/report.rs
+- claudine/lib/src/doctor/config.rs
+- claudine/lib/src/doctor/config_tests.rs
+- claudine/lib/src/doctor/registration.rs
+- claudine/lib/src/doctor/registration_tests.rs
+- claudine/lib/src/doctor/permissions.rs
+- claudine/lib/src/doctor/permissions_tests.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/tests/l1/config_init.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_3:
+- sniff/lib/src/process.rs
+- sniff/lib/src/programs/mod.rs
+- sniff/lib/src/programs/git_program.rs
+- sniff/lib/src/programs/windows_shells.rs
+- sniff/lib/src/programs/windows_shells_tests.rs
+- claudine/lib/src/doctor/mod.rs
+- claudine/lib/src/doctor/config.rs
+- claudine/lib/src/doctor/config_tests.rs
+- claudine/lib/src/doctor/registration_tests.rs
+- claudine/lib/src/doctor/permissions_tests.rs
+- claudine/lib/src/doctor/tts.rs
+- claudine/lib/src/doctor/tts_tests.rs
+- claudine/lib/src/doctor/path.rs
+- claudine/lib/src/doctor/path_tests.rs
+docs_updated_during_phase_3:
+- sniff/README.md
+- sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_3:
+- sniff/docs/topics/windows-shells.md
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/sniff/programs.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/os/windows.md
 ---
 
 # Claudine doctor implementation plan
@@ -122,17 +174,17 @@ Invalid input produces an error with the failing file and field location where a
 
 ### Wave 2
 
-- [ ] **Publisher Repair**
+- [x] **Publisher Repair**
   - Own `claudine/lib/src/composition/registration.rs`, `doctor/registration.rs`, and Darkmatter's registration-specific `config/init.rs` writer entry point. Implement Rules 10–11, including the shared lock guard, publication operation log, and preflight of all authorized removals. Define the crate-private publisher entry points for setup integration in the task's patch.
   - Prove missing, stale, changed-unloadable manifest, extra and legacy paths, equivalent entry, other-host preservation, lexical and canonical boundaries, obstructing symlinks/junctions, idempotent bytes and mtimes, withheld config edit on failed publication, and retained legacy paths on a registration write failure. Use deterministic failure injection after the first publish operation and concurrent callers using the same lock. Check that a retry converges.
 
-- [ ] **Permissions Repair**
+- [x] **Permissions Repair**
   - Own the permissions handoff parts of `claudine/lib/src/config/setup.rs` and `doctor/permissions.rs`, plus Darkmatter `init.rs` observation/helper methods outside its register writer. Implement Rules 12–13. Share planner and commit logic with setup and keep the doctor existing-file edit path explicit.
   - Prove user and repo scopes, equivalent reference spellings, third-party and broken references, missing prerequisites, mixed aliases, authored conflict, effective equality, null and omitted settings, and invalid scoped mappings. Use `darkmatter::config::write::test_hooks::fail_replacement_after(1)` to assert the original inline block remains in force and retry completes. Cover a config lock/source-byte race as a refused edit, with no stale overwrite.
 
 ### Repair integration
 
-- [ ] **Setup Integration**
+- [x] **Setup Integration**
   - After Wave 2, wire the new shared publication and legacy finalization calls into `config/setup.rs::setup_claudine`, holding the publisher lock through setup's registration finalization. Keep the lock order publisher then configuration locks and release configuration locks before starting another transaction. Use the publisher's no-follow guard for the doctor permissions writer's targets and sidecars. Give this task ownership of the shared setup call site and keep both Wave 2 patches out of `setup_claudine` until integration.
   - Verify setup's preserved initialization, conflict, partial failure, and successful legacy cleanup tests. Run focused Claudine library and Darkmatter L1 tests for the merged phase. Use separate file-content and repair-outcome assertions.
 
@@ -140,10 +192,10 @@ Invalid input produces an error with the failing file and field location where a
 
 ### Wave 3
 
-- [ ] **Speech Assessment**
+- [x] **Speech Assessment**
   - Own `claudine/lib/src/doctor/tts.rs`. Implement Rule 14 with a private injected candidate slice. Exercise automatic ranking and runtime order, equal ratings, missing recognized pinned provider despite an available fallback, unknown configured name including with no candidates, low and high quality, invalid user config, and all disabled shapes.
 
-- [ ] **Executable Assessment**
+- [x] **Executable Assessment**
   - Own `claudine/lib/src/doctor/path.rs` and Sniff's new shell module and process adapter. Implement Rules 15–16. Return typed shell lookup outcomes to Claudine with shell family, found, missing, timeout, or failure; an absent family produces no report detail.
   - Use private discovery/probe seams and temporary binaries to test controlled PATH and Windows suffixes. Test the two Bash families with fake layout trees and PowerShell preference. L1 subprocess fixtures exercise 0, 3, other nonzero, spawn failure and timeout without launching real profile code, opening a window, or altering focus. Assert probe argument and environment policy and child cleanup. Run focused Sniff and Claudine L1 tests after merging the wave.
 

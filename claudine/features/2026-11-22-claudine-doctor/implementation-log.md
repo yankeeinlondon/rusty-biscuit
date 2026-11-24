@@ -41,12 +41,39 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+    - claudine/lib/src/composition/registration.rs
+    - claudine/lib/src/composition/registration/legacy.rs
+    - claudine/lib/src/composition/registration/inspect.rs
+    - claudine/lib/src/composition/registration/repair.rs
+    - claudine/lib/src/composition/registration/repair_tests.rs
+    - claudine/lib/src/config/setup.rs
+    - claudine/lib/src/doctor/mod.rs
+    - claudine/lib/src/doctor/report.rs
+    - claudine/lib/src/doctor/config.rs
+    - claudine/lib/src/doctor/config_tests.rs
+    - claudine/lib/src/doctor/registration.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - claudine/lib/src/doctor/permissions.rs
+    - claudine/lib/src/doctor/permissions_tests.rs
+    - claudine/lib/tests/l1/installed_registration.rs
+    - darkmatter/lib/src/config/init.rs
+    - darkmatter/lib/tests/l1/config_init.rs
+docs_updated_during_phase_2:
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/configuration.md
+    - darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
 packages:
     - claudine
     - darkmatter
     - darkmatter-cli
     - darkmatter-lsp
     - simplified-schema
+    - sniff
 decisions-for-review:
     - |-
         The plan leaves wiring the seven production check callbacks to Phase 4. I wired the three that Phase 1 builds (`config`, `repo-config`, `stray-config-keys`) into the registry now and gave the other four a placeholder callback that returns an `info` row ("this check is not available yet"). Leaving the three unwired would have made their code unused, which fails the lint gate, or would have needed lint suppressions that hide real dead code. The alternative is lint allowances now and wiring everything in Phase 4. To reverse: point the three entries back at the placeholder. Phase 4 still replaces the four placeholders.
@@ -68,15 +95,58 @@ decisions-for-review:
         When SimplifiedSchema names unknown keys inside a union, it ignores arms that are not objects (a literal such as `true`, or an enum of words). Only object arms say which keys they accept, so the rejected keys are those that no object arm declares. A union with no object arm keeps its old message.
     - |-
         `file-read: []` (an empty list) is accepted by both scopes, so doctor treats it as valid. The plan expected it to be refused. I tested what the schema does and listed it with the valid cases; the scope-refusal case uses an invalid glob instead. If an empty list should be refused, the change goes in the permissions schema, not in doctor.
+    - |-
+        A changed registration manifest is judged by Darkmatter's manifest admission (`bundle::admit_manifest`) plus checks that the host is `claudine`, every member path is one Claudine publishes, and every member's bytes match their digest. The plan asked for Darkmatter's full v2 loader (`load_entries`). An existing Claudine guard test forbids calling the installed-bundle loaders anywhere in Claudine's source, so using the loader would have meant loosening that guard. The difference: the full loader also prepares the schema payloads, so it would also catch a manifest whose files are digest-correct but whose schemas fail to prepare; that cannot happen for files Claudine itself published. To switch: allow `load_entries` in `composition/registration/inspect.rs` in `cli/tests/l1/registrations_command.rs` and replace `inspect.rs::manifest_load` (about 15 lines, no test changes).
+    - |-
+        The registration repair refuses to start when the user `~/.darkmatter.yaml` has any invalid `register` entry, including another host's. The plan says the repair needs a valid `register` field. The alternative is to require only that `register` is a list and let Darkmatter's writer refuse an invalid result; that would repair more homes but edits a file Darkmatter already reports as invalid. Reversing it changes `registration/inspect.rs::entry_precondition` and one test.
+    - |-
+        Doctor's two repairs refuse to write a configuration file that is itself a symbolic link (for example a dotfiles-managed `~/.darkmatter.yaml` or `~/.claudine/config.yaml`), or whose writer lock sidecar is one, and report it as a manual finding. The plan asks for the no-follow guard at write destinations. The alternative is to resolve the link and write its target, as `claudine setup` and `md init` do; that repairs linked dotfiles but writes outside the paths doctor names. Reversing it means dropping the destination itself from `config_target_blockers` (keeping the sidecar check).
+    - |-
+        Setup's own `permissions` handling is unchanged: a Darkmatter `permissions: null` is still copied into Claudine's file as `null`, a Claudine `permissions: null` still counts as a block, and setup still lets the writer guess the Darkmatter file's scope (wrong only when the home is the repository root). Doctor handles all three as the plan specifies. The plan asked to keep setup's behavior while sharing the planner, so setup was not changed. Fixing setup means calling the shared planner with doctor's null handling and the explicit-scope validator in setup mode; it is small but changes what `claudine setup` writes.
+    - |-
+        The registration and permissions `--fix` tests run with a registry of only the row under test (plus `config`), so one repair never edits the other's fixture. Interaction of the two repairs in one run (registration first, then permissions on the same `~/.darkmatter.yaml`) is covered only by the existing fresh-reading order of `run_with` and the writer's observed-bytes check, not by an end-to-end test; Phase 4's CLI repair-and-rerun scenario will exercise both together. The alternative is a library test with the full registry now.
+    - |-
+        Sniff's shell probe takes any plain program name, not only `claudine`: `windows_shells::probe(shell, program, dir)` accepts a name of ASCII letters, digits, `.`, `_`, `-` (no leading `-` or `.`), refuses anything else before starting a shell, and passes the name to Bash as `$1`, never as script text. The plan described a fixed script for `claudine`. A fixed name would be an odd API for a library, and the check keeps the script fixed in every other way. The alternative is a `claudine`-only function. To reverse: make the name a constant in `windows_shells.rs` and drop `InvalidProgramName`; Claudine's call does not change.
+    - |-
+        Shell discovery picks the first installed candidate of each family in preference order, so there is no separate "deduplicate by path identity" pass. Because a family yields one shell and a Bash belongs to only one family (by the DLL beside it), a candidate that is the same file as another can never be reported twice. An indexed `bash` (Sniff's full index: `PATH` first, then App Paths and install roots) counts as Git Bash when its installation also holds `cmd\git.exe`, and as MSYS2 otherwise. It wins over the install layouts of its kind. The alternatives are to treat only a `PATH` hit as preferred, or to classify Git Bash by another marker such as `mingw64`. Reversing either changes `windows_shells.rs::discover` and its fake-layout tests.
+    - |-
+        In the `path` row, every other-shell outcome is a `warn` and a `Found` is an `ok` finding listed in the detail, so a healthy Windows report still names each shell it asked. Shell findings are listed in path order, as the report foundation orders every row's findings. The alternative is to list only problems, which shortens the detail but hides which shells were checked. Reversing it drops the `Found` arm's finding in `doctor/path.rs::shell_finding`.
+    - |-
+        In the `tts` row, a pinned provider with low quality says "the configured speech provider, X, has low quality" and suggests changing `tts.provider`, without naming other installed providers. Only automatic selection names the provider runtime tries first. Each row also carries an `ok` note that detection checks only local prerequisites, and a disabled row adds that lifecycle `say` can still speak. The alternative is to put those notes only in the documentation. Reversing it removes the trailing note finding in `doctor/tts.rs::assess`.
 message-to-agent: |-
-    Phase 1 is done and its gates pass (Claudine, Darkmatter, and SimplifiedSchema `just test`/`just lint`/tier coverage). What Phase 2 builds on:
-    - `claudine/lib/src/doctor/mod.rs` holds `Severity`, `DoctorRow`, `run`, `Environment`, `Pass` (one cached reading of the disk per pass), `CheckDescriptor`, and the seven-entry `REGISTRY`. `config`, `repo-config`, and `stray-config-keys` are wired; `registration`, `darkmatter-permissions`, `tts`, and `path` use `pending_check`. Replace each one as its phase builds it.
-    - `Pass::config()` returns `doctor::config::ConfigObservations`: the four files (`claudine_user`, `claudine_repo`, `darkmatter_user`, `darkmatter_repo`, each an `ObservedFile` with a path and a state), `user_config` and `effective_config` (typed, or the reason it is unusable), plus `home_available`, `context_available`, `in_repository`. The struct has a `cfg_attr(not(test), expect(dead_code))` because some fields are only read by tests so far; remove the attribute when the registration and permissions checks read them, or the `expect` will fail the lint.
-    - `Finding::fixable` and `Pass::environment` carry the same kind of `expect(dead_code)`; remove each when your repair first uses it.
-    - `report::row` already renders repair attempts (`Repaired:`, `Repair failed:`, `Already changed:`) and forces a failed repair to `error`; `run_with` runs a repair only when a fresh check of its row is fixable, then rereads the row and its `prerequisites`.
-    - Never put a raw validator message or an authored value in a finding; use the wording helpers in `doctor/config.rs` (`redacted_pointer`, `named_setting`). `report::display_text` escapes control characters for every row.
-    - The robustness matrix's `CliProcessFixture` process cases are deferred to Phase 4, when the CLI command exists.
-    - SimplifiedSchema's `just test` takes no package filter; run it from `simplified-schema/` to cover both crates.
+    Phase 3 is done. All seven checks are now real callbacks in `doctor::REGISTRY`, and `pending_check` is deleted. What Phase 4 builds on:
+    - `doctor::file_checks()` (test-only) is the registry without `tts` and `path`. Library tests of file rows use it so they never detect speech engines or, on Windows, start real shells. A full-registry library test on Windows starts the installed PowerShell, Git Bash, and Cygwin probes (2 s deadline each), so keep `run_with(&REGISTRY, …)` out of loops.
+    - `tts` and `path` take their host data through `tts::assess(user_config, candidates)` and `path::assess(current, shells)`. Use them for exact-outcome tests. In spawned CLI cases, tolerate whatever shells the host has (the plan already says so). `path` in a `CliProcessFixture` child with the default PATH (fixture `bin` plus `/usr/bin:/bin`) is an `error`, because no `claudine` is there, unless the test installs one. Use `fake_only_path()` for the deliberate-miss case, or copy the binary into the fixture `bin` for the found case.
+    - Build expected paths in doctor tests with the test-only `doctor::native_path("a/b")`; a `/` literal joined onto a Windows path fails there (19 Phase 1–2 tests did, now fixed).
+    - `Environment` now has `launch_dir` (from `RequestSnapshot::request_dir`). Windows shells are probed there.
+    - `ConfigObservations.effective_config` is the only field production code does not read. Its `expect(dead_code)` is on that field now.
+    - The Sniff API is `sniff::programs::windows_shells::{detect, probe, InstalledShell, ShellKind, ShellFamily, ShellLookup, InvalidProgramName}`. User docs are in `sniff/docs/topics/windows-shells.md`. `claudine/docs/cli/doctor.md` should describe the `tts` and `path` rows (severity tables, the startup-free probes, the 2 s deadline, no probes off native Windows) and link that page.
+    - `just cross-check` breaks on a nextest `-E 'test(…)'` filter (the parentheses are re-parsed by a shell). Pass positional filters instead (`just cross-check claudine --os windows doctor::`).
+source_files_during_phase_3:
+    - sniff/lib/src/process.rs
+    - sniff/lib/src/programs/mod.rs
+    - sniff/lib/src/programs/git_program.rs
+    - sniff/lib/src/programs/windows_shells.rs
+    - sniff/lib/src/programs/windows_shells_tests.rs
+    - claudine/lib/src/doctor/mod.rs
+    - claudine/lib/src/doctor/config.rs
+    - claudine/lib/src/doctor/config_tests.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - claudine/lib/src/doctor/permissions_tests.rs
+    - claudine/lib/src/doctor/tts.rs
+    - claudine/lib/src/doctor/tts_tests.rs
+    - claudine/lib/src/doctor/path.rs
+    - claudine/lib/src/doctor/path_tests.rs
+docs_updated_during_phase_3:
+    - sniff/README.md
+    - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_3:
+    - sniff/docs/topics/windows-shells.md
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/sniff/programs.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/os/windows.md
 ---
 
 # Implementation Log for 2026-11-22-claudine-doctor (5 phases)
@@ -358,3 +428,347 @@ reads reuse the existing schema-default projection), and no
 `unwrap_or_default()` (an unknown key's display name) runs only on a
 problem already known to be `UnknownKey`, and the legacy `config.json`
 probe is existence-only by design.
+
+## Phase 2
+
+- started 2026-11-23 on the committed Phase 1 tree (`a347c45c8`).
+- scaffolding (orchestrator): `doctor/registration.rs` and
+  `doctor/permissions.rs` created with their check and repair callbacks, and
+  wired into `REGISTRY` (`registration` and `darkmatter-permissions` now
+  declare repairs), so the two Wave 2 tasks each own one file.
+- Darkmatter `config/init.rs` (orchestrator, before Wave 2, so neither
+  parallel task edits it):
+  - `replace_manifest_registration_existing(context, scope, reference,
+    old_path)`: the doctor's register writer. It never creates the file
+    (`InitError::Read` with `NotFound`), shares `replace_manifest_change`
+    with setup, and edits only while the file holds the observed bytes.
+  - `check_referenced_permissions(text, path, scope, context)`: the public
+    form of the loader's reference-target judgment (`referenced_block`
+    now shares `referenced_block_text`), so a handoff can judge Claudine's
+    candidate block with Darkmatter's scoped runtime rules.
+  - tests in `darkmatter/lib/tests/l1/config_init.rs` (4): never creates,
+    edits in place keeping comments and the other host's entry and then
+    converges, refuses an invalid `register` writing nothing, and the
+    referenced-mapping verdicts (`{}` and a valid mapping pass; missing,
+    `null`, a reference, and a wrong-typed entry fail). 4 passed.
+
+### Publisher Repair (Rules 10–11), delegated to a subagent
+
+- `composition/registration.rs`: `publish`/`publish_with` now delegate to a
+  crate-private `Publisher` that owns the lock and the layout
+  (`acquire`, `publish`, `finalize_legacy`); each write and removal repeats
+  the no-follow check just before it happens. Plain `publish` behavior is
+  unchanged (unknown files are kept); the existing publisher tests pass
+  unchanged.
+- `registration/legacy.rs`: the no-write examination is its own function
+  (`legacy_plan`), shared by inspection and the repair's preflight; each entry
+  is examined again just before removal, and an entry another caller already
+  removed is tolerated.
+- new `registration/inspect.rs` (read-only, no-follow inspection:
+  `inspect_installation`, `ExpectedState`, `ManifestLoad`, `Blocker`,
+  `entry_precondition`, `entry_registered`, `config_target_blockers`) and
+  `registration/repair.rs` (`repair_registration`, `repair_registration_with`
+  with a lock deadline and an observer; `RegistrationRepair { operations,
+  failure }` with typed `RepairOperation`/`RepairFailure`/`EditFailure`).
+  Repair order: user `.darkmatter.yaml` must be valid with a valid `register`
+  → preflight everything it will touch → lock, preflight again → publish →
+  delete extras deepest first → verify the tree → recheck the config file
+  and its lock sidecar → `replace_manifest_registration_existing` → re-read
+  and verify the entry → `finalize_legacy`.
+- `doctor/registration.rs`: the `registration` row and its repair, with
+  wording that names paths, operations, and I/O kinds only.
+- departure: a changed manifest is judged with `bundle::admit_manifest`
+  plus host, path, and digest checks, not `load_entries`, because the CLI
+  guard `registrations_command.rs::only_the_registration_module_locates_or_loads_an_installed_bundle`
+  forbids the installed-bundle loaders in Claudine source (see
+  decisions-for-review).
+- tests: `composition::registration::repair::tests` (9) and
+  `doctor::registration::tests` (14 + 4 Unix-only obstruction cases).
+  `doctor/config_tests.rs::the_valid_control_passes_every_configuration_row`
+  now asserts unfixability only for the three config rows, since its
+  fixture publishes no registration and the `registration` row is rightly
+  fixable there.
+
+### Permissions Repair (Rules 12–13), delegated to a subagent
+
+- `config/setup.rs`: `setup_with_darkmatter` now calls the shared crate-private
+  `plan_permissions_handoff(context, scope, mode, claudine, observation)` and
+  `commit_permissions_handoff(context, plan)`; `HandoffMode::Setup` decides
+  exactly as before (the `darkmatter_setup.rs` tests pass unchanged),
+  `HandoffMode::Doctor` follows Rules 12–13: existing valid distinct files
+  only; omitted and `null` Darkmatter `permissions` are handoff requests;
+  `null`/omitted Claudine `permissions` is no authored block; a different
+  effective block or a Claudine-side reference is a conflict; Claudine's
+  selected mapping must pass `check_referenced_permissions`; edits are
+  `permissions` only, against the observed bytes, the Darkmatter edit
+  `published_last`, and the Darkmatter candidate is judged for the plan's own
+  scope.
+- `doctor/permissions.rs`: the `darkmatter-permissions` row and its repair;
+  after a commit the files are observed again to verify the reference
+  resolves to the mapping written. A repository-scope finding carries the
+  note that grants still depend on Darkmatter's user, committed, and
+  working-copy policy.
+- tests: `doctor::permissions::tests` (23).
+
+### Setup Integration (orchestrator)
+
+- `setup_claudine` now holds one `Publisher` from the publish through the
+  legacy cleanup (`Publisher::acquire` → `publish` → handshake →
+  `replace_manifest_registration` → `finalize_legacy` → drop). Lock order is
+  the publisher lock, then each configuration transaction's own locks, one
+  transaction at a time (each releases its locks when it commits).
+- the permissions writer's local symlink check was replaced by the
+  publisher's shared no-follow guard, `registration::config_target_blockers`
+  (now `pub(crate)`), for both destinations and their `LOCK_SUFFIX`
+  sidecars.
+- regression test:
+  `lib/tests/l1/installed_registration.rs::installed_registration_setup_holds_the_publisher_lock_through_the_handoff`:
+  a publisher started from inside setup's Claudine write (between the
+  publish and the cleanup) times out on the lock; after setup returns, a
+  publish succeeds and finds the tree current. It fails against the old
+  `setup_claudine`, which released the lock after publishing.
+- docs: `claudine/docs/topics/schemas.md` (setup holds the publisher lock
+  through its four steps), `darkmatter/docs/topics/host-registration.md`
+  (`replace_manifest_registration_existing`),
+  `darkmatter/docs/topics/configuration.md` (`check_referenced_permissions`).
+  The doctor command reference, the configuration topic's repair section,
+  and the caller skill are Phase 4's Reference Updates.
+- skills: `.claude/skills/claudine/SKILL.md` (publisher lock, shared
+  handoff planner, repair entry points, the loader guard),
+  `.claude/skills/darkmatter/SKILL.md` (the two new `init` functions).
+
+### Gates and verification (serial, after both subagents finished)
+
+| Command | Result |
+| --- | --- |
+| `cargo nextest run -p claudine --lib -E 'test(/doctor::\|composition::registration\|config::setup/)'` | 97 passed |
+| `cargo nextest run -p claudine --test l1 -E 'test(/installed_registration\|darkmatter_setup\|host_publication\|registration_inventory/)'` | 88 passed (incl. the new lock test) |
+| `cd claudine && just test` | 12819 passed, 15 skipped; `🐢 none at or above 5.0s`; `just slow-tests fresh` exit 0 |
+| `cd claudine && just lint` | clean |
+| `just check-tier-coverage claudine` | 0 stranded |
+| `cargo nextest run -p darkmatter -E 'test(/config\|init\|regist\|permission/)'` | 725 passed |
+| `cargo nextest run -p darkmatter-cli -E 'test(/init\|regist\|config/)'` | 100 passed |
+| `cd darkmatter && just lint` | clean |
+
+Host load stayed about 4–6 during the runs. The Darkmatter change is additive
+(two public functions, one internal helper split), so the config-scoped
+Darkmatter and Darkmatter-CLI selections stand in for their full suites;
+Claudine's suite is the other consumer of the changed code. The subagents saw
+no failing test; the one earlier red (`the_valid_control_passes_every_configuration_row`)
+was a correct expectation change, described above.
+
+Scope check: `git status --porcelain --untracked-files=all | awk '{print $NF}'
+| xargs python3 scripts/ci/affected_scope.py` → `packages: [claudine,
+darkmatter, test-toolkit]`, `change_class: package`, so no gate was skipped.
+
+Cross-OS: the new code has Windows branches (reparse-point attribute checks
+in the shared no-follow guard, which Phase 1's publisher already used) and
+Unix-only symlink tests. As Rule 18 directs, the local cross-check (which
+makes a throwaway commit) was not run; the regular CI schedule covers
+Windows and WSL2.
+
+### Requirement-to-test mapping (Phase 2)
+
+| Requirement | Tests |
+| --- | --- |
+| Rule 10: control, no home, missing tree/member, stale member, changed manifest loads vs refused | `doctor::registration::tests::{the_state_setup_leaves_passes, without_a_home_the_row_is_informational, a_missing_tree_is_a_fixable_error_and_the_fix_publishes_it, a_missing_member_is_a_fixable_error, a_stale_member_is_a_fixable_warning_that_explains_the_digest, a_changed_manifest_darkmatter_still_loads_is_a_warning_and_one_it_refuses_an_error}` |
+| Rule 10: extras, legacy paths, equivalent entry, missing entry, other hosts kept, blocked entry check | `extras_are_removable_warnings_and_the_fix_removes_only_them`, `the_retired_layout_is_a_warning_and_the_fix_removes_it_after_moving_the_entry`, `an_equivalent_spelling_of_the_entry_passes`, `a_missing_entry_is_a_fixable_error_and_other_hosts_entries_survive_the_fix`, `a_missing_or_invalid_user_file_blocks_the_repair_and_nothing_is_written`, `a_current_tree_with_a_missing_user_file_reports_the_entry_as_blocked` |
+| Rule 11: order, idempotence, extras deepest first, failed publish withholds the edit, failed register write keeps tree and legacy paths, retry converges, concurrency, obstructions | `composition::registration::repair::tests::*` (9), `doctor::registration::tests::{a_second_fix_changes_nothing, obstructions::*}` |
+| Rule 11 / Setup Integration: one publisher lock through setup | `installed_registration::installed_registration_setup_holds_the_publisher_lock_through_the_handoff`; existing setup migration, conflict, failed-publication, and link-refusal tests unchanged and green |
+| Rule 12: references in every spelling, third-party, broken, prerequisites, aliases, conflicts, Claudine-side reference, scoped mapping | `doctor::permissions::tests::{a_reference_to_claudine_passes_in_every_spelling, a_valid_third_party_reference_is_information, every_broken_reference_is_an_error_without_a_repair, a_missing_prerequisite_skips_its_scope_with_information, a_missing_home_skips_the_user_scope, a_repository_without_its_claudine_file_skips_only_that_scope, a_repository_that_is_the_home_is_assessed_once, a_repository_darkmatter_file_aliasing_the_user_one_skips_the_repository_scope, different_inline_blocks_conflict_and_nothing_is_written, a_claudine_side_reference_is_manual_in_every_darkmatter_state, a_mapping_that_fails_the_scoped_rules_is_manual, the_doctor_planner_*}` |
+| Rule 13: omitted / null / equal / transfer writes, comments kept, no-op rerun, interrupted transfer + retry, source-byte race, linked destination | `an_omitted_setting_is_repaired_with_the_default_block_and_the_reference`, `a_null_setting_reuses_claudines_mapping_and_writes_only_the_reference`, `an_effectively_equal_block_is_repaired_by_writing_only_the_reference`, `a_transfer_preserves_every_other_setting_and_comment_and_converges`, `an_interrupted_transfer_keeps_the_inline_block_and_a_retry_completes_it`, `a_file_changed_between_plan_and_commit_is_refused_without_an_overwrite`, `a_linked_destination_or_lock_sidecar_is_manual_and_nothing_is_written`, `the_repository_scope_is_repaired_with_its_relative_reference` |
+| Rule 4: redaction | `doctor::registration::tests::rows_never_show_an_authored_reference`, `doctor::permissions::tests::no_reference_or_block_value_reaches_the_report` |
+| Darkmatter writer and referenced-mapping check | `darkmatter::l1 config_init::{replace_manifest_registration_existing_*, check_referenced_permissions_needs_a_valid_mapping_of_the_scope}` |
+| Robustness matrix, Darkmatter and imported permissions: omitted and null are repairable handoffs on a valid file; `{}` valid; referenced `{}` uses defaults, missing/null/non-mapping target is broken | `the_doctor_planner_reads_null_and_omitted_as_handoff_requests`, `every_broken_reference_is_an_error_without_a_repair`, `check_referenced_permissions_needs_a_valid_mapping_of_the_scope` |
+| Robustness matrix, registration: absent/null/`[]` `register` leave the entry unregistered (fixable); invalid `register` forbids updates to that file | `a_missing_entry_is_a_fixable_error…`, `a_missing_or_invalid_user_file_refuses_before_anything_is_written`, `replace_manifest_registration_existing_refuses_an_invalid_register_and_writes_nothing` |
+| Process proof through `CliProcessFixture` | Phase 4 (the command is wired there) |
+
+Code-smell review of the new load-bearing reads: no new `#[serde(default)]`;
+`permissions: null` and an omitted `permissions` are told apart from the
+authored document in the planner; no `unwrap_or_default()` on a
+load-bearing read. The `.ok()` uses in the new inspection and repair code
+(`inspect.rs::manifest_load`, `entry_registered`, the repair's entry
+verification) and setup's existing `read_document` all fail closed: a
+failed read makes the manifest refused, the entry unverified, or the file
+reported unreadable, never silently accepted. The two `filter_map` calls
+collect blockers, not parsed values. Darkmatter's existing
+`replace_manifest_change` filters non-string `register` entries, which its
+schema already refuses before the repair can start.
+
+## Phase 3
+
+Phase 3 builds the two host-probing rows, `tts` and `path`, and the Sniff
+support the `path` row needs on native Windows. Both rows are wired into
+`doctor::REGISTRY`, and the `pending_check` placeholder is deleted. That
+finishes the move Phase 1 started of wiring each callback as soon as it
+exists; Phase 4 still adds the clap command, dispatch, and rendering.
+
+### Speech (`doctor/tts.rs`)
+
+- `check_tts` passes the pass's `user_config` and
+  `biscuit_speaks::get_available_providers()` to
+  `assess(user_config, candidates)`. The candidate slice is the injection
+  seam, and tests pass their own slices in runtime order.
+- Enablement and the provider string come from
+  `dispatch::loader::bridge_tts_settings`, the same projection hook `speak`
+  reads. `tts.provider` goes through `parse_provider_name`. A recognized
+  name keeps only that candidate (runtime `SpecificProvider` returns `[p]`
+  or `[]` and never falls back). An unrecognized name adds a `warn` floor
+  and judges the automatic candidates.
+- "Highest rated" is the lowest `VoiceQuality::rank`, and a tie goes to
+  the earlier candidate in runtime order. When the first runtime candidate
+  differs from the highest-rated one, the detail says which candidate
+  automatic selection tries first.
+- Severities follow the spec table. When the user configuration is not
+  usable, the row is `info` ("speech settings could not be determined").
+  Every row ends with the note that detection checks only local
+  prerequisites. A disabled row also says that lifecycle `say` can still
+  speak.
+- The unrecognized name is never shown. Provider names come from a fixed
+  table in `tts.rs`.
+- No engine is built, and nothing is prewarmed, synthesized, or played.
+
+### Executable path (`doctor/path.rs`) and Sniff
+
+- The current process uses `ExecutableIndex::build_path_only().find("claudine")`.
+  A miss is `error`.
+- On native Windows, `native_shell_lookups` runs
+  `sniff::programs::windows_shells::detect()`, then `probe()` for each shell,
+  in `Environment::launch_dir()`. That field is new and is captured from
+  `RequestSnapshot::request_dir`. On other OSes the list is empty and the
+  row has no shell detail.
+- Every shell outcome is a `warn`, except `Found`, which is `ok`. Each
+  outcome has its own summary and remedy. The finding is placed at the
+  shell's executable and carries the startup-free note.
+- New Sniff module `programs/windows_shells.rs`:
+    - Public: `ShellFamily`, `ShellKind`, `InstalledShell`, `ShellLookup`
+      (`Found`, `Missing`, `TimedOut`, `SpawnFailed { kind }`,
+      `Failed { exit_code }`), `InvalidProgramName`, `detect()`, and
+      `probe()`.
+    - The selection rules are a pure function over a private
+      `DiscoveryInputs`. Only `DiscoveryInputs::from_host` (the full
+      `ExecutableIndex`, `SystemRoot`/`ProgramFiles`/`SystemDrive`, and the
+      read-only Cygwin registry keys in both views) is `cfg(windows)`.
+- Sniff process changes:
+    - `run_command_with_timeout` now delegates to a new crate-private
+      `run_command_in_tree(command, timeout, TreeConfig)`. Existing callers
+      keep `TreeConfig::process_group()`.
+    - The probe uses `process_group().windows_creation_flags(WINDOWS_CREATE_NO_WINDOW)`
+      and the new `timeouts::SHELL_LOOKUP` (2 s).
+- `programs/git_program.rs`:
+    - The name-only part of `launcher_layout` is now `installation_top`.
+    - The new `installation_root` exposes it, so Git Bash is found from the
+      same launcher layouts Sniff's Git hint uses.
+    - `launcher_layout`'s behavior is unchanged, and its existing layout
+      tests pass.
+
+### Tests
+
+- Sniff: `programs::windows_shells::tests` (25 tests).
+    - Fake layout trees in a temporary directory cover every discovery rule
+      on every OS.
+    - The probe's argv, working directory, and environment removals are
+      read back from the built `Command`.
+    - Outcomes come from child fixtures. The test binary is re-executed with
+      `--exact --ignored`, so no real shell runs. The fixtures cover exit 0,
+      exit 3, exits 1 and 2, death by signal (Unix), a missing executable,
+      and a 1.5 s injected timeout. For the timeout, the child's recorded
+      PID is checked to be gone afterward.
+- Claudine:
+    - `doctor::tts::tests` (10) reads real `config.yaml` files through
+      `config::observe`.
+    - `doctor::path::tests` (7): injected shell answers for every outcome,
+      plus the current-process lookup in a re-executed child whose `PATH` is
+      only a temporary directory. On Unix this covers an executable, a
+      non-executable file, and an empty directory. On Windows it covers a
+      suffix-less `claudine` against `claudine.exe`.
+- `config_tests.rs` and `registration_tests.rs` used to run the full
+  `REGISTRY`. They now run `doctor::file_checks()`, the registry without
+  `tts` and `path`. Otherwise every file-row test would detect speech
+  engines and, on Windows, start the real shells. A `debug_assert!` pins
+  the two dropped rows.
+- `ConfigObservations`: the struct-level `expect(dead_code)` moved to
+  `effective_config`, the only field that production code still does not
+  read.
+
+### Cross-OS check
+
+The plan's Rule 18 leaves the local cross-check out because the recipe
+makes a throwaway commit. This session's instructions require it when the
+work has notable cross-OS risk. The recipe ships that commit as a bundle
+and leaves the branch, index, and stash untouched. This phase adds
+Windows-only code that Linux never compiles: the registry reads, the host
+input gatherer, `native_shell_lookups`, and the suffix test. So I ran
+`just cross-check sniff --os windows` and
+`just cross-check claudine --os windows`, each filtered to the touched
+modules. Nextest's positional filters were needed, because a `-E '…'`
+expression's parentheses break the recipe's re-quoting.
+
+Windows results:
+
+- `sniff`: 86 of 86 pass, covering `windows_shells`, `process::`, and
+  `git_program`.
+- `claudine`, `doctor::`: the first run failed 19 tests. None of them is a
+  Phase 3 test. Every new `tts`, `path`, and Sniff test passed there,
+  including `a_native_suffix_is_required_on_windows`. The 19 were Phase 1–2
+  config, permissions, and registration tests, and all had the same cause in
+  the test code: expected paths were built by joining a `/`-separated
+  literal (`.claudine/config.yaml`) onto a Windows path. Production prints
+  native separators. The fix was a test-only `doctor::native_path`, which
+  splits a `/` literal into native components, applied in
+  `config_tests.rs`, `permissions_tests.rs`, and `registration_tests.rs`.
+  On the second attempt all 93 tests pass on Windows. Linux runs 100,
+  because seven tests there are Unix-only.
+- I also checked the two probe scripts against the real shells on
+  build-win over SSH, using read-only commands. `pwsh`, Windows PowerShell,
+  and Git Bash each exit 0 for `git` and 3 for a name that does not exist.
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  reports `packages: [claudine, darkmatter, sniff, test-toolkit]` and
+  `change_class: package`. No gate was skipped.
+- Claudine `just test`: 12835 passed, 16 skipped, none at or above 5 s.
+  `just lint` is clean. `just check-tier-coverage claudine` reports nothing
+  stranded. The Windows path fix touched only tests, and afterward the
+  focused `doctor::` run passes 100 of 100.
+- Sniff `just test`: 3904 passed, none slow. `just lint` is clean.
+  `just check-tier-coverage sniff` reports nothing stranded.
+- Dependents of Sniff: the Sniff changes keep existing behavior.
+  `run_command_with_timeout` delegates with the same `TreeConfig`, and
+  `launcher_layout` gives the same result through the extracted
+  `installation_top`; Sniff's own process and git-layout tests cover both.
+  The rest is additive. The one dependent that uses the new API is
+  Claudine, and its whole area passed. I ran no other dependent package.
+- Failures: the 19 Windows-only test failures above, now fixed. There were
+  no failures on Linux.
+
+### Requirement-to-test mapping (Phase 3)
+
+| Requirement | Tests |
+| --- | --- |
+| Rule 14: automatic ranking and the runtime-first note | `doctor::tts::tests::automatic_selection_reports_the_highest_rated_and_the_runtime_first_candidate` |
+| Rule 14: equal ratings | `equal_ratings_select_the_candidate_runtime_tries_first` |
+| Rule 14: enabled with no candidate (`true`, `{}`, `provider:` null) | `every_enabled_automatic_shape_without_a_candidate_is_an_error` |
+| Rule 14: low, moderate, good quality | `quality_below_good_warns_and_good_or_better_passes_when_enabled` |
+| Rule 14: a recognized pinned provider is assessed alone | `a_recognized_provider_is_assessed_alone` |
+| Rule 14: a missing pinned provider despite a fallback | `a_missing_pinned_provider_is_an_error_despite_an_available_fallback` |
+| Rule 14: an unrecognized name (warn floor, no-candidate error, raw name hidden) | `an_unrecognized_provider_warns_at_least_and_uses_automatic_candidates` |
+| Rule 14: every disabled shape (absent, `tts:`, null, false) × none, low, good | `disabled_hook_speech_is_informational_and_names_lifecycle_say` |
+| Rule 14: an invalid or missing user configuration | `an_unusable_user_configuration_leaves_the_settings_undetermined` |
+| Rule 14: the registered callback over real detection | `the_registered_check_reports_one_row_from_host_detection` |
+| Rule 15: current-process lookup, found and missing (F2, a child with a controlled `PATH`) | `doctor::path::tests::{an_empty_path_directory_is_a_miss, an_executable_on_path_is_found_and_a_non_executable_file_is_not (unix), a_native_suffix_is_required_on_windows (windows)}` |
+| Rule 15: row severities, every shell outcome, ordering | `a_found_executable_passes_and_names_where_it_is`, `a_miss_in_this_process_is_an_error_with_a_remedy`, `each_shell_outcome_is_distinct_and_never_more_than_a_warning`, `shell_findings_follow_path_order_and_a_current_miss_still_leads` |
+| Rule 15: PowerShell preference and fallback | `sniff programs::windows_shells::tests::{pwsh_is_preferred_over_windows_powershell, indexed_windows_powershell_is_used_without_pwsh, windows_powershell_falls_back_to_its_system_root_layout}` |
+| Rule 15: both Bash families, DLL classification, WSL launcher excluded, preference order, `SystemDrive` root | `git_bash_is_found_from_the_git_launcher_root`, `git_bash_is_found_under_program_files`, `git_bash_is_preferred_over_a_standalone_msys2`, `standalone_msys2_layouts_are_checked_in_order`, `the_indexed_bash_is_preferred_within_its_kind`, `a_bash_without_an_msys_or_cygwin_runtime_is_not_a_shell`, `cygwin_registry_roots_precede_the_drive_layouts`, `the_indexed_cygwin_bash_is_preferred_and_needs_its_runtime`, `every_family_is_reported_once_in_family_order`, `a_system_drive_is_joined_as_a_volume_root`, `nothing_installed_finds_no_shell`, `detect_finds_nothing_off_native_windows` |
+| Rule 16: argument and environment policy, window flags, deadline | `a_powershell_probe_runs_no_profile_and_no_module_auto_loading`, `a_bash_probe_reads_no_startup_file_and_passes_the_name_as_an_argument`, `a_probe_runs_windowless_in_its_own_process_group`, `a_probe_refuses_anything_but_a_plain_program_name` |
+| Rule 16: exit 0, exit 3, other exits, termination, spawn failure, timeout with child cleanup | `exit_zero_is_found`, `exit_three_is_missing`, `any_other_exit_is_a_failed_probe`, `a_terminated_shell_is_a_failed_probe_without_an_exit_code` (unix), `a_shell_that_cannot_start_is_a_spawn_failure`, `a_hung_shell_times_out_and_is_terminated` |
+| Robustness matrix, Claudine TTS shapes through the doctor row | the disabled, enabled, unrecognized, and unusable tests above. Wrong-type, empty-string, and `[true]` shapes give `info` here, and `config` reports them as errors (`config_tests::tts_shapes_are_judged_by_the_user_schema`) |
+
+Code-smell review: the new code adds no `#[serde(default)]`. The speech row
+reads `Option<String>` provider through the bridge, where absent and null
+are the same by contract. No `unwrap_or_default()` sits on a load-bearing
+read. The `.ok()` in `native_shell_lookups` drops only an
+`InvalidProgramName`, which cannot happen for the constant `claudine`. The
+`.ok()` in `cygwin_registry_roots` reads a missing key or value as "no
+root", the meaning absence has.
