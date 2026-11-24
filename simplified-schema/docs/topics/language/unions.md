@@ -189,6 +189,12 @@ types:
 `parameters(...)` and `returns(...)` are required; the rest are optional.
 Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
 
+A host's callable catalog (`kind: expression-schema` or
+`kind: mutation-schema`) is the same `types:` mapping with a private scope:
+its signatures may name the file's own helper types, but no other file can
+import them or its callables, and the catalog is never a document's schema
+(see [Callable catalogs](schema-documents.md#callable-catalogs-kind-expression-schema-and-kind-mutation-schema)).
+
 | Constraint | Meaning |
 |---|---|
 | `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |

@@ -88,6 +88,7 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
 | a whole document of one of several shapes | a YAML list at `$schema` | [Root-level unions](./unions.md#root-level-unions) |
 | a path to a file | `source: file`, `source: file(eager)` | [Files](./types.md#files) |
 | a callable signature | `function(parameters(a: number); returns(number))` | [Function signatures](./unions.md#function-signatures) |
+| a host's catalog of callables, with private helper types | `kind: expression-schema` or `kind: mutation-schema` | [Callable catalogs](./schema-documents.md#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) |
 
 ## The Language Reference
 
@@ -106,8 +107,9 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
   `function(...)` signatures.
 - [Schema Resolution and Standalone Documents](./schema-documents.md): how a
   `$schema` reference finds its file, the envelopes a standalone schema
-  file uses (`kind: schema`, `kind: yaml-schema`, and the informal one), and
-  how each is checked against its definition.
+  file uses (`kind: schema`, `kind: yaml-schema`, `kind: namespace-schema`,
+  the two callable catalogs, and the informal one), and how each is checked
+  against its definition.
 - [Subtyping](./subtyping.md): whether one type accepts only values another
   type also accepts.
 - [Slots](./slots.md): `{{ … }}` expressions that supply `enum`/`suggest`

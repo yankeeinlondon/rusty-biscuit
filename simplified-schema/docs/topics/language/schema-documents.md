@@ -103,7 +103,8 @@ flowchart TD
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
 | YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema` or `kind: yaml-schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
-| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location; a duplicate key at its second spelling |
+| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location; a duplicate key at its second spelling, with the first spelling's line and column in the message |
+| `kind: expression-schema` or `kind: mutation-schema`, well formed or not | `NotASchemaDocument` (`CallableCatalog`); a [callable catalog](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) describes signatures, not documents |
 | JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
 | JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
 | JSON declaring 2020-12 that fails the dialect's meta-schema | `InvalidJsonSchema` |
@@ -111,13 +112,14 @@ flowchart TD
 The meta-schema check runs offline; nothing is fetched. These rules apply only
 to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
 `kind: schema` or informal envelope, a `types`-only one included, but never a
-`kind: yaml-schema`, `kind: namespace-schema`, or `kind: schema-trigger` file,
+`kind: yaml-schema`, `kind: namespace-schema`, `kind: expression-schema`,
+`kind: mutation-schema`, or `kind: schema-trigger` file,
 and never a schema whose `$schema` is a root union or a whole-file reference
 (`RootUnionImport`, `ReferenceImport`: it has no named types of its own).
 Other kinded YAML, such as ordinary data (`kind: roster`), is never a target
 either: it fails with one of the rows above. A refusal of a valid file for the
 way it was named (`TypesOnly`, `SelectedByKind`, `NamespaceCatalog`,
-`TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`, and
+`CallableCatalog`, `TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`, and
 `UnsupportedJsonDialect`) names the declaration that asked for it as its
 [site](../diagnostics.md#where-a-definition-failure-points).
 
@@ -150,7 +152,7 @@ A YAML map of SimplifiedSchema types written without the envelope
 
 ## Standalone Schema Documents
 
-A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes four envelopes:
+A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes six envelopes:
 
 | Envelope | Recognized by | Carries | Its definition | A `$schema` target or `Name@file` source? |
 |---|---|---|---|---|
@@ -158,10 +160,14 @@ A standalone YAML file can be a SimplifiedSchema authoring document, recognized 
 | [`kind: schema`](#kind-schema) (`Tagged`) | `kind: schema` | `$schema`, `types`, or both, and optionally `description`, `categories`; a `types`-only file may also carry a `name` | `schema.yaml` | yes; a `types`-only file is an import source only |
 | [`kind: yaml-schema`](#kind-yaml-schema) (`YamlSchema`) | `kind: yaml-schema` | `$schema` (required), and optionally `types`, `description`, `categories` | `yaml-schema.yaml` | no: [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced) |
 | [`kind: namespace-schema`](#kind-namespace-schema) (`NamespaceSchema`) | `kind: namespace-schema` | `namespace` and `$schema` (required), and optionally `description`, `types` | `namespace-schema.yaml` | no: [a host's catalog input](#kind-namespace-schema) |
+| [`kind: expression-schema`](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) (`ExpressionSchema`) | `kind: expression-schema` | `categories` and `types` (required), and optionally `description` | `expression-schema.yaml` | no: a callable catalog |
+| [`kind: mutation-schema`](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) (`MutationSchema`) | `kind: mutation-schema` | `categories` and `types` (required), and optionally `description` | `mutation-schema.yaml` | no: a callable catalog |
 
 `StandaloneSchemaEnvelope::kind()` returns the `kind` that claims an
 envelope: `Some("schema")`, `Some("yaml-schema")`, `Some("namespace-schema")`,
-or `None` for the informal one. Before its payload is read, every recognized envelope is
+`Some("expression-schema")`, `Some("mutation-schema")`, or `None` for the
+informal one. `label()` is the envelope as a refusal names it, and
+`allowed_keys()` the top-level keys its definition allows. Before its payload is read, every recognized envelope is
 [admitted](#admission-checking-an-envelope-against-its-definition) against its
 definition, so a misspelled key or a metadata value of the wrong shape is
 reported where it was written.
@@ -431,6 +437,60 @@ $schema:
     display-name: name@./schemas/person.yaml
     ages: age[]@./schemas/person.yaml
 ```
+
+### Callable catalogs: `kind: expression-schema` and `kind: mutation-schema`
+
+A callable catalog lists the signatures of functions a host can call, for
+call checking and documentation. It describes callables, not documents, so it
+exports no `$schema`:
+
+| Kind | What its callables are |
+|---|---|
+| `expression-schema` | value-producing expression functions, such as `kebab_case(name)` |
+| `mutation-schema` | signature-backed lifecycle actions, such as `set_frontmatter` |
+
+```yaml
+kind: expression-schema
+description: Text helpers.
+categories:
+    - Text -> Transform text.
+types:
+    kebab_case: |-
+        function(
+            parameters(x: Label | null);
+            returns(string | null);
+            category(Text);
+        ) -> Converts text to kebab-case.
+    Label: string(min(1))   # a private helper, usable in signatures only
+```
+
+| Key | Rule |
+|---|---|
+| `kind` | `expression-schema` or `mutation-schema` |
+| `categories` | required, a non-empty list of `Name` or `Name -> description` entries (see [Categories](#categories)) |
+| `types` | required, a non-empty mapping of callables (a `function(...)` or a union of them) and helper types |
+| `description` | optional string; an authored `""` is allowed |
+
+The shape is admitted **strictly**: nothing is converted, so `description:
+123` is refused rather than read as `"123"`. No other key is allowed
+(`$schema`, `name`, and `when` included), `description`, `categories`, and
+`types` may not be written as `null`, and neither may a `types` entry: a bare
+`Label:` declares nothing, while the quoted `Label: "null"` is the null type.
+
+Everything in `types` is private to the file. A catalog is never a `$schema`
+target, a `Name@file` import source, a trigger, or an expandable types
+library: naming one is `NotASchemaDocument` (`CallableCatalog`), well formed
+or not, from a file on disk, an embedded document, or a registered bundle.
+Put types several files share in a `kind: schema` library.
+
+This library checks the document's structure and type syntax: the
+definitions above, category entries, undeclared categories, each type
+string's grammar, and duplicate overloads. Opened as a whole YAML document,
+a catalog's kind check runs that same parse and reads no file: an import
+named inside it is not resolved. What makes a declaration a valid callable
+(every callable names a category, a callable is not mixed with an ordinary
+type, names do not collide, local helpers resolve) is checked by the host
+that reads the catalog, such as Darkmatter.
 
 ### `kind: namespace-schema`
 

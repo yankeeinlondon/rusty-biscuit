@@ -27,11 +27,14 @@ JSON must be an object whose
 [What a schema reference may target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
 
 Envelopes (`kind: schema`, `kind: yaml-schema`, `kind: namespace-schema`,
-informal) are **admitted** before their payload is read: `envelope.rs`
-soft-validates each against the compiled
-`simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml` /
-`namespace-schema.yaml` (`envelope::ENVELOPE_DEFINITIONS`,
-`admit_envelope_text`). Those files are the
+`kind: expression-schema`, `kind: mutation-schema`, informal) are
+**admitted** before their payload is read: `envelope.rs` validates each
+against the compiled `simplified-schema/schemas/schema.yaml` /
+`yaml-schema.yaml` / `namespace-schema.yaml` / `expression-schema.yaml` /
+`mutation-schema.yaml` (`envelope::ENVELOPE_DEFINITIONS`,
+`admit_envelope_text`), softly except for the two callable catalogs
+(`StandaloneSchemaEnvelope::is_callable_catalog`), which are admitted
+strictly (`validate_strict`: no metadata conversion). Those files are the
 only authority for envelope structure (closed keys, `$schema` or `types`,
 `types` a mapping, `not-empty` metadata); never add a structural check to
 `standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
@@ -86,8 +89,8 @@ whole-YAML loading agree). `envelope_null_carriers.rs` runs every carrier cell
 through the parser, admission (normal and `PreparationMode::Uncached`), both
 factories, and whole-YAML loading, which must agree.
 
-Ownership boundary: this crate owns all four shipped definitions
-(`schemas/{schema,yaml-schema,schema-trigger,namespace-schema}.yaml`, compiled
+Ownership boundary: this crate owns all six shipped definitions
+(`schemas/{schema,yaml-schema,schema-trigger,namespace-schema,expression-schema,mutation-schema}.yaml`, compiled
 into `envelope::ENVELOPE_DEFINITIONS`; all but the trigger definition admit
 envelopes, the trigger definition is a kind definition), envelope admission, trigger
 discovery and matching (`triggers/`), the schema roots (`roots.rs`), and whole
@@ -103,6 +106,24 @@ into its `EffectiveSchema`/`ValidationReport` (`YamlContract`, `YamlValidation`,
 [Schema Discovery](../../../darkmatter/docs/topics/schemas/schema-discovery.md).
 
 ## Namespaces, labels, and bundles
+
+- **Callable catalogs** (`kind: expression-schema`, `kind: mutation-schema`)
+  have closed, strictly admitted envelopes (`kind`, optional `description`,
+  required non-empty `categories` and `types`); `check_written_labels`
+  refuses explicit `null` metadata and a bare-null `types` entry. They are
+  private like namespaces: `parse_referenced_schema_document_with_mode` (the
+  one reader every disk, embedded, and bundle reference goes through),
+  `check_standalone_named_types`, both factories (`schema/layer.rs`,
+  `schema/export.rs`), and Darkmatter's `schema_files.rs::parse` refuse them
+  as `NotSchemaReason::CallableCatalog`, recognized leniently by
+  `claimed_envelope` so a malformed catalog is refused for its kind too.
+  Their whole-YAML kind check (`semantic.rs::callable_catalog_checks`) is
+  syntax-only (the selected parse, nothing resolved). Callable semantics
+  (category inheritance, callable-vs-helper, names) belong to Darkmatter's
+  catalog reader, which reports `SchemaError::CallableCatalog { path,
+  message, span, related: Vec<CatalogRelated> }`. On a duplicate-key load
+  error, `yaml_documents::duplicate_key(text)` returns both spellings
+  (`marks::duplicate_key_marks`) for a related location.
 
 - **Namespace files** (`kind: namespace-schema`) are catalog inputs only.
   `simplified/standalone.rs::parse_namespace_schema_document` admits the
