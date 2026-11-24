@@ -39,7 +39,7 @@ $schema:
     roster_version: literal(1; required)
 ```
 
-A definition is found the same way as a schema: in one of the document's five schema roots. `schema`, `schema-trigger`, `yaml-schema`, and `namespace-schema` are themselves `yaml-schema` kinds that ship with SimplifiedSchema, and Darkmatter and DMLS check files of those kinds against them. See [YAML documents](^darkmatter/docs/topics/schemas/definition.md#yaml-documents) for selection, discovery, and failure rules.
+A definition is found the same way as a schema: in one of the document's five schema roots. `schema`, `schema-trigger`, `yaml-schema`, `namespace-schema`, `expression-schema`, and `mutation-schema` are themselves `yaml-schema` kinds that ship with SimplifiedSchema, and Darkmatter and DMLS check files of those kinds against them. See [YAML documents](^darkmatter/docs/topics/schemas/definition.md#yaml-documents) for selection, discovery, and failure rules.
 
 ::doc-list kind=yaml-schema group-by=package-area
 
@@ -60,6 +60,37 @@ $schema:
 A namespace file is read only by a host's global catalog, typically as a member of a published host registration, where it imports other files by `./` or `../` path alone. It is never a `$schema` target, a `Name@file` import source, or a YAML document kind selector. See [`kind: namespace-schema`](^simplified-schema/docs/topics/language/schema-documents.md#kind-namespace-schema) for every rule.
 
 ::doc-list kind=namespace-schema group-by=package-area
+
+### Callable Catalogs (`expression-schema` and `mutation-schema`)
+
+A `kind: expression-schema` document declares value-producing expression functions; a `kind: mutation-schema` document declares signature-backed lifecycle actions. Both carry required `categories` and `types` (with optional `description`), export no `$schema`, and keep all helper types private to the file:
+
+```yaml
+# example expression-schema (shortened)
+kind: expression-schema
+categories:
+    - Text -> Transform text.
+types:
+    Label: string(min(1))
+    kebab_case:
+        - |-
+            function(
+                parameters(x: Label);
+                returns(string);
+                category(Text);
+            ) -> Converts a label to kebab-case.
+        - |-
+            function(
+                parameters(x: null);
+                returns(null);
+            ) -> Passes null through unchanged.
+```
+
+Simplified Schema checks the envelope shape and type syntax strictly; Darkmatter runs the callable semantic checks (required category, overload agreement, local-only helpers, name collisions, and eager binding) in `md schema validate`, DMLS, and host registration. Neither kind can be referenced as a `$schema` target or `Name@file` import source, and host registrations accept `expression-schema` (paired with a derived `.facts.json` companion) while refusing `mutation-schema`. See [Callable catalogs](^simplified-schema/docs/topics/language/schema-documents.md#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) and [Host functions](^darkmatter/docs/topics/host-functions.md).
+
+::doc-list kind=expression-schema group-by=package-area
+
+::doc-list kind=mutation-schema group-by=package-area
 
 ## Index Documentation (`index`)
 

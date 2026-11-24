@@ -6,6 +6,8 @@ $schema:
             schema-trigger,
             yaml-schema,
             namespace-schema,
+            expression-schema,
+            mutation-schema,
             sequence,
             task,
             index,

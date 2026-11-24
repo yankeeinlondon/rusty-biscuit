@@ -455,13 +455,19 @@ description: Text helpers.
 categories:
     - Text -> Transform text.
 types:
-    kebab_case: |-
-        function(
-            parameters(x: Label | null);
-            returns(string | null);
-            category(Text);
-        ) -> Converts text to kebab-case.
     Label: string(min(1))   # a private helper, usable in signatures only
+    kebab_case:
+        - |-
+            function(
+                parameters(x: Label);
+                returns(string);
+                category(Text);
+            ) -> Converts a label to kebab-case.
+        - |-
+            function(
+                parameters(x: null);
+                returns(null);
+            ) -> Passes null through unchanged (inherits category Text).
 ```
 
 | Key | Rule |
@@ -733,9 +739,11 @@ flowchart LR
     R -->|"kind: schema, informal"| S[admit against schema.yaml]
     R -->|"kind: yaml-schema"| Y[admit against yaml-schema.yaml]
     R -->|"kind: namespace-schema"| NS[admit against namespace-schema.yaml]
+    R -->|"kind: expression-schema / mutation-schema"| CC[admit strictly against catalog definition]
     S --> A{admitted?}
     Y --> A
     NS --> A
+    CC --> A
     A -->|no| E[SchemaDocument at the offending token]
     A -->|yes| P[parse $schema and types]
     P --> C[category, overload, and suggestion checks]
@@ -744,8 +752,10 @@ flowchart LR
 
 A file *referenced* as a schema is refused as
 [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced)
-before admission when it is a `yaml-schema`, and as a
-[catalog input](#kind-namespace-schema) when it is a `namespace-schema`.
+before admission when it is a `yaml-schema`, as a
+[catalog input](#kind-namespace-schema) when it is a `namespace-schema`, and as
+a [callable catalog](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema)
+when it is an `expression-schema` or `mutation-schema`.
 
 #### Who Owns Each Definition
 
@@ -755,19 +765,24 @@ before admission when it is a `yaml-schema`, and as a
 | `simplified-schema/schemas/yaml-schema.yaml` | `kind: yaml-schema`, itself included | this library |
 | `simplified-schema/schemas/schema-trigger.yaml` | `kind: schema-trigger` | this library |
 | `simplified-schema/schemas/namespace-schema.yaml` | `kind: namespace-schema` | this library |
+| `simplified-schema/schemas/expression-schema.yaml` | `kind: expression-schema` | this library |
+| `simplified-schema/schemas/mutation-schema.yaml` | `kind: mutation-schema` | this library |
 
-All four are compiled in as
+All six are compiled in as
 `simplified_schema::envelope::ENVELOPE_DEFINITIONS`, keyed by the virtual
 paths `SCHEMA_DEFINITION_PATH`, `YAML_SCHEMA_DEFINITION_PATH`,
-`SCHEMA_TRIGGER_DEFINITION_PATH`, and `NAMESPACE_SCHEMA_DEFINITION_PATH`;
-admission reads no file. All four are `kind: yaml-schema` documents, and
+`SCHEMA_TRIGGER_DEFINITION_PATH`, `NAMESPACE_SCHEMA_DEFINITION_PATH`,
+`EXPRESSION_SCHEMA_DEFINITION_PATH`, and `MUTATION_SCHEMA_DEFINITION_PATH`;
+admission reads no file. All six are `kind: yaml-schema` documents, and
 together they seed every YAML document-kind registry
 (`simplified_schema::yaml_documents::KindRegistry`). `schema.yaml`,
-`yaml-schema.yaml`, and `namespace-schema.yaml` admit envelopes. The trigger
+`yaml-schema.yaml`, `namespace-schema.yaml`, `expression-schema.yaml`, and
+`mutation-schema.yaml` admit envelopes (the two callable catalog definitions
+strictly, without metadata coercion). The trigger
 definition is a kind definition like one a user writes: it validates a
 trigger file when that file is opened as a YAML document, while trigger
 discovery (`simplified_schema::triggers`) reads triggers with its own parser.
-A host prepares the four for its registry with its own `ShippedSources`
+A host prepares all six for its registry with its own `ShippedSources`
 (`yaml_documents::prepare_shipped_definitions`) and may record the prepared
 form in its own shipped artifact; Darkmatter does. This is the definition
 of a `yaml-schema`:
