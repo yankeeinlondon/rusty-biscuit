@@ -3,7 +3,7 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -48,6 +48,134 @@ packages:
 - darkmatter
 - darkmatter-cli
 - claudine
+- darkmatter-lsp
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/lib/src/effects/types.rs
+- darkmatter/lib/src/lifecycle/signatures.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/mutations.yaml
+- darkmatter/schemas/partials/context-variables.yaml
+- darkmatter/lib/generated/shipped.json
+- claudine/lib/generated/shipped.json
+- darkmatter/lib/tests/fixtures/host_functions/project.yaml
+- darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/schemas/partials/context-variables.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-context-variables.json
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/callable_catalog_validation.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/collection_analysis.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/member_check.rs
+- darkmatter/lib/tests/l1/recent_commits_shared_type.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/dmls/src/overlay/yaml_contract.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/diagnostics/yaml_document.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/yaml_document_catalog_editor.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/dmls/tests/l1/yaml_document_session.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- simplified-schema/lib/src/yaml_documents/load.rs
+- simplified-schema/lib/tests/l1/callable_catalog_envelopes.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/host-functions.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+- darkmatter/schemas/darkmatter-host.yaml
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/bundle.rs
+- darkmatter/lib/src/config/registration/locate.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/config/registration/selection.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/host_namespaces.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+- darkmatter/lib/tests/l1/host_registration_companions.rs
+- darkmatter/lib/tests/l1/host_registration_locations.rs
+- darkmatter/lib/tests/l1/host_registration_snapshot.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/compose_foreign_documents.rs
+- darkmatter/cli/tests/l1/compose_host_scope.rs
+- darkmatter/cli/tests/l1/host_registration.rs
+- darkmatter/cli/tests/l1/host_runtime_scope.rs
+- darkmatter/dmls/benches/pipeline_work_a3.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/claudine_host.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/host_catalog_reload.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+- darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+- simplified-schema/lib/src/member_envelope.rs
+- simplified-schema/lib/tests/l1/member_envelope.rs
+- claudine/lib/src/composition/registration/published.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/lib/tests/l1/registration_inventory.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/host-functions.md
+- claudine/docs/topics/schemas.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Expression and mutation schemas implementation plan
@@ -104,7 +232,7 @@ For the new and changed validators, every invalid shape yields a located error o
 
 ## Phase 2 — Share Darkmatter catalog validation
 
-- [ ] **Catalog reader**
+- [x] **Catalog reader**
   - Implement Rules 4–6 in `markdown/compose/expression/catalog/mod.rs`, `expression/host/mod.rs`, and `markdown/schemas/yaml_documents/mod.rs`. Reuse the parsed document and source-map ranges through descriptor projection and semantic checks. Move canonical host name validation to `HostFunctionCatalog::load` and keep the alias and completeness defenses at set construction. Resolve reserved spellings against `functions/mod.rs`'s existing binding rows, with the same canonical and alias comparisons as `is_builtin_name`. Reuse `registered_aliases` for built-in expression descriptor projection. Keep this name-only lookup independent of the joined registry, which calls back into the catalog loader.
   - Carry field and authored overload ranges out of parser and binding errors. For binding errors reported with overload indices, use the corresponding source-map arm and attach the first matching arm for duplicate/disagreeing declarations. For a missing field use the enclosing mapping. For file-form examples, reject unlisted references directly from the supplied table. No filesystem fallback.
   - Retag `darkmatter/schemas/partials/{functions,mutations}.yaml` and only fixtures used as callable catalogs. Update `expression_function_catalog_from_sources`, `effects/types.rs::effect_function_catalog_from_sources`, and `markdown/schemas/shipped.rs::{prepare,accept_function_catalog}` and the two call sites of `load_catalog_with_mode`. Maintain acceptance of valid current records and source fallback with Rust binding and lifecycle registry parity. Update `lifecycle/signatures.rs`'s loader fixture and leave the lifecycle generator's data-shape logic intact.
@@ -113,44 +241,44 @@ For the new and changed validators, every invalid shape yields a located error o
 
 ### Wave 1
 
-- [ ] **CLI catalog route**
+- [x] **CLI catalog route**
   - Own `darkmatter/cli/src/commands/schema/validate.rs` and CLI YAML validation tests. Preserve the load error with original span and related marks. Render the shared error in human and machine output, using existing terminal renderables and located record conventions. Ensure `validate_yaml` cannot reach `resolve_schema_file` for the two callable kinds. Use the CLI wiring cases from the matrix plus an existing valid ordinary schema with a template to prove its route is preserved.
   - Verify each invalid control leaves example or template sentinels untouched. Include a successful CLI check of the shipped expression and mutation sources through the captured checkout context.
 
-- [ ] **Editor catalog route**
+- [x] **Editor catalog route**
   - Own `darkmatter/dmls/src/overlay/{yaml_contract,yaml_document,schema,suggestions,registry,mod}.rs`, `diagnostics/yaml_document.rs`, and the YAML authoring/diagnostic L1 tests. Support completion and hover for the new kind fields and local type declarations through the existing standalone tooling. Keep the generic authoring worker from resolving catalog imports as ordinary schema data. On an invalid catalog keep its whole YAML claim, suppress root `$schema` fallback, and publish one diagnostic per failure.
   - Prove valid → invalid → valid text with the same `kind` refreshes findings by buffer version. Check overload ranges, duplicate YAML keys and folded collisions against the same source fixture as the CLI. Check that repeated reads of the same installed buffer revision neither rebuild the catalog nor enter a handler.
 
 ### Checkpoint
 
-- [ ] **Catalog parity**
+- [x] **Catalog parity**
   - After Wave 1 run `just test -E 'test(catalog) | test(schema_validate_yaml) | test(yaml_document) | test(schema_reference)'` from `darkmatter/`. The public API cases also live in this filter. Keep LSP session tests headless.
 
 ## Phase 3 — Load v3 host registrations
 
-- [ ] **Verified companions**
+- [x] **Verified companions**
   - Own `darkmatter/schemas/darkmatter-host.yaml` and `darkmatter/lib/src/config/registration.rs` plus prerequisite `registration/{manifest,bundle}.rs`. Build the closed v3 manifest and extend verified preparation with Rule 7. Use `FileReference` and the v2 bundle probe and identity path for companions. Use `biscuit_hash::blake3_hash_bytes` on exact member bytes and keep the existing canonical hash projection for normalized revision.
   - Use one classification/preparation path for embedded and installed inputs. In the disk reader perform the first digest validation for explicit members before classifying YAML; then resolve derived companions, record attempted companion paths, check the exact digest-key set and verify remaining bytes. Apply the same classifier, derivation and exact member/digest reconciliation to an embedded inventory. Unlisted or stray bytes never feed resolution. Extend `manifest_member_candidates` and the returned `LoadedRegistrations` watch records to keep both the manifest field and companion candidate during failure, including an unchanged manifest with missing companion bytes.
   - Verify v2 fixed-path input refuses with its version and the upgrade instruction. Retain the v2 fixture's boundary, retry, digest, copied/reordered identity, duplicate claim, and verified-byte tests with v3 normal fixtures. Add cases for differing YAML extensions, multiple dots, shared derived paths, missing digest versus missing bytes, valid digest with stale inner hash, and forbidden mutation with its exact kind location. Preserve expected missing paths for DMLS in each failure case.
 
-- [ ] **Binding facts**
+- [x] **Binding facts**
   - Own `expression/host/{mod,artifact}.rs` and the host catalog helpers remaining in `markdown/schemas/catalog.rs`. Keep `analysis_only_at`'s direct-call behavior. Add strict registration projection over its result, carrying typed fact-field and alias provenance using `biscuit_file::data_locations::locate_json` for JSON pointers and the declaration map for YAML keys. Do not infer locations by matching rendered error text. Use the strict JSON decoder's location for syntax and duplicate failures. Keep the approved artifact format and encoder unchanged.
   - Validate cross-catalog names and aliases during profile assembly by walking members in normalized order. Keep alias-versus-alias, canonical-versus-alias and built-in alias collision cases, including two same-host catalogs with case variants. Prove a different host may publish the same canonical name and alias without affecting the first host. Preserve a private alias table per set and leave mount order irrelevant after collision admission.
   - Delete any callable schema-root probe retained by a prerequisite, including `is_host_function_catalog`'s old shape heuristic and that legacy path's cache tests. Preserve explicit `HostFunctionCatalog::load` and `HostFunctions` APIs, and preserve the registration loader's refusal on incomplete analysis. Replace tests that depend on root discovery with a root-discovery isolation case and registered-profile tests. Apply the facts and manifest matrix through public `load_entries` and published fixture bytes.
 
 ### Wave 2
 
-- [ ] **Compose host scope**
+- [x] **Compose host scope**
   - Own CLI `commands/compose.rs`, its host registration tests, and the analysis-only failure in `expression/functions/mod.rs::call_host`. Keep the existing selected-profile guard alive during passive reference checking, static call checking, and compose. Prove a bad call receives binding diagnostics while a valid call that reaches execution receives the host-runtime error. Use a probe with pre-conversion source exclusions in the companion and compare against an ordinary Markdown document and a document belonging to a different host. Do not change Markdown `md schema validate` into an expression linter.
   - Exercise an expression in a lifecycle action operand, verify the same spelling does not become an action key, and prove real host execution uses the bound handler with eager binding and return checks. Verify one built-in expression also accepted as an action still works in both positions, an effect-only mutation is not callable in an ordinary expression, and the current `load_data` read policy remains in force. Use the existing host runtime and lifecycle L1 fixtures.
 
-- [ ] **Editor host reload**
+- [x] **Editor host reload**
   - Own `darkmatter/dmls/src/overlay/hosts.rs`, host diagnostics projection and `registered_host_editor_agreement.rs`, `registered_host_views.rs`, and `host_registration_watches.rs`. Reuse the v2 installed revision and worker. Verify missing companion on initial load, removal of a valid companion, stale and restored bytes, coalesced publication, and refresh without reopening the document. Assert one load per settled revision for several documents, no reload for body edits, and no callable exposure from refused or unselected registrations.
   - Check disappearing completions and binding diagnostics after refusal and their recovery after repair. Assert case-insensitive canonical/alias lookup and the shared related-location information for conflicts. Include a catalog physically present in a schema root and absent from the manifest. Clear any legacy tests for implicit discovery.
 
 ### Checkpoint
 
-- [ ] **Registration parity**
+- [x] **Registration parity**
   - After Wave 2 regenerate Darkmatter's shipped artifact with the area's `just shipped-schemas`. Run `just test -E 'test(host_registration) | test(registered_host) | test(host_functions) | test(host_selection) | test(host_function_diagnostics)'` from `darkmatter/`. Update the host registration and host functions topics with v3 and the scope/runtime boundary.
 
 ## Phase 4 — Publish and repair one inventory
