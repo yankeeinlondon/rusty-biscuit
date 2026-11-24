@@ -241,8 +241,9 @@ no group: each reached call walks history from the file-resolution
 `repository_root` and renders through the capture's `render_recent_commits`.
 It is the lazy half of the first variable/function pair (R29): `ctx.recent_commits`
 is the eager snapshot in the same rendering. Both use the catalog's one
-`recent-commits` named type (the function returns it; `context-variables.yaml`
-imports it as `recent-commits(generated; required)@darkmatter:functions`), and
+`recent-commits` shape (the function returns the catalog's helper;
+`context-variables.yaml` declares an equal local helper, since a callable
+catalog is not importable, and a test pins the two equal), and
 each side's description names the other; there is no shared descriptor entry.
 
 `has_agentic_cli(agent)` demands `Agent`; the capture retains a lazily scanned

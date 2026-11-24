@@ -985,14 +985,25 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   route, the root `$schema`'s `NamedTypeCatalog::build_tolerant`
   (`PreparedYaml::named_types`, served by `yaml_only`). `YamlContracts` keys
   an entry on `declaration_key()` + context identity + generation + kinds
-  version (+ text hash only when `kind_checks_read_files()`),
-  never on data; begin/run/install mirror the registry's (epoch, seq,
+  version (+ text hash only when `kind_checks_read_files()`, and always the
+  full text for a callable catalog, `expression-schema`/`mutation-schema`, whose
+  whole text is its contract), never on data; begin/run/install mirror the registry's (epoch, seq,
   in-flight changes), and staleness is event-driven (`invalidate_paths`,
   `set_buffer`, `invalidate_all` from the trigger hooks; deps compared by
   buffer-aware hash, probes by presence, a failed entry stale on any change).
   `registry_demand` reports a YAML need when the registry is stale or the
   contract is not fresh for the current key, inside a workspace folder or
   not; its folders join `trigger_watch_folders`.
+- Callable catalogs: `prepare_yaml_contract` returns
+  `SchemaError::CallableCatalog` for a failed catalog; the worker resolves each
+  related file (relative → captured repository root) and captures its text
+  (open buffer first) so the dispatch thread reads nothing, and the overlay
+  keeps the kind claim (no root `$schema` fallback, no import resolution).
+  `diagnostics/yaml_document.rs` publishes one `dm.schema.callable_catalog`
+  per failure with `relatedInformation`; `overlay/mod.rs` suppresses the
+  envelope's coarser `document_malformed` beside it; `overlay/registry.rs`
+  never classifies a catalog in a schema root as a named schema. Tests:
+  `tests/l1/yaml_document_catalog_editor.rs`.
 - `overlay/yaml_document.rs` (dispatch thread) reads no file: it looks the
   entry up by key (`Pending` when none matches: never an earlier
   declaration's), runs the passive `YamlContract::validate` (or takes the
