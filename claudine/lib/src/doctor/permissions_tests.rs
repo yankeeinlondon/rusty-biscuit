@@ -534,3 +534,27 @@ fn no_reference_or_block_value_reaches_the_report() {
         }
     }
 }
+
+#[test]
+fn a_refused_candidate_reaches_the_report_without_its_refusal_text() {
+    let darkmatter = PathBuf::from("/home/me/.darkmatter.yaml");
+    let shown = |path: &Path| path.display().to_string();
+    let edited = |path: &Path| format!("{}: set `permissions`", path.display());
+    let refusals = [
+        HandoffCommitError::Claudine(crate::error::ClaudineError::ConfigValidation("`network: SECRET-value` is invalid".into())),
+        HandoffCommitError::Darkmatter(Box::new(InitError::Write(ConfigWriteError::ValidationFailed {
+            path: darkmatter.clone(),
+            refusal: darkmatter::config::write::ValidationRefusal::new("expected a mapping, found `SECRET-value`"),
+        }))),
+    ];
+    for refusal in refusals {
+        let (changes, reason) = super::failure(refusal, &shown, &edited);
+        assert!(changes.is_empty());
+        let attempt = crate::doctor::RepairOutcome { changes, failure: Some(reason) };
+        let row = super::super::report::row(ID, crate::doctor::CheckOutcome::new("ok"), Some(&attempt));
+        assert_eq!(row.severity, Severity::Error, "{row:#?}");
+        assert!(row.detail.contains("would be invalid; nothing was saved"), "{row:#?}");
+        let shown = serde_json::to_string(&row).unwrap();
+        assert!(!shown.contains("SECRET"), "{shown}");
+    }
+}

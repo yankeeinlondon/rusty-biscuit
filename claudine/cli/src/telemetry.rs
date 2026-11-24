@@ -147,6 +147,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Signals(_) => "signals",
         Commands::Logs(_) => "logs",
         Commands::Setup(_) => "setup",
+        Commands::Doctor(_) => "doctor",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",
         Commands::Claude(_)

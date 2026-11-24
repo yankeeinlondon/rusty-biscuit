@@ -75,6 +75,12 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "`test-fixtures` hook that records a group attempt's branch counts for CLI tests",
     ),
+    ambient(
+        "doctor/path.rs",
+        "std::env::var_os",
+        1,
+        "`test-fixtures` hook that lets `claudine doctor` CLI tests skip the host's real Windows shell probes",
+    ),
     ambient("config/antigravity.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),
     ambient("config/backup.rs", "biscuit_file::home_dir", 1, "locates Claudine's configuration backups under the user's home"),
     ambient("config/claude.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),

@@ -562,7 +562,11 @@ pub(crate) fn check_stray_keys(pass: &Pass<'_>) -> CheckOutcome {
                 }
                 let mut unknown: Vec<&ConfigProblem> =
                     problems.iter().filter(|problem| problem.kind == ConfigProblemKind::UnknownKey).collect();
-                unknown.sort_by(|left, right| left.pointer.cmp(&right.pointer));
+                // Source order, so the list reads top to bottom like the file;
+                // one key has one position, so equal pointers stay adjacent.
+                unknown.sort_by(|left, right| {
+                    (left.line, left.column, &left.pointer).cmp(&(right.line, right.column, &right.pointer))
+                });
                 unknown.dedup_by(|left, right| left.pointer == right.pointer);
                 for problem in unknown {
                     outcome.push(stray_finding(problem, config_scope_of(scope), scope, path));

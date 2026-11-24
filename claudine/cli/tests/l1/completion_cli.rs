@@ -380,6 +380,18 @@ fn non_targeted_subcommand_emits_no_candidates() {
 }
 
 #[test]
+fn doctor_and_both_of_its_options_complete_through_the_binary() {
+    let workspace = TestWorkspace::named("comp-doctor");
+    let root = workspace.path();
+
+    assert_eq!(run_complete_trailing(root, &["doc"]), vec!["doctor"]);
+    let got = run_complete_trailing(root, &["doctor", "--"]);
+    for flag in ["--fix", "--json"] {
+        assert!(got.iter().any(|c| c == flag), "expected {flag} in candidates, got {got:?}");
+    }
+}
+
+#[test]
 fn setter_shaped_token_suppresses_completion() {
     let workspace = TestWorkspace::named("supp-setter");
     let root = workspace.path();

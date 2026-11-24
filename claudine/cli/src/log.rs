@@ -31,7 +31,8 @@ fn force_color_enabled() -> bool {
             .unwrap_or(false)
 }
 
-fn forced_width(default: u32) -> u32 {
+/// `TERM_WIDTH`, else `COLUMNS`, else `default`.
+pub(crate) fn forced_width(default: u32) -> u32 {
     std::env::var("TERM_WIDTH")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())

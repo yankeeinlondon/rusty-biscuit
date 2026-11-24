@@ -539,6 +539,14 @@ async fn dispatch(
         return commands::registrations::run(args).map(|()| 0);
     }
 
+    // Also ahead of Darkmatter's configuration and first-run setup: a missing
+    // or broken configuration is what `doctor` diagnoses, so reading it here
+    // would stop the diagnosis, and setup or conversion would write files an
+    // inspection must leave as found.
+    if let Some(Commands::Doctor(args)) = &cli.command {
+        return commands::doctor::run(args);
+    }
+
     // Darkmatter's configuration is read once, before any hook, agent,
     // provider, or composition is dispatched; one that does not load stops
     // the run. Completion stays passive and reads none.
@@ -673,6 +681,7 @@ async fn dispatch(
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
         Commands::Registrations(_) => unreachable!("`registrations` is handled before configuration loads"),
+        Commands::Doctor(_) => unreachable!("`doctor` is handled before configuration loads"),
     };
     result.map(|()| 0)
 }

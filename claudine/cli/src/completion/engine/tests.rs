@@ -481,6 +481,16 @@ fn clap_fallback_completes_providers_format_flag() {
     );
 }
 
+#[test]
+fn doctor_is_offered_at_the_root_and_its_options_after_it() {
+    let root = run_with_context(&argv(&["claudine", "do"]), 1, &test_ctx(true, true, true));
+    assert_eq!(root, vec!["doctor"]);
+    let got = run_with_context(&argv(&["claudine", "doctor", "--"]), 2, &test_ctx(true, true, true));
+    for flag in ["--fix", "--json"] {
+        assert!(got.iter().any(|c| c == flag), "expected {flag} in candidates, got {got:?}");
+    }
+}
+
 // -- SetterName classification (schemas Phase 4) -----------------------
 
 #[test]

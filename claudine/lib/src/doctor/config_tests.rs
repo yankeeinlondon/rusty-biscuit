@@ -199,14 +199,17 @@ fn nested_unknown_keys_are_found_in_the_tts_mapping_the_imported_permissions_and
     let stray = row(&rows, "stray-config-keys");
     assert_eq!(stray.severity, Severity::Error, "{stray:#?}");
     let shown = |line: &str| format!("{}: {line}", path.display());
+    // Listed in source order, not by pointer (`/actions…` sorts first).
+    let mut at = 0;
     for expected in [
         "unknown key `pitch` in `/tts` (line 3, column 3)",
         "unknown key `sockets` in `/permissions` (line 6, column 3)",
         "unknown key `extra` in `/actions/session_start/0` (line 11, column 7)",
     ] {
-        assert!(stray.detail.contains(&shown(expected)), "`{expected}` not in {stray:#?}");
+        let found = stray.detail[at..].find(&shown(expected)).unwrap_or_else(|| panic!("`{expected}` not after byte {at} in {stray:#?}"));
+        at += found + expected.len();
     }
-    assert_eq!(stray.summary, "unknown key `extra` in `/actions/session_start/0` (line 11, column 7) (+2 more)");
+    assert_eq!(stray.summary, "unknown key `pitch` in `/tts` (line 3, column 3) (+2 more)");
 }
 
 #[test]

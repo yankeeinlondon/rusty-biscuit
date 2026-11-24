@@ -39,6 +39,7 @@ Administration:
   config            Manage Claudine configuration with a TUI
   sync              Re-sync hook registrations with detected agents
   setup             Set up Claudine with Darkmatter; safe to rerun, keeps settings
+  doctor            Check configuration, registration, speech, and PATH; --fix repairs
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs

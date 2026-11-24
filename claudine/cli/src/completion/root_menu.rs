@@ -14,7 +14,7 @@
 //! 3. Shared resources — `skills`, `commands`, `agents`, `mcp`.
 //! 4. Hooks / actions — `hooks`, `actions`.
 //! 5. Administration — `sync`, `uninstall`, `providers`, `logs`,
-//!    `completions`, `config`.
+//!    `completions`, `config`, `doctor`, `steer`.
 //! 6. `setup` — **only** when no configuration exists yet. See
 //!    [`should_offer_setup`].
 //!
@@ -90,6 +90,7 @@ pub(crate) fn full_menu(ctx: &RootContext) -> Vec<String> {
         "logs",
         "completions",
         "config",
+        "doctor",
         "steer",
     ]);
 
@@ -202,7 +203,7 @@ mod tests {
         let menu = full_menu(&ctx(true, true, true));
         let n = post_wrappers() + 6;
         assert_eq!(
-            &menu[n..n + 7],
+            &menu[n..n + 8],
             &[
                 "sync",
                 "uninstall",
@@ -210,6 +211,7 @@ mod tests {
                 "logs",
                 "completions",
                 "config",
+                "doctor",
                 "steer",
             ],
         );

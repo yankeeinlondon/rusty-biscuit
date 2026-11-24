@@ -92,6 +92,9 @@ pub(crate) enum Commands {
     /// Set up Claudine with Darkmatter; safe to rerun, keeps settings
     /// (publishes and registers its host registration, replacing an old one).
     Setup(commands::setup::SetupArgs),
+    /// Check Claudine's configuration, registration, permissions, speech,
+    /// and executable path; `--fix` repairs what it safely can.
+    Doctor(commands::doctor::DoctorArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
     /// Manage MCP (Model Context Protocol) servers.
