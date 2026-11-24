@@ -113,6 +113,11 @@ whether a recreated file should be analyzed.
 - **`which` (pinned to major `8`, `default-features = false`, `real-sys`).**
   Pinned to the same major as `claudine` and `claudine-cli` so provider and tool
   discovery behave consistently across the workspace.
+- **`tempfile` 3 (regular dependency).** `programs::windows_shells::probe`
+  gives each PowerShell probe a private, self-deleting temporary folder as
+  its profile, so PowerShell's startup cache never lands in the user's
+  profile. It was already in the graph through `gix-odb`, and was a
+  dev-dependency before.
 
 ## Lockfile and Configuration Parsing (`filesystem::repo::{jsonc, lockfile}`)
 

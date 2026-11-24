@@ -112,7 +112,10 @@ same question: which PowerShell, MSYS (Git Bash before MSYS2), and Cygwin
 shell is installed, classified by the runtime DLL beside `bash.exe`, and
 whether each, started without startup files under the 2 s
 `timeouts::SHELL_LOOKUP` through `process::run_command_in_tree` (windowless
-`TreeConfig`), finds a name. Selection rules are pure over `DiscoveryInputs`
+`TreeConfig`), finds a name. A PowerShell probe gets a private
+`tempfile` folder as `USERPROFILE`/`LOCALAPPDATA`/`APPDATA` (plus
+`PSModuleAnalysisCachePath`), removed on return, because PowerShell writes
+its startup cache even with `-NoProfile`; `PATH` stays inherited. Selection rules are pure over `DiscoveryInputs`
 and tested on every OS with fake layouts; `detect()` is empty off native
 Windows. User docs: [Windows shells](../../../sniff/docs/topics/windows-shells.md).
 

@@ -215,16 +215,29 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   after `cargo` exits. A rig script that runs `cargo nextest` through
   `Start-Process -Wait` reports nothing until then. Use `-PassThru` without
   `-Wait` and call `$p.WaitForExit()`, which waits for that process alone.
-- **A probed PowerShell writes into `%LOCALAPPDATA%` even with
-  `-NoProfile -NonInteractive`.** `pwsh` and Windows PowerShell refresh their
-  startup JIT cache, `AppData\Local\Microsoft\PowerShell\StartupProfileData-NonInteractive`,
-  on every start. `CliProcessFixture` points `USERPROFILE` at the fixture home,
-  so a test that snapshots the home before and after a run that starts
-  PowerShell (for example `claudine doctor`'s `path` row) finds a new
-  `AppData` tree there, and only on Windows. Each real shell probe also costs
-  about 0.5–1 s. `claudine doctor` CLI tests set the `test-fixtures` seam
-  `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES` and test probe outcomes through
-  the library; the one case that keeps real probes excludes `AppData`.
+- **A started PowerShell writes into the user profile even with
+  `-NoProfile -NonInteractive`.** `pwsh` 7 creates
+  `AppData\Local\Microsoft\PowerShell\StartupProfileData-NonInteractive`
+  (its startup JIT profile); Windows PowerShell 5.1 writes the same file
+  under `AppData\Local\Microsoft\Windows\PowerShell` when that folder
+  exists (in every real profile it does) and creates an empty
+  `AppData\Roaming` if it is missing. Both resolve these through the known
+  folders, which follow **`USERPROFILE`**: setting `LOCALAPPDATA` alone
+  moves nothing, and `DOTNET_MultiCoreJit=0`/`COMPlus_MultiCoreJit=0` do not
+  stop the write (measured on `build-win`, 7.6 and 5.1, 2026-11-24). Sniff's
+  `windows_shells::probe` therefore points `USERPROFILE`, `LOCALAPPDATA`,
+  and `APPDATA` at a private temp folder it deletes afterwards. Any other
+  read-only code that starts PowerShell needs the same. Proof:
+  `windows_shells::tests::a_real_powershell_probe_answers_and_leaves_the_profile_unchanged`.
+  Each real shell probe costs about 0.2–0.5 s, so `claudine doctor` CLI
+  tests set the `test-fixtures` seam `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES`
+  except in the one healthy-home case, which compares the whole fixture
+  home.
+- **Directory timestamps read by enumeration lag on NTFS.** A parent's
+  `LastWriteTime` seen through `Get-ChildItem`/`read_dir` metadata can
+  change shortly after a child was created even though nothing new was
+  written. A before/after snapshot compares entries and file bytes, not
+  directory times.
 - **Defender is about a quarter of a parallel test run's CPU on
   `build-win-native`** (`MsMpEng` 120–145 of ~575 CPU-s; Search, `System`,
   and `svchost` another 80–90). Roughly 5 ms per process start, 2–5 ms per
@@ -241,6 +254,17 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   and 16 threads in the test barely helped (7.3 s). A whole-repository scan
   should let Git rule out clean tracked files and open only the rest
   (`darkmatter/lib/tests/l1/current_root_migration_guard.rs`: 7.3 s → 1.1 s).
+  The helper is `darkmatter/lib/tests/git_prefilter/mod.rs`. Splitting such
+  a scan across nextest processes does not fix it on its own: 3,848 Markdown
+  files per test cut into seven tests took 3.5–4.5 s each, against
+  5.2–5.5 s unsplit, in the same filtered run. With Git's prefilter the
+  seven took 0.3–1.4 s (`shipped_schema_corpus`).
+- **The `build-win` checkout holds Git symlinks as plain files**
+  (`core.symlinks` off). `.claude/skills/system-one` and
+  `.claude/skills/claudine/topics` are 39-byte text files there rather than
+  links into `claudine/docs`, so a walk through `.claude/skills` finds fewer
+  files on Windows than on Linux or macOS. A per-directory count floor must
+  not depend on files reached through a link.
 - **A freshly copied executable costs about 0.3 s on its first run** on
   `build-win-native` (Defender scans it; later runs take about 10 ms). A hard
   link to a file that has already run costs about 20 ms. A test fixture that

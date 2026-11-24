@@ -27,6 +27,22 @@ pub enum FileIdentity {
     },
 }
 
+impl FileIdentity {
+    /// The identity of the object at `path`. With `follow_links` false a
+    /// symlink, junction, or other reparse point reports its own identity,
+    /// so two spellings of one directory entry (a case-only alias on a
+    /// case-insensitive volume) compare equal without anything being
+    /// followed.
+    ///
+    /// ## Errors
+    ///
+    /// The OS error of reading the metadata (Unix) or of opening an
+    /// attribute-only handle and querying it (Windows).
+    pub fn of_path(path: &Path, follow_links: bool) -> io::Result<Self> {
+        of_path(path, follow_links)
+    }
+}
+
 #[cfg(unix)]
 pub(crate) fn of_metadata(metadata: &std::fs::Metadata) -> FileIdentity {
     use std::os::unix::fs::MetadataExt;

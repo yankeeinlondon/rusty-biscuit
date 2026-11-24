@@ -4,7 +4,8 @@ On native Windows, a program the current process can find may still be
 missing in the shell a user actually opens. PowerShell, Git Bash, and Cygwin
 each build `PATH` their own way when they start. `sniff::programs::windows_shells`
 finds which of those shells are installed and asks each one, without its
-startup files, whether it can find a program.
+startup files and without changing the user's profile, whether it can find
+a program.
 
 ```rust
 use sniff::programs::windows_shells::{self, ShellLookup};
@@ -84,6 +85,38 @@ The probe never runs `program` and never reads the user's startup code:
 - Stdin is null, both output pipes are drained, and on Windows the child gets
   no console window. The shell otherwise inherits this process's
   environment, including `PATH`.
+
+### PowerShell's startup cache
+
+PowerShell writes files when it starts, even with `-NoProfile`:
+
+| File | PowerShell 7 | Windows PowerShell 5.1 |
+| --- | --- | --- |
+| Startup JIT profile, `StartupProfileData-NonInteractive` | `AppData\Local\Microsoft\PowerShell` (folder created if missing) | `AppData\Local\Microsoft\Windows\PowerShell` (only if that folder exists) |
+| Module analysis cache | `AppData\Local\Microsoft\PowerShell` | `AppData\Local\Microsoft\Windows\PowerShell` |
+| Empty `AppData\Roaming`, if missing | no | yes |
+
+Both versions find these folders through Windows' known folders, which
+follow `USERPROFILE`; setting `LOCALAPPDATA` alone does not move them, and
+`-NoProfile` does not stop them. So a PowerShell probe runs with a private
+folder in its environment:
+
+- `probe` creates a new folder in the system temporary directory
+  (`std::env::temp_dir()`, normally `%LOCALAPPDATA%\Temp`) and points
+  `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` at it;
+- `PSModuleAnalysisCachePath` names a file inside it;
+- `POWERSHELL_TELEMETRY_OPTOUT=1` stops PowerShell 7 sending its startup
+  telemetry;
+- `probe` deletes the folder when it returns, whatever the outcome.
+
+`PATH` is not touched, so the lookup answers exactly as before. The
+temporary folder is the only place the probe writes, and only while the
+probe runs. If the folder cannot be created, `probe` returns
+`SpawnFailed` and starts no shell.
+
+Bash needs no such folder. `--noprofile` skips `/etc/profile`, where MSYS2
+and Cygwin do their first-run setup (creating the home directory, copying
+skeleton files), and a non-interactive `-c` shell keeps no history.
 
 `program` must be a plain name of ASCII letters, digits, `.`, `_`, and `-`,
 not starting with `-` or `.`. Anything else is `InvalidProgramName`, and no

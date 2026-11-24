@@ -7,7 +7,7 @@
 //! [`detect`] finds at most one installed shell per [`ShellFamily`] from
 //! local metadata and the registry alone; [`probe`] asks one of them for a
 //! program in a bounded, windowless subprocess that reads no profile, rc
-//! file, or `BASH_ENV`.
+//! file, or `BASH_ENV`, and leaves the user's profile and caches unchanged.
 //!
 //! [`detect`] returns nothing off native Windows: WSL2 and every Unix host
 //! has only its own environment to check.
@@ -121,18 +121,33 @@ pub fn detect() -> Vec<InstalledShell> {
 
 /// Asks `shell`, started without its startup files in `working_dir`, whether
 /// `program` is on the `PATH` it derives. The shell inherits this process's
-/// environment, less `BASH_ENV` and `ENV`.
+/// environment, `PATH` included, less `BASH_ENV` and `ENV`.
 ///
 /// The probe runs the discovered absolute executable directly (never
 /// `program`) with null stdin, drained output, no console window, and a
 /// two-second deadline, after which its process tree is terminated.
+///
+/// PowerShell writes its startup cache when it starts, even without a
+/// profile, so a PowerShell probe gets a private folder in the OS temporary
+/// directory as its user profile and local and roaming application data;
+/// the folder is removed when the probe returns. A folder that cannot be
+/// created is [`ShellLookup::SpawnFailed`], and no shell is started.
 ///
 /// ## Errors
 ///
 /// [`InvalidProgramName`] when `program` is not a plain name; nothing is
 /// started.
 pub fn probe(shell: &InstalledShell, program: &str, working_dir: &Path) -> Result<ShellLookup, InvalidProgramName> {
-    let mut command = probe_command(shell, program, working_dir)?;
+    check_program(program)?;
+    let scratch = if shell.kind.is_powershell() {
+        match tempfile::Builder::new().prefix("sniff-shell-probe-").tempdir() {
+            Ok(scratch) => Some(scratch),
+            Err(error) => return Ok(ShellLookup::SpawnFailed { kind: error.kind() }),
+        }
+    } else {
+        None
+    };
+    let mut command = probe_command(shell, program, working_dir, scratch.as_ref().map(tempfile::TempDir::path))?;
     Ok(run_probe(&mut command, timeouts::SHELL_LOOKUP))
 }
 
@@ -149,16 +164,36 @@ const PROBE_TREE: TreeConfig = TreeConfig::process_group().windows_creation_flag
 /// Variables a Bash or POSIX shell sources at startup even without rc files.
 const STARTUP_VARIABLES: [&str; 2] = ["BASH_ENV", "ENV"];
 
-fn probe_command(shell: &InstalledShell, program: &str, working_dir: &Path) -> Result<Command, InvalidProgramName> {
+/// Where PowerShell finds the folders it writes at startup: the profile
+/// (Windows' known folders, the startup cache among them, are derived from
+/// `USERPROFILE`) and the application-data variables.
+const POWERSHELL_PROFILE_VARIABLES: [&str; 3] = ["USERPROFILE", "LOCALAPPDATA", "APPDATA"];
+
+fn check_program(program: &str) -> Result<(), InvalidProgramName> {
     let plain = !program.is_empty()
         && program.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
         && !program.starts_with(['-', '.']);
-    if !plain {
-        return Err(InvalidProgramName);
-    }
+    if plain { Ok(()) } else { Err(InvalidProgramName) }
+}
+
+/// The probe's command. A PowerShell command points its profile and caches
+/// at `scratch`, which [`probe`] always supplies for PowerShell.
+fn probe_command(shell: &InstalledShell, program: &str, working_dir: &Path, scratch: Option<&Path>) -> Result<Command, InvalidProgramName> {
+    check_program(program)?;
     let mut command = Command::new(&shell.executable);
     command.current_dir(working_dir);
     if shell.kind.is_powershell() {
+        // `-NoProfile` skips profile scripts but not the startup JIT profile
+        // (`StartupProfileData-NonInteractive`) written under the local
+        // application data folder, nor a module analysis cache; both land in
+        // `scratch` instead of the user's profile. `PATH` is left as inherited.
+        if let Some(scratch) = scratch {
+            for variable in POWERSHELL_PROFILE_VARIABLES {
+                command.env(variable, scratch);
+            }
+            command.env("PSModuleAnalysisCachePath", scratch.join("ModuleAnalysisCache"));
+        }
+        command.env("POWERSHELL_TELEMETRY_OPTOUT", "1");
         // Module auto-loading stays off and `Get-Command` is module-qualified,
         // so no module on `PSModulePath` is imported to answer.
         let script = format!(

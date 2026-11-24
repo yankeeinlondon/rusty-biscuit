@@ -233,9 +233,10 @@ fn args_of(command: &Command) -> Vec<String> {
 #[test]
 fn a_powershell_probe_runs_no_profile_and_no_module_auto_loading() {
     let working_dir = tempfile::tempdir().expect("tempdir");
+    let scratch = tempfile::tempdir().expect("tempdir");
     for kind in [ShellKind::Pwsh, ShellKind::WindowsPowerShell] {
         let shell = InstalledShell { kind, executable: PathBuf::from("C:/ps/pwsh.exe") };
-        let command = probe_command(&shell, "claudine", working_dir.path()).expect("plain name");
+        let command = probe_command(&shell, "claudine", working_dir.path(), Some(scratch.path())).expect("plain name");
         assert_eq!(command.get_program(), OsStr::new("C:/ps/pwsh.exe"));
         assert_eq!(command.get_current_dir(), Some(working_dir.path()));
         let args = args_of(&command);
@@ -247,7 +248,23 @@ fn a_powershell_probe_runs_no_profile_and_no_module_auto_loading() {
              { exit 0 }; exit 3"
         );
         assert_eq!(args.len(), 5);
-        assert_eq!(command.get_envs().count(), 0, "PowerShell inherits the environment unchanged");
+        let mut envs: Vec<(String, Option<PathBuf>)> = command
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().into_owned(), value.map(PathBuf::from)))
+            .collect();
+        envs.sort();
+        let scratch = scratch.path().to_path_buf();
+        assert_eq!(
+            envs,
+            [
+                ("APPDATA".to_string(), Some(scratch.clone())),
+                ("LOCALAPPDATA".to_string(), Some(scratch.clone())),
+                ("POWERSHELL_TELEMETRY_OPTOUT".to_string(), Some(PathBuf::from("1"))),
+                ("PSModuleAnalysisCachePath".to_string(), Some(scratch.join("ModuleAnalysisCache"))),
+                ("USERPROFILE".to_string(), Some(scratch.clone())),
+            ],
+            "the profile and caches move to the private folder; PATH and the rest are inherited"
+        );
     }
 }
 
@@ -256,7 +273,7 @@ fn a_bash_probe_reads_no_startup_file_and_passes_the_name_as_an_argument() {
     let working_dir = tempfile::tempdir().expect("tempdir");
     for kind in [ShellKind::GitBash, ShellKind::Msys2, ShellKind::Cygwin] {
         let shell = InstalledShell { kind, executable: PathBuf::from("C:/Git/usr/bin/bash.exe") };
-        let command = probe_command(&shell, "claudine", working_dir.path()).expect("plain name");
+        let command = probe_command(&shell, "claudine", working_dir.path(), None).expect("plain name");
         assert_eq!(command.get_program(), OsStr::new("C:/Git/usr/bin/bash.exe"));
         assert_eq!(command.get_current_dir(), Some(working_dir.path()));
         assert_eq!(
@@ -281,11 +298,11 @@ fn a_bash_probe_reads_no_startup_file_and_passes_the_name_as_an_argument() {
 fn a_probe_refuses_anything_but_a_plain_program_name() {
     let shell = InstalledShell { kind: ShellKind::GitBash, executable: PathBuf::from("bash.exe") };
     for name in ["", "-c", ".hidden", "two words", "a;b", "a'b", "../claudine", "a/b", "a\\b", "$(id)", "é"] {
-        assert_eq!(probe_command(&shell, name, Path::new(".")).err(), Some(InvalidProgramName), "{name:?}");
+        assert_eq!(probe_command(&shell, name, Path::new("."), None).err(), Some(InvalidProgramName), "{name:?}");
         assert_eq!(probe(&shell, name, Path::new(".")), Err(InvalidProgramName), "{name:?}");
     }
     for name in ["claudine", "claudine.exe", "my_tool-2"] {
-        assert!(probe_command(&shell, name, Path::new(".")).is_ok(), "{name:?}");
+        assert!(probe_command(&shell, name, Path::new("."), None).is_ok(), "{name:?}");
     }
 }
 
@@ -391,4 +408,71 @@ fn a_hung_shell_times_out_and_is_terminated() {
     let mut system = sysinfo::System::new();
     system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
     assert!(system.process(pid).is_none(), "the timed-out child was reaped");
+}
+
+// ------------------------------------------------- a real PowerShell probe
+
+/// Every entry under `root`, with each file's bytes.
+#[cfg(windows)]
+fn tree(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .map(|entry| entry.expect("walk"))
+        .map(|entry| {
+            let bytes = entry.file_type().is_file().then(|| fs::read(entry.path()).expect("read file"));
+            (entry.path().to_path_buf(), bytes)
+        })
+        .collect()
+}
+
+/// The one test that starts real PowerShell. Each installed variant, given
+/// a user profile that already holds PowerShell's cache folders, answers a
+/// found and a missing lookup through the inherited `PATH`; afterwards the
+/// profile is unchanged, without exclusions, and no private folder is left
+/// in the temporary directory.
+#[cfg(windows)]
+#[test]
+#[serial_test::serial]
+fn a_real_powershell_probe_answers_and_leaves_the_profile_unchanged() {
+    use test_toolkit::EnvGuard;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let profile = root.path().join("profile");
+    for folder in [r"AppData\Local\Microsoft\PowerShell", r"AppData\Local\Microsoft\Windows\PowerShell", r"AppData\Roaming", "Documents"] {
+        fs::create_dir_all(profile.join(folder)).expect("profile folder");
+    }
+    let temp = root.path().join("temp");
+    fs::create_dir(&temp).expect("temp folder");
+    let bin = root.path().join("bin");
+    touch(&bin.join("sniff-probe-target.exe"));
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&inherited))).expect("join PATH");
+    let _guards = [
+        EnvGuard::set_safe("USERPROFILE", &profile),
+        EnvGuard::set_safe("LOCALAPPDATA", profile.join(r"AppData\Local")),
+        EnvGuard::set_safe("APPDATA", profile.join(r"AppData\Roaming")),
+        EnvGuard::set_safe("TEMP", &temp),
+        EnvGuard::set_safe("TMP", &temp),
+        EnvGuard::set_safe("PATH", &path),
+    ];
+
+    let system_root = PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"));
+    let windows_powershell = join(&system_root, &["System32", "WindowsPowerShell", "v1.0", "powershell.exe"]);
+    assert!(windows_powershell.is_file(), "Windows PowerShell ships with Windows");
+    let mut shells = vec![InstalledShell { kind: ShellKind::WindowsPowerShell, executable: windows_powershell }];
+    match crate::executable_index::ExecutableIndex::build().find_with_source("pwsh") {
+        Some((executable, _)) => shells.push(InstalledShell { kind: ShellKind::Pwsh, executable }),
+        None => eprintln!("PowerShell 7 is not installed; only Windows PowerShell is probed"),
+    }
+    let before = tree(&profile);
+
+    for shell in &shells {
+        let start = Instant::now();
+        assert_eq!(probe(shell, "sniff-probe-target", &bin), Ok(ShellLookup::Found), "{shell:?}");
+        assert_eq!(probe(shell, "sniff-probe-absent", &bin), Ok(ShellLookup::Missing), "{shell:?}");
+        eprintln!("{}: two lookups in {:?}", shell.kind.display_name(), start.elapsed());
+    }
+
+    assert_eq!(tree(&profile), before, "the probes left the user profile as found");
+    assert_eq!(fs::read_dir(&temp).expect("temp folder").count(), 0, "each private folder was removed");
 }
