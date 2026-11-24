@@ -4,7 +4,7 @@ area: claudine
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 4
+phase: 6
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -47,6 +47,7 @@ skills_files_updated_during_phase_1:
 - .claude/skills/claudine/SKILL.md
 packages:
 - claudine
+- claudine-cli
 - darkmatter
 - darkmatter-cli
 - darkmatter-lsp
@@ -103,6 +104,129 @@ skills_files_updated_during_phase_3:
 - .claude/skills/sniff/programs.md
 - .claude/skills/sniff/architecture.md
 - .claude/skills/os/windows.md
+source_files_during_phase_4:
+- claudine/cli/src/commands/doctor.rs
+- claudine/cli/src/commands/mod.rs
+- claudine/cli/src/commands/help.rs
+- claudine/cli/src/args.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/telemetry.rs
+- claudine/cli/src/log.rs
+- claudine/cli/src/completion/root_menu.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/tests/l1/doctor.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/completion_cli.rs
+- claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+- claudine/lib/src/doctor/path.rs
+- claudine/lib/src/doctor/permissions_tests.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_4:
+- claudine/README.md
+- claudine/docs/cli/index.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_4:
+- claudine/docs/cli/doctor.md
+skills_files_updated_during_phase_4:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/os/windows.md
+- claudine/docs/use-skills/use-claudine/cli.md
+source_files_during_phase_5:
+- claudine/lib/src/doctor/config.rs
+- claudine/lib/src/doctor/config_tests.rs
+docs_updated_during_phase_5:
+- claudine/docs/cli/doctor.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source-code:
+- claudine/lib/src/doctor/mod.rs
+- claudine/lib/src/doctor/report.rs
+- claudine/lib/src/doctor/config.rs
+- claudine/lib/src/doctor/tests.rs
+- claudine/lib/src/doctor/config_tests.rs
+- claudine/lib/src/lib.rs
+- claudine/lib/src/config/load.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/config/claudine_config.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/config_inspect_working_file.rs
+- darkmatter/lib/tests/content_policy_fixtures/mod.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+- darkmatter/dmls/tests/l1/core_schema_types.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_faults.json
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/union_unknown_keys.rs
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/composition/registration/legacy.rs
+- claudine/lib/src/composition/registration/inspect.rs
+- claudine/lib/src/composition/registration/repair.rs
+- claudine/lib/src/composition/registration/repair_tests.rs
+- claudine/lib/src/doctor/registration.rs
+- claudine/lib/src/doctor/registration_tests.rs
+- claudine/lib/src/doctor/permissions.rs
+- claudine/lib/src/doctor/permissions_tests.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- sniff/lib/src/process.rs
+- sniff/lib/src/programs/mod.rs
+- sniff/lib/src/programs/git_program.rs
+- sniff/lib/src/programs/windows_shells.rs
+- sniff/lib/src/programs/windows_shells_tests.rs
+- claudine/lib/src/doctor/tts.rs
+- claudine/lib/src/doctor/tts_tests.rs
+- claudine/lib/src/doctor/path.rs
+- claudine/lib/src/doctor/path_tests.rs
+- claudine/cli/src/commands/doctor.rs
+- claudine/cli/src/commands/mod.rs
+- claudine/cli/src/commands/help.rs
+- claudine/cli/src/args.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/telemetry.rs
+- claudine/cli/src/log.rs
+- claudine/cli/src/completion/root_menu.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/tests/l1/doctor.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/completion_cli.rs
+- claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+- claudine/lib/tests/l1/context_construction_guard.rs
+documentation:
+- claudine/docs/topics/configuration.md
+- darkmatter/docs/topics/configuration.md
+- simplified-schema/docs/topics/language/unions.md
+- .claude/skills/claudine/SKILL.md
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/topics/host-registration.md
+- .claude/skills/darkmatter/SKILL.md
+- sniff/README.md
+- sniff/docs/sniff-library-architecture.md
+- sniff/docs/topics/windows-shells.md
+- .claude/skills/sniff/programs.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/os/windows.md
+- claudine/README.md
+- claudine/docs/cli/index.md
+- claudine/docs/cli/doctor.md
+- .claude/skills/claudine/cli-commands.md
+- claudine/docs/use-skills/use-claudine/cli.md
+completed-phase: 5
+implemented: true
 ---
 
 # Claudine doctor implementation plan
@@ -201,28 +325,28 @@ Invalid input produces an error with the failing file and field location where a
 
 ## Phase 4 — Command wiring and end-to-end proof
 
-- [ ] **Doctor Dispatch**
+- [x] **Doctor Dispatch**
   - Connect the seven callbacks in registry order, add the clap arguments, early dispatch and stdout adapter, and wire grouped help and completion using Rules 1 and 17. Add `Doctor` to the exhaustive terminal match with an unreachable arm after the early return. Keep the v2 no-refresh behavior on ordinary routes and hidden inventory listing intact.
   - Establish the happy path with all seven rows on clean temp files. Verify help and both command options in shell completion in the existing root-menu and CLI completion fixtures. Use `log::set_plain` plus redirect detection before rendering, and cover stdout write-error propagation through the existing CLI error path.
 
 ### Wave 4
 
-- [ ] **CLI Contracts**
+- [x] **CLI Contracts**
   - Own `claudine/cli/tests/l1/doctor.rs` and its module declaration in `tests/l1/main.rs`. Run through `CliProcessFixture` for help, flags, unknown option status 2, warnings-only exit 0, errors exit 1, repaired errors exit 0, and failed repairs exit 1. For the failed-repair CLI case hold the regular user Darkmatter lock sidecar in the test parent before launching a child configured for an eligible registration-only edit. Assert the bounded lock failure, preserved entry and legacy paths, and remaining fixability. Release the parent lock after the child exits.
   - Compare JSON shape, order, severity, fixability, and remedies against the library; verify the human report uses those same findings and has no ANSI on redirect or in `--plain`. Put a secret sentinel in a schema error and an invalid reference and assert it stays out of stdout and stderr. Exercise a refused candidate with a secret sentinel at the in-process report boundary. Assert no config creation, backup, registration refresh, startup guidance prompt, or worker launch during inspection from missing and invalid homes. Use fake-only PATH when asserting the invoking-process miss. Keep alternate native-shell findings tolerant of the ambient installed shell roster in spawned CLI cases; test their exact outcomes through the injected probe seam.
   - Prove concurrent and repeat repair behavior through the library's focused tests and one CLI repair-and-rerun scenario. Use platform-neutral output assertions and the project's temp repository fixtures.
 
-- [ ] **Reference Updates**
+- [x] **Reference Updates**
   - Own `claudine/docs/cli/doctor.md`, the CLI index, the README troubleshooting link, Claudine's configuration and schemas topics, and Darkmatter's host registration topic. Document one JSON example with the stable fields, final exit statuses, repair order and limits, working-copy permissions meaning, legacy remedy, TTS limits, and native Windows probe behavior. Add a flow diagram for publish/verify/register/verify/cleanup. Use runnable sample invocations with expected results and link the topics without naming internal feature directories.
   - Update `.claude/skills/claudine/SKILL.md` for the passive dispatch and shared repair entry points and `claudine/docs/use-skills/use-claudine/cli.md` for user-facing behavior, transcluding the canonical command reference where it fits.
 
 ## Phase 5 — Verification and delivery
 
-- [ ] **Scoped Verification**
+- [x] **Scoped Verification**
   - Run area recipes for the touched Claudine, Darkmatter, SimplifiedSchema, and Sniff surfaces. Run `just build`, `just test`, and `just lint` from Claudine, Darkmatter, Sniff, and SimplifiedSchema once after all waves merge. Verify the Sniff and SimplifiedSchema public changes against the Claudine and Darkmatter consumers in those runs. Use the repository's L1 nextest wiring and no real terminal tests. Apply formatting corrections manually.
   - Run `git diff --check` and audit the implementation against the seven row contracts, the robustness matrix, and the no-write/no-value-disclosure requirements. Fix failures in scope and rerun the affected tests. Record local OS evidence and the remote coverage delegated to existing CI, without creating CI jobs, commits, or changing branch or worktree.
   - Run every phase non-interactively. Parallel wave agents receive the same non-interactive constraint and run only their focused L1 slices before integration. Preserve the repository's no-focus behavior during all verification.
 
-- [ ] **Skill Publication**
+- [x] **Skill Publication**
   - From `claudine/`, run `just publish-skills` after docs are final. Check the resulting caller skill for the doctor command, status contract, and working links or transcluded text.
   - Record results and any spec departures in the feature's `implementation-log.md`. For the final review include representative human and JSON outputs from temp fixtures, with cases for redirected output, warning, repair, and failed repair. The implementation ends ready for review after these checks.

@@ -69,6 +69,7 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/SKILL.md
 packages:
     - claudine
+    - claudine-cli
     - darkmatter
     - darkmatter-cli
     - darkmatter-lsp
@@ -113,15 +114,18 @@ decisions-for-review:
         In the `path` row, every other-shell outcome is a `warn` and a `Found` is an `ok` finding listed in the detail, so a healthy Windows report still names each shell it asked. Shell findings are listed in path order, as the report foundation orders every row's findings. The alternative is to list only problems, which shortens the detail but hides which shells were checked. Reversing it drops the `Found` arm's finding in `doctor/path.rs::shell_finding`.
     - |-
         In the `tts` row, a pinned provider with low quality says "the configured speech provider, X, has low quality" and suggests changing `tts.provider`, without naming other installed providers. Only automatic selection names the provider runtime tries first. Each row also carries an `ok` note that detection checks only local prerequisites, and a disabled row adds that lifecycle `say` can still speak. The alternative is to put those notes only in the documentation. Reversing it removes the trailing note finding in `doctor/tts.rs::assess`.
-message-to-agent: |-
-    Phase 3 is done. All seven checks are now real callbacks in `doctor::REGISTRY`, and `pending_check` is deleted. What Phase 4 builds on:
-    - `doctor::file_checks()` (test-only) is the registry without `tts` and `path`. Library tests of file rows use it so they never detect speech engines or, on Windows, start real shells. A full-registry library test on Windows starts the installed PowerShell, Git Bash, and Cygwin probes (2 s deadline each), so keep `run_with(&REGISTRY, …)` out of loops.
-    - `tts` and `path` take their host data through `tts::assess(user_config, candidates)` and `path::assess(current, shells)`. Use them for exact-outcome tests. In spawned CLI cases, tolerate whatever shells the host has (the plan already says so). `path` in a `CliProcessFixture` child with the default PATH (fixture `bin` plus `/usr/bin:/bin`) is an `error`, because no `claudine` is there, unless the test installs one. Use `fake_only_path()` for the deliberate-miss case, or copy the binary into the fixture `bin` for the found case.
-    - Build expected paths in doctor tests with the test-only `doctor::native_path("a/b")`; a `/` literal joined onto a Windows path fails there (19 Phase 1–2 tests did, now fixed).
-    - `Environment` now has `launch_dir` (from `RequestSnapshot::request_dir`). Windows shells are probed there.
-    - `ConfigObservations.effective_config` is the only field production code does not read. Its `expect(dead_code)` is on that field now.
-    - The Sniff API is `sniff::programs::windows_shells::{detect, probe, InstalledShell, ShellKind, ShellFamily, ShellLookup, InvalidProgramName}`. User docs are in `sniff/docs/topics/windows-shells.md`. `claudine/docs/cli/doctor.md` should describe the `tts` and `path` rows (severity tables, the startup-free probes, the 2 s deadline, no probes off native Windows) and link that page.
-    - `just cross-check` breaks on a nextest `-E 'test(…)'` filter (the parentheses are re-parsed by a shell). Pass positional filters instead (`just cross-check claudine --os windows doctor::`).
+    - |-
+        The human report prints each row as a bullet `[severity] Title (id): summary`, its detail lines as a nested list, and a closing count ("2 errors, 1 warning."). Severity is bracketed text, colored only on a terminal, so the report reads the same without color. The spec asks only for biscuit-terminal list and prose components. The alternatives are a table, or glyphs such as ✓/✗; a table wraps long paths badly and glyphs need a Unicode fallback. Changing it touches only `cli/src/commands/doctor.rs::render` and two CLI tests that look for the row heads.
+    - |-
+        Redirected output is always plain, even with `FORCE_COLOR` set: doctor calls `log::set_plain(true)` when stdout is not a terminal. The plan said "redirect detection before rendering". Elsewhere Claudine lets `FORCE_COLOR` style redirected output. The alternative is to honor `FORCE_COLOR`, which helps CI logs that render ANSI but breaks the "no ANSI on redirect" contract. Reversing it means checking `FORCE_COLOR` in `commands/doctor.rs::run` and changing the warnings-only CLI test.
+    - |-
+        Doctor writes its report to stdout directly (as `claudine completions` does) instead of through `log::data`, because `log::data` drops write errors and the plan requires a failed write to reach the CLI's error path (exit 1). The cost is that doctor bypasses the terminal gate; that gate only matters during a wrapped run, which doctor never starts. The alternative is to make `log::data` return the error, which changes every caller.
+    - |-
+        On native Windows, the `path` row's PowerShell probe makes PowerShell refresh its own startup cache, `%LOCALAPPDATA%\Microsoft\PowerShell\StartupProfileData-NonInteractive`, even with `-NoProfile`. The spec says an inspection leaves the filesystem as found. I treated this as PowerShell's write, not doctor's, and documented it in `docs/cli/doctor.md`. Real homes almost always have this file already. The alternative is to give each PowerShell probe a private `LOCALAPPDATA` (a temporary directory). That leaves the user's profile untouched, but the probe would no longer run in the environment the user's shell sees, and the probe's environment policy is Sniff's (`windows_shells::probe`). Doing that later changes Sniff's probe environment and its argv/environment test.
+    - |-
+        Spawned `claudine doctor` CLI tests skip the real Windows shell probes through a new `test-fixtures`-only seam, `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES`. The healthy-home test is the exception: it keeps the real probes and tolerates `ok` or `warn` on `path`. The plan said spawned cases should tolerate the installed shell roster. With real probes in every spawn, multi-spawn tests took over 5 s on Windows (about 2.5 s per spawn), and each spawn wrote PowerShell's cache into the fixture home. Exact probe outcomes stay covered by the library's injected `path::assess` tests. The alternative is real probes everywhere, with each multi-spawn test split into one-spawn tests and `AppData` excluded from every tree comparison. To reverse: remove the seam from `doctor/path.rs` and the guard allowance, and the `SKIP_SHELL_PROBES` env from `cli/tests/l1/doctor.rs`.
+    - |-
+        The human report keeps biscuit-terminal's default word wrap, which may break a long path at a hyphen (`/tmp/p5-doctor-` then `i85y/…` on the next line), because `WordWrap::WrapProse` treats `-` as a break character. A wrapped path cannot be copied in one piece; `--json` is unaffected. The alternatives are to give doctor's detail lines a wrap policy that breaks only at spaces (the list component applies its own wrap to items, so this needs a list option or a change in biscuit-terminal), or to stop wrapping paths in every Prose user. Changing it later touches `cli/src/commands/doctor.rs::render` or biscuit-terminal's list wrapping, and no test asserts the current breaks.
 source_files_during_phase_3:
     - sniff/lib/src/process.rs
     - sniff/lib/src/programs/mod.rs
@@ -147,6 +151,129 @@ skills_files_updated_during_phase_3:
     - .claude/skills/sniff/programs.md
     - .claude/skills/sniff/architecture.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/doctor.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/log.rs
+    - claudine/cli/src/completion/root_menu.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/l1/doctor.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/completion_cli.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/lib/src/doctor/path.rs
+    - claudine/lib/src/doctor/permissions_tests.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_4:
+    - claudine/README.md
+    - claudine/docs/cli/index.md
+    - claudine/docs/topics/configuration.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_4:
+    - claudine/docs/cli/doctor.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/os/windows.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+source_files_during_phase_5:
+    - claudine/lib/src/doctor/config.rs
+    - claudine/lib/src/doctor/config_tests.rs
+docs_updated_during_phase_5:
+    - claudine/docs/cli/doctor.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source-code:
+    - claudine/lib/src/doctor/mod.rs
+    - claudine/lib/src/doctor/report.rs
+    - claudine/lib/src/doctor/config.rs
+    - claudine/lib/src/doctor/tests.rs
+    - claudine/lib/src/doctor/config_tests.rs
+    - claudine/lib/src/lib.rs
+    - claudine/lib/src/config/load.rs
+    - claudine/lib/src/config/json_conversion.rs
+    - claudine/lib/src/config/persist.rs
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/config/setup.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - darkmatter/lib/src/config/load.rs
+    - darkmatter/lib/src/config/init.rs
+    - darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/config_inspect_working_file.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_faults.json
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/union_unknown_keys.rs
+    - claudine/lib/src/composition/registration.rs
+    - claudine/lib/src/composition/registration/legacy.rs
+    - claudine/lib/src/composition/registration/inspect.rs
+    - claudine/lib/src/composition/registration/repair.rs
+    - claudine/lib/src/composition/registration/repair_tests.rs
+    - claudine/lib/src/doctor/registration.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - claudine/lib/src/doctor/permissions.rs
+    - claudine/lib/src/doctor/permissions_tests.rs
+    - claudine/lib/tests/l1/installed_registration.rs
+    - darkmatter/lib/tests/l1/config_init.rs
+    - sniff/lib/src/process.rs
+    - sniff/lib/src/programs/mod.rs
+    - sniff/lib/src/programs/git_program.rs
+    - sniff/lib/src/programs/windows_shells.rs
+    - sniff/lib/src/programs/windows_shells_tests.rs
+    - claudine/lib/src/doctor/tts.rs
+    - claudine/lib/src/doctor/tts_tests.rs
+    - claudine/lib/src/doctor/path.rs
+    - claudine/lib/src/doctor/path_tests.rs
+    - claudine/cli/src/commands/doctor.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/log.rs
+    - claudine/cli/src/completion/root_menu.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/l1/doctor.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/completion_cli.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/lib/tests/l1/context_construction_guard.rs
+documentation:
+    - claudine/docs/topics/configuration.md
+    - darkmatter/docs/topics/configuration.md
+    - simplified-schema/docs/topics/language/unions.md
+    - .claude/skills/claudine/SKILL.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/host-registration.md
+    - .claude/skills/darkmatter/SKILL.md
+    - sniff/README.md
+    - sniff/docs/sniff-library-architecture.md
+    - sniff/docs/topics/windows-shells.md
+    - .claude/skills/sniff/programs.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/os/windows.md
+    - claudine/README.md
+    - claudine/docs/cli/index.md
+    - claudine/docs/cli/doctor.md
+    - .claude/skills/claudine/cli-commands.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+completed-phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-22-claudine-doctor (5 phases)
@@ -772,3 +899,425 @@ read. The `.ok()` in `native_shell_lookups` drops only an
 `InvalidProgramName`, which cannot happen for the constant `claudine`. The
 `.ok()` in `cygwin_registry_roots` reads a missing key or value as "no
 root", the meaning absence has.
+
+## Phase 4
+
+Phase 4 wires `claudine doctor [--fix] [--json]` into the CLI, proves the
+command end to end through the shipped binary, and writes the user
+reference. The seven callbacks were already in `doctor::REGISTRY` in
+registry order (Phase 3), so wiring meant the CLI adapter only.
+
+### Doctor Dispatch
+
+- New `claudine/cli/src/commands/doctor.rs` (`DoctorArgs { fix, json }`).
+  It calls `claudine::doctor::run(request::snapshot(), fix)` and renders the
+  rows. Exit status is `1` when any row is `error`, else `0`. Clap usage
+  errors keep clap's status `2`.
+- `main.rs::dispatch` returns doctor right after `registrations`. That is
+  after `request::initialize` and `log::set_plain`, but before
+  `request::darkmatter_config()` (which can create `~/.darkmatter.yaml`) and
+  before `ensure_config_exists` (setup, conversion). The exhaustive terminal
+  match has `Commands::Doctor(_) => unreachable!(…)`, and `telemetry.rs` names
+  the command. The ordinary routes and the hidden `registrations` route are
+  unchanged.
+- Human output is built with biscuit-terminal: one `UnorderedList` line per
+  row (`[severity] Title (id): summary`), its detail lines as a nested list,
+  and a closing tally. Text goes through `Prose::escape_text_outside_code_spans`,
+  so authored path characters are never read as markup. When stdout is not a
+  terminal, `log::set_plain(true)` runs before rendering, so redirected
+  output has no ANSI codes even with `FORCE_COLOR`. A plain terminal honors
+  `COLUMNS`/`TERM_WIDTH` (`log::forced_width` is now `pub(crate)`).
+- stdout is written directly with `?` (as `completions` does), not through
+  `log::data`, which drops write errors. A failed write therefore reaches
+  `render_top_level_error`, with exit 1.
+- Grouped help (`help.rs`, Administration, after `setup`) and the root
+  completion menu (`root_menu.rs`, Administration, after `config`) list
+  `doctor`. Its options complete through the existing clap fallback.
+
+### CLI Contracts (`cli/tests/l1/doctor.rs`, 10 tests, declared in `tests/l1/main.rs`)
+
+- Help (`doctor --help` with no configuration, plus the grouped overview)
+  and usage (`--repair` → 2, empty stdout).
+- Healthy home inside a repository: seven rows, exit 0, home tree unchanged.
+  This is the one spawned case that keeps the real Windows shell probes;
+  it tolerates `ok`/`warn` on `path`.
+- Warnings only (format 1 leftover) → exit 0. The JSON shape is checked
+  (exactly five keys, types, single-line summary, id order). The five file
+  rows equal the in-process `claudine::doctor::run` rows for the same home.
+  The human report is checked twice, redirected with `FORCE_COLOR=1` and
+  with `--plain`: no ESC byte, row heads in JSON order, every registration
+  detail line, and the tally.
+- Missing home with `fake_only_path()`: `config`, `registration`, and
+  `path` are errors, exit 1. Nothing is created in the home, no audio spool
+  appears, and no setup text is on stderr.
+- Broken home (legacy `config.json` with no YAML, an invalid
+  `~/.darkmatter.yaml`): exit 1, the `config` row names `config.json`, the
+  tree is unchanged, and nothing is published.
+- Redaction: one case per sentinel (a schema error quoting its value, and a
+  broken `permissions` reference). Neither sentinel is on stdout or stderr,
+  in JSON or human output, and the targeted row is an error.
+- Repair and rerun: both repairs in one run (unpublished, unregistered
+  registration plus an inline Darkmatter block). Inspection is exit 1 with
+  both rows fixable. `--fix` is exit 0 with `Repaired:` lines, comments
+  kept, block moved, and the entry written. A second `--fix` repairs nothing
+  and leaves the tree unchanged.
+- Failed repair: the parent holds `~/.darkmatter.yaml.darkmatter-lock`
+  (`File::lock`) while the child runs `--fix` for a registration-only edit
+  (`register: []`, legacy files present). Exit 1, `the repair failed: …lock…`,
+  `fixable: true`, and the tree (entry and legacy paths) unchanged. The lock
+  is released after the child exits. This test waits out Darkmatter's fixed
+  2 s `LOCK_DEADLINE` (2.1 s on Linux, 3.2 s on Windows; mostly sleep). No
+  CLI seam exists to shorten it, and the plan asks for this exact case.
+- stdout write error (Linux only, `/dev/full`): exit 1 with an `Error:`
+  block on stderr.
+- Library, in-process report boundary:
+  `doctor::permissions::tests::a_refused_candidate_reaches_the_report_without_its_refusal_text`
+  passes a refused Claudine candidate and a refused Darkmatter candidate,
+  each with a sentinel in its refusal text, through `failure` and
+  `report::row`. The row is an error, says "would be invalid; nothing was
+  saved", and contains no sentinel.
+- Completion: `completion::engine::tests::doctor_is_offered_at_the_root_and_its_options_after_it`
+  (unit) and `completion_cli::doctor_and_both_of_its_options_complete_through_the_binary`
+  (spawned). The root menu test and the help snapshot
+  (`l1__wrap_basics__help_lists_wrapper_subcommands.snap`) were updated.
+- Renderer unit tests in `commands/doctor.rs`: exit status, row and detail
+  order without ANSI, and the no-problem tally.
+
+### Windows (cross-check, two attempts)
+
+`just cross-check claudine-cli --os windows doctor`:
+
+- **First attempt: 5 of 14 failed.** Each spawned `doctor` started the
+  host's real PowerShell, Git Bash, and Cygwin probes. PowerShell writes
+  `AppData\Local\Microsoft\PowerShell\StartupProfileData-NonInteractive`
+  under `%LOCALAPPDATA%`, even with `-NoProfile`, and `CliProcessFixture`
+  points that at the fixture home, so every "home unchanged" assertion
+  failed. The probes also cost about 2.5 s per spawn, which put two
+  multi-spawn tests over 5 s.
+- **Fix.**
+    - A `test-fixtures`-only seam, `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES`,
+      read in `doctor/path.rs::native_shell_lookups`, Windows only. It has a
+      `context_construction_guard` allowance.
+    - Every spawned case sets it except the healthy-home case. That case
+      keeps the real probes and leaves `AppData` out of its tree comparison.
+    - `tree()` lists a lock sidecar without reading it, because Windows
+      refuses to read a file another handle holds locked.
+- **Second attempt: 14 of 14 pass** (slowest 3.2 s). The new fact is
+  recorded in `.claude/skills/os/windows.md`, and the PowerShell cache
+  behavior is documented in `docs/cli/doctor.md`. `os-failing` is not set.
+
+### Reference Updates
+
+- New `claudine/docs/cli/doctor.md`. It covers:
+    - options and runnable examples with expected results;
+    - what an inspection never does, and redaction;
+    - exit statuses and row order, severities, and the human and JSON
+      reports, with one JSON example;
+    - each check's severity table, including registration findings, the
+      permissions handoff (with the working-copy meaning), `tts` limits, and
+      the `path` and Windows probes (no startup files, no window, 2 s, never
+      above `warn`, a link to Sniff's `windows-shells.md`);
+    - repair order and limits, with a Mermaid flow for links → publish →
+      remove extras → verify → register → verify → legacy cleanup.
+- Updated:
+    - `docs/cli/index.md` (listing and paragraph) and `README.md` (new
+      Troubleshooting section);
+    - `docs/topics/configuration.md`: a doctor paragraph under "How a file
+      is read", and doctor's handoff repair under "Darkmatter's permissions";
+    - `docs/topics/schemas.md`: doctor in recovery, a table row, and extras
+      being removed by `--fix`;
+    - `darkmatter/docs/topics/host-registration.md`: links the doctor repair.
+- Skills:
+    - `.claude/skills/claudine/SKILL.md`: the CLI adapter, early dispatch,
+      direct stdout, test seams, and `doctor --fix` as a publisher;
+    - `.claude/skills/claudine/cli-commands.md`: a command row, and doctor
+      added to the list of publication routes;
+    - `claudine/docs/use-skills/use-claudine/cli.md`: an inspection table
+      row and a "Checking the setup" section. It is a summary, not a
+      transclusion, because the canonical page is too long to transclude
+      whole. `just publish-skills` is Phase 5's task and was not run here.
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  reports `packages: [claudine, claudine-cli, test-toolkit, darkmatter]`,
+  `change_class: package`. No gate was skipped.
+- Claudine `just test`: run twice, the second time after the Windows fix.
+  The final run passed 12851 tests, skipped 16, and recorded none at or
+  above 5 s. `just slow-tests fresh` exits 0.
+- `just lint` is clean, and `just check-tier-coverage claudine` reports
+  nothing stranded.
+- Dependents:
+    - The calculator lists `darkmatter` because three edited docs are read
+      by Darkmatter tests. I ran `trigger_spelling_guard`,
+      `shipped_schema_corpus`, `meta_schema_phase1`/`phase4`, and
+      `base_schema_end_to_end` (55 passed).
+    - `just test test-toolkit`: 591 passed, none slow. A bare
+      `cargo nextest -p test-toolkit` also runs the `real_` test
+      `real_kache_config_selector_bypasses_the_managed_pin`, which fails on
+      this host. L1 excludes it, and this phase did not touch it.
+    - No public library API changed, and nothing depends on `claudine-cli`.
+- Failures: none on Linux. On Windows, the 5 failures above were fixed on
+  the second attempt.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Requirement | Tests |
+| --- | --- |
+| Early dispatch: no setup, conversion, creation, refresh, or worker from missing and invalid homes | `doctor::inspecting_a_missing_home_reports_errors_and_creates_nothing`, `doctor::inspecting_a_broken_home_leaves_every_file_as_found` |
+| Happy path, all seven rows, clean temp files | `doctor::a_healthy_home_reports_every_row_and_exits_zero` |
+| Help, both options, grouped Administration help | `doctor::help_names_both_options_and_needs_no_configuration`, `wrap_basics::help_lists_wrapper_subcommands` (snapshot) |
+| Unknown option exits 2 | `doctor::an_unknown_option_is_a_usage_error_with_nothing_reported` |
+| Completion of `doctor`, `--fix`, `--json` | `completion::engine::tests::doctor_is_offered_at_the_root_and_its_options_after_it`, `completion_cli::doctor_and_both_of_its_options_complete_through_the_binary`, `root_menu::tests::full_menu_has_administration_in_spec_order` |
+| Warnings only exit 0; JSON shape and order match the library; human report uses the same rows, with no ANSI when redirected or under `--plain` | `doctor::warnings_alone_exit_zero_and_both_formats_show_the_library_rows`, `commands::doctor::tests::*` |
+| Unresolved errors exit 1; deliberate `PATH` miss with fake-only `PATH` | `doctor::inspecting_a_missing_home_reports_errors_and_creates_nothing` |
+| Repaired errors exit 0; both repairs in one run; second run is a no-op | `doctor::a_repaired_home_exits_zero_and_a_second_run_changes_nothing` |
+| Failed repair exit 1 under a held Darkmatter lock; entry and legacy kept; still fixable | `doctor::a_repair_blocked_by_a_held_lock_fails_and_keeps_the_entry_and_the_legacy_files` |
+| Secret sentinels out of stdout and stderr (schema error, invalid reference) | `doctor::no_authored_value_reaches_either_report_or_stderr` |
+| Refused candidate with a sentinel at the in-process report boundary | `doctor::permissions::tests::a_refused_candidate_reaches_the_report_without_its_refusal_text` |
+| stdout write error goes through the CLI error path | `doctor::a_failed_write_to_stdout_is_an_error` (Linux) |
+
+The input robustness matrix does not apply to this phase: no parser or
+loader changed. The CLI only renders rows the library computes, and each
+row's field and document shapes are the Phase 1–3 tests.
+
+## Phase 5
+
+Verification and delivery. Every command ran non-interactively; no
+terminal-harness (L2/L3) test ran, so nothing could take focus.
+
+### Audit
+
+- `git diff --check` over the working tree, and over the committed Phases
+  1–3 (`d6110dd40~4..d6110dd40`), reports nothing. The three untracked
+  Phase 4 files have no trailing whitespace.
+- Robustness smells (`unwrap_or_default()`, `.ok()`, `filter_map(.. as_str)`,
+  `#[serde(default)]`) in `lib/src/doctor/`, `composition/registration/
+  {inspect,repair}.rs`, and `cli/src/commands/doctor.rs`: each hit is a
+  display fallback or an `Option` the caller already treats as "not
+  verified" (`repair.rs` turns `None` into `EntryUnverified`). The one
+  `.ok()?` that drops a shell (`doctor/path.rs`) is on `windows_shells::probe`,
+  whose only error is `InvalidProgramName`, impossible for the constant
+  `claudine`; timeouts and crashes are `ShellLookup` variants, so the three
+  outcomes stay distinct.
+- Row contracts against the spec: each of the seven rows has library tests
+  (`doctor/{tests,config_tests,registration_tests,permissions_tests,tts_tests,path_tests}.rs`,
+  `composition/registration/repair_tests.rs`, 107 tests) and the CLI
+  contract in `cli/tests/l1/doctor.rs` (help without configuration, usage
+  exit 2, healthy home, warnings only, missing home creates nothing, broken
+  home left as found, no authored value in either report or stderr, repair
+  then a no-op second run, failed repair under a held lock, stdout write
+  error).
+- Found and fixed: `stray-config-keys` listed a file's unknown keys sorted by
+  JSON pointer, so `/actions/…` came before `/tts` even when `tts` was on
+  line 1, and the row summary named whichever key sorted first. They are now
+  listed by line and column (`doctor/config.rs::check_stray_keys`); the
+  existing nested-key test now asserts the order and the summary
+  (`config_tests.rs::nested_unknown_keys_are_found_in_the_tts_mapping_the_imported_permissions_and_a_keyed_action`),
+  and `docs/cli/doctor.md` says so.
+- Observed, not changed: the human report's Prose word wrap breaks a long
+  path at a hyphen (`/tmp/p5-doctor-` / `i85y/…`), because biscuit-terminal's
+  `WordWrap::WrapProse` treats `-` as a break character. `--json` is
+  unaffected. See `decisions-for-review`.
+
+### Representative output
+
+Produced by the `target/debug/claudine` that the suite built, in temp homes
+under `/tmp/p5-doctor-i85y/` (`env -i HOME=… PATH=<fixture bin>:/usr/bin:/bin
+COLUMNS=100`, launch directory outside any repository unless noted). Every
+run's stdout was a pipe, so each human report is the redirected (plain)
+form: no ANSI, severity as bracketed text. The `tts` row reads this host
+(eSpeak NG only, hook speech off, so `info`).
+
+**Warning only, redirected human report** (published registration, a
+leftover `~/.claudine/darkmatter-host.yaml`), exit 0:
+
+```text
+• [ok] Configuration files (config): every configuration file is valid
+    - /tmp/p5-doctor-i85y/warn/home/.claudine/config.yaml: valid
+    - /tmp/p5-doctor-i85y/warn/home/.darkmatter.yaml: valid
+• [warn] Darkmatter host registration (registration): is left over from the retired format 1
+  registration
+    - /tmp/p5-doctor-i85y/warn/home/.claudine/darkmatter-host.yaml: is left over from the retired
+      format 1 registration
+    - the repair removes it once the `register` entry names the published manifest
+    - Remedy: run `claudine doctor --fix`
+• [ok] Darkmatter permissions handoff (darkmatter-permissions): Darkmatter takes its permissions
+  from Claudine's configuration
+    - /tmp/p5-doctor-i85y/warn/home/.darkmatter.yaml: the user `permissions` refers to Claudine's
+      configuration
+• [info] Repository configuration (repo-config): not inside a repository
+    - not inside a repository
+• [ok] Unknown configuration keys (stray-config-keys): no unknown Claudine configuration keys
+    - /tmp/p5-doctor-i85y/warn/home/.claudine/config.yaml: no unknown keys
+• [info] Text-to-speech (tts): the best available speech provider, eSpeak NG, has low quality
+    - the best available speech provider, eSpeak NG, has low quality
+    - Remedy: install a higher-quality provider such as Kokoro, Echogarden, or Piper
+    - provider detection checks local prerequisites only
+    - an executable or a credential being present does not prove a working voice, network access,
+      or audio playback
+    - hook speech is off because `tts` is absent, null, or false; lifecycle `say` can still speak
+• [ok] Executable path (path): this process finds `claudine` at /tmp/p5-doctor-
+  i85y/warn/bin/claudine
+
+0 errors, 1 warning.
+```
+
+**The same home, `--json`** (first two of the seven rows), exit 0:
+
+```json
+[
+  {
+    "id": "config",
+    "severity": "ok",
+    "summary": "every configuration file is valid",
+    "detail": "/tmp/p5-doctor-i85y/warn/home/.claudine/config.yaml: valid\n/tmp/p5-doctor-i85y/warn/home/.darkmatter.yaml: valid",
+    "fixable": false
+  },
+  {
+    "id": "registration",
+    "severity": "warn",
+    "summary": "is left over from the retired format 1 registration",
+    "detail": "/tmp/p5-doctor-i85y/warn/home/.claudine/darkmatter-host.yaml: is left over from the retired format 1 registration\nthe repair removes it once the `register` entry names the published manifest\nRemedy: run `claudine doctor --fix`",
+    "fixable": true
+  }
+]
+```
+
+**Repair** (no published registration, `register: []`, and an inline
+`permissions` block in `~/.darkmatter.yaml`). Before, exit 1, the two
+fixable rows:
+
+```text
+• [error] Darkmatter host registration (registration): the published registration is missing
+    - /tmp/p5-doctor-i85y/fix/home/.claudine/registrations/darkmatter: the published registration
+      is missing
+    - Remedy: run `claudine doctor --fix`
+    - /tmp/p5-doctor-i85y/fix/home/.darkmatter.yaml: the `register` entry is verified once the
+      manifest is published
+• [error] Darkmatter permissions handoff (darkmatter-permissions): the user `permissions` is an
+  inline block that Claudine's configuration should hold
+    - /tmp/p5-doctor-i85y/fix/home/.darkmatter.yaml: the user `permissions` is an inline block that
+      Claudine's configuration should hold
+    - the repair writes the block into /tmp/p5-doctor-i85y/fix/home/.claudine/config.yaml, then
+      refers to it
+    - Remedy: run `claudine doctor --fix`, or `claudine setup`
+…
+2 errors, 0 warnings.
+```
+
+`--fix`, exit 0 (the run of `Repaired: wrote …` lines is cut to its first
+two and the manifest):
+
+```text
+• [ok] Darkmatter host registration (registration): the registration is published and registered
+    - Repaired: wrote /tmp/p5-doctor-
+      i85y/fix/home/.claudine/registrations/darkmatter/globals.lifecycle.json
+    - Repaired: wrote /tmp/p5-doctor-
+      i85y/fix/home/.claudine/registrations/darkmatter/schemas/action.yaml
+    - Repaired: wrote /tmp/p5-doctor-i85y/fix/home/.claudine/registrations/darkmatter/manifest.yaml
+    - Repaired: updated the `register` entry in /tmp/p5-doctor-i85y/fix/home/.darkmatter.yaml
+• [ok] Darkmatter permissions handoff (darkmatter-permissions): Darkmatter takes its permissions
+  from Claudine's configuration
+    - /tmp/p5-doctor-i85y/fix/home/.darkmatter.yaml: the user `permissions` refers to Claudine's
+      configuration
+    - Repaired: /tmp/p5-doctor-i85y/fix/home/.claudine/config.yaml: set `permissions`
+    - Repaired: /tmp/p5-doctor-i85y/fix/home/.darkmatter.yaml: set `permissions`
+…
+No problems found.
+```
+
+A second `--fix --json` reported no `Repaired:` line and exit 0.
+
+**Failed repair** (registration published but `register: []`, a legacy
+manifest present, and Darkmatter's writer lock on `~/.darkmatter.yaml` held
+by `flock` for the whole run), exit 1 after Darkmatter's 2 s lock deadline
+(2.09 s wall time); the entry and the legacy file were left as found:
+
+```text
+• [error] Darkmatter host registration (registration): the repair failed: could not update the
+  `register` entry in /tmp/p5-doctor-i85y/locked/home/.darkmatter.yaml (another writer held its
+  lock); the published registration is kept and the retired one left in place
+    - /tmp/p5-doctor-i85y/locked/home/.claudine/darkmatter-host.yaml: is left over from the retired
+      format 1 registration
+    - the repair removes it once the `register` entry names the published manifest
+    - Remedy: run `claudine doctor --fix`
+    - /tmp/p5-doctor-i85y/locked/home/.darkmatter.yaml: no `register` entry names Claudine's
+      manifest
+    - Remedy: run `claudine doctor --fix`
+    - Repair failed: could not update the `register` entry in /tmp/p5-doctor-
+      i85y/locked/home/.darkmatter.yaml (another writer held its lock); the published
+      registration is kept and the retired one left in place
+    - No change was made before the failure
+…
+1 error, 0 warnings.
+```
+
+**Repository with stray keys** (`{repo}/.claudine/config.yaml` holding
+`tts: true` then `loging: false`), `--json`, exit 1, after this phase's
+source-order fix:
+
+```json
+[
+  {
+    "id": "stray-config-keys",
+    "severity": "error",
+    "summary": "unknown key `tts` at the top level (line 1, column 1) (+1 more)",
+    "detail": "/tmp/p5-doctor-i85y/warn/home/.claudine/config.yaml: no unknown keys\n/tmp/p5-doctor-i85y/warn/work/repo/.claudine/config.yaml: unknown key `tts` at the top level (line 1, column 1)\nRemedy: it is a user setting; move it to `~/.claudine/config.yaml` or remove it\n/tmp/p5-doctor-i85y/warn/work/repo/.claudine/config.yaml: unknown key `loging` at the top level (line 2, column 1)\nRemedy: remove it, or correct its spelling",
+    "fixable": false
+  }
+]
+```
+
+### Gates
+
+All ran on Linux, serially, with no subagents (load average 4–10 on this
+host). Each ran on the final tree except the first Claudine `just test`,
+which started before the `stray-config-keys` sort fix; the 117 tests that
+cover doctor ran again afterwards.
+
+| Area | `just build` | `just test` (L1) | `just lint` |
+|---|---|---|---|
+| claudine | pass | 12851 passed, 16 skipped, none ≥ 5 s; after the fix, `just test doctor` 117 passed, none ≥ 5 s | pass, no warnings |
+| darkmatter | pass | 17859 passed, 10 skipped, none ≥ 5 s | pass, no warnings |
+| sniff | pass | 3904 passed, 38 skipped, none ≥ 5 s | pass |
+| simplified-schema | pass | 2592 (+2172) passed, none ≥ 5 s | pass |
+
+- `just check-tier-coverage claudine`: nothing stranded.
+- Scope calculator over the uncommitted tree (Phases 4 and 5):
+  `packages: [claudine, claudine-cli, test-toolkit, darkmatter]`,
+  `change_class: package`, so the gates could not be skipped.
+  `just test test-toolkit`: 591 passed, none ≥ 5 s.
+- Consumers: Darkmatter's and Claudine's full suites above are the consumers
+  of the Sniff (`windows_shells`) and SimplifiedSchema (union unknown keys)
+  public changes. Nothing in this phase changed a public API, so no other
+  dependent package was run.
+- Cross-OS: not run this phase. The only code change is the sort order of
+  findings inside one function, with no path, process, or OS-specific code.
+  Phase 4's `just cross-check claudine-cli --os windows doctor` (14/14) is
+  the latest Windows evidence; macOS, native Windows, and WSL2 are left to
+  CI as the repository's event schedule decides.
+
+### Skill publication
+
+`just publish-skills` (from `claudine/`) passed and installed
+`~/.claude/skills/use-claudine/`. Its `cli.md` carries the doctor row in the
+command table and the "Checking the setup: `claudine doctor`" section with
+the seven row IDs in order, the exit statuses (0/1/2), the JSON object
+shape, the two repair scopes, and the `jq` example, word for word from
+`claudine/docs/use-skills/use-claudine/cli.md`; the section has no links or
+transclusions to break. The 2 s shell limit it states matches Sniff's
+`timeouts::SHELL_LOOKUP`. The research summaries the recipe also writes
+(`.claude/skills/claudine/summaries/`) came out unchanged. One
+pre-existing warning printed (`err` undeclared in
+`docs/research/summary/plugins.md`), unrelated to doctor.
+
+### Requirement-to-test mapping (this phase)
+
+- Unknown keys are listed in file order, and the summary names the first one
+  in the file: `doctor::config::tests::nested_unknown_keys_are_found_in_the_tts_mapping_the_imported_permissions_and_a_keyed_action`
+  (order asserted by position; the summary now `pitch` at line 3, which
+  sorted after `/actions/…` before). F1 at the library's public `run` result;
+  the CLI only renders those rows (`warnings_alone_exit_zero_and_both_formats_show_the_library_rows`
+  proves the CLI rows equal the library rows).
+- No spec departures in this phase. Skipped or pre-existing failures: none.
