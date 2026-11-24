@@ -1,0 +1,13 @@
+kind: yaml-schema
+description: |-
+    The definition of a `kind: mutation-schema` document: a YAML file that
+    declares the signatures of signature-backed lifecycle actions (such as
+    `set_frontmatter`) for a callable catalog. It is a dedicated catalog
+    input: never a `$schema` target, a `Name@file` import source, or a
+    trigger, and its `types` are private to it.
+$schema:
+    kind: literal(mutation-schema; required) -> the document kind that claims this definition
+    description: string -> what the catalog is for; may be empty
+    categories: string[](required; not-empty) -> the category names every callable's `category(...)` may use, each `Name` or `Name -> description`
+    types: schema(mapping; required; not-empty) -> the callables (`function(...)` declarations or unions of them) and the private helper types their signatures use
+    $constraints: { closed: true }

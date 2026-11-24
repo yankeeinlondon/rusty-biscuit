@@ -177,6 +177,15 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             }
             .into());
         }
+        // The factories refuse a callable catalog, so none is ever exported.
+        StandaloneSchemaEnvelope::ExpressionSchema | StandaloneSchemaEnvelope::MutationSchema => {
+            return Err(crate::errors::SchemaError::NotASchemaDocument {
+                path: std::path::PathBuf::new(),
+                reason: crate::errors::NotSchemaReason::CallableCatalog,
+                site: None,
+            }
+            .into());
+        }
         StandaloneSchemaEnvelope::Tagged => {
             document.insert("kind".into(), "schema".into());
             if let Some(categories) = &authored.categories {

@@ -281,13 +281,13 @@ impl Layer {
     ) -> Result<Self, SimplifiedSchemaError> {
         let named = path.clone().unwrap_or_else(|| PathBuf::from(CONTENT));
         if let Some(document) = parse_standalone_schema_document(text, &named)? {
-            if document.envelope == StandaloneSchemaEnvelope::NamespaceSchema {
-                return Err(SchemaError::NotASchemaDocument {
-                    path: named,
-                    reason: crate::errors::NotSchemaReason::NamespaceCatalog,
-                    site: None,
-                }
-                .into());
+            let refused = match document.envelope {
+                StandaloneSchemaEnvelope::NamespaceSchema => Some(crate::errors::NotSchemaReason::NamespaceCatalog),
+                envelope if envelope.is_callable_catalog() => Some(crate::errors::NotSchemaReason::CallableCatalog),
+                _ => None,
+            };
+            if let Some(reason) = refused {
+                return Err(SchemaError::NotASchemaDocument { path: named, reason, site: None }.into());
             }
             let authored = AuthoredSchema {
                 declaration: document.declaration,

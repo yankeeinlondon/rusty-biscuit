@@ -31,7 +31,7 @@ pub mod select;
 pub mod semantic;
 
 pub use declaration::{claim_segments, declaration_segments, reference_site, source_path_segments};
-pub use load::{LoadedYaml, first_tag_start, load_yaml_document, locating_problem, pointer_string};
+pub use load::{DuplicateKey, LoadedYaml, duplicate_key, first_tag_start, load_yaml_document, locating_problem, pointer_string};
 pub use registry::{
     Claim, DefinitionSource, Incomplete, KindDefinition, KindHost, KindRegistry, RegisteredDefinition, RegisteredKinds,
     RegisteredSource, RegistryScope, ShippedDefinition, prepare_shipped, prepare_shipped_definitions,

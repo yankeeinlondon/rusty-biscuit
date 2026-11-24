@@ -285,13 +285,13 @@ refused! {
     null_sources: edited(|value| set(value, "/header/sources", Value::Null)) => MalformedArtifact at Some("/header/sources");
     object_sources: edited(|value| set(value, "/header/sources", json!({}))) => MalformedArtifact at Some("/header/sources");
     empty_sources: edited(|value| set(value, "/header/sources", json!([]))) => SourceMismatch at Some("/header/sources");
-    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/4");
+    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/6");
     every_source_invalid: edited(|value| set(value, "/header/sources", json!([5, 6]))) => MalformedArtifact at Some("/header/sources/0");
     a_source_with_an_unknown_member: edited(|value| set(value, "/header/sources/0/extra", json!(1))) => MalformedArtifact at Some("/header/sources/0");
     a_repeated_source: edited(|value| { let first = value["header"]["sources"][0].clone(); value["header"]["sources"].as_array_mut().unwrap().insert(0, first); }) => MalformedArtifact at Some("/header/sources/1");
     unsorted_sources: edited(|value| value["header"]["sources"].as_array_mut().unwrap().reverse()) => MalformedArtifact at Some("/header/sources/1");
     an_empty_source_identity: edited(|value| set(value, "/header/sources/0/identity", json!(""))) => MalformedArtifact at Some("/header/sources/0/identity");
-    a_renamed_source: edited(|value| set(value, "/header/sources/0/identity", json!("simplified-schema/schemas/other.yaml"))) => SourceMismatch at Some("/header/sources/0/identity");
+    a_renamed_source: edited(|value| set(value, "/header/sources/0/identity", json!("simplified-schema/schemas/a-renamed.yaml"))) => SourceMismatch at Some("/header/sources/0/identity");
     an_extra_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!({"identity": "zz.yaml", "digest": "0000000000000000"}))) => SourceMismatch at Some("/header/sources");
 
     // The digest validator, shared by sources and dependencies.

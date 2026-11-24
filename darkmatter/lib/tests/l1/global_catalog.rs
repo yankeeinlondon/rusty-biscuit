@@ -379,8 +379,8 @@ fn a_baseline_holding_a_slot_fails_with_the_slot_code() {
 }
 
 /// The old separately embedded baseline under `docs/schemas/` is gone, and no
-/// Darkmatter source or test names or includes it. A file Git reports free of
-/// the old path is not opened: opening every source file of the area took
+/// Darkmatter source or test names or includes it. A regular file Git reports
+/// free of the old path is not opened (a link always is): opening every source file of the area took
 /// about 2.5 s on native Windows alone and about 7 s in the package run.
 #[test]
 fn the_old_embedded_baseline_is_deleted_and_never_included() {
@@ -397,7 +397,8 @@ fn the_old_embedded_baseline_is_deleted_and_never_included() {
     let mut pending: Vec<_> = roots.iter().map(|dir| area.join(dir)).collect();
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).expect("readable source tree") {
-            let path = entry.expect("entry").path();
+            let entry = entry.expect("entry");
+            let path = entry.path();
             if path.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|ext| ext == "rs") {
@@ -408,7 +409,7 @@ fn the_old_embedded_baseline_is_deleted_and_never_included() {
                     .map(|component| component.as_os_str().to_string_lossy())
                     .collect::<Vec<_>>()
                     .join("/");
-                if skippable.contains(&key) {
+                if skippable.skips(&key, entry.file_type().expect("file type")) {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).expect("source");

@@ -14,13 +14,12 @@ fn base_api() -> DarkmatterSchemas {
         .expect("base schema must be baseline-compatible")
 }
 
-/// The Darkmatter baseline with trigger discovery and Claudine's
-/// registration (its trigger, library, and namespace files and its lifecycle
-/// artifact, without the sequence trigger and types) installed as the
-/// registered `claudine` host, the way Claudine's setup publishes it. The
-/// fixture's work folder and home are empty, so the registered host is the
-/// only trigger source; the fixture lives as long as the returned guard.
-fn claudine_api() -> (crate::host_fixtures::Fixture, DarkmatterSchemas) {
+/// A fixture with Claudine's registration (its trigger, library, and
+/// namespace files and its lifecycle artifact, without the sequence trigger
+/// and types) installed as the `claudine` bundle, the way Claudine's setup
+/// publishes it, and its `register` reference. The fixture's work folder and
+/// home are empty, so the registered host is the only trigger source.
+fn claudine_fixture() -> (crate::host_fixtures::Fixture, String) {
     use crate::host_fixtures::{Bundle, Fixture, MANIFEST_NAME};
     let files = [
         ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
@@ -50,7 +49,15 @@ fn claudine_api() -> (crate::host_fixtures::Fixture, DarkmatterSchemas) {
         .with_member("schemas/globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json"));
     let fixture = Fixture::new();
     fixture.install_bundle("claudine", &bundle);
-    let hosts = fixture.hosts(&[&format!("../claudine/{MANIFEST_NAME}")]);
+    (fixture, format!("../claudine/{MANIFEST_NAME}"))
+}
+
+/// The Darkmatter baseline with trigger discovery and [`claudine_fixture`]'s
+/// bundle as the registered `claudine` host; the fixture lives as long as
+/// the returned guard.
+fn claudine_api() -> (crate::host_fixtures::Fixture, DarkmatterSchemas) {
+    let (fixture, reference) = claudine_fixture();
+    let hosts = fixture.hosts(&[&reference]);
     assert!(hosts.claims().len() == 1, "Claudine's registration loads: {:?}", hosts.claims());
     let api = DarkmatterSchemas::new(fixture.context())
         .with_baseline(darkmatter_base_schema())
@@ -62,8 +69,8 @@ fn claudine_api() -> (crate::host_fixtures::Fixture, DarkmatterSchemas) {
 }
 
 thread_local! {
-    /// One base schema per test thread: building it captures the process
-    /// directory's repository, too costly to repeat for every case of a table.
+    /// One base schema per test thread, so a table of cases builds and
+    /// compiles the baseline once.
     static BASE_API: DarkmatterSchemas = base_api();
 }
 
@@ -250,6 +257,27 @@ fn claudine_catalog_resolves_from_its_bundle() {
     assert!(!raw.contains("boolish"));
 }
 
+/// One load of Claudine's registered bundle: each of its two trigger
+/// payloads is compiled, merge-checked, and canonically hashed once (the
+/// validator-cache identity validation reuses); the manifest envelope and
+/// the namespace payload are hashed once each; the other compiles are the
+/// suggestion lint's and those two schemas'.
+#[cfg(feature = "work-counters")]
+#[test]
+fn claudine_registration_load_does_fixed_work() {
+    use darkmatter::work_counters::{Work, snapshot};
+    let (fixture, reference) = claudine_fixture();
+    let before = snapshot();
+    let hosts = fixture.hosts(&[&reference]);
+    let work = snapshot().since(&before);
+
+    assert!(hosts.claims().len() == 1, "Claudine's registration loads: {:?}", hosts.claims());
+    assert_eq!(work.get(Work::PayloadCompileCheck), 2);
+    assert_eq!(work.get(Work::PayloadMergeCheck), 2);
+    assert_eq!(work.get(Work::CanonicalSchemaSerialization), 4);
+    assert_eq!(work.get(Work::ValidatorCompile), 22);
+}
+
 #[test]
 fn claudine_schema_accepts_typed_lifecycle_stack() {
     let md: Markdown = "---\nstart:\n  - info: Starting\n  - when: env.CI == 'true'\n    then:\n      - message: Build started\n      - shell:\n          command: cargo test\n          no_error: true\nsuccess:\n  info: Done\n  effect: tick\n---\nBody\n".into();
@@ -379,10 +407,12 @@ fn schema_document_transcludes_same_file_as_library_source() {
     let catalog_path = biscuit_file::canonicalize_simplified(&manifest_dir!().join("../schemas/darkmatter.yaml"))
         .expect("catalog path");
     let catalog_dir = catalog_path.parent().expect("the catalog has a parent");
+    // One capture for both readers: each runs repository discovery over the
+    // whole checkout.
+    let catalog_context = crate::request_support::context_at(catalog_dir);
     let declaration: YamlValue = serde_yaml_ng::from_str("fm: fm@./partials/fm.yaml").expect("declaration");
-    let from_disk =
-        resolve_yaml_schema(&declaration, catalog_dir, &crate::request_support::context_at(catalog_dir))
-            .expect("the authored baseline resolves from disk");
+    let from_disk = resolve_yaml_schema(&declaration, catalog_dir, &catalog_context)
+        .expect("the authored baseline resolves from disk");
     assert!(from_disk.imports.contains(&policy_path), "{:?}", from_disk.imports);
     // The disk catalog's baseline stores the same shared types the embedded
     // one does; their identities name different sources, so compare the
@@ -390,7 +420,7 @@ fn schema_document_transcludes_same_file_as_library_source() {
     let catalog = darkmatter::markdown::schemas::catalog::GlobalCatalog::from_file(
         &catalog_path,
         darkmatter::markdown::schemas::catalog::DARKMATTER_GLOBALS,
-        &crate::request_support::context_at(catalog_dir),
+        &catalog_context,
     )
     .expect("the authored catalog loads from disk");
     let (from_disk, definitions) = catalog.baseline().expect("the catalog declares `fm`");
@@ -412,7 +442,8 @@ fn nested_mapping_object_matches_inline_object_literal_json_schema() {
 #[test]
 fn sequence_union_arms_accept_nested_mapping_object_shapes() {
     let md: Markdown = "---\n$schema:\n  choice:\n    - string\n    - kind: string(required)\n      value: number\nchoice:\n  kind: score\n  value: 10\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
+    let dir = tempfile::tempdir().expect("temp dir");
+    let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .validate(&md)
         .expect("validation must run");
 

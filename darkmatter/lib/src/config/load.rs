@@ -196,7 +196,8 @@ impl ConfigFile {
 pub struct Registration {
     /// The manifest reference as written.
     pub reference: String,
-    /// Its position in the file's `register` list.
+    /// Its zero-based offset in the file's `register` list (a warning
+    /// shows the 1-based ordinal).
     pub index: usize,
     /// The file that lists it.
     pub declared_in: PathBuf,

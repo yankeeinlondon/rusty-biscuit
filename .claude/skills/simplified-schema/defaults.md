@@ -75,9 +75,12 @@ Tests: `tests/l1/required_presence.rs` (presence, no defaults) and
   the lowered literal-exclusion lookahead). `if`/`then`/`else`,
   `dependentSchemas`, `not`, and `unevaluated*` are deliberately not followed.
   Tests: `tests/l1/pattern_defaults.rs`. `check_declarations` remembers
-  accepted documents by canonical content hash (`CHECKED`, capacity 256),
+  accepted documents by the XXH64 of their JSON text in written key order
+  (`written_digest`, streamed, no sorted copy; `CHECKED`, capacity 256),
   because hosts lower the same baseline repeatedly and the pattern subtrees
-  more than doubled its locations. It also compiles without arms
+  more than doubled its locations. The key is not a canonical identity:
+  every lowering pays it, a registered trigger payload of half a megabyte
+  included, so do not switch it to `xx_hash_json`. It also compiles without arms
   (`Compiler::new(schema, false)`: one location per node set instead of one
   per arm, about 13x fewer on the lifecycle baseline), since arms only
   matter to `Fill::check`; a refusal or an expansion loop

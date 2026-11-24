@@ -732,8 +732,9 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
 /// constraints and template types) through the run's slot session, after
 /// one batched approval of the reads they name, then every import the
 /// result needs. A YAML document that is not a schema file has nothing to
-/// resolve, and a namespace file is never a schema target: its kind check
-/// already resolved it as a host's registration does.
+/// resolve, a namespace file is never a schema target (its kind check
+/// already resolved it as a host's registration does), and a callable
+/// catalog is never resolved: its slots and examples stay passive data.
 ///
 /// ## Errors
 ///
@@ -741,7 +742,9 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
 /// that does not resolve: the check is unavailable, never a success.
 fn resolve_schema_file(api: &DarkmatterSchemas, path: &Path, text: &str) -> Result<(), SchemaError> {
     match simplified_schema::parse_standalone_schema_document(text, path) {
-        Ok(Some(document)) if document.envelope != simplified_schema::StandaloneSchemaEnvelope::NamespaceSchema => {}
+        Ok(Some(document))
+            if document.envelope != simplified_schema::StandaloneSchemaEnvelope::NamespaceSchema
+                && !document.envelope.is_callable_catalog() => {}
         _ => return Ok(()),
     }
     // A handler that cannot answer leaves the reads undecided, which the

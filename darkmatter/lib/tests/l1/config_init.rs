@@ -477,6 +477,40 @@ fn replace_manifest_registration_matches_a_missing_old_manifest_in_every_spellin
     }
 }
 
+/// `entry_names_location` is the writer's rule for the old manifest's
+/// entries: every spelling of a missing (or present) old manifest matches,
+/// another host's entry does not, and those are exactly the entries
+/// `replace_manifest_registration` removes beside the listed new entry.
+#[test]
+fn entry_names_location_matches_the_entries_the_writer_removes() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
+    let absolute = biscuit_file::to_portable_string(&old_manifest(&fixture));
+    let names = |entry: &str| {
+        darkmatter::config::registration::entry_names_location(entry, &fixture.user_file(), &fixture.context(), &old_manifest(&fixture))
+    };
+    for present in [false, true] {
+        if present {
+            fixture.write("home/.acme/darkmatter-host.yaml", "kind: darkmatter-host\n");
+        }
+        for spelling in [absolute.as_str(), "~/.acme/darkmatter-host.yaml", "./.acme/darkmatter-host.yaml", ".acme/darkmatter-host.yaml"] {
+            assert!(names(spelling), "{spelling}, present: {present}");
+        }
+        assert!(!names("~/.other/darkmatter-host.yaml") && !names(NEW_REFERENCE), "present: {present}");
+    }
+    std::fs::remove_file(old_manifest(&fixture)).unwrap();
+    for spelling in [absolute.as_str(), "~/.acme/darkmatter-host.yaml", "./.acme/darkmatter-host.yaml", ".acme/darkmatter-host.yaml"] {
+        fixture.write(
+            "home/.darkmatter.yaml",
+            &format!("register:\n    - ~/.other/darkmatter-host.yaml\n    - {NEW_REFERENCE}\n    - {spelling}\n"),
+        );
+        let report = replace(&fixture).unwrap();
+        assert_eq!(report.replaced, vec![spelling.to_string()], "{spelling}");
+        assert_eq!(registered(&fixture), vec!["~/.other/darkmatter-host.yaml".to_string(), NEW_REFERENCE.to_string()], "{spelling}");
+    }
+}
+
 #[test]
 fn replace_manifest_registration_leaves_one_canonical_entry_at_the_first_affected_index() {
     let fixture = Fixture::new();

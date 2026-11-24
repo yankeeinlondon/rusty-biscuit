@@ -92,14 +92,24 @@ pub enum StandaloneSchemaEnvelope {
     /// `$schema` target or a `Name@file` import source, and its `types` are
     /// private to it.
     NamespaceSchema,
+    /// A document containing `kind: expression-schema`: a callable catalog of
+    /// value-producing expression signatures. It never exports `$schema`, is
+    /// never a `$schema` target, trigger, or `Name@file` import source, and
+    /// its `types` (callables and their helpers) are private to it.
+    ExpressionSchema,
+    /// A document containing `kind: mutation-schema`: a callable catalog of
+    /// signature-backed lifecycle actions, private in the same way as
+    /// [`ExpressionSchema`](Self::ExpressionSchema).
+    MutationSchema,
 }
 
 impl StandaloneSchemaEnvelope {
     /// Whether this envelope admits `key` at the top level of its mapping.
     ///
-    /// Every envelope admits `$schema`, `types`, and `description`; every
-    /// envelope but [`NamespaceSchema`](Self::NamespaceSchema) admits
-    /// `categories`, and every tagged one admits `kind`.
+    /// Every envelope admits `types` and `description`, and every envelope
+    /// but the two callable catalogs ([`Self::is_callable_catalog`]) admits
+    /// `$schema`; every envelope but [`NamespaceSchema`](Self::NamespaceSchema)
+    /// admits `categories`, and every tagged one admits `kind`.
     /// [`Tagged`](Self::Tagged) also admits `name` and
     /// [`NamespaceSchema`](Self::NamespaceSchema) `namespace`. Recognition and
     /// editor lexical claims read it to decide whether an untagged mapping is
@@ -107,7 +117,8 @@ impl StandaloneSchemaEnvelope {
     /// its definition ([`crate::envelope`]).
     pub fn admits_top_level_key(self, key: &str) -> bool {
         match key {
-            "$schema" | "types" | "description" => true,
+            "types" | "description" => true,
+            "$schema" => !self.is_callable_catalog(),
             "categories" => self != Self::NamespaceSchema,
             "kind" => self != Self::Pure,
             "name" => self == Self::Tagged,
@@ -124,6 +135,40 @@ impl StandaloneSchemaEnvelope {
             Self::Tagged => Some("schema"),
             Self::YamlSchema => Some("yaml-schema"),
             Self::NamespaceSchema => Some("namespace-schema"),
+            Self::ExpressionSchema => Some("expression-schema"),
+            Self::MutationSchema => Some("mutation-schema"),
+        }
+    }
+
+    /// Whether this envelope is a callable catalog (`expression-schema` or
+    /// `mutation-schema`): it describes callable signatures, so it exports
+    /// no document schema and serves no named-type import.
+    pub fn is_callable_catalog(self) -> bool {
+        matches!(self, Self::ExpressionSchema | Self::MutationSchema)
+    }
+
+    /// The envelope's label in a refusal, such as ``"`kind: schema`"``.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pure => "informal schema",
+            Self::Tagged => "`kind: schema`",
+            Self::YamlSchema => "`kind: yaml-schema`",
+            Self::NamespaceSchema => "`kind: namespace-schema`",
+            Self::ExpressionSchema => "`kind: expression-schema`",
+            Self::MutationSchema => "`kind: mutation-schema`",
+        }
+    }
+
+    /// The top-level keys this envelope's definition allows, in authored
+    /// order of the definition; the informal envelope's are the keys
+    /// recognition admits.
+    pub fn allowed_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Pure => &["$schema", "types", "description", "categories"],
+            Self::Tagged => &["kind", "name", "description", "categories", "$schema", "types"],
+            Self::YamlSchema => &["kind", "description", "categories", "$schema", "types"],
+            Self::NamespaceSchema => &["kind", "namespace", "description", "$schema", "types"],
+            Self::ExpressionSchema | Self::MutationSchema => &["kind", "description", "categories", "types"],
         }
     }
 }
@@ -508,6 +553,8 @@ pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
         Some("schema") => StandaloneSchemaEnvelope::Tagged,
         Some("yaml-schema") => StandaloneSchemaEnvelope::YamlSchema,
         Some("namespace-schema") => StandaloneSchemaEnvelope::NamespaceSchema,
+        Some("expression-schema") => StandaloneSchemaEnvelope::ExpressionSchema,
+        Some("mutation-schema") => StandaloneSchemaEnvelope::MutationSchema,
         // An informal document is claimed only by a usable `$schema`; with a
         // null one it is ordinary YAML, as with none.
         _ if map.get("$schema").is_some_and(|value| !value.is_null())
@@ -695,8 +742,9 @@ pub(crate) fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAt
 /// Refuses the written forms of the labels and local tables the library
 /// reads exactly, which the definitions cannot refuse because an optional
 /// property admits `null`: a `name` on a `kind: schema` document must be a
-/// string, and a namespace schema's `description` and `types` are not
-/// `null`. Located at the authored value.
+/// string, a namespace schema's `description` and `types` are not `null`,
+/// and a callable catalog's `description`, `categories`, `types`, and each
+/// `types` entry are not `null`. Located at the authored value.
 fn check_written_labels(recognized: &RecognizedStandalone, source: &str, path: &Path) -> Result<(), SchemaError> {
     let map = recognized.mapping();
     let refused = |key: &str, message: String| SchemaError::SchemaDocument {
@@ -714,6 +762,34 @@ fn check_written_labels(recognized: &RecognizedStandalone, source: &str, path: &
             for key in ["description", "types"] {
                 if map.get(key).is_some_and(YamlValue::is_null) {
                     return Err(refused(key, "must not be null; omit it instead".into()));
+                }
+            }
+            Ok(())
+        }
+        StandaloneSchemaEnvelope::ExpressionSchema | StandaloneSchemaEnvelope::MutationSchema => {
+            for key in ["description", "categories", "types"] {
+                if map.get(key).is_some_and(YamlValue::is_null) {
+                    let message = if key == "description" { "must not be null; omit it instead" } else { "must not be null" };
+                    return Err(refused(key, message.into()));
+                }
+            }
+            // A bare null entry declares nothing; the null type is the
+            // quoted string `"null"`.
+            if let Some(types) = map.get("types").and_then(YamlValue::as_mapping) {
+                for (name, value) in types {
+                    if value.is_null() {
+                        let name = name.as_str().map_or_else(|| format!("{name:?}"), str::to_string);
+                        let positions = crate::PositionMap::deferred(std::sync::Arc::from(source));
+                        let problem = crate::yaml_documents::locating_problem(&["types".to_string(), name.clone()]);
+                        return Err(SchemaError::SchemaDocument {
+                            path: path.to_path_buf(),
+                            message: format!(
+                                "`types.{name}`: an entry cannot be null; declare a callable or a helper type (write `\"null\"` for the null type)"
+                            ),
+                            source: None,
+                            span: positions.byte_range(&problem),
+                        });
+                    }
                 }
             }
             Ok(())

@@ -240,6 +240,7 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         SchemaError::Io { path, .. }
         | SchemaError::ReferencedSchema { path, .. }
         | SchemaError::SchemaDocument { path, .. }
+        | SchemaError::CallableCatalog { path, .. }
         | SchemaError::NotASchemaDocument { path, .. }
         | SchemaError::UnsupportedJsonDialect { path, .. }
         | SchemaError::InvalidJsonSchema { path, .. } => path,

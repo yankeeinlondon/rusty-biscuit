@@ -29,7 +29,7 @@ fn refusals(loaded: &LoadedRegistrations) -> &[RegistrationDiagnostic] {
     assert!(!loaded.diagnostics.is_empty(), "the entry is refused");
     for diagnostic in &loaded.diagnostics {
         assert_eq!(diagnostic.severity, Severity::Warning);
-        assert!(diagnostic.message.contains("entry 0 of `register`"), "names the entry: {}", diagnostic.message);
+        assert!(diagnostic.message.contains("entry 1 of `register`"), "names the entry: {}", diagnostic.message);
     }
     &loaded.diagnostics
 }

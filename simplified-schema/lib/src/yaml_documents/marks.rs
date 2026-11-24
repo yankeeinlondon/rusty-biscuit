@@ -52,19 +52,25 @@ pub(super) fn second_document_start(text: &str) -> Option<usize> {
     Some(document_marker_above(text, node).unwrap_or(node))
 }
 
-/// The byte offset of the first mapping key of `text` that repeats an
-/// earlier key of the same mapping, in document order: what a strict load
-/// refuses as a duplicate entry, whose own mark is the mapping's start.
-/// `None` when no key repeats or the text does not parse that far.
-pub(super) fn duplicate_key_start(text: &str) -> Option<usize> {
+/// The byte offsets of the first mapping key of `text` that repeats an
+/// earlier key of the same mapping, in document order, and of that earlier
+/// key: `(first, repeated)`. A strict load refuses the repeat as a duplicate
+/// entry whose own mark is the mapping's start. `None` when no key repeats or
+/// the text does not parse that far. Only the duplicate-error path runs it.
+pub(super) fn duplicate_key_marks(text: &str) -> Option<(usize, usize)> {
     let mut keys = 0;
     let mut duplicate = None;
     // The first pass numbers every key in document order and finds the first
-    // repeated one; the second stops at that key's mark.
+    // repeated one and the key it repeats; a pass per key stops at its mark.
     let _ = serde_yaml_ng::Deserializer::from_str(text)
         .next()?
         .deserialize_any(Walk { keys: &mut keys, find: Find::Duplicate(&mut duplicate) });
-    let target = duplicate?;
+    let (first, repeated) = duplicate?;
+    Some((key_mark(text, first)?, key_mark(text, repeated)?))
+}
+
+/// The byte offset of key number `target`, in document order.
+fn key_mark(text: &str, target: usize) -> Option<usize> {
     let mut keys = 0;
     let error = serde_yaml_ng::Deserializer::from_str(text)
         .next()?
@@ -75,8 +81,9 @@ pub(super) fn duplicate_key_start(text: &str) -> Option<usize> {
 
 /// What a [`Walk`] looks for.
 enum Find<'a> {
-    /// The number of the first key repeating an earlier key of its mapping.
-    Duplicate(&'a mut Option<usize>),
+    /// The numbers of the first key repeating an earlier key of its mapping
+    /// and of the key it repeats: `(first, repeated)`.
+    Duplicate(&'a mut Option<(usize, usize)>),
     /// Fail at the key with this number.
     Stop(usize),
 }
@@ -132,7 +139,7 @@ impl<'de> Visitor<'de> for Walk<'_, '_> {
     }
 
     fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<(), A::Error> {
-        let mut seen: Vec<YamlValue> = Vec::new();
+        let mut seen: Vec<(YamlValue, usize)> = Vec::new();
         loop {
             let number = *self.keys;
             *self.keys += 1;
@@ -146,10 +153,12 @@ impl<'de> Visitor<'de> for Walk<'_, '_> {
             };
             let Some(key) = key else { return Ok(()) };
             if let (Some(key), Find::Duplicate(found)) = (key, &mut self.find) {
-                if found.is_none() && seen.contains(&key) {
-                    **found = Some(number);
+                if found.is_none()
+                    && let Some((_, first)) = seen.iter().find(|(earlier, _)| *earlier == key)
+                {
+                    **found = Some((*first, number));
                 }
-                seen.push(key);
+                seen.push((key, number));
             }
             map.next_value_seed(self.nested())?;
         }
@@ -367,15 +376,17 @@ mod tests {
         assert_eq!(offender("a: 1\n", Offender::Tag), None);
     }
 
-    fn duplicate(text: &str) -> Option<(usize, usize)> {
-        duplicate_key_start(text).and_then(|offset| biscuit_file::source_position(text, offset))
+    fn duplicate(text: &str) -> Option<((usize, usize), (usize, usize))> {
+        let (first, repeated) = duplicate_key_marks(text)?;
+        Some((biscuit_file::source_position(text, first)?, biscuit_file::source_position(text, repeated)?))
     }
 
     #[test]
-    fn a_duplicate_key_is_marked_at_its_second_spelling() {
-        assert_eq!(duplicate("kind: a\nkind: b\n"), Some((2, 1)));
-        assert_eq!(duplicate("a:\n  b: 1\n  c: 2\n  b: 3\nd: 4\n"), Some((4, 3)));
-        assert_eq!(duplicate("a: [{x: 1}, {y: 1, y: 2}]\n"), Some((1, 20)));
+    fn a_duplicate_key_is_marked_at_both_spellings() {
+        assert_eq!(duplicate("kind: a\nkind: b\n"), Some(((1, 1), (2, 1))));
+        assert_eq!(duplicate("a:\n  b: 1\n  c: 2\n  b: 3\nd: 4\n"), Some(((2, 3), (4, 3))));
+        assert_eq!(duplicate("a: [{x: 1}, {y: 1, y: 2}]\n"), Some(((1, 14), (1, 20))));
+        assert_eq!(duplicate("a:\n  b: 1\n  b: 2\nb: 3\nb: 4\n"), Some(((2, 3), (3, 3))), "the first repeat in document order");
         assert_eq!(duplicate("a: {b: 1}\nc: {b: 1}\n"), None, "keys repeat only within one mapping");
         assert_eq!(duplicate("a: 1\n"), None);
     }

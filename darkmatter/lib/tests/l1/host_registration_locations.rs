@@ -1333,3 +1333,115 @@ fn an_extends_operand_naming_a_trigger_is_refused_at_the_operand() {
     );
     assert!(diagnostic.message.contains("resolved to a schema-trigger envelope"), "{}", diagnostic.message);
 }
+
+// ── which `register` entry a refusal names ──────────────────────────────────
+//
+// A warning names its entry by the 1-based position a person counts in the
+// file, never the list offset `Registration::index` keeps: moving an entry
+// down one line moves its number by one, an equivalent spelling at the same
+// position keeps it, and the refusal's own file and position are untouched.
+
+const VALID_ENTRY: &str = "../host/darkmatter-host.yaml";
+
+/// The refusals of the `register` entries the user `config` (and, when
+/// given, the working copy `repository` of a repository at `work/` with an
+/// unborn `HEAD`) lists, loaded through the configuration snapshot.
+fn snapshot_refusals(fixture: &Fixture, config: &str, repository: Option<&str>) -> Vec<RegistrationDiagnostic> {
+    use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
+    use darkmatter::config::registration::{load_registrations, md_owned_names};
+
+    fixture.write("home/.darkmatter.yaml", config);
+    let (context, tree) = match repository {
+        Some(text) => {
+            let work = fixture.path("work");
+            git2::Repository::init(&work).unwrap();
+            fixture.write("work/.darkmatter.yaml", text);
+            let tree = sniff::filesystem::git::GitRepo::discover(&work).unwrap().expect("a repository").committed_tree().unwrap();
+            (fixture.context().with_repository_root(&work), Some(tree))
+        }
+        None => (fixture.context(), None),
+    };
+    let snapshot = ConfigSnapshot::load(&context, tree.as_ref(), ConfigLoadMode::Passive).expect("the configuration loads");
+    load_registrations(&snapshot, &context, md_owned_names()).diagnostics
+}
+
+/// `diagnostic` names entry `ordinal` of the `register` list in `declared_in`.
+fn assert_names_entry(diagnostic: &RegistrationDiagnostic, ordinal: usize, declared_in: &Path) {
+    let named = format!("(entry {ordinal} of `register` in `{}`)", declared_in.display());
+    assert!(diagnostic.message.contains(&named), "expected {named}: {}", diagnostic.message);
+}
+
+#[test]
+fn a_refused_entry_is_numbered_by_its_position_and_not_by_its_spelling() {
+    let cases = [
+        ("first", "register:\n  - ~/.acme/darkmatter-host.yaml\n", 1, (2, 5)),
+        ("second", "register:\n  - ../host/darkmatter-host.yaml\n  - ~/.acme/darkmatter-host.yaml\n", 2, (3, 5)),
+        ("second, respelled", "register:\n  - ../host/darkmatter-host.yaml\n  - ./.acme/darkmatter-host.yaml\n", 2, (3, 5)),
+    ];
+    for (case, config, ordinal, at) in cases {
+        let fixture = Fixture::new();
+        let all = snapshot_refusals(&fixture, config, None);
+        let [diagnostic] = all.as_slice() else { panic!("{case}: one refusal: {all:#?}") };
+        let declared_in = fixture.path("home/.darkmatter.yaml");
+        assert_names_entry(diagnostic, ordinal, &declared_in);
+        assert_eq!(site(diagnostic), (declared_in.as_path(), None, Some(at)), "{case}: {diagnostic:#?}");
+        assert_eq!(diagnostic.entry.index, ordinal - 1, "{case}: the structured index stays the list offset");
+    }
+}
+
+#[test]
+fn a_refused_entry_is_numbered_within_the_configuration_that_lists_it() {
+    let fixture = Fixture::new();
+    let all = snapshot_refusals(
+        &fixture,
+        &format!("register:\n  - {VALID_ENTRY}\n  - ./other/darkmatter-host.yaml\n"),
+        Some("register:\n  - ./.acme/darkmatter-host.yaml\n"),
+    );
+    let [user, repository] = all.as_slice() else { panic!("one refusal per file: {all:#?}") };
+    let (user_file, repository_file) = (fixture.path("home/.darkmatter.yaml"), fixture.path("work/.darkmatter.yaml"));
+    assert_names_entry(user, 2, &user_file);
+    assert_eq!(site(user), (user_file.as_path(), None, Some((3, 5))), "{user:#?}");
+    assert_names_entry(repository, 1, &repository_file);
+    assert_eq!(site(repository), (repository_file.as_path(), None, Some((2, 5))), "{repository:#?}");
+}
+
+/// A manifest or member refusal names the entry that declared the manifest
+/// while keeping its own file and position.
+#[test]
+fn a_manifest_or_member_refusal_names_its_declaring_entry() {
+    let format_1 = "kind: darkmatter-host\nformat_version: 1\nhost: acme\nversion: 1.2.0\nidentify: ./schemas/widget.yaml\n\
+                    triggers: []\nglobals: ./schemas/run.yaml\nlifecycle: ./schemas/globals.lifecycle.json\nfunctions: []\n";
+
+    let fixture = Fixture::new();
+    fixture.write("retired/darkmatter-host.yaml", format_1);
+    let all = snapshot_refusals(&fixture, &format!("register:\n  - {VALID_ENTRY}\n  - ../retired/darkmatter-host.yaml\n"), None);
+    let [retired] = all.as_slice() else { panic!("present retired manifest: {all:#?}") };
+    assert_names_entry(retired, 2, &fixture.path("home/.darkmatter.yaml"));
+    assert_eq!((retired.file.clone(), retired.line), (fixture.path("retired/darkmatter-host.yaml"), Some(2)), "{retired:#?}");
+
+    let fixture = Fixture::new();
+    fixture.install_host("other", "other");
+    fixture.edit_manifest(|manifest| manifest.replace("version: 1.2.0\n", ""));
+    let expected = site(&refused(&fixture.load())).0.to_path_buf();
+    let all = snapshot_refusals(&fixture, &format!("register:\n  - {VALID_ENTRY}\n  - ../other/darkmatter-host.yaml\n"), None);
+    let [malformed] = all.as_slice() else { panic!("malformed current manifest: {all:#?}") };
+    assert_names_entry(malformed, 1, &fixture.path("home/.darkmatter.yaml"));
+    assert_eq!(malformed.file, expected, "{malformed:#?}");
+    assert!(malformed.line.is_some(), "{malformed:#?}");
+
+    let fixture = Fixture::new();
+    std::fs::remove_file(fixture.path("host/schemas/gadget.yaml")).unwrap();
+    let owned_site = |diagnostic: &RegistrationDiagnostic| {
+        let (file, member, at) = site(diagnostic);
+        (file.to_path_buf(), member.map(str::to_string), at)
+    };
+    let expected: Vec<_> = refusals(&fixture.load()).iter().map(owned_site).collect();
+    let all = snapshot_refusals(&fixture, &format!("register:\n  - {VALID_ENTRY}\n"), None);
+    assert!(!all.is_empty(), "missing member");
+    for diagnostic in &all {
+        assert_names_entry(diagnostic, 1, &fixture.path("home/.darkmatter.yaml"));
+        assert!(diagnostic.member.is_some(), "{diagnostic:#?}");
+    }
+    let found: Vec<_> = all.iter().map(owned_site).collect();
+    assert_eq!(found, expected, "the member refusals keep their own locations");
+}

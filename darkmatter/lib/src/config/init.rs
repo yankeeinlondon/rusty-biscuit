@@ -565,10 +565,12 @@ pub fn register_manifest(
 /// the place of every `register` entry that names `old_path` (the host's
 /// previous default manifest, which may no longer exist) or the same
 /// manifest as `reference`, however each is spelled. The first such entry is
-/// rewritten to `reference` as given and the others are removed; with none,
-/// `reference` is appended. Every other entry, value, and comment is kept,
-/// and a file that already lists `reference` once and `old_path` nowhere is
-/// not written.
+/// rewritten to `reference` as given, keeping the comment on its line, and
+/// the others are removed together with the comment on each one's line; with
+/// none, `reference` is appended. Every other entry, value, and comment
+/// (including a comment on its own line above a removed entry) is kept, and
+/// a file that already lists `reference` once and `old_path` nowhere is not
+/// written.
 ///
 /// Entries are compared by the file they name, resolved from the
 /// configuration file's folder: [`manifest_identity`](super::registration::manifest_identity)
@@ -724,7 +726,6 @@ fn plan_replacement(
     old_path: &Path,
 ) -> Result<(Option<TargetChange>, RegisterReport), InitError> {
     let invalid = |message: String| invalid_setting(observation, message);
-    let old = super::registration::location_identity(old_path);
     let register_path = |index: Option<usize>| {
         let mut segments = vec![String::from("register")];
         segments.extend(index.map(|index| index.to_string()));
@@ -761,7 +762,8 @@ fn plan_replacement(
         .filter_map(|(index, entry)| Some((index, entry.as_str()?)))
         .filter(|(_, entry)| {
             super::registration::manifest_location_identity(entry, &observation.path, context)
-                .is_some_and(|identity| identity == *wanted || identity == old)
+                .is_some_and(|identity| identity == *wanted)
+                || super::registration::entry_names_location(entry, &observation.path, context, old_path)
         })
         .collect();
 

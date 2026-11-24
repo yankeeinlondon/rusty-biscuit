@@ -350,13 +350,19 @@ impl Artifact {
 /// dependencies, and fixture directories (`tests/fixtures`, a spike's `fixtures`)
 /// are not shipped and are skipped.
 fn files_below(dir: &Path, ext: &str) -> Vec<PathBuf> {
+    typed_files_below(dir, ext).into_iter().map(|(path, _)| path).collect()
+}
+
+/// [`files_below`] with each file's no-follow type, as `DirEntry` reports it.
+fn typed_files_below(dir: &Path, ext: &str) -> Vec<(PathBuf, fs::FileType)> {
     let mut found = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(current) = pending.pop() {
         let entries = fs::read_dir(&current)
             .unwrap_or_else(|error| panic!("{} is unreadable: {error}", current.display()));
         for entry in entries {
-            let path = entry.expect("directory entry").path();
+            let entry = entry.expect("directory entry");
+            let path = entry.path();
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -366,11 +372,11 @@ fn files_below(dir: &Path, ext: &str) -> Vec<PathBuf> {
                     pending.push(path);
                 }
             } else if path.extension().is_some_and(|extension| extension == ext) {
-                found.push(path);
+                found.push((path, entry.file_type().expect("file type")));
             }
         }
     }
-    found.sort();
+    found.sort_by(|(a, _), (b, _)| a.cmp(b));
     found
 }
 
@@ -1073,8 +1079,8 @@ fn authored_schema_value(frontmatter: &str) -> Option<String> {
 }
 
 /// The `$schema` value of every Markdown file below `dirs` whose frontmatter
-/// declares one. A file Git reports free of the `$schema` needle is never
-/// opened, and a frontmatter without it is never YAML-decoded.
+/// declares one. A regular file Git reports free of the `$schema` needle is
+/// never opened (a link always is), and a frontmatter without it is never YAML-decoded.
 fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
     let pathspecs: Vec<String> = dirs
         .iter()
@@ -1084,9 +1090,9 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
     let skippable = git_prefilter::clean_tracked_files_without(root, &["$schema"], &pathspecs);
     let mut found = Vec::new();
     for dir in dirs {
-        for path in files_below(dir, "md") {
+        for (path, kind) in typed_files_below(dir, "md") {
             let label = relative(&path, root);
-            if skippable.contains(&label) {
+            if skippable.skips(&label, kind) {
                 continue;
             }
             let Ok(text) = fs::read_to_string(&path) else {

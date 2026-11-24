@@ -683,7 +683,8 @@ impl Labeled {
             message: format!(
                 "host registration `{}` (entry {} of `register` in `{}`) is not loaded{member}: {}",
                 entry.reference,
-                entry.index,
+                // `index` is the list offset; a person counts from 1.
+                entry.index + 1,
                 entry.declared_in.display(),
                 refusal.message
             ),
@@ -756,6 +757,18 @@ pub(crate) fn manifest_location_identity(
         None => detailed.probed_paths().next()?,
     };
     Some(location_identity(&location))
+}
+
+/// Whether the `register` entry `reference`, written in `declared_in`, names
+/// the file at `location`, whether or not either exists: the entry is
+/// compared by the location it would open, resolved from `declared_in`'s
+/// folder in `context`, so every spelling of the same file matches. This is the rule
+/// [`replace_manifest_registration`](super::init::replace_manifest_registration)
+/// uses to find the entries of a host's previous manifest, so a host can
+/// tell which entries that writer would remove.
+#[must_use]
+pub fn entry_names_location(reference: &str, declared_in: &Path, context: &FileResolutionContext, location: &Path) -> bool {
+    manifest_location_identity(reference, declared_in, context).is_some_and(|identity| identity == location_identity(location))
 }
 
 /// The identity of `path` whether or not it exists: its nearest existing

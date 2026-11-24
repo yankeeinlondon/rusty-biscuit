@@ -1,7 +1,7 @@
 //! Simplified Schema's own artifact: the prepared envelope definitions.
 //!
 //! The library's shipped sources are its kind definitions
-//! ([`ENVELOPE_DEFINITIONS`]: the three envelope definitions and the trigger
+//! ([`ENVELOPE_DEFINITIONS`]: the five envelope definitions and the trigger
 //! definition); the payload's prepared form is each envelope definition's
 //! lowered JSON Schema. The trigger definition is fingerprinted here, and a
 //! host records its prepared form in its own artifact (Darkmatter's
@@ -19,10 +19,7 @@ use serde_json::Value;
 use super::{
     AcceptedArtifact, ArtifactDescriptor, FreshLower, LowerArtifact, Loaded, PreparationMode, RecordError, Refusal,
 };
-use crate::envelope::{
-    ENVELOPE_DEFINITIONS, EnvelopeDefinitions, NAMESPACE_SCHEMA_DEFINITION_PATH, SCHEMA_DEFINITION_PATH,
-    YAML_SCHEMA_DEFINITION_PATH,
-};
+use crate::envelope::{ENVELOPE_DEFINITION_PATHS, ENVELOPE_DEFINITIONS, EnvelopeDefinitions};
 
 /// The owner name in this library's artifact header.
 pub const OWNER: &str = "simplified-schema";
@@ -30,7 +27,7 @@ pub const OWNER: &str = "simplified-schema";
 /// This library's preparation revision. Increment it whenever lowering or
 /// admission changes what the envelope definitions prepare to, then run
 /// `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 4;
+pub const PREPARATION_REVISION: u32 = 5;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "simplified-schema/lib/generated/shipped.json";
@@ -136,7 +133,7 @@ pub(crate) fn envelopes(mode: PreparationMode<'_>) -> Result<&EnvelopeDefinition
 
 /// Checks the payload's records and builds the definitions from them.
 fn accept_payload(_: &super::Acceptance<'_>, payload: EnvelopePayload) -> Result<EnvelopeDefinitions, RecordError> {
-    let expected = [SCHEMA_DEFINITION_PATH, YAML_SCHEMA_DEFINITION_PATH, NAMESPACE_SCHEMA_DEFINITION_PATH];
+    let expected = ENVELOPE_DEFINITION_PATHS;
     if payload.definitions.len() != expected.len() {
         return Err(RecordError::new(
             "/definitions",
@@ -159,10 +156,8 @@ fn accept_payload(_: &super::Acceptance<'_>, payload: EnvelopePayload) -> Result
         }
         lowered.push(Arc::new(record.json_schema));
     }
-    let namespace_schema = lowered.pop().expect("three definitions");
-    let yaml_schema = lowered.pop().expect("three definitions");
-    let schema = lowered.pop().expect("three definitions");
-    Ok(EnvelopeDefinitions::from_lowered(schema, yaml_schema, namespace_schema))
+    let lowered = lowered.try_into().expect("one record per envelope definition");
+    Ok(EnvelopeDefinitions::from_lowered(lowered))
 }
 
 /// The payload of freshly prepared `envelopes`, with every generation check
@@ -173,16 +168,15 @@ fn accept_payload(_: &super::Acceptance<'_>, payload: EnvelopePayload) -> Result
 /// A message when a definition does not satisfy its own contract.
 pub(crate) fn prepare_payload(envelopes: &EnvelopeDefinitions) -> Result<EnvelopePayload, String> {
     envelopes.check_contracts().map_err(|error| error.to_string())?;
-    let (schema, yaml_schema, namespace_schema) = envelopes.json_schemas();
     Ok(EnvelopePayload {
-        definitions: vec![
-            EnvelopeDefinitionRecord { identity: SCHEMA_DEFINITION_PATH.into(), json_schema: schema.clone() },
-            EnvelopeDefinitionRecord { identity: YAML_SCHEMA_DEFINITION_PATH.into(), json_schema: yaml_schema.clone() },
-            EnvelopeDefinitionRecord {
-                identity: NAMESPACE_SCHEMA_DEFINITION_PATH.into(),
-                json_schema: namespace_schema.clone(),
-            },
-        ],
+        definitions: ENVELOPE_DEFINITION_PATHS
+            .iter()
+            .zip(envelopes.json_schemas())
+            .map(|(identity, json_schema)| EnvelopeDefinitionRecord {
+                identity: (*identity).into(),
+                json_schema: json_schema.clone(),
+            })
+            .collect(),
     })
 }
 

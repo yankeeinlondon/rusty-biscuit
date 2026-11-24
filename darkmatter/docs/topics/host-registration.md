@@ -67,9 +67,11 @@ A host whose manifest moved calls
 instead. Every entry naming `old_path` or the new manifest, in any spelling
 (`~/…`, an absolute path, or a path relative to the configuration file) and
 even when the old file no longer exists, is replaced: the first becomes the
-new reference as written, the rest are removed, and with none the new
-reference is appended. Other entries and comments are kept, and a file that
-already lists the new reference once writes nothing:
+new reference as written and keeps the comment on its line, the rest are
+removed together with the comment on each one's line, and with none the new
+reference is appended. Other entries, and every comment not on a removed
+entry's line (one on its own line above it included), are kept, and a file
+that already lists the new reference once writes nothing:
 
 ```yaml
 # before: replace_manifest_registration(…, "~/.acme/registration/manifest.yaml", ~/.acme/host.yaml)
@@ -80,6 +82,21 @@ register:
 register:
     - ~/tools/mine.yaml
     - ~/.acme/registration/manifest.yaml       # Acme
+```
+
+To report such a leftover before writing anything, a host asks
+`darkmatter::config::registration::entry_names_location(reference, declared_in, context, old_path)`
+for each `register` entry it loaded. It answers with the rule the writer
+uses to pick the entries it replaces, so a diagnostic and the edit agree
+on every spelling, whether or not `old_path` still exists:
+
+```rust
+// ~/.darkmatter.yaml lists `./.acme/host.yaml`; ~/.acme/host.yaml was deleted
+for entry in file.registrations() {
+    if entry_names_location(&entry.reference, &entry.declared_in, &context, &old) {
+        // entry.index and entry.at locate it; replace_manifest_registration removes it
+    }
+}
 ```
 
 An explicit repair that must never create a configuration file (Claudine's
@@ -850,8 +867,12 @@ empty. A formatted warning with a position starts with it, as
 `path:line:column:` (the path written with forward slashes):
 
 ```text
-/home/me/.acme/schemas/library.yaml:4:15: host registration `./.acme/darkmatter-host.yaml` (entry 0 of `register` in `/home/me/.darkmatter.yaml`) is not loaded at `files[2]`: imported by `files[0]` (`schemas/widget.yaml`): …
-``` `md compose`, `md clean`, `md schema validate`, and `md schema triggers`
+/home/me/.acme/schemas/library.yaml:4:15: host registration `./.acme/darkmatter-host.yaml` (entry 1 of `register` in `/home/me/.darkmatter.yaml`) is not loaded at `files[2]`: imported by `files[0]` (`schemas/widget.yaml`): …
+```
+
+The entry number counts the `register` list of the named file from 1, as
+you read it: the second item is entry 2, however its path is spelled.
+`md compose`, `md clean`, `md schema validate`, and `md schema triggers`
 also report the selection warnings of the documents they judge.
 
 | Code | When |

@@ -6,6 +6,7 @@
 mod claimed_values;
 mod alias_positions;
 mod bundle_resolution;
+mod callable_catalog_envelopes;
 mod closed_roots;
 mod coercion_core;
 mod container_contracts;

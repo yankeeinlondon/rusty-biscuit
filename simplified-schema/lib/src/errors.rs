@@ -62,6 +62,20 @@ pub struct GrammarRelated {
     pub arm: Option<usize>,
 }
 
+/// Another location a [`SchemaError::CallableCatalog`] failure involves:
+/// the earlier declaration a duplicate or colliding name conflicts with, or
+/// the first spelling of a repeated key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogRelated {
+    /// What the location is, as an editor would label it.
+    pub message: String,
+    /// The file `span` is a byte range of: the catalog itself, another
+    /// catalog of the same host, or a built-in catalog's identity.
+    pub file: PathBuf,
+    /// Byte range in `file`'s text; `None` when only the file is known.
+    pub span: Option<Range<usize>>,
+}
+
 /// One reference of a rejected [`SchemaError::NonDescendingCycle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycleReference {
@@ -188,6 +202,11 @@ pub enum NotSchemaReason {
     /// for a host's global catalog, so it is neither a `$schema` target nor
     /// a `Name@file` import source, and its `types` are private to it.
     NamespaceCatalog,
+    /// A `kind: expression-schema` or `kind: mutation-schema` document,
+    /// well formed or not: it describes callable signatures for a callable
+    /// catalog, so it is neither a `$schema` target nor a `Name@file` import
+    /// source, and its `types` are private to it.
+    CallableCatalog,
     /// A file claiming the `kind: schema-trigger` envelope, well formed or
     /// not: a trigger activates by placement and match, so it is neither a
     /// `$schema` target nor a `Name@file` import source. A trigger payload or
@@ -216,6 +235,7 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly
             | NotSchemaReason::SelectedByKind
             | NotSchemaReason::NamespaceCatalog
+            | NotSchemaReason::CallableCatalog
             | NotSchemaReason::TriggerEnvelope
             | NotSchemaReason::RootUnionImport
             | NotSchemaReason::ReferenceImport => true,
@@ -231,7 +251,7 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
             NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
             NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
-            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog => {
+            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog | NotSchemaReason::CallableCatalog => {
                 Some("move shared types into a `kind: schema` file and import them from there")
             }
             NotSchemaReason::TriggerEnvelope => Some("reference the trigger's payload file instead"),
@@ -263,6 +283,10 @@ impl fmt::Display for NotSchemaReason {
             }
             NotSchemaReason::NamespaceCatalog => {
                 "it is a `namespace-schema`; it declares a host namespace and is read only by a host's catalog"
+            }
+            NotSchemaReason::CallableCatalog => {
+                "it is a callable catalog (`expression-schema` or `mutation-schema`); it describes callable \
+                 signatures and cannot be used as a document schema or a named-type import"
             }
             NotSchemaReason::TriggerEnvelope => {
                 "it is a `schema-trigger`; trigger schemas activate by placement and match, never by reference"
@@ -721,6 +745,23 @@ pub enum SchemaError {
         #[source]
         source: Option<Box<SchemaError>>,
         span: Option<Range<usize>>,
+    },
+
+    /// A callable catalog (`kind: expression-schema` or
+    /// `kind: mutation-schema`) fails a check of its callables: a missing or
+    /// disagreeing category, a callable mixed with an ordinary type, a
+    /// duplicate or colliding name, an invalid overload. `span` is the byte
+    /// range of the failing declaration or field in `path`'s text, `None`
+    /// when only the file is known; `related` holds the other locations a
+    /// conflict involves (the earlier declaration), empty otherwise. Every
+    /// consumer (registration, `md schema validate`, the editor) reports
+    /// this one judgment.
+    #[error("invalid callable catalog `{}`: {message}", path.display())]
+    CallableCatalog {
+        path: PathBuf,
+        message: String,
+        span: Option<Range<usize>>,
+        related: Vec<CatalogRelated>,
     },
 
     /// A `$schema` value is a remote URL; v1 only supports local references.
@@ -1598,6 +1639,25 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::new(format!("<dim>Reason:</dim> {}", Prose::escape_text(message))),
                 ])
                 .hint("Fix the schema so it satisfies the Draft 2020-12 meta-schema."),
+
+            SchemaError::CallableCatalog { path, message, related, .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "callable catalog invalid"))
+                .body(
+                    std::iter::once(Prose::new(format!(
+                        "<cyan>{}</cyan>: {}",
+                        Prose::escape_text(&path.display().to_string()),
+                        Prose::escape_text_outside_code_spans(message)
+                    )))
+                    .chain(related.iter().map(|related| {
+                        Prose::new(format!(
+                            "<dim>Related:</dim> {} <dim>({})</dim>",
+                            Prose::escape_text_outside_code_spans(&related.message),
+                            Prose::escape_text(&related.file.display().to_string())
+                        ))
+                    }))
+                    .collect::<Vec<_>>(),
+                )
+                .hint("Fix the declaration at the reported location; a callable catalog is checked by the host that reads it."),
 
             SchemaError::SchemaDocument { path, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

@@ -891,13 +891,24 @@ pub(crate) fn expand_named_types_searched(
 ///
 /// ## Errors
 ///
-/// The same named-type resolution errors as [`expand_named_types`].
+/// The same named-type resolution errors as [`expand_named_types`], and
+/// [`NotSchemaReason::CallableCatalog`] for a callable catalog, whose types
+/// are checked by the host's catalog reader, never expanded here.
 pub fn check_standalone_named_types(
     document: &StandaloneSchemaDocument,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<Vec<PathBuf>, SchemaError> {
+    // A callable catalog's helpers are private and its callables are not
+    // types: it is never expanded as an import library.
+    if document.envelope.is_callable_catalog() {
+        return Err(SchemaError::NotASchemaDocument {
+            path: document.path.clone(),
+            reason: NotSchemaReason::CallableCatalog,
+            site: None,
+        });
+    }
     let base_dir = document.path.parent().unwrap_or_else(|| Path::new("."));
     let mut imports = BTreeSet::new();
     if let Some(schema) = document.schema() {
@@ -1661,18 +1672,20 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
 /// [`parse_standalone_schema_document`] for a file named as a `$schema`
 /// target or a `Name@file` import source, where a `kind: yaml-schema`
 /// document is refused as selected by `kind`
-/// ([`NotSchemaReason::SelectedByKind`]) and a `kind: namespace-schema`
-/// document as a catalog input ([`NotSchemaReason::NamespaceCatalog`]),
-/// whether or not its envelope is well formed: naming it is the mistake to
-/// report. Hosts reading a
+/// ([`NotSchemaReason::SelectedByKind`]), a `kind: namespace-schema`
+/// document as a catalog input ([`NotSchemaReason::NamespaceCatalog`]), and a
+/// `kind: expression-schema` or `kind: mutation-schema` document as a
+/// callable catalog ([`NotSchemaReason::CallableCatalog`]), whether or not
+/// its envelope is well formed: naming it is the mistake to report. Every
+/// disk, embedded, and bundle read of a referenced file goes through here. Hosts reading a
 /// referenced file themselves (an editor's import catalog) use this too.
 ///
 /// ## Errors
 ///
 /// As [`parse_standalone_schema_document`], plus
 /// [`SchemaError::NotASchemaDocument`] with
-/// [`NotSchemaReason::SelectedByKind`] or
-/// [`NotSchemaReason::NamespaceCatalog`].
+/// [`NotSchemaReason::SelectedByKind`], [`NotSchemaReason::NamespaceCatalog`],
+/// or [`NotSchemaReason::CallableCatalog`].
 pub fn parse_referenced_schema_document(
     text: &str,
     path: &Path,
@@ -1695,6 +1708,9 @@ pub fn parse_referenced_schema_document_with_mode(
         let reason = match envelope {
             StandaloneSchemaEnvelope::YamlSchema => NotSchemaReason::SelectedByKind,
             StandaloneSchemaEnvelope::NamespaceSchema => NotSchemaReason::NamespaceCatalog,
+            StandaloneSchemaEnvelope::ExpressionSchema | StandaloneSchemaEnvelope::MutationSchema => {
+                NotSchemaReason::CallableCatalog
+            }
             StandaloneSchemaEnvelope::Pure | StandaloneSchemaEnvelope::Tagged => return None,
         };
         Some(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason, site: None })

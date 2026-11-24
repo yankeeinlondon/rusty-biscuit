@@ -20,6 +20,7 @@
 //! | `schema-trigger` | the `match` grammar: `$path` globs, empty or vacuous `match`, `min-match` count bounds, match-safe conditions |
 //! | `yaml-schema` | the same parse; its export prepares and claims a finite set of kinds |
 //! | `namespace-schema` | the preparation a host's registration runs ([`crate::resolve::prepare_namespace_document`]): its labels' exact forms (an explicit `null` `description` or `types` is refused), a `$schema` written as one mapping, and its resolution with the file's private `types` |
+//! | `expression-schema`, `mutation-schema` | syntax only: the same parse without envelope admission (labels' exact forms, null entries, category entries, undeclared categories, each type string's grammar, duplicate overloads); nothing is resolved or imported, and the callable rules belong to the host's catalog reader |
 //!
 //! A namespace file is the one exception to the rule above: its check is
 //! the registration's own preparation, which admits the envelope against
@@ -50,7 +51,8 @@ use super::declaration::{claim_segments, source_path_segments};
 use super::load::{LoadedYaml, locating_problem};
 
 /// The document kinds that have checks here.
-pub const CHECKED_KINDS: &[&str] = &["schema", "schema-trigger", "yaml-schema", "namespace-schema"];
+pub const CHECKED_KINDS: &[&str] =
+    &["schema", "schema-trigger", "yaml-schema", "namespace-schema", "expression-schema", "mutation-schema"];
 
 /// The checked kinds whose checks resolve what the document imports, so
 /// read files; the `schema-trigger` checks are passive.
@@ -78,6 +80,7 @@ pub(crate) fn kind_checks(
         "schema" => schema_checks(body, path, accepted, schema_roots, context, sources),
         "yaml-schema" => yaml_schema_checks(body, path, accepted, schema_roots, context, sources),
         "namespace-schema" => namespace_checks(body, path, context, sources),
+        "expression-schema" | "mutation-schema" => callable_catalog_checks(body, path, accepted),
         _ => Vec::new(),
     };
     findings.into_iter().map(|finding| finding.at_reference(text, path, loaded).into_problem(text, loaded)).collect()
@@ -233,6 +236,16 @@ fn yaml_schema_checks(
     match crate::claimed_values(&resolved, "kind") {
         Ok(_) => Vec::new(),
         Err(problem) => vec![Finding::at(claim_segments(&problem), &super::registry::claim_error(path, &problem, body))],
+    }
+}
+
+/// A callable catalog's syntax: the parse of the accepted document, which
+/// reads no file. Named types are not expanded; a catalog is never an import
+/// library.
+fn callable_catalog_checks(body: &str, path: &Path, accepted: &serde_json::Value) -> Vec<Finding> {
+    match crate::parse_selected_standalone_schema_document(body, path, accepted) {
+        Ok(_) => Vec::new(),
+        Err(error) => vec![definition_failure(body, &error)],
     }
 }
 
