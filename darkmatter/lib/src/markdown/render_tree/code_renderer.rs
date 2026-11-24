@@ -401,14 +401,15 @@ fn build_code_meta(lang: &str, meta: Option<&str>) -> CodeBlockMeta {
     })
 }
 
-/// Extension-hint namespace carrying [`CodeBlockMeta::start_line`] across the
-/// render tree. The fence info string deliberately has no start-line key, so
-/// a [`CodeBlock`](crate::markdown::code_block::CodeBlock) projects the value
-/// here instead of into its serialized meta.
+/// Extension-hint namespace for source numbering on code blocks constructed
+/// in Rust. Numbering offsets and excerpt rows have no fence syntax.
 pub(crate) const CODE_HINTS: HintNamespace = HintNamespace("darkmatter.code");
 
 /// Hint key under [`CODE_HINTS`] for the block's first line number.
 pub(crate) const START_LINE_HINT: &str = "start_line";
+
+/// Hint key for each excerpt row's source line, with null for gaps.
+pub(crate) const SOURCE_LINES_HINT: &str = "source_lines";
 
 /// Parses the fence meta and applies any [`START_LINE_HINT`] carried on
 /// `attrs`.
@@ -500,7 +501,13 @@ mod surface_probe {
 /// A bounded width is the band width. Under an unbounded width nothing fills: the band is the block's
 /// longest line plus its padding (the left gutter or one-column pad, and a
 /// one-column right pad).
-fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: bool, first_line: usize) -> u32 {
+fn code_band_width(
+    width: renderable::output::Width,
+    value: &str,
+    line_numbers: bool,
+    first_line: usize,
+    last_source_line: Option<usize>,
+) -> u32 {
     if let Some(columns) = width.as_columns() {
         return columns;
     }
@@ -511,7 +518,11 @@ fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: 
         .max()
         .unwrap_or(0);
     let gutter = if line_numbers {
-        format!("{}", (first_line + lines.len()).saturating_sub(1)).len() + 3
+        last_source_line
+            .unwrap_or_else(|| (first_line + lines.len()).saturating_sub(1))
+            .to_string()
+            .len()
+            + 3
     } else {
         1
     };
@@ -544,6 +555,14 @@ impl CodeRenderer for TerminalCodeRenderer {
         let code_theme = surface.code_theme;
         let page_mode = surface.page_mode;
         let code_meta = build_node_code_meta(lang.unwrap_or(""), meta, attrs);
+        let source_lines: Option<Vec<Option<usize>>> = if attrs.data.is_empty() {
+            None
+        } else {
+            attrs
+                .get_hint(CODE_HINTS, SOURCE_LINES_HINT)
+                .and_then(|hint| serde_json::from_value(hint.clone()).ok())
+                .filter(|rows: &Vec<_>| rows.len() == value.lines().count())
+        };
         let language = lang.unwrap_or("");
         let grammar = LanguageGrammar::from_token_or_plain_text(language);
         let options = TerminalOptions {
@@ -584,6 +603,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             value,
             options.include_line_numbers || code_meta.line_numbering,
             code_meta.first_line(),
+            source_lines.as_ref().and_then(|rows| rows.last().copied().flatten()),
         );
         let body = render_terminal_code_block(
             value,
@@ -594,6 +614,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             color_mode,
             Some(band_width),
             None,
+            source_lines.as_deref(),
         )
         .ok()?;
 
@@ -690,11 +711,11 @@ mod tests {
     #[test]
     fn an_unbounded_code_band_hugs_its_longest_line() {
         use renderable::output::Width;
-        assert_eq!(code_band_width(Width::Columns(80), "x", false, 1), 80);
+        assert_eq!(code_band_width(Width::Columns(80), "x", false, 1, None), 80);
         // One-column left pad, the longest line, one-column right pad.
-        assert_eq!(code_band_width(Width::Unlimited, "ab\nabcdef", false, 1), 8);
+        assert_eq!(code_band_width(Width::Unlimited, "ab\nabcdef", false, 1, None), 8);
         // A line-number gutter (`N │ `) replaces the left pad.
-        assert_eq!(code_band_width(Width::Source, "ab\nabcdef", true, 9), 2 + 3 + 6 + 1);
+        assert_eq!(code_band_width(Width::Source, "ab\nabcdef", true, 9, None), 2 + 3 + 6 + 1);
     }
     use crate::markdown::Markdown;
     use renderable::color::ColorDepth;

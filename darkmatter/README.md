@@ -12,6 +12,7 @@ last_updated: 2026-11-06
 - Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
 - [Load data files](./docs/topics/loading-data.md) (YAML, JSON, JSON Lines, CSV, TSV, TOML, JSON5) into an expression, checked against a type: `load_data("hosts.csv", "{ name: string, port: number }[]")`
 - Render to [multiple output formats](./docs/topics/output-formats.md)
+    - Render [focused terminal code excerpts](./docs/topics/code-blocks.md) with source line numbers and gap markers in one panel
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`, including an [`edit`](./docs/topics/lifecycle/index.md#editing-a-file-edit) action that pauses the run while you write a file in your editor
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
 - [Shell approval](./docs/inline/preflight-checks.md) supports exact commands and

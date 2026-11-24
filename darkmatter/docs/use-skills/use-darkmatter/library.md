@@ -224,3 +224,7 @@ lifecycle topic pages in the canonical docs cover the details.
 browser output directly: `DarkmatterPage` (page frame: margins, max width,
 background), `CodeBlock`, `TocTree`, `FileTree`, `DeltaReport`, and
 `ValidationReportView`.
+
+`CodeBlock::render_terminal_excerpt` takes source regions as
+`(first_line, text)` pairs in source order and renders them in one panel
+with source line numbers and gap markers.

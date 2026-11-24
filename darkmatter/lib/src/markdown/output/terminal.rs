@@ -936,6 +936,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -959,6 +960,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1006,6 +1008,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -1040,6 +1043,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1082,6 +1086,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1128,6 +1133,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -1166,6 +1172,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1211,6 +1218,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1259,6 +1267,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -1294,6 +1303,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -1355,6 +1365,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -1399,6 +1410,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );

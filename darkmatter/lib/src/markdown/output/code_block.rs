@@ -38,6 +38,8 @@ use syntect::util::LinesWithEndings;
 ///   color instead of clearing to the terminal edge with `\x1b[K`. This is
 ///   what component `Layout.max_width`, `width`, and `padding` need so the
 ///   code block body honours its resolved width.
+/// * `source_lines` - One entry per display row for a source excerpt. A
+///   missing number marks an elision row rather than a line of code.
 ///
 /// ## Returns
 ///
@@ -55,6 +57,7 @@ pub(crate) fn render_terminal_code_block(
     color_mode: ColorMode,
     target_width: Option<u32>,
     override_bg: Option<Color>,
+    source_lines: Option<&[Option<usize>]>,
 ) -> Result<String, MarkdownError> {
     let syntax_set = highlighter.syntax_set_for(language);
     let syntax = language
@@ -74,19 +77,28 @@ pub(crate) fn render_terminal_code_block(
     // Determine line number width
     let first_line = meta.first_line();
     let line_number_width = if options.include_line_numbers || meta.line_numbering {
-        format!("{}", (first_line + lines.len()).saturating_sub(1)).len()
+        let last_line = source_lines
+            .and_then(|rows| rows.last().copied().flatten())
+            .unwrap_or_else(|| (first_line + lines.len()).saturating_sub(1));
+        last_line.to_string().len()
     } else {
         0
     };
 
     // Add top padding row
-    output.push_str(&emit_padding_row(bg_color, target_width));
+    output.push_str(&emit_background_row(bg_color, target_width, ""));
 
     // Create highlighter for this code block
     let mut hl = HighlightLines::new(syntax, theme);
 
     for (idx, line) in lines.iter().enumerate() {
-        let line_number = first_line + idx;
+        let Some(line_number) = source_lines.map_or_else(|| Some(first_line + idx), |rows| rows[idx]) else {
+            let marker = format!("{:width$} ⋮", "", width = line_number_width);
+            output.push_str(&emit_background_row(bg_color, target_width, &marker));
+            // The omitted source could have closed a multiline token.
+            hl = HighlightLines::new(syntax, theme);
+            continue;
+        };
 
         // Determine if this line should be highlighted
         let is_highlighted = meta.highlight.contains(line_number);
@@ -363,26 +375,19 @@ pub(crate) fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Co
     adjust_background(theme_bg, color_mode, (30, 25, 0), (20, 15, 0))
 }
 
-/// Emits a padding row with the specified background color.
-///
-/// The padding row consists of:
-/// - Setting the background color
-/// - Either painting exactly `target_width` spaces, or clearing to end of line
-///   (`\x1b[K`) when no width constraint applies
-/// - Resetting all attributes (\x1b[0m)
-/// - Adding a newline
-#[inline]
-pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u32>) -> String {
+/// Paints an unhighlighted row across the code panel.
+fn emit_background_row(bg_color: Color, target_width: Option<u32>, text: &str) -> String {
+    let foreground = if text.is_empty() { "" } else { "\x1b[38;2;128;128;128m" };
     match target_width {
         Some(w) => format!(
-            "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m\n",
+            "\x1b[0m\x1b[48;2;{};{};{}m{foreground}{text}{}\x1b[0m\n",
             bg_color.r,
             bg_color.g,
             bg_color.b,
-            " ".repeat(w as usize)
+            " ".repeat(w.saturating_sub(biscuit_terminal::utils::block_constraint::visible_width(text)) as usize)
         ),
         None => format!(
-            "\x1b[0m\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
+            "\x1b[0m\x1b[48;2;{};{};{}m{foreground}{text}\x1b[K\x1b[0m\n",
             bg_color.r, bg_color.g, bg_color.b
         ),
     }
@@ -438,6 +443,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -464,6 +470,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         );
@@ -496,6 +503,7 @@ mod tests {
             ColorMode::Light,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -522,6 +530,7 @@ mod tests {
             ColorMode::Dark,
             None,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -546,6 +555,7 @@ mod tests {
             &meta,
             ColorMode::Light,
             Some(40),
+            None,
             None,
         )
         .expect("render code block");
@@ -613,7 +623,7 @@ mod tests {
             b: 70,
             a: 255,
         };
-        let row = emit_padding_row(bg, None);
+        let row = emit_background_row(bg, None, "");
         assert!(row.contains("\x1b[48;2;50;60;70m"));
         assert!(row.contains("\x1b[K"));
         assert!(row.contains("\x1b[0m"));
@@ -628,7 +638,7 @@ mod tests {
             b: 70,
             a: 255,
         };
-        let row = emit_padding_row(bg, Some(20));
+        let row = emit_background_row(bg, Some(20), "");
         assert!(row.contains("\x1b[48;2;50;60;70m"));
         // Should not use clear-to-EOL when constrained.
         assert!(!row.contains("\x1b[K"));
@@ -656,6 +666,7 @@ mod tests {
             &meta,
             ColorMode::Dark,
             Some(20),
+            None,
             None,
         )
         .unwrap();
@@ -692,6 +703,7 @@ mod tests {
             &test_options(),
             &meta,
             ColorMode::Dark,
+            None,
             None,
             None,
         )

@@ -90,6 +90,12 @@ fence key, so `CodeBlock::code_node` carries it across the render tree as the
 reads only when the node's `data` bag is non-empty (keeping the
 `structural_gate` zero-access check green for ordinary fences).
 
+`CodeBlock::render_terminal_excerpt` takes selected source regions and
+renders one panel. Its `darkmatter.code.source_lines` hint assigns a source
+line to each displayed code row and marks elision rows. The terminal fold
+aligns gaps to the shared gutter and restarts syntax highlighting across each
+gap, where the intervening source is unavailable.
+
 The CLI command is:
 
 ```text
