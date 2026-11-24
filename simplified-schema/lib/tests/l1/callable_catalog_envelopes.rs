@@ -343,6 +343,15 @@ fn the_kind_checks_are_syntax_only_and_located() {
     let line = text.lines().position(|line| line.contains("Bad: string(min(1)")).expect("edited") + 1;
     assert_eq!(problems[0].line, u32::try_from(line).ok(), "{problems:?}");
 
+    // A host's soft definition may have converted the metadata; the check
+    // still refuses what was written.
+    let numbered = edited("description:", "description: 5");
+    let problems = check("expression-schema", &numbered);
+    assert!(problems.iter().any(|problem| problem.path == "/description"), "{problems:?}");
+    let entry = EXPRESSION.replace("    - Text -> Transform text.\n", "    - Text -> Transform text.\n    - 7\n");
+    let problems = check("expression-schema", &entry);
+    assert!(problems.iter().any(|problem| problem.message.contains("categories[1]")), "{problems:?}");
+
     // An import is not resolved: the catalog's types are never expanded.
     let importing = edited("    Label:", "    Label: Owner@./absent.yaml");
     assert!(check("expression-schema", &importing).is_empty(), "nothing is read");

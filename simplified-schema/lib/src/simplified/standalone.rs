@@ -744,7 +744,9 @@ pub(crate) fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAt
 /// property admits `null`: a `name` on a `kind: schema` document must be a
 /// string, a namespace schema's `description` and `types` are not `null`,
 /// and a callable catalog's `description`, `categories`, `types`, and each
-/// `types` entry are not `null`. Located at the authored value.
+/// `types` entry are not `null`, and its written `description` and category
+/// entries are strings (never converted, whichever definition judged the
+/// shape). Located at the authored value.
 fn check_written_labels(recognized: &RecognizedStandalone, source: &str, path: &Path) -> Result<(), SchemaError> {
     let map = recognized.mapping();
     let refused = |key: &str, message: String| SchemaError::SchemaDocument {
@@ -772,6 +774,23 @@ fn check_written_labels(recognized: &RecognizedStandalone, source: &str, path: &
                     let message = if key == "description" { "must not be null; omit it instead" } else { "must not be null" };
                     return Err(refused(key, message.into()));
                 }
+            }
+            // Strict on every path, a host's selected (soft) definition
+            // included: written metadata is never converted.
+            if let Some(description) = map.get("description").filter(|value| !value.is_string()) {
+                return Err(refused("description", format!("must be a string, got {}", yaml_kind(description))));
+            }
+            if let Some(entries) = map.get("categories").and_then(YamlValue::as_sequence)
+                && let Some((index, entry)) = entries.iter().enumerate().find(|(_, entry)| !entry.is_string())
+            {
+                let positions = crate::PositionMap::deferred(std::sync::Arc::from(source));
+                let problem = crate::yaml_documents::locating_problem(&["categories".to_string(), index.to_string()]);
+                return Err(SchemaError::SchemaDocument {
+                    path: path.to_path_buf(),
+                    message: format!("`categories[{index}]`: a category entry must be a string, got {}", yaml_kind(entry)),
+                    source: None,
+                    span: positions.byte_range(&problem),
+                });
             }
             // A bare null entry declares nothing; the null type is the
             // quoted string `"null"`.
