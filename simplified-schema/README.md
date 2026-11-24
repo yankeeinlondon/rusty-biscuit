@@ -45,8 +45,12 @@ $schema:
     name: string(required) -> the employee's name
     age: number(required) -> the employee's age
     employed-since: date -> the date the employee's employment started
-    favorite-color: enum(red,blue,green;required;eager) -> the employee's favorite color
+    favorite-color: enum(red, blue gray, green; required; eager) -> the employee's favorite color
 ```
+
+Multiword values like `blue gray` can be written bare in
+[`enum(...)`](./docs/topics/language/types.md#enumerations) and
+[`suggest(...)`](./docs/topics/language/types.md#advisory-suggestions-suggest).
 
 > In this example we see: 
 > 

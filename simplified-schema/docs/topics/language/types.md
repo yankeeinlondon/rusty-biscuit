@@ -27,7 +27,7 @@ Every property value follows one of four shapes:
 | `{type} \| {type}`                         | `id: "string \| number"`                             |
 | `tuple([{type}, ...])`                     | `point: "tuple([number, number])"`                   |
 
-- **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
+- **Whitespace** between syntax tokens inside `(...)` and `{ ... }` is insignificant. Inside a bare `enum(...)` member or `suggest(...)` candidate, interior whitespace is part of the value. Quote the whole scalar when YAML would otherwise give its punctuation a special meaning.
 - **Multiple constraints** are separated by `;`.
 - **Optional by default** — properties are optional unless `required` appears in the constraint list. A missing key and an explicit `null` are the same value, so an optional property accepts both. `required` asks whether the key was **written**: a written `null` meets it and is then judged by the type, which rejects it unless the type admits `null` (`null`, `unknown`, or a union with such an arm). See [Null-Admitting Properties](#null-admitting-properties) and [Missing keys, `null`, and `required`](../validation.md#missing-keys-null-and-required). Add `not-empty` to refuse an empty written value (`""`, `[]`, `{}`); see [Empty Values](#empty-values-not-empty).
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
@@ -573,7 +573,7 @@ A value must satisfy every pattern. When an atom has more than one pattern-produ
 
 ```yaml
 $schema:
-    color: string(suggest(red, green, "blue gray"))
+    color: string(suggest(red, green, blue gray))
     port: number(integer; suggest(80, 443))
     ratio: number(min(0); max(1); suggest(0.25, 0.5, 1))
     tags: string(suggest(alpha, beta))[]
@@ -604,7 +604,11 @@ Each property declaration in a separate root-level schema-union arm is an indepe
 
 #### Argument Grammar
 
-Candidate arguments reuse the existing SimplifiedSchema argument delimiter, quoting, and escaping grammar — the feature introduces no new string literal syntax. The parser retains the exact source span and decoded text for every candidate.
+Commas separate candidates. A bare candidate such as `blue gray` preserves
+its interior whitespace and trims surrounding ASCII whitespace. Use single
+or double quotes to preserve whitespace at either edge or include commas,
+semicolons, or parentheses, as in `suggest(' padded ', "blue, gray")`.
+The parser retains the source span and decoded text for every candidate.
 
 #### String Interpretation
 
@@ -678,12 +682,15 @@ DMLS reads suggestions from the SimplifiedSchema representation via `suggestions
 
 ### Enumerations
 
-`enum` requires a positional comma list of members; other constraints follow after a `;`. Members with whitespace, commas, parentheses, or `;` must be single-quoted.
+`enum` takes comma-separated members, with other constraints after a `;`.
+Bare members preserve their interior whitespace and trim surrounding ASCII
+whitespace. Use single or double quotes to preserve whitespace at either
+edge or include commas, parentheses, or semicolons.
 
 ```yaml
 $schema:
     color:  enum(red,green,blue; required)
-    status: "enum(draft, published, archived; default(draft))"
+    status: "enum(draft, in review, published; default(draft))"
     spaced: "enum('a, b', 'c; d')"
 ```
 
