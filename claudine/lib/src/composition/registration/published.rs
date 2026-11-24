@@ -2,7 +2,10 @@
 //! listing them.
 
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::OnceLock;
+
+use darkmatter::config::registration::{HOST_REGISTRATION_CODE, bundle::SnapshotRefusal};
 
 use crate::composition::inventory::{self, MemberKind};
 
@@ -161,16 +164,16 @@ impl RegistrationInventory {
     ///
     /// ## Errors
     ///
-    /// Every refusal Darkmatter's verified bundle preparation reports (missing,
-    /// stray, or stale companions, invalid catalogs, or `mutation-schema`
-    /// members).
+    /// Refuses a source using the reserved name `manifest.yaml` in any ASCII
+    /// case. Other refusals come from Darkmatter's verified bundle preparation,
+    /// including missing, stray, or stale companions and invalid catalogs.
     #[doc(hidden)]
     pub fn from_embedded_sources<S, C>(
         version: impl Into<String>,
         yaml_sources: S,
         lifecycle: impl Into<Cow<'static, [u8]>>,
         companions: C,
-    ) -> Result<Self, Vec<darkmatter::config::registration::bundle::SnapshotRefusal>>
+    ) -> Result<Self, Vec<SnapshotRefusal>>
     where
         S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
         C: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
@@ -184,7 +187,7 @@ impl RegistrationInventory {
         lifecycle: impl Into<Cow<'static, [u8]>>,
         companions: C,
         prepared: &dyn Fn(&str) -> Option<simplified_schema::triggers::assemble::ResolvedPayload>,
-    ) -> Result<Self, Vec<darkmatter::config::registration::bundle::SnapshotRefusal>>
+    ) -> Result<Self, Vec<SnapshotRefusal>>
     where
         S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
         C: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
@@ -204,6 +207,22 @@ impl RegistrationInventory {
         ));
         for (path, bytes) in companions {
             files.push(PublishedFile::new(path, FileKind::ExpressionFacts, None::<&'static str>, bytes));
+        }
+        if let Some(file) = files.iter().find(|file| file.path().eq_ignore_ascii_case(MANIFEST_FILE)) {
+            let path = file.path();
+            return Err(vec![SnapshotRefusal {
+                code: HOST_REGISTRATION_CODE,
+                message: format!("the embedded source `{path}` uses the reserved name `{MANIFEST_FILE}`"),
+                file: PathBuf::from(format!("<{}>", inventory::BUNDLE_NAME)).join(path),
+                line: None,
+                column: None,
+                line_prefix: None,
+                member: None,
+                label: None,
+                unsupported_format: None,
+                dependencies: Vec::new(),
+                candidates: Vec::new(),
+            }]);
         }
         let inventory = Self::from_members(version, files);
         crate::composition::schema::bundle::profile_of_with(&inventory, prepared)?;

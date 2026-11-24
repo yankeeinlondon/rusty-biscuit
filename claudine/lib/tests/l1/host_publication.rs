@@ -786,6 +786,42 @@ types:
     }
 
     #[test]
+    fn companion_inventory_refuses_sources_using_the_reserved_manifest_name() {
+        let home = Home::new();
+        let before = snapshot(&home.home());
+        let facts = project_facts(PROJECT_CATALOG).into_bytes();
+        for (yaml_path, companion_path) in [
+            (None, Some("manifest.yaml")),
+            (None, Some("Manifest.yaml")),
+            (Some("manifest.yaml"), None),
+            (Some("Manifest.yaml"), None),
+        ] {
+            let mut sources = base_yaml_sources();
+            let mut companions = vec![(Cow::Borrowed("schemas/project.facts.json"), Cow::Owned(facts.clone()))];
+            if let Some(path) = yaml_path {
+                sources.push((Cow::Borrowed(path), Cow::Borrowed(PROJECT_CATALOG.as_bytes())));
+            }
+            if let Some(path) = companion_path {
+                companions.push((Cow::Borrowed(path), Cow::Owned(facts.clone())));
+            }
+            let path = yaml_path.or(companion_path).unwrap();
+            let result = RegistrationInventory::from_embedded_sources(
+                "1.2.3",
+                sources,
+                inventory::LIFECYCLE_ARTIFACT,
+                companions,
+            );
+            let Err(refused) = result else {
+                panic!("source `{path}` claimed the inventory's manifest path");
+            };
+            assert_eq!(refused.len(), 1);
+            assert_eq!(refused[0].file.file_name().and_then(|name| name.to_str()), Some(path));
+            assert!(refused[0].message.contains("reserved"), "{refused:#?}");
+        }
+        assert_eq!(snapshot(&home.home()), before);
+    }
+
+    #[test]
     fn companion_inventory_refuses_missing_stray_stale_companions_and_mutation_before_any_write() {
         let home = Home::new();
         let before = snapshot(&home.home());
