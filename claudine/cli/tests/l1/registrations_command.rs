@@ -261,6 +261,21 @@ fn registrations_publish_installs_the_listing_and_a_second_publish_changes_nothi
     }
 }
 
+/// R5-F1.c2: publishing alone never edits `~/.darkmatter.yaml`, even when
+/// it lists the retired manifest beside the current one.
+#[test]
+fn registrations_publish_leaves_a_retired_register_entry_alone() {
+    let fixture = configured("registrations-publish-retired");
+    let config = fixture.home().join(".darkmatter.yaml");
+    let text = "register:\n  - ~/.acme/manifest.yaml\n  - ~/.claudine/registrations/darkmatter/manifest.yaml\n  - ~/.claudine/darkmatter-host.yaml\n";
+    common::write(&config, text);
+
+    let (success, _, stderr) = registrations(&fixture, &["publish"]);
+
+    assert!(success, "publish failed:\n{stderr}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+}
+
 #[test]
 fn registrations_publish_failure_exits_nonzero_with_the_cause_on_stderr() {
     let fixture = CliProcessFixture::named("registrations-publish-obstructed");

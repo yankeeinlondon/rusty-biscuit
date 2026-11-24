@@ -679,6 +679,58 @@ fn an_inline_register_list_is_a_manual_registration_finding_before_and_after_fix
     }
 }
 
+/// What Darkmatter reports about the registrations it reads from the
+/// fixture's configuration, as `md compose` does: one line per diagnostic.
+fn darkmatter_diagnostics(fixture: &CliProcessFixture) -> Vec<String> {
+    use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
+    let snapshot = RequestSnapshot::new(fixture.cwd()).with_home(Some(fixture.home().to_path_buf()));
+    let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).expect("a request");
+    darkmatter::config::registration::RegisteredHosts::load(request.config_snapshot(), request.resolution_context())
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| format!("{}: {}", diagnostic.file.display(), diagnostic.message))
+        .collect()
+}
+
+/// R5-F1: a retired entry left beside the current one after the retired
+/// files are gone is a fixable warning that Darkmatter also warns about;
+/// `--fix` removes it, which clears Darkmatter's warning, and a second
+/// `--fix` changes nothing.
+#[test]
+fn a_retired_register_entry_is_fixed_and_a_second_fix_changes_nothing() {
+    let fixture = healthy("doctor-retired-entry");
+    let kept = format!("{}  - ~/.acme/manifest.yaml\n", darkmatter_config());
+    common::write(&fixture.home().join(".darkmatter.yaml"), &format!("{kept}  - ~/.claudine/darkmatter-host.yaml\n"));
+    assert!(
+        darkmatter_diagnostics(&fixture).iter().any(|line| line.contains("darkmatter-host.yaml")),
+        "Darkmatter warns at the retired entry: {:#?}",
+        darkmatter_diagnostics(&fixture)
+    );
+
+    let inspected = doctor(&fixture, &["--json"]);
+
+    assert_eq!(inspected.code, Some(0), "warnings alone: {}", inspected.stdout);
+    let registration = row(&rows(&inspected), "registration").clone();
+    assert_eq!((registration["severity"].as_str(), registration["fixable"].as_bool()), (Some("warn"), Some(true)), "{registration}");
+    assert!(registration["detail"].as_str().unwrap().contains("`register` entry 3 names the retired format 1 manifest"), "{registration}");
+    assert!(!inspected.stdout.contains("darkmatter-host"), "no authored value: {}", inspected.stdout);
+
+    let fixed = doctor(&fixture, &["--fix", "--json"]);
+
+    assert_eq!(fixed.code, Some(0), "{}\n{}", fixed.stdout, fixed.stderr);
+    assert_eq!(severity(&rows(&fixed), "registration"), "ok", "{}", fixed.stdout);
+    assert_eq!(std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).unwrap(), kept);
+    let remaining = darkmatter_diagnostics(&fixture);
+    assert!(!remaining.iter().any(|line| line.contains("darkmatter-host.yaml")), "{remaining:#?}");
+    let settled = tree(fixture.home());
+
+    let again = doctor(&fixture, &["--fix", "--json"]);
+
+    assert_eq!(again.code, Some(0), "{}", again.stdout);
+    assert!(!again.stdout.contains("Repaired: "), "{}", again.stdout);
+    assert_eq!(tree(fixture.home()), settled, "a second repair is a no-op");
+}
+
 /// Starts doctor with `args` without waiting for it, so two runs can wait
 /// out the same held lock together.
 fn start_doctor(fixture: &CliProcessFixture, args: &[&str]) -> std::process::Child {

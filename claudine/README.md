@@ -309,7 +309,7 @@ permissions handoff, and `--json` prints the report for scripts. See
 [`claudine doctor`](./docs/cli/doctor.md).
 
 ```sh
-claudine doctor          # inspect; changes nothing
+claudine doctor          # inspect; changes none of your files
 claudine doctor --fix    # repair what can be repaired, then report
 ```
 

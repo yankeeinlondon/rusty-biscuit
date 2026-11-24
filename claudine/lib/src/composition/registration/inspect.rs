@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, PathIdentity, canonicalize_simplified};
 use darkmatter::config::init as dm_init;
-use darkmatter::config::load::ConfigFile;
+use darkmatter::config::load::{ConfigFile, Registration};
 use darkmatter::config::schema::ConfigScope as DarkmatterScope;
 use darkmatter::config::write::TargetChange;
 use darkmatter::yaml_edit::{YamlEditError, YamlEditErrorKind};
@@ -656,4 +656,19 @@ pub(crate) fn entry_registered(context: &FileResolutionContext, home: &Path, fil
         darkmatter::config::registration::manifest_identity(&entry.reference, &entry.declared_in, context)
             .is_ok_and(|identity| identity == expected)
     }))
+}
+
+/// The valid `register` entries of `file` that name the retired format 1
+/// manifest, `~/.claudine/darkmatter-host.yaml`, however each is spelled and
+/// whether or not that file still exists: Darkmatter's own rule for the
+/// entries its writer removes ([`dm_init::replace_manifest_registration`]),
+/// so the report, the repair's verification, and the writer agree.
+pub(crate) fn retired_entries<'a>(context: &FileResolutionContext, home: &Path, file: &'a ConfigFile) -> Vec<&'a Registration> {
+    let retired = legacy_manifest_path(home);
+    file.registrations()
+        .iter()
+        .filter(|entry| {
+            darkmatter::config::registration::entry_names_location(&entry.reference, &entry.declared_in, context, &retired)
+        })
+        .collect()
 }

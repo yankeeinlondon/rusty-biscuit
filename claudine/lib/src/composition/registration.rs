@@ -739,6 +739,7 @@ pub(crate) use removal::fail_removals;
 pub(crate) use inspect::{
     Blocker, BlockerProblem, EditLayout, EntryPrecondition, ExpectedState, Installation, ManifestLoad,
     config_target_blockers, edit_layout, entry_layout, entry_precondition, entry_registered, inspect_installation,
+    retired_entries,
 };
 pub use legacy::{CleanupError, CleanupFailure, LegacyCleanup, remove_legacy_registration};
 pub(crate) use repair::{EditFailure, RepairFailure, RepairOperation, repair_registration};

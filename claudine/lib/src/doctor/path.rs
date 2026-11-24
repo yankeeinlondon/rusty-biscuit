@@ -63,17 +63,18 @@ fn native_shell_lookups(_working_dir: &Path) -> Vec<(InstalledShell, ShellLookup
 /// The finding for a current-process lookup that found `current`, and for
 /// each installed shell's answer. A shell that is not installed has no
 /// entry and no finding.
+///
+/// The current process's hit is a finding of its own, not only the `ok`
+/// summary: a row with a shell warning is summarized by that warning, and
+/// the hit must still reach the detail.
 pub(super) fn assess(current: Option<&Path>, shells: &[(InstalledShell, ShellLookup)]) -> CheckOutcome {
-    let mut outcome = CheckOutcome::new(match current {
-        Some(found) => format!("this process finds `claudine` at {}", display_path(found)),
-        None => String::new(),
-    });
-    if current.is_none() {
-        outcome.push(
-            Finding::new(Severity::Error, Scope::General, "this process cannot find `claudine` on its PATH")
-                .remedy("add the directory that holds the installed `claudine` executable to PATH (for a Cargo install, `~/.cargo/bin`)"),
-        );
-    }
+    let current_finding = match current {
+        Some(found) => Finding::new(Severity::Ok, Scope::General, format!("this process finds `claudine` at {}", display_path(found))),
+        None => Finding::new(Severity::Error, Scope::General, "this process cannot find `claudine` on its PATH")
+            .remedy("add the directory that holds the installed `claudine` executable to PATH (for a Cargo install, `~/.cargo/bin`)"),
+    };
+    let mut outcome = CheckOutcome::new(current_finding.summary.clone());
+    outcome.push(current_finding);
     for (shell, lookup) in shells {
         outcome.push(shell_finding(shell, *lookup));
     }

@@ -232,7 +232,7 @@ fn a_superseded_user_mapper_is_corrected_in_place_without_a_command() {
     let good = "    - call:\n        command: check\n";
     let user = format!("tts: true\nactions:\n  before_tool:\n{mapper}");
     let (inside, _) = tts_row_with_repository(&user, &format!("actions:\n  before_tool:\n{good}"), true);
-    assert!(inside.detail.contains("in the user file alone, the mapper of action 0 of `before_tool`"), "{inside:#?}");
+    assert!(inside.detail.contains("in the user file alone, the mapper of action 1 of `before_tool`"), "{inside:#?}");
     assert!(
         inside.detail.contains(
             "Remedy: correct `actions.before_tool[0].call.mapper.pattern` in `~/.claudine/config.yaml` so it is a valid regular expression"

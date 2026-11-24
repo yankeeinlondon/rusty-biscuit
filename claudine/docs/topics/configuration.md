@@ -259,10 +259,12 @@ The `register` entry is Claudine's host registration: setup publishes it
 before writing either file and writes the entry last, so `md` and DMLS
 recognize Claudine documents anywhere (see
 [The published host registration](schemas.md#the-published-host-registration)).
-An entry naming the manifest earlier releases published,
-`~/.claudine/darkmatter-host.yaml`, is rewritten in place to the new path
-(even when that file no longer exists), other entries and comments are kept,
-and the old manifest and its `~/.claudine/darkmatter-host/` folder are
+Of the entries naming the new manifest or the one earlier releases
+published, `~/.claudine/darkmatter-host.yaml` (even when that file no longer
+exists), in any spelling, the first is kept, rewritten in place to the new
+path with the comment on its line, and every later one is removed together
+with the comment on its line; other hosts' entries and the remaining
+comments are kept. The old manifest and its `~/.claudine/darkmatter-host/` folder are
 removed once the entry is written. The entry is written even when the
 `permissions` handshake below reports a conflict, and a repository's
 `.darkmatter.yaml` is never changed.
@@ -332,8 +334,9 @@ failed second write leaves the original block in force. Unlike setup, it
 edits only existing, valid files (a `.darkmatter.yaml` whose `register`
 setting is invalid is left for you to correct, since Darkmatter's writer
 would refuse the edited file, and a scope whose edit would reach an inline
-root mapping, which Darkmatter's format-preserving editor cannot change in
-place, is left for you to rewrite in block form), never writes through a
+root mapping or a `permissions` value with an anchor or tag, which
+Darkmatter's format-preserving editor cannot change in place, is left for
+you to rewrite in block form), never writes through a
 symbolic link, never
 writes a reference to a Claudine file that a link places outside its scope
 (your home, or the repository), and never resolves a conflict: two different blocks stay an error until you

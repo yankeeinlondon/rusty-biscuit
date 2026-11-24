@@ -780,6 +780,23 @@ fn installed_registration_setup_replaces_a_legacy_entry_whose_manifest_is_gone()
     assert_one_claudine_profile(&fixture.hosts(&fixture.context()));
 }
 
+/// R5-F1.c2: beside the current entry and another host's, a retired entry
+/// whose manifest is gone is removed and the other two are kept.
+#[test]
+fn installed_registration_setup_removes_a_retired_entry_beside_the_current_one_after_its_files_are_gone() {
+    let fixture = Fixture::new();
+    fixture.write(&fixture.home().join("hosts/mine.yaml"), "kind: darkmatter-host\n");
+    fixture.write(
+        &fixture.darkmatter(),
+        &format!("register:\n  - ~/hosts/mine.yaml\n  - {MANIFEST_REFERENCE}\n  - {LEGACY_MANIFEST_REFERENCE}\n"),
+    );
+
+    let setup = fixture.setup().unwrap();
+
+    assert_eq!(setup.registration.unwrap().replaced, vec![LEGACY_MANIFEST_REFERENCE.to_string()]);
+    assert_eq!(register_list(&fixture), json!(["~/hosts/mine.yaml", MANIFEST_REFERENCE]));
+}
+
 /// An interrupted `~/.darkmatter.yaml` write leaves the new manifest
 /// published, the retired entry listed, and the retired files in place;
 /// the next setup finishes the migration.

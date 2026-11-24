@@ -7,7 +7,9 @@
 //! Darkmatter loads the whole bundle it lists, lists entries of the output
 //! root the inventory does not have and the retired format 1 layout, and
 //! looks for a user `register` entry naming the manifest by Darkmatter's
-//! manifest identity, so any spelling of the same file passes.
+//! manifest identity, so any spelling of the same file passes, and for user
+//! entries naming the retired format 1 manifest by the rule Darkmatter's
+//! writer removes them with, whether or not that file still exists.
 //! Other hosts' entries and repository `register` entries are not its
 //! concern. Nothing is followed through a link and nothing is written.
 //!
@@ -21,7 +23,7 @@
 use std::io;
 use std::path::Path;
 
-use super::config::{DarkmatterState, ObservedFile, Unreadable, io_kind};
+use super::config::{DarkmatterState, ObservedFile, Unreadable, io_kind, location};
 use super::{CheckOutcome, Environment, Finding, Pass, RepairOutcome, Scope, Severity};
 use crate::composition::registration::{
     self as publisher, Blocker, BlockerProblem, CleanupError, EditFailure, EditLayout, EntryPrecondition, ExpectedState, Installation,
@@ -222,6 +224,21 @@ fn entry_findings(
             "the `register` entry is verified once the manifest is published",
         ))),
     }
+    // Darkmatter warns at such an entry whether or not the retired files are
+    // still there, and the repair's writer removes it either way.
+    for entry in publisher::retired_entries(context, home, file) {
+        let position = location(entry.at.as_ref().map(|at| at.line), entry.at.as_ref().map(|at| at.column));
+        let finding = at(Finding::new(
+            Severity::Warn,
+            Scope::User,
+            format!("`register` entry {} names the retired format 1 manifest{position}", entry.index + 1),
+        ))
+        .note("Darkmatter warns about it whenever it loads its configuration");
+        match precondition {
+            Ok(()) => repairable.push(finding),
+            Err(blocked) => manual.push(finding.remedy(precondition_remedy(blocked))),
+        }
+    }
 }
 
 fn precondition_text(blocked: EntryPrecondition) -> String {
@@ -247,13 +264,18 @@ fn precondition_remedy(blocked: EntryPrecondition) -> String {
 }
 
 /// Why Darkmatter's editor cannot make a planned edit to `file`, naming the
-/// setting but never its value.
+/// setting but never its value. Only an inline root is refused at the root;
+/// a setting's refusal does not say whether a flow collection or an anchor,
+/// alias, or tag stopped it, so the reason names both kinds.
 pub(super) fn layout_problem(layout: EditLayout, file: &str) -> String {
-    let what = match layout {
-        EditLayout::Root => format!("the root mapping of {file}"),
-        EditLayout::Setting(setting) => format!("the `{setting}` setting of {file}"),
-    };
-    format!("{what} is not written in block form, so Darkmatter's format-preserving editor cannot change it in place")
+    match layout {
+        EditLayout::Root => format!(
+            "the root mapping of {file} is written inline, which Darkmatter's format-preserving editor cannot change in place"
+        ),
+        EditLayout::Setting(setting) => format!(
+            "Darkmatter's format-preserving editor cannot change the `{setting}` setting of {file} in place, because the edit reaches an inline `{{…}}` or `[…]` collection, or a value with an anchor, alias, or tag"
+        ),
+    }
 }
 
 /// How to bring `file`'s layout within the editor's reach.
@@ -347,6 +369,9 @@ fn failure_text(failure: &RepairFailure) -> String {
         }
         RepairFailure::EntryUnverified { path } => {
             format!("no `register` entry of {} names the manifest after the edit", path.display())
+        }
+        RepairFailure::RetiredEntryKept { path } => {
+            format!("a `register` entry of {} still names the retired format 1 manifest after the edit", path.display())
         }
         RepairFailure::Legacy(error) => match error {
             CleanupError::Obstructed { path, obstruction } => {

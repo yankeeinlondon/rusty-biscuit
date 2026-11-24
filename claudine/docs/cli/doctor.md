@@ -52,9 +52,14 @@ claudine doctor --json | jq -r '.[] | select(.severity == "error") | .id'
 
 A run without `--fix`:
 
-- writes, creates, converts, or deletes no file. It does not create a
-  default configuration, convert a legacy `config.json`, or refresh the
-  published registration;
+- writes, creates, converts, or deletes none of your files: not
+  Claudine's or Darkmatter's configuration, not the published
+  registration, and nothing in your home or user profile. It does not
+  create a default configuration, convert a legacy `config.json`, or
+  refresh the published registration. The one exception is on native
+  Windows: each PowerShell probe of the `path` row gets a private folder
+  in the system temporary directory, deleted when the probe ends (see
+  below);
 - starts no setup interview, even when `~/.claudine/config.yaml` is missing;
 - makes no network request, synthesizes no speech, and plays no sound;
 - never runs `claudine`: the `path` row only looks the name up.
@@ -63,8 +68,9 @@ On native Windows the `path` row starts each installed shell once (see
 [`path`](#path-executable-path)). Those shells leave your profile alone
 too. PowerShell writes a startup cache every time it starts, even without
 a profile, so doctor gives each PowerShell probe a private folder in the
-system temporary directory as its profile and cache location. The folder
-is deleted when the probe ends.
+system temporary directory as its profile and cache location. That folder
+is the only place an inspection writes, and it is deleted when the probe
+ends.
 
 The report never shows a configuration value, the contents of a
 `permissions` block, a credential, or file contents. A problem is named by
@@ -128,6 +134,7 @@ remedies. The last line counts errors and warnings.
     - Remedy: run `claudine doctor --fix`
 …
 • [ok] Executable path (path): this process finds `claudine` at /home/me/.cargo/bin/claudine
+    - this process finds `claudine` at /home/me/.cargo/bin/claudine
 
 0 errors, 1 warning.
 ```
@@ -311,7 +318,7 @@ value that broke the rule:
 actions:
   before_tool: [ … valid … ]
   after_tool:  [ … broken mapper … ]
-# config: {repo-root}/.claudine/config.yaml: the mapper of action 0 of `after_tool` is not a valid regular expression
+# config: {repo-root}/.claudine/config.yaml: the mapper of action 1 of `after_tool` is not a valid regular expression
 ```
 
 When the repository replaces a setting your user file gets wrong, the
@@ -391,8 +398,44 @@ with what this `claudine` binary would publish:
 | An extra file in the registration folder | `warn` |
 | No `register` entry in `~/.darkmatter.yaml` names Claudine's manifest | `error` |
 | `~/.claudine/darkmatter-host.yaml` or `~/.claudine/darkmatter-host/` (the retired format 1 registration) still exists | `warn` |
+| A `register` entry in `~/.darkmatter.yaml` still names the retired `~/.claudine/darkmatter-host.yaml`, in any spelling, whether or not that file still exists | `warn` |
 | A path doctor would repair is a symbolic link or junction | `error`, repaired by hand |
-| The `register` edit the repair needs reaches an inline list or root mapping | the finding's own severity, repaired by hand (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
+| The `register` edit the repair needs reaches an inline list or root mapping, or an entry or list with an anchor, alias, or tag | the finding's own severity, repaired by hand (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
+
+A leftover entry for the retired manifest is easy to miss: deleting the old
+files by hand after upgrading leaves this list behind, and Darkmatter warns
+about the entry each time it loads its configuration:
+
+```yaml
+# ~/.darkmatter.yaml
+register:
+  - ~/.claudine/registrations/darkmatter/manifest.yaml
+  - ~/.claudine/darkmatter-host.yaml   # the old manifest, already deleted
+```
+
+Doctor finds such an entry the way Darkmatter's writer does, by the file it
+would open, so `~/.claudine/darkmatter-host.yaml`,
+`./.claudine/darkmatter-host.yaml`, `.claudine/darkmatter-host.yaml`, and
+the absolute path are all the same entry. The finding gives the entry's
+position in the list and its line and column, never its text:
+
+```text
+• [warn] Darkmatter host registration (registration): `register` entry 2 names the retired format 1 manifest (line 4, column 5)
+    - /home/me/.darkmatter.yaml: `register` entry 2 names the retired format 1 manifest (line 4, column 5)
+    - Darkmatter warns about it whenever it loads its configuration
+    - Remedy: run `claudine doctor --fix`
+```
+
+`--fix` changes only the entries that name Claudine's current manifest or
+the retired one, in any spelling. The first of them is kept, rewritten to
+`~/.claudine/registrations/darkmatter/manifest.yaml` if it names the retired
+manifest, with the comment on its line; every later one is removed together
+with the comment on its line. In the example above, the retired entry goes
+with its `# the old manifest, already deleted` comment. Other hosts'
+entries and every other comment, including one on its own line above a
+removed entry, are kept. A retired entry in a repository's own
+`.darkmatter.yaml` is not this row's concern; only the user file is checked
+and edited.
 
 A changed published file is explained by what the installed manifest says
 about it:
@@ -452,7 +495,7 @@ skipped, as `info`; a broken reference there is still an `error` under
 | No `permissions` (or `null`), or an inline block Claudine can take over | `error` | `--fix` |
 | The same, in a file whose `register` setting is invalid | `error` | By hand: correct `register` first |
 | The same, where Claudine's file is reached through a link that leaves the scope | `error` | By hand: replace the link |
-| The same, where the edit reaches an inline root mapping of either file | `error` | By hand: rewrite that root in block form (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
+| The same, where the edit reaches an inline root mapping of either file, or a `permissions` value with an anchor (`&name`) or tag (`!tag`) | `error` | By hand: rewrite that part in block form, without the anchor or tag (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
 | An inline block that differs from Claudine's own `permissions` | `error` | By hand: choose which to keep |
 
 `permissions: null` means the same as leaving `permissions` out: Darkmatter
@@ -570,8 +613,19 @@ that is, the row says which of these happened:
 | Timed out, could not start, or failed | `warn` |
 
 A shell's result is never an `error`, so a shell you never open cannot fail
-doctor or a CI step. A miss reads, for example: "a fresh Git Bash without
-your startup files cannot find `claudine`". No shell is probed on macOS,
+doctor or a CI step. The first line of the row's detail is always what doctor's
+own process found, including the path it found, even when a shell's warning
+becomes the row's summary:
+
+```text
+• [warn] Executable path (path): a fresh Git Bash without your startup files cannot find `claudine`
+    - this process finds `claudine` at C:\Users\me\.cargo\bin\claudine.exe
+    - C:\Program Files\Git\bin\bash.exe: a fresh Git Bash without your startup files cannot find `claudine`
+    - asked without its startup files: no profile, rc file, or BASH_ENV
+    - Remedy: add the directory that holds `claudine` to the user or system PATH Git Bash starts with, not only to a profile script
+```
+
+No shell is probed on macOS,
 Linux, or WSL2. How Sniff finds and probes these shells is described in
 [Windows shells](../../../sniff/docs/topics/windows-shells.md).
 
@@ -597,19 +651,26 @@ Running `--fix` again after it succeeded changes nothing.
 ### Files the repairs cannot edit in place
 
 Both repairs edit YAML with Darkmatter's format-preserving editor, which
-keeps every comment, quote, and blank line by changing only the text of the
-values it edits. It cannot add, replace, or remove something *inside* an
-inline (flow) collection, written on one line in `[…]` or `{…}`, or inside
-a value that carries an anchor (`&name`), alias (`*name`), or tag (`!tag`).
-YAML means the same thing in either layout, but only the block layout can
-be edited in place.
+changes only the text of the values it edits and keeps every comment,
+quote, and blank line outside them. A `register` entry the registration
+repair removes takes the comment on its line with it (see
+[Registration repair](#registration-repair)). It cannot add, replace, or
+remove something *inside* an inline (flow) collection, written on one line
+in `[…]` or `{…}`, or inside a value that carries an anchor (`&name`),
+alias (`*name`), or tag (`!tag`).
+YAML means the same thing either way, but only a plain block value, one
+`key: value` or `- item` per line with no anchor, alias, or tag, can be
+edited in place.
 
 Before it offers a repair, doctor applies the exact edits the repair would
 make to the file as it read it, without writing anything. When the editor
 would refuse one, the row is not fixable: it names the file and the part
 of it to change, without quoting any value, and tells you to rewrite that
-part in block form. For example, Claudine's entry cannot be appended to
-this list:
+part in block form. Where the row also explains why the repair is
+unavailable, a refused root is described as written inline; a refused
+setting is described as reaching an inline collection or a value with an
+anchor, alias, or tag, since doctor does not tell those apart. For
+example, Claudine's entry cannot be appended to this list:
 
 ```yaml
 # ~/.darkmatter.yaml, which doctor cannot edit
@@ -633,8 +694,9 @@ register:
 Only an edit that actually reaches the inline part counts, so these are
 still repaired:
 
-- an inline list that already names Claudine's manifest, when the repair
-  only removes the retired files (the list is left byte for byte);
+- an inline list that already names Claudine's manifest and no retired
+  one, when the repair only removes the retired files (the list is left
+  byte for byte);
 - an omitted, `null`, or empty `register: []` in a block root, which the
   repair replaces whole;
 - an inline value that the repair moves or replaces whole, such as
@@ -665,7 +727,8 @@ error, which names the line, column, and setting.
 The repair needs a valid existing `~/.darkmatter.yaml` whose `register`
 edit the editor can make in place. When the file is missing or invalid, the
 row says so and suggests `claudine setup` or fixing the file first; when the
-edit would reach an inline list or root mapping, it names that part (see
+edit would reach an inline list or root mapping, or an entry or list with an
+anchor, alias, or tag, it names that part (see
 [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)).
 
 ```mermaid
@@ -674,7 +737,7 @@ flowchart LR
     B --> C[Remove extra files]
     C --> D[Verify the published files]
     D --> E[Add the register entry]
-    E --> F[Verify the entry]
+    E --> F[Verify the entries]
     F --> G[Remove the format 1 files]
 ```
 
@@ -689,7 +752,13 @@ flowchart LR
   (Linux) it is a different file, so the repair publishes
   `schemas/action.yaml` and removes `schemas/Action.yaml`.
 - The `register` entry is written with Darkmatter's locked writer, keeping
-  your comments, other settings, and other hosts' entries.
+  your other settings and other hosts' entries. Of the entries that name
+  Claudine's current or retired manifest, in any spelling and whether or not
+  the retired file still exists, the first is kept (rewritten to the current
+  manifest if needed, with the comment on its line) and every later one is
+  removed in the same edit together with the comment on its line; every
+  other comment is kept. The repair then checks both that an entry names
+  Claudine's manifest and that no retired entry is left.
 - The retired `~/.claudine/darkmatter-host.yaml` and
   `~/.claudine/darkmatter-host/` are removed only after the entry is in
   place. If anything before that fails, they stay, so a retry or an older

@@ -414,7 +414,8 @@ fn describe(problem: &SemanticProblem, scope: Scope) -> String {
             format!("the setting `{}` breaks a configuration rule", setting_name(*setting, scope))
         }
         SemanticProblem::Mapper { event, index } => {
-            format!("the mapper of action {index} of `{event}` is not a valid regular expression")
+            // `index` is the list offset its remedy's path uses; a person counts from 1.
+            format!("the mapper of action {} of `{event}` is not a valid regular expression", index + 1)
         }
     }
 }
@@ -866,7 +867,7 @@ const fn config_scope_of(scope: Scope) -> ConfigScope {
 }
 
 /// ` (line L, column C)`, or nothing when the position is unknown.
-fn location(line: Option<usize>, column: Option<usize>) -> String {
+pub(super) fn location(line: Option<usize>, column: Option<usize>) -> String {
     match (line, column) {
         (Some(line), Some(column)) => format!(" (line {line}, column {column})"),
         (Some(line), None) => format!(" (line {line})"),

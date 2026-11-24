@@ -258,7 +258,11 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   a scan across nextest processes does not fix it on its own: 3,848 Markdown
   files per test cut into seven tests took 3.5–4.5 s each, against
   5.2–5.5 s unsplit, in the same filtered run. With Git's prefilter the
-  seven took 0.3–1.4 s (`shipped_schema_corpus`).
+  seven took 0.3–1.4 s (`shipped_schema_corpus`). Git's working-tree grep
+  never reads through a link (a tracked one, or a link replacing a tracked
+  file), so its silence is applied only to regular files, judged by the
+  walk's `DirEntry::file_type` (`CleanTracked::skips`); a `symlink_metadata`
+  per file would cost about what the skipped open did.
 - **The `build-win` checkout holds Git symlinks as plain files**
   (`core.symlinks` off). `.claude/skills/system-one` and
   `.claude/skills/claudine/topics` are 39-byte text files there rather than

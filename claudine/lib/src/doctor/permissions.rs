@@ -164,7 +164,8 @@ fn assess(pass: &Pass<'_>, scope: Scope) -> Option<Assessment> {
     }
 
     // The editor keeps every authored byte, so it refuses an edit that has
-    // to walk into a flow collection; both files stay as they are.
+    // to walk into a flow collection or reach an anchor, alias, or tag; both
+    // files stay as they are.
     if let Some((path, layout)) = plan.layout_obstacle() {
         let shown = display_path(path);
         return settled(

@@ -1677,11 +1677,13 @@ flowchart LR
   4. removes the files earlier releases published, `~/.claudine/darkmatter-host.yaml`
      and the `~/.claudine/darkmatter-host/` folder, once step 3 succeeded.
 
-  Step 3 keeps every other entry and comment. An entry naming the old
+  Step 3 changes only the entries that name the old
   `~/.claudine/darkmatter-host.yaml` (in any spelling, and even when that
-  file is already gone) or the new manifest is rewritten in place to the
-  new spelling; any further such entry is removed, and with none the new
-  entry is appended:
+  file is already gone) or the new manifest. The first such entry is
+  rewritten in place to the new spelling and keeps the comment on its line;
+  every later one is removed together with the comment on its line, and
+  with none the new entry is appended. Other hosts' entries and every other
+  comment, including one on its own line above a removed entry, are kept:
 
   ```yaml
   # ~/.darkmatter.yaml before setup
@@ -1738,10 +1740,13 @@ fixed, Claudine documents get no Claudine schemas in `md` or the editor.
 To find out what is wrong, run [`claudine doctor`](../cli/doctor.md). Its
 `registration` row compares every published file with the binary's copy,
 lists extra files in the folder and leftovers of the format 1 registration,
-and checks the `register` entry; it changes nothing. `claudine doctor --fix`
-repairs all of it in one step: it publishes, removes extra files inside
-`~/.claudine/registrations/darkmatter/`, writes the `register` entry, checks
-each step from disk, and only then removes the format 1 files.
+and checks the `register` entry, including any entry still naming the
+format 1 manifest after its files were deleted; it changes none of these
+files.
+`claudine doctor --fix` repairs all of it in one step: it publishes,
+removes extra files inside `~/.claudine/registrations/darkmatter/`, writes
+the `register` entry and drops any format 1 entry, checks each step from
+disk, and only then removes the format 1 files.
 
 To recover, publish again. Each of these rewrites only the files that
 differ from the binary's copy, removes leftover temporary files, and writes
@@ -1754,6 +1759,7 @@ the manifest last:
 | you upgraded Claudine with `just install` | nothing: it publishes with the new binary |
 | you upgraded Claudine some other way | `claudine registrations publish` |
 | `md` or the editor warns that `~/.claudine/darkmatter-host.yaml` is a format 1 manifest (registered by an earlier release) | `claudine setup` |
+| `md` warns that a `register` entry naming `~/.claudine/darkmatter-host.yaml` names no existing file (the old files were deleted by hand) | `claudine doctor --fix` or `claudine setup`; both remove the entry and keep the others |
 | `~/.darkmatter.yaml` lost Claudine's `register` entry | `claudine setup` (it keeps your settings), or add `~/.claudine/registrations/darkmatter/manifest.yaml` to its `register` list by hand; `registrations publish` never edits `~/.darkmatter.yaml` |
 | a publish reports a symbolic link or junction | remove or replace the link it names, then publish again |
 | you are not sure which of these applies | `claudine doctor`, then `claudine doctor --fix` |

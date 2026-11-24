@@ -69,12 +69,12 @@
     {
       "owner": "darkmatter",
       "preparation_revision": 4,
-      "digest": "f76e0668292e8e73"
+      "digest": "43fd9fe5c86852ac"
     },
     {
       "owner": "simplified-schema",
-      "preparation_revision": 4,
-      "digest": "f913c304a4201221"
+      "preparation_revision": 5,
+      "digest": "c1cf4069a7a150ca"
     }
   ],
   "configuration": []

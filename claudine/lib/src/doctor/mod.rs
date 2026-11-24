@@ -2,9 +2,14 @@
 //!
 //! [`run`] inspects the captured home and the repository containing the
 //! launch directory and returns one [`DoctorRow`] per built-in check, in a
-//! fixed order. An inspection writes nothing, makes no network request, and
-//! synthesizes no speech; with `fix` it then attempts the repairs the
-//! registry declares and reports the state it finds on disk afterwards.
+//! fixed order. An inspection writes, creates, converts, or deletes none of
+//! Claudine's or Darkmatter's configuration files, the published
+//! registration, or anything in the home or user profile; it makes no
+//! network request and synthesizes no speech. The one write is on native
+//! Windows: each PowerShell probe of the `path` check gets a private folder
+//! in the system temporary directory, removed when the probe ends. With
+//! `fix`, `run` then attempts the repairs the registry declares and reports
+//! the state it finds on disk afterwards.
 //!
 //! The CLI adapter (`claudine-cli`'s `commands/doctor.rs`) only renders the
 //! rows; every finding and every severity is decided here.

@@ -583,30 +583,204 @@ fn a_current_tree_with_a_missing_user_file_reports_the_entry_as_blocked() {
     assert_row(&fixture.check(), Severity::Info, false, "the `register` entry cannot be verified: the file does not exist");
 }
 
+// ------------------------------------------------- a retired entry (R5-F1)
+
+/// The spellings of the retired manifest's entry Darkmatter resolves from
+/// `~/.darkmatter.yaml` to the same file.
+const RETIRED_SPELLINGS: [&str; 3] =
+    ["~/.claudine/darkmatter-host.yaml", "./.claudine/darkmatter-host.yaml", ".claudine/darkmatter-host.yaml"];
+
+/// The retired entry's summary for the `register` entry at `position` (1-based).
+fn retired_summary(position: usize) -> String {
+    format!("`register` entry {position} names the retired format 1 manifest")
+}
+
+/// R5-F1.1: the current entry beside the retired one, whose files are gone:
+/// a fixable warning locating the entry without its value, and a fix that
+/// removes only that entry, verified, then nothing more.
+#[test]
+fn a_retired_entry_beside_the_current_one_is_removed_after_its_files_are_gone() {
+    for spelling in RETIRED_SPELLINGS {
+        let fixture = Fixture::set_up();
+        let kept = format!("# my settings\nregister:\n    # the acme host\n    - ~/.acme/manifest.yaml # pinned\n    - {ENTRY}\n");
+        fixture.config(&format!("{kept}    - {spelling}\n"));
+
+        let row = fixture.check();
+
+        assert_row(&row, Severity::Warn, true, &retired_summary(3));
+        assert!(row.detail.contains(" (line 6, column 7)"), "{spelling}: {row:#?}");
+        assert!(!row.detail.contains("darkmatter-host"), "{spelling}: no authored value is quoted: {row:#?}");
+        let fixed = fixture.fix();
+        assert_repaired(&fixture, &fixed);
+        assert!(fixed.detail.contains("updated the `register` entry"), "{spelling}: {fixed:#?}");
+        assert_eq!(fixture.config_text(), kept, "{spelling}");
+
+        let before = fixture.snapshot();
+        let again = fixture.fix();
+        assert_row(&again, Severity::Ok, false, "the registration is published and registered");
+        assert_eq!(fixture.snapshot(), before, "{spelling}: a second fix changes nothing");
+    }
+}
+
+/// R5-F1.2: the same pair in an inline list is the same leftover, with or
+/// without the retired manifest, and the editor cannot remove it in place,
+/// so the finding carries the block-form remedy and `--fix` changes nothing.
+#[test]
+fn a_retired_entry_in_an_inline_list_is_reported_with_the_block_form_remedy() {
+    for legacy in [false, true] {
+        let fixture = Fixture::set_up();
+        let text = format!("register: [{ENTRY}, ~/.claudine/darkmatter-host.yaml]\n");
+        fixture.config(&text);
+        if legacy {
+            fixture.legacy();
+        }
+        let before = fixture.snapshot();
+
+        let row = fixture.check();
+        let fixed = fixture.fix();
+
+        assert_row(&row, Severity::Warn, false, &retired_summary(2));
+        // The retired manifest is a repairable finding of its own, which
+        // brings in the reason the repair is unavailable.
+        assert_eq!(row.detail.contains(REGISTER_LAYOUT_PROBLEM), legacy, "{legacy}: {row:#?}");
+        assert!(row.detail.contains("rewrite the `register` list of `~/.darkmatter.yaml` in block form"), "{legacy}: {row:#?}");
+        assert_eq!(fixed, row, "{legacy}: no repair is attempted");
+        assert_eq!(fixture.snapshot(), before, "{legacy}");
+    }
+}
+
+/// R5-F3.2: a retired entry the editor cannot remove because it carries an
+/// anchor, alias, or tag stays manual with the block-form remedy, and when
+/// another finding (here a missing member) brings in the explanation, the
+/// reason names those markers instead of claiming the list is not in block
+/// form.
+#[test]
+fn a_decorated_retired_entry_is_reported_with_an_accurate_layout_reason() {
+    for (text, position) in [
+        (format!("register:\n    - {ENTRY}\n    - &old ~/.claudine/darkmatter-host.yaml\n"), 2),
+        (format!("register:\n    - {ENTRY}\n    - !!str ~/.claudine/darkmatter-host.yaml\n"), 2),
+        (format!("register:\n    - {ENTRY}\n    - &old ~/.claudine/darkmatter-host.yaml\n    - *old\n"), 3),
+    ] {
+        for member_missing in [false, true] {
+            let fixture = Fixture::set_up();
+            fixture.config(&text);
+            if member_missing {
+                std::fs::remove_file(fixture.root().join(native_path("schemas/shared.yaml"))).unwrap();
+            }
+            let before = fixture.snapshot();
+
+            let row = fixture.check();
+            let fixed = fixture.fix();
+
+            let case = format!("{text} (member missing: {member_missing})");
+            assert!(!row.fixable, "{case}: {row:#?}");
+            assert!(row.detail.contains(&retired_summary(position)), "{case}: {row:#?}");
+            assert_eq!(row.detail.contains(REGISTER_LAYOUT_PROBLEM), member_missing, "{case}: {row:#?}");
+            assert!(!row.detail.contains("not written in block form"), "{case}: {row:#?}");
+            assert!(row.detail.contains(LAYOUT_REMEDY), "{case}: {row:#?}");
+            assert!(!row.detail.contains("darkmatter-host"), "{case}: no authored value is quoted: {row:#?}");
+            assert_eq!(fixed, row, "{case}: no repair is attempted");
+            assert_eq!(fixture.snapshot(), before, "{case}");
+        }
+    }
+}
+
+/// R5-F1.c1: with the retired manifest still present, both the file and the
+/// entry are reported, and the fix drops the entry before the cleanup.
+#[test]
+fn a_retired_entry_and_its_manifest_are_both_reported_and_the_entry_goes_first() {
+    let fixture = Fixture::set_up();
+    fixture.config(&format!("register:\n    - {ENTRY}\n    - ~/.claudine/darkmatter-host.yaml\n"));
+    fixture.legacy();
+
+    let row = fixture.check();
+
+    assert_row(&row, Severity::Warn, true, &retired_summary(2));
+    assert!(row.detail.contains("is left over from the retired format 1 registration"), "{row:#?}");
+    let fixed = fixture.fix();
+    assert_repaired(&fixture, &fixed);
+    let edited = fixed.detail.find("updated the `register` entry").unwrap();
+    let removed = fixed.detail.find(&format!("removed {}", fixture.home.join(native_path(".claudine/darkmatter-host.yaml")).display())).unwrap();
+    assert!(edited < removed, "{fixed:#?}");
+    assert_eq!(fixture.config_text(), format!("register:\n    - {ENTRY}\n"));
+}
+
+/// R5-F1.c2: a repair started by another finding removes the retired entry
+/// too and keeps the other host's.
+#[test]
+fn a_repair_started_by_a_missing_member_also_removes_a_retired_entry() {
+    let fixture = Fixture::set_up();
+    fixture.config(&format!("register:\n    - ~/.acme/manifest.yaml\n    - {ENTRY}\n    - ~/.claudine/darkmatter-host.yaml\n"));
+    std::fs::remove_file(fixture.root().join(native_path("schemas/shared.yaml"))).unwrap();
+
+    assert_repaired(&fixture, &fixture.fix());
+
+    assert_eq!(fixture.config_text(), format!("register:\n    - ~/.acme/manifest.yaml\n    - {ENTRY}\n"));
+}
+
+/// R5-F1.c3: a repeated current entry is healthy, and a retired entry only
+/// in a separate repository's file is not the user repair's concern.
+#[test]
+fn a_repeated_current_entry_or_a_retired_entry_in_a_repository_file_is_healthy() {
+    let fixture = Fixture::set_up();
+    fixture.config(&format!("register:\n    - {ENTRY}\n    - {ENTRY}\n"));
+    assert_row(&fixture.check(), Severity::Ok, false, "the registration is published and registered");
+
+    let fixture = Fixture::set_up();
+    let environment = fixture.environment_in(Launch::SeparateRepository);
+    let repository = fixture.separate_repository().join(".darkmatter.yaml");
+    let text = "register:\n    - ~/.claudine/darkmatter-host.yaml\n";
+    std::fs::write(&repository, text).unwrap();
+
+    let inspected = row(run_with(file_checks(), &environment, false));
+    let fixed = row(run_with(&ONLY_REGISTRATION, &environment, true));
+
+    assert_row(&inspected, Severity::Ok, false, "the registration is published and registered");
+    assert_eq!(fixed, inspected);
+    assert_eq!(std::fs::read_to_string(&repository).unwrap(), text);
+}
+
 // ------------------------------------------------- the editor's layout (R4-F2)
 
 const LAYOUT_REMEDY: &str = "in block form, one `key: value` or `- item` per line";
 
-/// R4-F2.1/.2: when the entry edit the repair needs reaches an inline list or
-/// an inline root, the whole repair is manual: the row names the file and
-/// the setting, offers no fix, and `--fix` publishes and removes nothing.
+/// Doctor's reason for a `register` edit the editor refuses, whichever
+/// obstacle (flow collection, anchor, alias, or tag) stopped it.
+const REGISTER_LAYOUT_PROBLEM: &str = "Darkmatter's format-preserving editor cannot change the `register` setting of `~/.darkmatter.yaml` in place, because the edit reaches an inline `{…}` or `[…]` collection, or a value with an anchor, alias, or tag";
+
+/// R4-F2.1/.2, R5-F3.2: when the entry edit the repair needs reaches an
+/// inline list or root, or an anchored, aliased, or tagged block value, the
+/// whole repair is manual: the row names the file and the setting, offers
+/// no fix, and `--fix` publishes and removes nothing.
 #[rstest::rstest]
-#[case::inline_list_append("register: [~/.acme/manifest.yaml]\n", false, "the `register` setting of `~/.darkmatter.yaml`")]
-#[case::inline_list_replace(
-    "register: [~/.acme/manifest.yaml, ~/.claudine/darkmatter-host.yaml]\n",
-    true,
-    "the `register` setting of `~/.darkmatter.yaml`"
-)]
+#[case::inline_list_append("register: [~/.acme/manifest.yaml]\n", false, REGISTER_LAYOUT_PROBLEM)]
+#[case::inline_list_replace("register: [~/.acme/manifest.yaml, ~/.claudine/darkmatter-host.yaml]\n", true, REGISTER_LAYOUT_PROBLEM)]
 #[case::inline_list_remove(
     "register: [~/.claudine/registrations/darkmatter/manifest.yaml, ~/.claudine/darkmatter-host.yaml]\n",
     true,
-    "the `register` setting of `~/.darkmatter.yaml`"
+    REGISTER_LAYOUT_PROBLEM
 )]
-#[case::inline_root("{register: [], permissions: {network: deny}}\n", false, "the root mapping of `~/.darkmatter.yaml`")]
+#[case::anchored_block_list_append("register: &hosts\n    - ~/.acme/manifest.yaml\n", false, REGISTER_LAYOUT_PROBLEM)]
+#[case::anchored_retired_entry(
+    "register:\n    - ~/.acme/manifest.yaml\n    - &old ~/.claudine/darkmatter-host.yaml\n",
+    true,
+    REGISTER_LAYOUT_PROBLEM
+)]
+#[case::aliased_retired_entry(
+    "register:\n    - &old ~/.claudine/darkmatter-host.yaml\n    - *old\n",
+    true,
+    REGISTER_LAYOUT_PROBLEM
+)]
+#[case::tagged_retired_entry("register:\n    - !!str ~/.claudine/darkmatter-host.yaml\n", true, REGISTER_LAYOUT_PROBLEM)]
+#[case::inline_root(
+    "{register: [], permissions: {network: deny}}\n",
+    false,
+    "the root mapping of `~/.darkmatter.yaml` is written inline, which Darkmatter's format-preserving editor cannot change in place"
+)]
 fn an_entry_edit_the_editor_cannot_make_leaves_the_registration_manual(
     #[case] text: &str,
     #[case] legacy: bool,
-    #[case] names: &str,
+    #[case] problem: &str,
 ) {
     let fixture = Fixture::empty();
     fixture.config(text);
@@ -619,7 +793,8 @@ fn an_entry_edit_the_editor_cannot_make_leaves_the_registration_manual(
     let fixed = fixture.fix();
 
     assert_row(&row, Severity::Error, false, "the published registration is missing");
-    assert!(row.detail.contains(&format!("{names} is not written in block form")), "{row:#?}");
+    assert!(row.detail.contains(problem), "{row:#?}");
+    assert!(!row.detail.contains("not written in block form"), "{row:#?}");
     assert!(row.detail.contains(LAYOUT_REMEDY), "{row:#?}");
     assert!(!row.detail.contains("~/.acme/manifest.yaml"), "no authored value is quoted: {row:#?}");
     assert_eq!(fixed, row, "no repair is attempted");

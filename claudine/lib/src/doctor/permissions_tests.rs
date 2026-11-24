@@ -1273,6 +1273,8 @@ enum LayoutOutcome {
     /// The planned edit of this file meets the editor's layout refusal at its
     /// root: the scope is manual and neither file changes.
     ManualRoot(Side),
+    /// The same, at this file's `permissions` setting.
+    ManualSetting(Side),
     /// The handoff is repaired; `claudine_kept` when Claudine's file needs
     /// no edit and keeps every byte.
     Repaired { claudine_kept: bool },
@@ -1290,15 +1292,26 @@ fn assert_layout_case(repository: bool, claudine_text: &str, darkmatter_text: &s
     let row = fixture.row(false);
 
     match outcome {
-        LayoutOutcome::ManualRoot(side) => {
+        LayoutOutcome::ManualRoot(side) | LayoutOutcome::ManualSetting(side) => {
             let file = match side {
                 Side::Claudine => &claudine,
                 Side::Darkmatter => &darkmatter,
             };
             let shown = display_path(file);
+            let (problem, part) = match outcome {
+                LayoutOutcome::ManualRoot(_) => (
+                    format!("the root mapping of {shown} is written inline, which Darkmatter's format-preserving editor cannot change in place"),
+                    format!("the root mapping of {shown}"),
+                ),
+                _ => (
+                    format!("cannot change the `permissions` setting of {shown} in place, because the edit reaches an inline `{{…}}` or `[…]` collection, or a value with an anchor, alias, or tag"),
+                    format!("the `permissions` setting of {shown}"),
+                ),
+            };
             assert_row(&row, Severity::Error, false, &format!("the {label} `permissions`"));
-            assert!(row.detail.contains(&format!("the root mapping of {shown} is not written in block form")), "{row:#?}");
-            assert!(row.detail.contains(&format!("Remedy: rewrite the root mapping of {shown} in block form")), "{row:#?}");
+            assert!(row.detail.contains(&problem), "{row:#?}");
+            assert!(!row.detail.contains("not written in block form"), "{row:#?}");
+            assert!(row.detail.contains(&format!("Remedy: rewrite {part} in block form")), "{row:#?}");
             assert!(!row.detail.contains("network") && !row.detail.contains("claude,"), "no authored value: {row:#?}");
             let before = fixture.tree();
             let fixed = fixture.row(true);
@@ -1374,6 +1387,32 @@ layout_cases! {
     repository_two_file_handoff_into_an_inline_darkmatter_root_is_manual:
         repository true, claudine "# repo\nactive_messenger: null\n", darkmatter "{register: [], permissions: {network: deny}}\n"
         => LayoutOutcome::ManualRoot(Side::Darkmatter);
+    // R5-F3.1: a block `permissions` mapping with an anchor or a tag, with an
+    // equal Claudine block (reference only) and with none (both files).
+    user_reference_only_over_an_anchored_darkmatter_block_is_manual:
+        repository false, claudine "permissions:\n  network: deny\n", darkmatter "permissions: &policy\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    repository_reference_only_over_an_anchored_darkmatter_block_is_manual:
+        repository true, claudine "permissions:\n  network: deny\n", darkmatter "permissions: &policy\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    user_two_file_handoff_of_an_anchored_darkmatter_block_is_manual:
+        repository false, claudine "# my settings\nlogging: true\n", darkmatter "permissions: &policy\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    repository_two_file_handoff_of_an_anchored_darkmatter_block_is_manual:
+        repository true, claudine "# repo\nactive_messenger: null\n", darkmatter "permissions: &policy\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    user_reference_only_over_a_tagged_darkmatter_block_is_manual:
+        repository false, claudine "permissions:\n  network: deny\n", darkmatter "permissions: !!map\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    repository_reference_only_over_a_tagged_darkmatter_block_is_manual:
+        repository true, claudine "permissions:\n  network: deny\n", darkmatter "permissions: !!map\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    user_two_file_handoff_of_a_tagged_darkmatter_block_is_manual:
+        repository false, claudine "# my settings\nlogging: true\n", darkmatter "permissions: !!map\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
+    repository_two_file_handoff_of_a_tagged_darkmatter_block_is_manual:
+        repository true, claudine "# repo\nactive_messenger: null\n", darkmatter "permissions: !!map\n  network: deny\n"
+        => LayoutOutcome::ManualSetting(Side::Darkmatter);
     // R4-F2.c2: edits the editor makes, whatever inline collection is nearby.
     user_empty_inline_claudine_root_takes_its_first_key:
         repository false, claudine "{}\n", darkmatter "permissions:\n  network: deny\n"

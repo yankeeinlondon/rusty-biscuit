@@ -23,7 +23,7 @@ Detail behind [SKILL.md](SKILL.md). Full flag reference: [cli-reference.md](cli-
 | `claudine hooks --variables` | Template variables with current values |
 | `claudine actions` | Show which actions are configured and for which events |
 | `claudine handle <event> [--provider]` | Process event from stdin (hidden; called by hook registrations) |
-| `claudine doctor [--fix] [--json]` | Seven ordered checks (`config`, `registration`, `darkmatter-permissions`, `repo-config`, `stray-config-keys`, `tts`, `path`); dispatched before configuration loads, never prompts, writes only under `--fix` (registration and permissions repairs); exit 1 while an `error` row remains — see [`claudine doctor`](../../../claudine/docs/cli/doctor.md) |
+| `claudine doctor [--fix] [--json]` | Seven ordered checks (`config`, `registration`, `darkmatter-permissions`, `repo-config`, `stray-config-keys`, `tts`, `path`); dispatched before configuration loads, never prompts, writes no user file without `--fix` (registration and permissions repairs; a plain run's only write is the self-deleting temporary folder of each native-Windows PowerShell `path` probe); exit 1 while an `error` row remains — see [`claudine doctor`](../../../claudine/docs/cli/doctor.md) |
 | `claudine registrations [<filepath>\|publish]` | List, print, or publish the Darkmatter host registration as JSON (hidden; maintainers; dispatched before configuration loads; `just install` runs `publish`) — see [`claudine registrations`](../../../claudine/docs/cli/registrations.md) |
 
 **Wrapped Execution**

@@ -1,6 +1,8 @@
 //! Doctor's repair of the registration: publish, remove extras, verify,
-//! point the user `register` entry at the manifest, verify, then remove the
-//! retired layout, all under one publisher lock.
+//! point the user `register` entry at the manifest in place of any entry
+//! naming the retired manifest, verify both (the manifest named, no retired
+//! entry left), then remove the retired layout, all under one publisher
+//! lock.
 //!
 //! Unlike a plain [`publish`](super::publish), the repair removes every
 //! entry of the output root the inventory does not have. It starts only
@@ -29,7 +31,7 @@ use darkmatter::config::schema::ConfigScope as DarkmatterScope;
 
 use super::inspect::{
     Blocker, BlockerProblem, EntryPrecondition, config_target_blockers, entry_layout, entry_precondition, entry_registered,
-    inspect_installation,
+    inspect_installation, retired_entries,
 };
 use super::{
     CleanupError, Entry, LOCK_DEADLINE, Layout, MANIFEST_REFERENCE, PublishChanges, PublishError, PublishStep,
@@ -75,6 +77,9 @@ pub(crate) enum RepairFailure {
     RegisterEdit { path: PathBuf, cause: EditFailure },
     /// After the edit, no `register` entry of `path` names the manifest.
     EntryUnverified { path: PathBuf },
+    /// After the edit, a `register` entry of `path` still names the retired
+    /// format 1 manifest.
+    RetiredEntryKept { path: PathBuf },
     /// The retired layout could not be removed.
     Legacy(CleanupError),
     /// A test observer stopped the repair at this step.
@@ -190,11 +195,12 @@ fn run(
     if report.action != InitAction::Unchanged {
         operations.push(RepairOperation::Edited(report.path));
     }
-    let registered = inspect_working_file(context, DarkmatterScope::User)
-        .ok()
-        .and_then(|file| entry_registered(context, home, &file));
-    if registered != Some(true) {
+    let file = inspect_working_file(context, DarkmatterScope::User).ok();
+    if file.as_ref().and_then(|file| entry_registered(context, home, file)) != Some(true) {
         return Err(RepairFailure::EntryUnverified { path: config });
+    }
+    if file.is_some_and(|file| !retired_entries(context, home, &file).is_empty()) {
+        return Err(RepairFailure::RetiredEntryKept { path: config });
     }
 
     stop(RepairStep::BeforeLegacyCleanup, observer)?;

@@ -25,21 +25,15 @@ fn a_found_executable_passes_and_names_where_it_is() {
     let row = path_row(Some(Path::new("/opt/bin/claudine")), &[]);
     assert_eq!(row.severity, Severity::Ok);
     assert_eq!(row.summary, "this process finds `claudine` at /opt/bin/claudine");
-    assert_eq!(row.detail, "", "an absent shell adds nothing");
+    assert_eq!(row.detail, "this process finds `claudine` at /opt/bin/claudine", "an absent shell adds nothing");
     assert!(!row.fixable);
 }
 
-#[test]
-fn a_miss_in_this_process_is_an_error_with_a_remedy() {
-    let row = path_row(None, &[]);
-    assert_eq!(row.severity, Severity::Error);
-    assert_eq!(row.summary, "this process cannot find `claudine` on its PATH");
-    assert!(row.detail.contains("Remedy: add the directory that holds the installed `claudine` executable to PATH"), "{row:#?}");
-}
+const CURRENT_HIT: &str = "this process finds `claudine` at /opt/bin/claudine";
 
-#[test]
-fn each_shell_outcome_is_distinct_and_never_more_than_a_warning() {
-    let cases = [
+/// Every shell answer, with the severity, summary, and remedy it must keep.
+fn shell_answers() -> [(ShellLookup, Severity, &'static str, Option<&'static str>); 6] {
+    [
         (ShellLookup::Found, Severity::Ok, "a fresh Git Bash without your startup files finds `claudine`", None),
         (
             ShellLookup::Missing,
@@ -71,11 +65,28 @@ fn each_shell_outcome_is_distinct_and_never_more_than_a_warning() {
             "a fresh Git Bash without your startup files was terminated before answering",
             Some("Remedy: check that Git Bash starts without its profile"),
         ),
-    ];
+    ]
+}
+
+#[test]
+fn a_miss_in_this_process_is_an_error_with_a_remedy() {
+    let row = path_row(None, &[]);
+    assert_eq!(row.severity, Severity::Error);
+    assert_eq!(row.summary, "this process cannot find `claudine` on its PATH");
+    assert!(row.detail.contains("Remedy: add the directory that holds the installed `claudine` executable to PATH"), "{row:#?}");
+}
+
+#[test]
+fn each_shell_outcome_is_distinct_and_never_more_than_a_warning() {
+    let cases = shell_answers();
     for (lookup, severity, summary, remedy) in cases {
         let row = path_row(Some(Path::new("/opt/bin/claudine")), &[(shell(ShellKind::GitBash), lookup)]);
         assert_eq!(row.severity, severity, "{lookup:?}: {row:#?}");
         assert!(row.detail.contains(&format!("C:/Shells/GitBash/shell.exe: {summary}")), "{lookup:?}: {row:#?}");
+        assert_eq!(row.detail.lines().next(), Some(CURRENT_HIT), "{lookup:?}: the current hit leads the detail: {row:#?}");
+        if severity == Severity::Warn {
+            assert!(row.summary.starts_with(summary), "{lookup:?}: the warning summarizes the row: {row:#?}");
+        }
         assert!(row.detail.contains("asked without its startup files: no profile, rc file, or BASH_ENV"), "{row:#?}");
         match remedy {
             Some(remedy) => assert!(row.detail.contains(remedy), "{lookup:?}: {row:#?}"),
@@ -108,6 +119,44 @@ fn shell_findings_follow_path_order_and_a_current_miss_still_leads() {
     let row = path_row(Some(Path::new("/opt/bin/claudine")), &shells);
     assert_eq!(row.severity, Severity::Warn, "another shell's miss cannot fail the run");
     assert_eq!(row.summary, "a fresh Git Bash without your startup files cannot find `claudine` (+1 more)");
+    let lines: Vec<&str> = row.detail.lines().filter(|line| !line.starts_with("Remedy") && !line.starts_with("asked")).collect();
+    assert_eq!(
+        lines,
+        [
+            CURRENT_HIT,
+            "C:/Shells/Cygwin/shell.exe: a fresh Cygwin Bash without your startup files did not answer the lookup for `claudine` within 2 seconds",
+            "C:/Shells/GitBash/shell.exe: a fresh Git Bash without your startup files cannot find `claudine`",
+            "C:/Shells/Pwsh/shell.exe: a fresh PowerShell 7 without your startup files finds `claudine`",
+        ]
+    );
+}
+
+#[test]
+fn every_shell_warning_keeps_the_current_hit_for_every_shell_kind() {
+    let kinds = [ShellKind::Pwsh, ShellKind::WindowsPowerShell, ShellKind::GitBash, ShellKind::Msys2, ShellKind::Cygwin];
+    for (lookup, severity, _, _) in shell_answers().into_iter().filter(|(_, severity, _, _)| *severity == Severity::Warn) {
+        for kind in kinds {
+            let row = path_row(Some(Path::new("/opt/bin/claudine")), &[(shell(kind), lookup)]);
+            assert_eq!(row.severity, severity, "{kind:?} {lookup:?}: {row:#?}");
+            assert!(row.summary.contains(kind.display_name()), "{kind:?} {lookup:?}: the warning summarizes the row: {row:#?}");
+            assert_eq!(row.detail.lines().next(), Some(CURRENT_HIT), "{kind:?} {lookup:?}: {row:#?}");
+            assert!(row.detail.contains("Remedy: "), "{kind:?} {lookup:?}: {row:#?}");
+        }
+    }
+}
+
+#[test]
+fn both_report_formats_carry_the_current_hit_beside_shell_warnings() {
+    // The JSON report serializes the row; the human report lists its detail
+    // lines. Both read the same `summary` and `detail`.
+    let shells = [(shell(ShellKind::GitBash), ShellLookup::Missing), (shell(ShellKind::Pwsh), ShellLookup::SpawnFailed { kind: std::io::ErrorKind::NotFound })];
+    let row = path_row(Some(Path::new("C:/Tools/claudine.cmd")), &shells);
+    let json = serde_json::to_value(&row).unwrap();
+    assert_eq!(json["severity"], "warn");
+    let detail = json["detail"].as_str().unwrap();
+    assert_eq!(detail.lines().next(), Some("this process finds `claudine` at C:/Tools/claudine.cmd"), "{json:#}");
+    assert!(detail.contains("C:/Shells/GitBash/shell.exe: a fresh Git Bash without your startup files cannot find `claudine`"), "{json:#}");
+    assert!(detail.contains("C:/Shells/Pwsh/shell.exe: PowerShell 7 could not be started to look for `claudine`"), "{json:#}");
 }
 
 // ------------------------------------------- current-process lookup (F2)

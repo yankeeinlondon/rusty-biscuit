@@ -154,10 +154,15 @@ They take every wrapper switch above, plus:
 `registration`, `darkmatter-permissions`, `repo-config`,
 `stray-config-keys`, `tts`, `path`. Each row has a `severity` (`ok`,
 `info`, `warn`, `error`) and remedies for what it found. It works with a
-missing or broken configuration, never prompts, and without `--fix` writes
-nothing (no default config, no `config.json` conversion, no registration
-refresh), makes no network request, and plays no sound. Reports never show
-configuration values or permission contents.
+missing or broken configuration, never prompts, and without `--fix`
+writes, creates, converts, or deletes none of your files: not Claudine's
+or Darkmatter's configuration, not the published registration, and
+nothing in your home or user profile (no default config, no `config.json`
+conversion, no registration refresh). The one exception is on native
+Windows: each PowerShell probe of the `path` row gets a private folder in
+the system temporary directory for PowerShell's startup cache, deleted
+when the probe ends. It makes no network request and plays no sound.
+Reports never show configuration values or permission contents.
 
 - Exit status: `0` when no row is an `error` (warnings are fine), `1` when
   any error remains (including a failed repair), `2` for a usage error.
@@ -165,8 +170,9 @@ configuration values or permission contents.
   objects; branch on `id`, `severity`, and `fixable`, not on the wording.
 - `--fix` repairs only two rows: `registration` (republishes Claudine's
   schema files under `~/.claudine/registrations/darkmatter/`, writes the
-  `register` entry in an existing `~/.darkmatter.yaml`, then removes the
-  format 1 `~/.claudine/darkmatter-host*` files) and
+  `register` entry in an existing `~/.darkmatter.yaml` and drops any entry
+  still naming the format 1 manifest, even after its file was deleted, then
+  removes the format 1 `~/.claudine/darkmatter-host*` files) and
   `darkmatter-permissions` (moves an inline `permissions` block from
   `~/.darkmatter.yaml` into Claudine's file, as `claudine setup` does). The
   exit status reflects the state after the repairs, and a second `--fix`

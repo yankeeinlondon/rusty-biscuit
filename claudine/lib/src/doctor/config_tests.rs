@@ -807,7 +807,7 @@ fn a_mapper_the_runtime_compiler_refuses_is_a_config_error() {
         "actions:\n  before_tool:\n    - call:\n        command: check\n        mapper: { type: regex, pattern: \"(SECRET\" }\n",
     );
     let rows = fixture.rows();
-    assert_row(&rows, "config", Severity::Error, "the mapper of action 0 of `before_tool` is not a valid regular expression");
+    assert_row(&rows, "config", Severity::Error, "the mapper of action 1 of `before_tool` is not a valid regular expression");
     assert!(!serde_json::to_string(&rows).unwrap().contains("SECRET"));
 }
 
@@ -878,6 +878,18 @@ fn a_failing_repository_selection_names_the_repository_selection_and_the_user_ro
     assert!(!detail.contains("`claudine actions`"), "{detail}");
 }
 
+/// The action is named by the 1-based position a person counts in the
+/// event's list, and its remedy by the list offset of its YAML path.
+#[test]
+fn a_refused_mapper_is_numbered_by_its_position_in_the_event() {
+    let fixture = Fixture::new();
+    fixture.user(CLAUDINE, &format!("actions:\n  before_tool:\n{GOOD_MAPPER}{BAD_MAPPER}"));
+    let (severity, detail) = semantic_lines(&fixture);
+    assert_eq!(severity, Severity::Error, "{detail}");
+    assert!(detail.contains("the mapper of action 2 of `before_tool` is not a valid regular expression"), "{detail}");
+    assert!(detail.contains("`actions.before_tool[1].call.mapper.pattern`"), "{detail}");
+}
+
 #[test]
 fn an_action_mapper_failure_names_the_file_that_authors_the_event() {
     let fixture = Fixture::new();
@@ -890,7 +902,7 @@ fn an_action_mapper_failure_names_the_file_that_authors_the_event() {
     let (severity, detail) = semantic_lines(&fixture);
     assert_eq!(severity, Severity::Error, "{detail}");
     assert!(
-        detail.contains(&format!("{}: the mapper of action 0 of `after_tool` is not a valid regular expression", repo.display())),
+        detail.contains(&format!("{}: the mapper of action 1 of `after_tool` is not a valid regular expression", repo.display())),
         "{detail}"
     );
     assert!(!detail.contains(&format!("{}: the", user.display())), "{detail}");
@@ -901,7 +913,7 @@ fn an_action_mapper_failure_names_the_file_that_authors_the_event() {
     fixture.repository(CLAUDINE, &format!("actions:\n  after_tool:\n{GOOD_MAPPER}"));
     let (_, detail) = semantic_lines(&fixture);
     assert!(
-        detail.contains(&format!("{}: the mapper of action 0 of `before_tool` is not a valid regular expression", user.display())),
+        detail.contains(&format!("{}: the mapper of action 1 of `before_tool` is not a valid regular expression", user.display())),
         "{detail}"
     );
 }

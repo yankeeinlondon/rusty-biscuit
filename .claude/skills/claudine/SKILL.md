@@ -206,8 +206,13 @@ refers to `config` (tests: `doctor/config_tests.rs::broken_target_cases!`).
 Doctor's registration repair is `composition/registration/repair.rs::
 repair_registration` (requires a valid existing user `.darkmatter.yaml`
 whose entry edit the editor can make in place; preflight with the no-follow guard, publish, delete extras deepest first,
-verify, `init::replace_manifest_registration_existing`, verify, then legacy
-cleanup, all under one `Publisher`), with read-only inspection in
+verify, `init::replace_manifest_registration_existing`, verify both entry
+conditions (`entry_registered` and no `inspect::retired_entries`), then legacy
+cleanup, all under one `Publisher`). A user `register` entry naming the
+retired manifest, by Darkmatter's `registration::entry_names_location` (the
+writer's own match, so any spelling, file present or gone), is its own
+fixable `warn` located by entry position and line/column, routed through the
+same precondition and `entry_layout` as the missing-entry finding, with read-only inspection in
 `registration/inspect.rs` (`inspect_installation`; `config_target_blockers`
 is the no-follow guard both doctor writers use for a destination and its
 `LOCK_SUFFIX` sidecar). Claudine source may not call Darkmatter's
