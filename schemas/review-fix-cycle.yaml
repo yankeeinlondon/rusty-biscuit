@@ -1,0 +1,40 @@
+kind: schema
+description: the key Frontmatter properties that will be used through the review/fix cycle of an implementation
+$schema:
+    - "{ ...rfc, ...pipeline }"
+    - "{ ...rfc }"
+types:
+    finding:
+        # the old unstructured format
+        - "string -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; any finding makes `ready` false"
+        # a more structured approach
+        - {
+              id: "string(required) -> A short but unique identifying name for the issue",
+              priority: "enum(high, medium, low; required)",
+              blocked: "boolean(default(false)) -> flag to indicate the human review is required to progress this finding",
+              description: "string(required)",
+          }
+    rfc:
+        spec: file(required;eager;match(**/*spec*.md)) -> the specification providing the primary contract for what should be implemented
+        plan: file(required) -> the plan used during implementation
+        implementation-log: file(required) -> the log of what happened during the implementation of the spec
+        blast-radius:
+            $description: The scope of change for this spec's implementation
+            packages: string[] -> the packages which had source code changed in them (or config files which impacted the compilation of the package).
+            mutated-symbols: string[](default([])) -> those symbols in the existing code base
+            new-symbols: string[](default([])) -> new symbols created during this implementation
+        reviewed: |-
+            boolean(required) -> whether the **specification** was _reviewed_.
+
+            > **Note:** if _not_ reviewed then this indicates that the implementation
+            > likely didn't happen; or at a minimum that a normal quality gate was
+            > skipped!
+        implemented: |-
+            boolean(required) -> whether the **specification** was _implemented_ or
+            not. Obviously we would expect it to be and the review/fix cycle can not
+            start until that is the case.
+        ready: boolean(required) -> whether or not the spec is deemed "production ready"
+        last-review: file -> the last review that
+        last-review-findings: finding[] -> the _findings_ discovered in the last review cycle (if any).
+    pipeline:
+        name: string(required) -> a short name for the pipeline of specs which have been grouped together
