@@ -249,7 +249,13 @@ Important contracts:
   `base_dir()`, `~/schemas`. Never walk ancestors or read the process
   environment for them. Every bare-name consumer (`$schema`, `Name@file`,
   `example(file)`, trigger payloads) selects through
-  `simplified_schema::resolve::select_schema_file`; never add another copy. `$path` patterns are `GlobReference`s; see
+  `simplified_schema::resolve::select_schema_file`; never add another copy.
+  Root lookup never depends on triggers: `DarkmatterSchemas` takes its roots
+  from the installed trigger registry or, without one,
+  `with_schema_root_lookup()`; `prepare_schemas`, `md clean`, and
+  `md schema validate` install it for a repository document whenever
+  triggers are off (the reference/graph commands, `--disable schema-triggers`).
+  DMLS keeps its own workspace-boundary rule. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,

@@ -78,7 +78,7 @@ check (`yaml_documents/semantic.rs`), which is why `md schema validate` and
 DMLS skip resolving it as a schema target.
 
 Null carriers are absent: a null `description`/`categories`/`types` is
-omitted, a tagged `$schema: null` beside a usable `types` table is a
+omitted (except in a callable catalog, which refuses it; see below), a tagged `$schema: null` beside a usable `types` table is a
 types-only document, an untagged document whose `$schema` is null is
 ordinary YAML (`standalone.rs::recognize_standalone`), and a trigger's
 `$schema: null` is matcher-only. An

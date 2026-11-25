@@ -176,7 +176,7 @@ md compose doc.md author=7 author.name=Bob
 - `--deny <ID|all>`: make the selected diagnostics blocking, so compose fails and writes no document. Repeatable. Takes any recovery identifier above, `style` (unknown or deprecated `style:` keys and inline horizontal-rule deprecations), a diagnostic code such as `dm.reference.missing_hyperlink` (`md compose --help` lists them), or `all`. Informational notices never block, and `--deny all` never revokes an `--allow host=HOST`.
 - `--disable <ID>`: stop a feature from running. Repeatable; there is no `all`.
     - `baseline-schema`: validate without the default Darkmatter baseline frontmatter schema.
-    - `schema-triggers`: skip repository schema-trigger discovery and bare-name schema-root lookup.
+    - `schema-triggers`: skip repository schema-trigger discovery. A bare `$schema` name is still looked up in the schema roots.
     - `collection-blocks`: skip the `::map` and `::filter` directive stage, so those directives are not expanded.
 - `--max-iteration-visits <N>`: how many source items one compose request may visit across every `::map` and `::filter`, nested directives and child compositions included. Rejected items count. `N` is a positive integer (zero, a sign, or a value beyond 64 bits is a usage error with exit status 2). When omitted, the library default (100,000) applies; there is no unlimited setting and no recovery for exhaustion.
 - `--max-expansion-bytes <N>`: how many bytes of `::map` and `::filter` expansion one request may materialize, nested copies included. Same value rules as `--max-iteration-visits`; the library default is 16,777,216 (16 MiB).

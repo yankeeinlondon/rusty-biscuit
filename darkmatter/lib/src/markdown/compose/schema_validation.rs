@@ -400,10 +400,13 @@ fn slot_below<'v>(value: &'v mut serde_json::Value, steps: &[ValuePathSegment]) 
     })
 }
 
-/// Trigger discovery runs only for a request inside a repository; the schema
-/// roots themselves come from the document's own context.
-fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> bool {
-    options.resolution_context().repository_root().is_some()
+/// The schema roots (trigger discovery and bare-name lookup) are searched only
+/// for a source whose own context is inside a repository. An enclosing
+/// request's repository never extends to a child or link target opened
+/// outside it (a note opened through `~`): eligibility, like the roots
+/// themselves, belongs to each source document.
+fn searches_schema_roots(source_context: &biscuit_file::FileResolutionContext) -> bool {
+    source_context.repository_root().is_some()
 }
 
 pub(crate) fn prepare_schemas(
@@ -434,7 +437,9 @@ pub(crate) fn prepare_schemas(
     // The source's own context: a child opened through `~`, or a source
     // outside the request's tree, resolves its `file` values in the tree it
     // was opened in, as its transclusions do.
-    let mut schemas = DarkmatterSchemas::new(options.source_file_resolution_context());
+    let source_context = options.source_file_resolution_context();
+    let searches_roots = searches_schema_roots(&source_context);
+    let mut schemas = DarkmatterSchemas::new(source_context);
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
@@ -458,7 +463,7 @@ pub(crate) fn prepare_schemas(
     }
     if options.trigger_schemas
         && let Some(ComposeSource::File(_)) = markdown.source()
-        && discovers_triggers(options)
+        && searches_roots
     {
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
@@ -475,8 +480,21 @@ pub(crate) fn prepare_schemas(
             *trigger_registry = Some(registry.clone());
         }
     }
+    // Bare-name lookup in the schema roots does not depend on triggers: a
+    // request without them (the standalone reference and graph commands,
+    // `--disable schema-triggers`) still resolves the `$schema` and
+    // `Name@file` imports the document names.
+    if schemas.trigger_registry().is_none()
+        && let Some(ComposeSource::File(_)) = markdown.source()
+        && searches_roots
+    {
+        schemas = schemas
+            .with_schema_root_lookup()
+            .map_err(|err| prepare_error(format!("schema could not be prepared: {err}"), err))?;
+    }
     // Registration is its own trigger source, judged in the source's own
-    // context; `--disable schema-triggers` turns it off with the roots, and a
+    // context; `--disable schema-triggers` turns it off with root trigger
+    // discovery (bare-name lookup stays), and a
     // caller's own host options are never replaced.
     if options.trigger_schemas
         && let Some(hosts) = options.applied_registered_hosts()
@@ -2711,23 +2729,24 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_needs_a_request_repository() {
-        let request_repo = tempfile::tempdir().unwrap();
-        let nested_repo = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
-        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-        let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
-            .with_repository_root(request_repo.path());
-        let options = crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot);
+    fn schema_root_search_needs_a_source_repository() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let request = biscuit_file::FileResolutionContext::new(repo.path())
+            .with_repository_root(repo.path());
+        let in_repo = request.for_source(repo.path().join("doc.md"));
+        // A source the request accepted outside its tree keeps no
+        // repository root, so it searches no schema roots even though the
+        // request itself is inside a repository.
+        let external = request.for_trusted_external_source(outside.path().join("note.md"));
         // A context without a repository root discovers nothing, even when
         // the document itself sits inside a repository.
-        let unbounded = crate::markdown::compose::test_request_in(
-            ComposeOptions::new(),
-            biscuit_file::FileResolutionContext::new(nested_repo.path()),
-        );
+        let unbounded = biscuit_file::FileResolutionContext::new(repo.path()).for_source(repo.path().join("doc.md"));
 
-        assert!(discovers_triggers(&options));
-        assert!(!discovers_triggers(&unbounded));
+        assert!(searches_schema_roots(&in_repo));
+        assert!(!searches_schema_roots(&external));
+        assert!(!searches_schema_roots(&unbounded));
     }
 
     #[test]

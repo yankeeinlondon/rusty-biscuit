@@ -241,6 +241,7 @@ mod prose_wrap_parity;
 mod raw_root_union_assertions;
 mod raw_schema_conversion;
 mod recent_commits_shared_type;
+mod reference_bare_schema_roots;
 mod reference_html_discovery;
 mod reference_integration;
 mod link_title_migration;

@@ -72,7 +72,7 @@ categories:
     - Text -> Transform text.
 types:
     Label: string(min(1))
-    kebab_case:
+    project_slug:
         - |-
             function(
                 parameters(x: Label);

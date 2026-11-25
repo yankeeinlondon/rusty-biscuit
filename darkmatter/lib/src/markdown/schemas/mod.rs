@@ -260,7 +260,9 @@ pub fn darkmatter_base_json_schema_ref() -> &'static Value {
 /// context resolves every file value and `$schema` reference; a document with
 /// no path of its own is anchored at the context's `cwd`.
 /// Trigger-schema discovery is opt-in via [`Self::with_trigger_discovery`] or
-/// [`Self::with_trigger_registry`]. Implicit CWD-based discovery is forbidden —
+/// [`Self::with_trigger_registry`], and either also enables bare-name lookup
+/// in the schema roots; [`Self::with_schema_root_lookup`] enables that lookup
+/// without triggers. Implicit CWD-based discovery is forbidden —
 /// validation behavior must never depend silently on the process working
 /// directory.
 #[derive(Clone)]
@@ -268,6 +270,9 @@ pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
     triggers: Option<library_triggers::TriggerRegistry>,
+    /// The searched schema roots [`Self::with_schema_root_lookup`] installed,
+    /// for bare-name lookup when no trigger registry supplies its own.
+    schema_roots: Option<Vec<PathBuf>>,
     /// Bundles [`Self::with_trigger_discovery`] appends after the roots.
     embedded_bundles: Vec<EmbeddedSchemaBundle>,
     file_resolution_context: biscuit_file::FileResolutionContext,
@@ -589,6 +594,7 @@ impl DarkmatterSchemas {
             baseline: None,
             cache: SHARED_VALIDATOR_CACHE.clone(),
             triggers: None,
+            schema_roots: None,
             embedded_bundles: Vec::new(),
             file_resolution_context: context,
             kind_registry: None,
@@ -1020,7 +1026,8 @@ impl DarkmatterSchemas {
     /// [`Self::discovery_findings`] while every valid one is installed. The
     /// resulting [`library_triggers::TriggerRegistry`] is stored and consumed by
     /// [`Self::effective_for`], whose bare-name `$schema` lookup also
-    /// searches its roots.
+    /// searches its roots ([`Self::with_schema_root_lookup`] gives that lookup
+    /// alone).
     ///
     /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in via
     /// this method or [`Self::with_trigger_registry`].
@@ -1077,6 +1084,31 @@ impl DarkmatterSchemas {
         self
     }
 
+    /// Enables bare-name schema lookup in the five [schema roots](roots) of
+    /// this instance's context without discovering triggers: a bare
+    /// `$schema` name or `Name@file` import selects from the roots exactly as
+    /// it does after [`Self::with_trigger_discovery`], and no trigger is
+    /// installed. An installed trigger registry's roots, computed for the same
+    /// context, take precedence.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Io`] when a root's folder cannot be inspected (see
+    /// [`SchemaRoots::for_document`](simplified_schema::roots::SchemaRoots::for_document)).
+    pub fn with_schema_root_lookup(mut self) -> Result<Self, SchemaError> {
+        let roots = simplified_schema::roots::SchemaRoots::for_document(&self.file_resolution_context)?;
+        self.schema_roots = Some(roots.search_paths().to_vec());
+        Ok(self)
+    }
+
+    /// The folders a bare schema name is looked up in, in search order.
+    fn bare_name_roots(&self) -> &[PathBuf] {
+        match &self.triggers {
+            Some(registry) => registry.roots.search_paths(),
+            None => self.schema_roots.as_deref().unwrap_or(&[]),
+        }
+    }
+
     /// Returns the configured trigger registry, when present.
     pub fn trigger_registry(&self) -> Option<&library_triggers::TriggerRegistry> {
         self.triggers.as_ref()
@@ -1124,8 +1156,8 @@ impl DarkmatterSchemas {
     /// posture of `md schema validate --schema`). The override takes the same
     /// shapes a `$schema` frontmatter value takes: a string file reference or
     /// bare name, an inline mapping, or a root-union sequence, resolved
-    /// against the document's own base directory and the configured trigger
-    /// schema roots. Baseline and trigger layering, matching, and merge
+    /// against the document's own base directory and the configured schema
+    /// roots. Baseline and trigger layering, matching, and merge
     /// precedence are unchanged.
     ///
     /// ## Errors
@@ -1174,13 +1206,7 @@ impl DarkmatterSchemas {
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
 
-        // Schema roots from the trigger registry feed bare-name $schema
-        // resolution.
-        let trigger_roots: &[PathBuf] = self
-            .triggers
-            .as_ref()
-            .map(|reg| reg.roots.search_paths())
-            .unwrap_or(&[]);
+        let schema_roots = self.bare_name_roots();
 
         // The document's own `$schema` is positioned in its text; an
         // override is no part of the document.
@@ -1201,7 +1227,7 @@ impl DarkmatterSchemas {
                         value,
                         authored.as_ref(),
                         &base_dir,
-                        trigger_roots,
+                        schema_roots,
                         &self.file_resolution_context,
                     )
                     .or_else(|error| self.resolve_template(error, &document_template_identity(value, &base_dir)))
@@ -1371,8 +1397,7 @@ impl DarkmatterSchemas {
     /// validation reports it.
     pub fn pending_templates_for(&self, source: &Markdown) -> Vec<PendingTemplate> {
         let base_dir = base_dir_for(source, &self.file_resolution_context);
-        let trigger_roots: &[PathBuf] =
-            self.triggers.as_ref().map(|registry| registry.roots.search_paths()).unwrap_or(&[]);
+        let schema_roots = self.bare_name_roots();
         let mut templates = Vec::new();
         let mut document_declared: Vec<String> = Vec::new();
         if let Some(value) = source.frontmatter().as_map().get("$schema").cloned() {
@@ -1381,7 +1406,7 @@ impl DarkmatterSchemas {
                 &value,
                 authored.as_ref(),
                 &base_dir,
-                trigger_roots,
+                schema_roots,
                 &self.file_resolution_context,
             ) {
                 Err(SchemaError::UnresolvedSlots(unresolved)) => {

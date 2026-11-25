@@ -2083,6 +2083,10 @@ are an error rather than one shadowing the other (see
   document in a repository; DMLS searches them for any document inside an
   open workspace folder. Outside a repository the file tree root is the tree
   the document was opened in (often its own folder).
+- Bare-name lookup does not depend on trigger schemas. `md validate refs`
+  and `md graph`, which apply no triggers, and a run with
+  `--disable schema-triggers` resolve `$schema: post.yaml` and
+  `Post@shared.yaml` from the same roots as `md compose`.
 - `SCHEMAS_DIR` names the schemas folder **itself**, which can be any folder
   you choose: with `SCHEMAS_DIR=/opt/team/dm-defs`, files are read from
   `/opt/team/dm-defs/`, never from `/opt/team/dm-defs/schemas/`. It must be an

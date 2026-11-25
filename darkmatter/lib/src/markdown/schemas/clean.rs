@@ -154,8 +154,9 @@ impl CleanSchemaConfig {
         self
     }
 
-    /// Enables or disables repository schema-trigger discovery and bare-name
-    /// schema-root lookup (`--disable schema-triggers`).
+    /// Enables or disables repository schema-trigger discovery
+    /// (`--disable schema-triggers`). Bare-name lookup in the schema roots
+    /// stays on either way.
     #[must_use]
     pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
         self.trigger_schemas = enabled;
@@ -173,7 +174,8 @@ impl CleanSchemaConfig {
     /// ## Errors
     ///
     /// Propagates [`SchemaError`] from baseline loading/validation and from
-    /// trigger discovery's infrastructure failures. An invalid trigger is not
+    /// the infrastructure failures of trigger discovery or schema-root
+    /// lookup. An invalid trigger is not
     /// an error: discovery skips it and the context reports it through
     /// [`CleanSchemaContext::discovery_findings`].
     pub fn resolve(&self, document_path: Option<&Path>) -> Result<CleanSchemaContext, SchemaError> {
@@ -187,11 +189,12 @@ impl CleanSchemaConfig {
             CleanBaselineSchema::Schema(schema) => builder.with_baseline(schema.clone())?,
             CleanBaselineSchema::File(path) => builder.with_baseline_from_file(path)?,
         };
-        if self.trigger_schemas
-            && document_path.is_some()
-            && self.file_resolution_context.repository_root().is_some()
-        {
-            builder = builder.with_trigger_discovery()?;
+        if document_path.is_some() && self.file_resolution_context.repository_root().is_some() {
+            builder = if self.trigger_schemas {
+                builder.with_trigger_discovery()?
+            } else {
+                builder.with_schema_root_lookup()?
+            };
         }
         if self.trigger_schemas
             && let Some(hosts) = &self.registered_hosts

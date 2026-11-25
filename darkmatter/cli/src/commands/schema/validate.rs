@@ -489,6 +489,16 @@ pub(crate) fn discover_document_triggers(schemas: DarkmatterSchemas) -> Result<D
     if schemas.file_resolution_context().repository_root().is_some() { schemas.with_trigger_discovery() } else { Ok(schemas) }
 }
 
+/// `schemas` with bare-name schema-root lookup but no triggers when its
+/// context is inside a repository (`--disable schema-triggers`).
+///
+/// ## Errors
+///
+/// When a schema root cannot be inspected.
+pub(crate) fn document_schema_roots(schemas: DarkmatterSchemas) -> Result<DarkmatterSchemas, SchemaError> {
+    if schemas.file_resolution_context().repository_root().is_some() { schemas.with_schema_root_lookup() } else { Ok(schemas) }
+}
+
 /// The effective schema of `document` from `schemas` (a baseline selection)
 /// in the document's `context`, with trigger discovery when
 /// `discover_triggers` and the context is inside a repository; `None` when no
@@ -507,7 +517,7 @@ pub(crate) fn effective_document_schema(
     discover_triggers: bool,
 ) -> Result<Option<EffectiveSchema>, SchemaError> {
     let schemas = schemas.with_file_resolution_context(context);
-    let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { schemas };
+    let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { document_schema_roots(schemas)? };
     schemas.effective_for(document)
 }
 
@@ -603,7 +613,10 @@ fn validate_one(
             (Err(err), discovery) => return early(FileOutcome::schema_error(err, &discovery_path), Some(discovery)),
         }
     } else {
-        (api, ValidationTimings::default())
+        match document_schema_roots(api) {
+            Ok(api) => (api, ValidationTimings::default()),
+            Err(err) => return early(FileOutcome::schema_error(err, &discovery_path), None),
+        }
     };
     let findings = api.discovery_findings().to_vec();
     let checked = |outcome, timings| CheckedFile { outcome, timings: Some(timings), findings: findings.clone() };

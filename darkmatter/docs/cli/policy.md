@@ -96,7 +96,7 @@ also allows schema slot reads of URLs on it; see
 | Identifier | What stops |
 |---|---|
 | `baseline-schema` | the built-in Darkmatter baseline frontmatter schema (and `BASELINE_SCHEMA`) |
-| `schema-triggers` | schema-trigger discovery and bare-name schema-root lookup |
+| `schema-triggers` | schema-trigger discovery (a bare `$schema` name or `Name@file` import is still looked up in the schema roots) |
 | `collection-blocks` | the `::map` and `::filter` directive stage (`md compose` only) |
 
 A disabled feature produces no diagnostics, and `--deny` does not turn it back

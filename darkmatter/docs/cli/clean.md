@@ -95,7 +95,7 @@ md clean README.md --save -v
 - `--baseline-schema <PATH>`: Replace the default Darkmatter baseline with an explicit SimplifiedSchema file.
 - `--disable <ID>`: Stop a feature from running. Repeatable; there is no `all`. See [Policy Flags](./policy.md).
     - `baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
-    - `schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
+    - `schema-triggers`: Disable repository trigger discovery. A bare `$schema` name is still looked up in the schema roots.
 
 A [schema template](../topics/schemas/schema-slots.md) (a schema whose
 definitions hold `{{ … }}` slots) is resolved before the schema checks run, under

@@ -31,6 +31,12 @@ Checked 4 references across 2 documents: 2 ok, 2 broken
 It exits with status 0 when nothing is broken and 1 when something is. Scripts
 should read the status, not the report's text.
 
+Each document is prepared with its own `$schema`, never with trigger schemas.
+A bare schema name such as `$schema: feature-review.yaml` is looked up in the
+document's [schema roots](../topics/schemas/definition.md#schema-roots), as
+`md compose` looks it up. A name no root holds stops preparation of that
+document.
+
 A document whose schema is a [template](../topics/schemas/schema-slots.md) is
 prepared with the reads its slots are already approved: the files your
 `permissions.file-read` pre-approves (see

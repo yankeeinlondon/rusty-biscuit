@@ -110,6 +110,7 @@ mod md_process_fixture;
 mod path_lookup_guard;
 mod policy_verbs;
 mod prose_escape_guard;
+mod reference_bare_schema;
 mod reference_report;
 mod render_basic;
 mod render_alias_parity;

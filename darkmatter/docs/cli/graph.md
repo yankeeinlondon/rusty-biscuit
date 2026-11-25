@@ -28,6 +28,12 @@ so it goes to stdout.
 | `markdown`, `markdown-plus`, `html` | the tree as a code block, then with `--validate` the report in that form |
 | `json`, `json5`, `yaml`, `toml` | [the graph as data](#data-output) |
 
+Each document is prepared with its own `$schema`, never with trigger schemas.
+A bare schema name such as `$schema: feature-review.yaml` is looked up in the
+document's [schema roots](../topics/schemas/definition.md#schema-roots), as
+`md compose` looks it up. A name no root holds stops preparation of that
+document.
+
 A document whose schema is a [template](../topics/schemas/schema-slots.md) is
 prepared with the reads its slots are already approved: the files your
 `permissions.file-read` pre-approves (see
