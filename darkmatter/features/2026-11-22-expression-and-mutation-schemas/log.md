@@ -3,6 +3,7 @@ implementation_1: "2026-11-24T22:52:40+00:00"
 implementation_2: "2026-11-25T00:38:46+00:00"
 implementation_3: "2026-11-25T01:35:06+00:00"
 implementation_4: "2026-11-25T02:33:46+00:00"
+implementation_5: "2026-11-25T03:42:27+00:00"
 ---
 ## Implementation of Review Findings #1
 
@@ -588,3 +589,120 @@ No author rulings or blocked findings are recorded in the review.
         - `darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs`
         - `darkmatter/features/2026-11-22-expression-and-mutation-schemas/log.md`
         - `darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-4.md`
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-11-25T03:42:27+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-5.md'
+- this is iteration 5 of the review-to-implement cycle 
+- the review's `implemented` flag was confirmed `false` before repairs began
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R5-F1 | The kind guide's expression catalog uses a reserved name | fixed | All five children verified; example key is `project_slug`. |
+| R5-F1.1 | Repository kind guide block validates, with comment variant; a reserved key still gives the two-location error | fixed | Extracted block exit 0; comment variant exit 0; `kebab_case` variant: `dm.schema.callable_catalog` at 7:5 with related `functions.yaml:312:5`; guide composes with `--deny all`. |
+| R5-F1.2 | Simplified Schema callable catalog guide example validates | clean | Review exit 0; block unchanged (`project_slug`, inline comment, two overloads). |
+| R5-F1.3 | Host function guide `is_project_file` and `set_frontmatter` examples validate | clean | Review exit 0 for both; blocks unchanged. |
+| R5-F1.4 | Host registration guide `./functions/project.yaml` catalog validates | clean | Review exit 0; block unchanged. Sweep found no other Markdown declaring a callable catalog. |
+| R5-F1.5 | Caller skills reference guidance; both built-in catalogs validate | clean | Caller skills hold no complete catalog (grep of `^kind: (expression\|mutation)-schema`); built-ins untouched; review exit 0. |
+| R5-F2 | The category guide misstates which catalogs require categories | fixed | General Categories section scopes optional/lenient rules to informal, `kind: schema`, `kind: yaml-schema`, states the callable requirement with a link; repo skill null-carrier note qualified. CLI: absent/null/`[]`/`[5]` exit 1, `[Text]` exit 0; `md validate refs` 44 ok. |
+| R5-F3 | Reference commands miss schemas named by bare filename | fixed | Root lookup decoupled from triggers (`with_schema_root_lookup`); all seven children verified. The in-repository controls for compose, clean, schema validation, and path completion resolve with `--disable schema-triggers`. |
+| R5-F3.1 | `md validate refs`: bare and absolute check the link; missing fails | fixed | `reference_bare_schema_roots::bare_root_schema_prepares_like_the_absolute_path`; CLI tests `reference_bare_schema::*`; `review-4.md` exit 0 (was 1); missing-name copy exit 1. |
+| R5-F3.2 | `md validate refs --graph mermaid`: bare and absolute produce the graph; missing fails | fixed | `review-4.md --graph mermaid` exit 0; CLI test covers bare and missing. |
+| R5-F3.3 | `md graph` with/without `--validate`: bare and absolute agree; missing fails | fixed | `md graph` and `md graph --validate` on `review-4.md` exit 0; missing copy `--validate` exit 1. |
+| R5-F3.4 | Inclusion preparation (`::file`) under refs, Mermaid, and `md graph --follow --validate` | fixed | `bare_schema_in_an_included_document_prepares` (2 nodes, no issues bare/absolute; missing fails); `graph --follow --validate` exit 0. |
+| R5-F3.5 | Fragment validation finds a heading generated from frontmatter; static-heading fallback preserved | fixed | `fragment_target_with_bare_schema_finds_generated_heading`: bare/absolute resolve both headings; missing schema keeps static fallback and reports the generated one as `MissingFragmentTarget`. |
+| R5-F3.6 | Named-type import `Name@ci-evidence.yaml` accepted bare and absolute in standalone preparation | fixed | `bare_named_type_import_prepares_like_the_absolute_path`; by hand `validate refs` and `graph --validate` exit 0 bare, exit 1 for `@absent-evidence.yaml`. |
+| R5-F3.7 | `md schema validate` and `md compose --deny all` controls preserved | fixed | Unchanged results: schema validate and compose exit 0 for `review-4.md` (with and without `--disable schema-triggers`), missing exit 1; `compose_resolves_bare_schema_with_or_without_trigger_schemas`; full suites green. |
+
+### Progress
+
+- starting the work on 'R5-F1 The kind guide's expression catalog uses a reserved name' at 03:42:50
+        - defect class: a copyable authoring example breaks the admission rules it documents (here, a reserved built-in callable name)
+        - done by the orchestrator directly; the repair is one key in a Markdown example, so a subagent added only cost
+        - sweep: every Markdown file with a fenced `kind: expression-schema` or `kind: mutation-schema` block outside features/fixes is `docs/kind-documents.md`, `darkmatter/docs/topics/host-functions.md`, `darkmatter/docs/topics/host-registration.md`, `simplified-schema/docs/topics/language/schema-documents.md`; the last three were validated clean by the review (R5-F1.2–.4) and no other file declares a callable catalog
+        - other `kebab_case` mentions (`darkmatter-expressions.md`, `use-darkmatter/authoring.md`) are calls of the built-in, not declarations
+        - changed `kebab_case:` to `project_slug:` in the kind guide block, matching the language guide
+        - extracted block: exit 0; with an inline helper comment: exit 0; renamed back to `kebab_case`: `dm.schema.callable_catalog` at 7:5 with the related built-in declaration at `functions.yaml:312:5`
+        - `md compose docs/kind-documents.md --deny all --output markdown` exits 0
+- work completed for 'R5-F1 The kind guide's expression catalog uses a reserved name' at 03:43:50
+- starting the work on 'R5-F2 The category guide misstates which catalogs require categories' at 03:43:10
+        - defect class: a general rule in shared guidance is stated for every envelope while one envelope family follows a stricter rule
+        - rewrote the general Categories section of `simplified-schema/docs/topics/language/schema-documents.md`: names the optional envelopes (informal, `kind: schema`, `kind: yaml-schema`), states the callable catalogs' requirement with a link to their section, keeps the shared syntax and the rules common to all envelopes, and scopes the lenient null/number rules to the optional envelopes
+        - sweep: the caller skill table (`use-dmls/schemas.md`) already marks `categories` required for both callable kinds (clean); the repo skill `.claude/skills/simplified-schema/schema-documents.md` said a null `categories` is omitted without exception, so it now notes the callable catalogs refuse it
+        - CLI probes on an expression catalog: categories absent, `null`, `[]`, and `[5]` each exit 1; `[Text]` exits 0, so every new sentence matches behavior
+        - `md validate refs` on the language guide: 44 references, all ok (the new anchor resolves)
+- work completed for 'R5-F2 The category guide misstates which catalogs require categories' at 03:44:10
+- starting the work on 'R5-F3 Reference commands miss schemas named by bare filename' at 03:44:40
+        - delegated to one foreground rust-developer subagent; its report was reconciled by the orchestrator (diff read, registry-reuse claim checked, one drifted comment fixed)
+        - defect class: an authored schema reference (root `$schema` or a `Name@file` import) loses its schema-root lookup on any preparation path that installs no trigger registry, because root search was tied to trigger discovery
+        - confirmed cause: `DarkmatterSchemas` took bare-name roots only from an installed trigger registry (`site_schema_with_override`, `pending_templates_for`); `prepare_schemas` installs one only when `trigger_schemas` is on, which `ComposeOptions::for_document` (used by `md validate refs` and `md graph`) leaves off
+        - repair: `DarkmatterSchemas::with_schema_root_lookup()` computes `SchemaRoots::for_document` for the instance's context without discovering triggers; a private `bare_name_roots()` prefers an installed registry's roots, else these; selection still goes through `select_schema_file` (no second selector)
+        - `prepare_schemas` installs root lookup whenever no registry is installed for a file source inside a repository, covering the reference check, graph, inclusions, fragment targets, pre-flight collection and lifecycle, setters, pipeline, and `md_host.rs`; trigger application is unchanged where it was off
+        - sibling sites:
+                - `md compose --disable schema-triggers`: same defect (exit 1 before, exit 0 after) — fixed by the same line
+                - `md clean` (`CleanSchemaConfig::resolve`) without triggers — fixed
+                - `md schema validate --disable schema-triggers` — fixed via a `document_schema_roots` helper, CLI test added
+                - path completion `effective_document_schema` — fixed through the same helper
+                - `discover_document_triggers`, `md schema triggers` — clean, they always discover so a registry supplies roots
+                - `data/contract.rs`, `schema_files.rs`, `yaml_documents` — clean, they call `SchemaRoots::for_document` or the kind registry's roots
+                - DMLS overlays — clean: no trigger switch, always installs a registry inside a workspace; its documented rule is no roots outside a workspace
+                - registry reuse across documents (subagent's open note) — clean: every `prepare_schemas` caller passes a fresh per-document `None` (`pipeline/mod.rs:428`, `setters.rs`, `effective_schema_for`, `preflight/collect.rs`, `preflight/lifecycle.rs`, `md_host.rs`), so a registry is reused only across one document's passes
+        - decision: `--disable schema-triggers` was documented as disabling "schema-trigger discovery and bare-name schema-root lookup" — the same coupling as the defect; the flag now stops trigger discovery only, and `docs/cli/{policy,compose,clean}.md` and the `policy.rs` summary say so. Alternative was a separate `ComposeOptions` field for root lookup (more identity surface, keeps an option nobody needs); rejected as speculative. Ledger-only decision (easily reversed)
+        - tests added: `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs` (5 tests) and `darkmatter/cli/tests/l1/reference_bare_schema.rs` (2 tests); the 4 library reference tests fail with the `prepare_schemas` change disabled and pass with it
+        - docs: `darkmatter/docs/cli/{validate,graph,policy,compose,clean}.md`, `darkmatter/docs/topics/schemas/definition.md` (Schema roots); skill `.claude/skills/darkmatter/SKILL.md`
+- work completed for 'R5-F3 Reference commands miss schemas named by bare filename' at 04:00:30
+
+### Completion Report
+
+- **outcome: complete** — elapsed 2026-11-25T03:42:27+00:00 → 04:11 UTC (about 29 minutes)
+- parent findings: total 3 = fixed 3 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: 12 = fixed 8 (R5-F1.1, R5-F3.1–.7) + clean 4 (R5-F1.2–.5)
+- open findings: none
+- verified repairs:
+        - R5-F1: the kind guide's callable catalog example uses `project_slug`, validates in isolation and with a comment, and a reserved name still yields the two-location refusal
+        - R5-F2: the general Categories guidance distinguishes the optional envelopes from the callable catalogs' required, strictly admitted `categories`
+        - R5-F3: bare-name `$schema` and `Name@file` lookup no longer depends on trigger discovery for the checked in-repository documents, inclusions and fragment targets. A name no root holds still fails. A descendant outside Git can still inherit schema-root eligibility from a repository parent.
+- decision (ledger only): `--disable schema-triggers` now stops trigger discovery only, not bare-name lookup; docs and help updated
+- cross-OS: no OS-specific code was added (root computation reuses `SchemaRoots::for_document`); cross-check not run, left to CI
+- changed files:
+        - R5-F1: `docs/kind-documents.md`
+        - R5-F2: `simplified-schema/docs/topics/language/schema-documents.md`, `.claude/skills/simplified-schema/schema-documents.md`
+        - R5-F3: `darkmatter/lib/src/markdown/schemas/mod.rs`, `darkmatter/lib/src/markdown/compose/schema_validation.rs`, `darkmatter/lib/src/markdown/schemas/clean.rs`, `darkmatter/cli/src/commands/schema/validate.rs`, `darkmatter/cli/src/args/policy.rs`, `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs` (new), `darkmatter/lib/tests/l1/main.rs`, `darkmatter/cli/tests/l1/reference_bare_schema.rs` (new), `darkmatter/cli/tests/l1/main.rs`, `darkmatter/docs/cli/{validate,graph,policy,compose,clean}.md`, `darkmatter/docs/topics/schemas/definition.md`, `.claude/skills/darkmatter/SKILL.md`
+        - records: this log, `review-5.md` frontmatter
+- final verification (run by the orchestrator after all changes, no subagent running):
+        - `darkmatter`: `just lint` exit 0; `just test` 18,045 passed, 10 skipped, none at or above 5 s (R5-F3, plus regression for all earlier findings)
+        - `just check-tier-coverage darkmatter`: 0 stranded
+        - `claudine`: `just test` 13,077 passed, 16 skipped, none at or above 5 s (consumer of `prepare_schemas`)
+        - `just slow-tests fresh` exit 0
+        - `simplified-schema`: documentation-only change, and no test reads the edited page; suite not rerun
+        - by hand: R5-F1 extraction probes; R5-F2 category probes; R5-F3 `validate refs`, `--graph mermaid`, `graph`, `graph --validate`, `graph --follow --validate`, `schema validate` on `review-4.md` all exit 0, missing-name copy exit 1; `md validate refs review-5.md` 54 ok
+
+
+### Review 6 record correction (2026-11-25)
+
+- The iteration 5 completion report generalized the in-repository result to the document's own schema roots for all inclusions and fragment targets. The source determines which folders are inspected, while eligibility in shared preparation still uses the enclosing request's repository. Using the worktree-built `md`, I put the schema in `~/schemas/` and checked the same note outside Git directly and via a repository parent. Direct validation refused the bare name. The inclusion and generated-heading link checks accepted it. Explicit relative and absolute spellings worked in both positions, and the original in-repository cases retained their recorded results. [Review 6 finding](review-6.md#r6-f1-high-included-documents-and-fragment-targets-inherit-schema-root-eligibility-from-the-parent)
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-11-25T04:20:51+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- review frontmatter `implemented` confirmed `false` before repairs began
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R6-F1 | Included documents and fragment targets inherit schema-root eligibility from the parent | pending | |
+| R6-F1.1 | Reference report and Mermaid graph for an inclusion of an outside-Git note: explicit spellings pass for repository and outside-Git parents; bare and missing fail at the included note | pending | |
+| R6-F1.2 | `md graph`, `--validate`, `--follow --validate` over the same inclusion accept explicit and refuse bare and missing | pending | |
+| R6-F1.3 | `md validate refs --fragments`: only explicit spellings generate the heading; static-heading fallback preserved | pending | |
+| R6-F1.4 | Named-type import `entry@types.yaml` in the external note: explicit accepted, bare and missing refused on inclusion report, follow-and-validate graph, fragment check, compose with triggers disabled | pending | |
+| R6-F1.5 | Composition of the repository parent with and without `--disable schema-triggers`: generated heading only for explicit spellings; bare and missing fail in the child | pending | |
+| R6-F1.6 | Direct checks of the external note (refs, schema validate, compose, clean, completion) and the R5-F3 in-repository controls keep their results | pending | |
+| R6-F1.7 | Default composition skips root trigger discovery for the external included note; in-repository trigger behavior preserved | pending | |
