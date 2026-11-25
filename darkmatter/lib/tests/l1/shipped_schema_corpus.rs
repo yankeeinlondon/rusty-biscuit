@@ -1093,64 +1093,97 @@ fn repository_kind_schema_validates_markdown_catalog_kinds() {
 }
 
 #[test]
-fn review_fix_cycle_validates_markdown_with_and_without_pipeline_metadata() {
+fn review_fix_cycle_inputs_require_an_existing_specification_file() {
     let schema = include_str!("../../../../schemas/review-fix-cycle.yaml");
     let dir = tempfile::tempdir().expect("review workspace");
     fs::write(dir.path().join("review-fix-cycle.yaml"), schema).expect("write schema");
     for name in ["spec.md", "plan.md", "implementation-log.md"] {
         fs::write(dir.path().join(name), "# Fixture\n").expect("write referenced document");
     }
-    let context = FileResolutionContext::new(dir.path()).without_home_dir();
-    let resolved = resolve_schema_with_roots(
-        &serde_json::json!("./review-fix-cycle.yaml"),
-        dir.path(),
-        &[],
-        &context,
-    )
-    .expect("resolve the exported schema");
-    let Some(simplified_schema::SchemaRoot::Union(arms)) = resolved.simplified else {
-        panic!("the review cycle exports a root union");
-    };
-    assert_eq!(arms.len(), 2);
-    let arm_properties = |index: usize| {
-        let simplified_schema::SchemaArm::Inline(shape) = &arms[index] else {
-            panic!("expected a resolved mapping at arm {index}");
-        };
-        &shape.properties
-    };
-    assert!(arm_properties(0)["name"].is_required());
-    assert!(!arm_properties(1).contains_key("name"));
-
-    let api = DarkmatterSchemas::new(context);
-    let base = "\
-$schema: ./review-fix-cycle.yaml
-spec: ./spec.md
-plan: ./plan.md
-implementation-log: ./implementation-log.md
-blast-radius:
-    packages: [darkmatter]
-implemented: true
-ready: false
-";
-    let validate = |frontmatter: &str| {
-        let document = Markdown::from(format!("---\n{frontmatter}---\n# Review\n"))
+    let api = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()).without_home_dir());
+    let validate = |fields: &str| {
+        let document = Markdown::from(format!("---\n$schema: ./review-fix-cycle.yaml\n{fields}---\n# Review\n"))
             .with_source(ComposeSource::File(dir.path().join("review.md")));
         api.validate(&document).expect("validate against the review schema")
     };
-    for pipeline in ["", "name: Review pipeline\n"] {
-        let fields = format!("{base}{pipeline}");
-        let positive = validate(&format!("{fields}reviewed: true\n"));
-        assert!(positive.valid, "{pipeline:?}: {:?}", positive.problems);
-        let missing = validate(&fields);
-        assert!(!missing.valid, "{pipeline:?}: reviewed must be required");
-        assert!(missing.problems.iter().any(|problem| problem.property.as_deref() == Some("reviewed")),
-            "{pipeline:?}: {:?}", missing.problems);
+    let rejected_at = |fields: &str, path: &str| {
+        let report = validate(fields);
+        assert!(!report.valid, "{fields:?} must be rejected");
+        assert!(
+            report.problems.iter().any(|problem| problem.path == path),
+            "{fields:?}: expected a problem at {path}: {:?}",
+            report.problems
+        );
+    };
+
+    for spec in ["spec.md", "./spec.md"] {
+        let report = validate(&format!("spec: {spec}\n"));
+        assert!(report.valid, "{spec}: {:?}", report.problems);
     }
-    let wrong_packages = base.replace("[darkmatter]", "{package: darkmatter}");
-    let invalid = validate(&format!("{wrong_packages}reviewed: true\n"));
-    assert!(!invalid.valid, "the blast radius still validates its packages");
-    assert!(invalid.problems.iter().any(|problem| problem.path == "/blast-radius/packages"),
-        "{:?}", invalid.problems);
+    // An existing file outside `match(**/*spec*.md)` is refused, not only
+    // left out of completion.
+    rejected_at("spec: ./plan.md\n", "/spec");
+    rejected_at("spec: ./missing-spec.md\n", "/spec");
+    let missing = validate("plan: ./plan.md\n");
+    assert!(!missing.valid, "spec is required");
+    assert!(
+        missing.problems.iter().any(|problem| problem.property.as_deref() == Some("spec")),
+        "{:?}",
+        missing.problems
+    );
+
+    for key in ["plan", "implementation-log"] {
+        for value in ["", " null", " \"\"", " ./plan.md"] {
+            let report = validate(&format!("spec: ./spec.md\n{key}:{value}\n"));
+            assert!(report.valid, "{key}:{value:?}: {:?}", report.problems);
+        }
+        rejected_at(&format!("spec: ./spec.md\n{key}: [./plan.md]\n"), &format!("/{key}"));
+    }
+}
+
+#[test]
+fn specification_schema_validates_its_imported_cycle_fields() {
+    let dir = tempfile::tempdir().expect("specification workspace");
+    fs::write(
+        dir.path().join("review-fix-cycle.yaml"),
+        include_str!("../../../../schemas/review-fix-cycle.yaml"),
+    )
+    .expect("write cycle schema");
+    fs::write(
+        dir.path().join("specification.yaml"),
+        include_str!("../../../../schemas/specification.yaml"),
+    )
+    .expect("write specification schema");
+    let api = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()).without_home_dir());
+    let validate = |fields: &str| {
+        let document = Markdown::from(format!("---\n$schema: ./specification.yaml\n{fields}---\n# Spec\n"))
+            .with_source(ComposeSource::File(dir.path().join("spec.md")));
+        api.validate(&document).expect("validate against the specification schema")
+    };
+    let good = "\
+cycle-verdict: extend
+blast-radius:
+    packages: [darkmatter]
+pipeline:
+    name: schemas
+";
+    let report = validate(good);
+    assert!(report.valid, "{:?}", report.problems);
+
+    for (bad, path) in [
+        (good.replace("extend", "maybe"), "/cycle-verdict"),
+        (good.replace("[darkmatter]", "{package: darkmatter}"), "/blast-radius/packages"),
+        (good.replace("name: schemas", "next: other"), "/pipeline"),
+    ] {
+        let report = validate(&bad);
+        assert!(!report.valid, "{bad:?} must be rejected");
+        let problem = report
+            .problems
+            .iter()
+            .find(|problem| problem.path.starts_with(path))
+            .unwrap_or_else(|| panic!("{bad:?}: expected a problem at {path}: {:?}", report.problems));
+        assert!(problem.line.is_some(), "{bad:?}: the problem is located: {problem:?}");
+    }
 }
 
 struct InlineSchema {

@@ -75,6 +75,7 @@ mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;
 mod required_defaults;
+mod review_cycle_schema;
 mod schema_reference_parity;
 mod schema_reference_sessions;
 mod schema_roots_parity;

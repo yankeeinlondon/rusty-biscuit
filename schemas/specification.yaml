@@ -7,5 +7,10 @@ $schema:
     reviewed-on: date -> the date the review of the specification took place
     clarified: boolean(required; default(false)) -> whether this specification has gone through the more rigorous _clarification_ process (versus a standard review cycle)
     implemented: boolean(required; default(false)) -> a boolean flag which indicates whether this specification has been implemented or not
+    ready: boolean(required; default(false)) -> whether the implementation of this spec is considered "production ready"
     human-review: |-
         boolean -> Whether a human review is required **now** to settle open rulings.
+    review-iterations: number(integer) -> how many implementation reviews have run, for a human reader; prompts find the latest review with `find_last_index`
+    cycle-verdict: cycle-verdict@./review-fix-cycle.yaml
+    blast-radius: blast-radius@./review-fix-cycle.yaml
+    pipeline: pipeline@./review-fix-cycle.yaml
