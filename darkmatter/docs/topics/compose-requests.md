@@ -44,6 +44,31 @@ validates references, lists transclusions, or prepares the effective schema
 (`effective_schema_for`); the reference graph, the validators, and the
 transclusion query always root at the document's own source when it has one.
 
+The reverse holds too: a `Markdown` with no source, given a request that
+names a file, is that file's text. This is how an editor composes an unsaved
+buffer:
+
+```rust
+# use darkmatter::markdown::Markdown;
+# use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+# let snapshot = RequestSnapshot::new(std::env::temp_dir());
+# let buffer = String::new();
+let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file("vendor/review.md"), &snapshot)?;
+let md = Markdown::from(buffer); // the editor's text, never re-read from disk
+let (composed, _report) = md.compose_with(&request)?; // composed.source() names vendor/review.md
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Every entry point above then decides the file's identity exactly as if the
+path were on the `Markdown`: its checkout's schema roots, bare `$schema`
+names and triggers, the `&` root, the reference graph's root and the origin
+of each of its own references, the base of its relative links and of every
+inclusion (body `::file` and `::code`, `prologue`, `epilogue`), and the file
+its errors name. Only the path is attached; the text judged is always the
+buffer. Text a host generated from a file and marked with
+`Markdown::with_context_identity` is not that file's text, so it keeps no
+source and its errors keep naming the identity.
+
 `from_process` takes the home directory from `biscuit_file::home_dir()`:
 `HOME` on macOS and Linux, `USERPROFILE` on native Windows (`HOME` alone does
 not move it there), with the platform's profile lookup as the fallback when

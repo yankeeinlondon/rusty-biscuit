@@ -425,8 +425,7 @@ pub fn run_compose(
                 Some(report)
             }
             ReferenceCheck::Refused(report) => {
-                pending_triggers.hold(&report.trigger_warnings);
-                pending_triggers.deliver(sink, None, &term_cell);
+                deliver_refused_check_warnings(&report, &mut pending_triggers, sink, &term_cell);
                 if let Some(sink) = sink {
                     sink.references(&report);
                     perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
@@ -858,6 +857,24 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         return Ok(ReferenceCheck::Report(report));
     }
     Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
+}
+
+/// Delivers the warnings of a reference check that refused the document:
+/// those held so far, its skipped triggers, and those its preparation found,
+/// which composition would have reported had it run.
+pub(crate) fn deliver_refused_check_warnings(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&ReportSink>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    let mut warnings = report.earlier_warnings.clone();
+    pending_triggers.hold(&report.trigger_warnings);
+    pending_triggers.merge_into(&mut warnings);
+    match sink {
+        Some(sink) => sink.warnings(&warnings),
+        None => report_failure_trigger_warnings(&warnings, None, term_cell),
+    }
 }
 
 /// Delivers what the failed reference check `error` had found before it

@@ -60,6 +60,26 @@ pub const UNKNOWN_FUNCTION_CODE: &str = "dm.expression.unknown_function";
 pub const INPUT_READ_CODE: &str = "dm.input.read_failure";
 /// A directive could not be parsed.
 pub const DIRECTIVE_PARSE_CODE: &str = "dm.directive.parse_failure";
+/// A `::toc-linking` `level=` names no heading level from `h1` to `h6`.
+pub const TOC_LINKING_INVALID_LEVEL_CODE: &str = "dm.toc_linking.invalid_level";
+/// A `::toc-linking` `cleanup=` names an unknown cleanup service.
+pub const TOC_LINKING_INVALID_CLEANUP_CODE: &str = "dm.toc_linking.invalid_cleanup";
+/// A `::toc-linking` `keep=` or `filter=` pattern does not compile.
+pub const TOC_LINKING_INVALID_FILTER_CODE: &str = "dm.toc_linking.invalid_filter";
+/// A `::file-links` `--depth` is not a non-negative integer.
+pub const FILE_LINKS_INVALID_DEPTH_CODE: &str = "dm.file_links.invalid_depth";
+/// A `::file-links` directive is in a document with no source file.
+pub const FILE_LINKS_MISSING_SOURCE_CODE: &str = "dm.file_links.missing_source";
+/// A `::file-links --dir` target exists but is not a directory.
+pub const FILE_LINKS_NOT_A_DIRECTORY_CODE: &str = "dm.file_links.not_a_directory";
+/// A `::file-links` glob is invalid, leaves the file tree, or cannot be rooted.
+pub const FILE_LINKS_INVALID_GLOB_CODE: &str = "dm.file_links.invalid_glob";
+/// Re-leveling would push a heading past H6.
+pub const NORMALIZATION_LEVEL_OVERFLOW_CODE: &str = "dm.normalization.level_overflow";
+/// A heading structure rule was violated.
+pub const NORMALIZATION_VALIDATION_FAILED_CODE: &str = "dm.normalization.validation_failed";
+/// A transcluded heading re-leveled past H6 became bold text.
+pub const TRANSCLUSION_HEADING_OVERFLOW_CODE: &str = "dm.transclusion.heading_overflow";
 /// A shell command failed, timed out, or was refused.
 pub const SHELL_FAILURE_CODE: &str = "dm.shell.failure";
 /// A transclusion failed for a reason other than its content's own error.
@@ -182,8 +202,15 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 /// - A schema failure reports one record per problem, and a `load_data`
 ///   contract mismatch one per violating location (see the module docs).
 /// - Any other Darkmatter error reports one record classified by its
-///   innermost typed error; a foreign error reports [`INPUT_READ_CODE`] for an
-///   I/O error and [`COMPOSE_FAILURE_CODE`] otherwise.
+///   innermost typed error, including a reference-analysis error carried
+///   without a [`MarkdownError`] around it (a `FileTreeError`; one that
+///   carries composition's own failure, such as an inclusion's target, is
+///   projected as composition projects it) and the
+///   `NormalizationError` `Markdown::normalize` and `relevel` return; a foreign
+///   error reports [`INPUT_READ_CODE`] for an I/O error and
+///   [`COMPOSE_FAILURE_CODE`] otherwise.
+/// - An inclusion's target failure ([`TransclusionError::Located`]) is placed
+///   at the inclusion that named the target, in the file that wrote it.
 /// - Every record of a Darkmatter failure carries the iteration path of the
 ///   copies it happened in, and a record with no authored position their
 ///   authored site (see `with_iteration_context`).
@@ -191,6 +218,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 /// A record's `source` comes only from `error`; see [`with_document_fallback`]
 /// for one that names no file.
 pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
+    let top = error;
     let mut current = Some(error);
     while let Some(error) = current {
         if let Some(config) = error.downcast_ref::<crate::config::load::ConfigError>() {
@@ -201,6 +229,24 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
         }
         if let Some(shell) = as_shell_error(error) {
             return shell_error_diagnostics(shell);
+        }
+        if let Some(reference) = error
+            .downcast_ref::<ReferenceError>()
+            .or_else(|| error.downcast_ref::<Box<ReferenceError>>().map(AsRef::as_ref))
+        {
+            // A failure composition also raises is projected as it is
+            // there, under this error's own words.
+            if let ReferenceError::Compose(inner) = reference {
+                let mut records = markdown_error_diagnostics(inner);
+                if let [record] = records.as_mut_slice() {
+                    record.message = top.to_string();
+                }
+                return records;
+            }
+            return vec![reference_diagnostic(reference, top.to_string())];
+        }
+        if let Some(normalization) = error.downcast_ref::<crate::markdown::normalize::NormalizationError>() {
+            return vec![unlocated(normalization_code(normalization), Severity::Error, top.to_string())];
         }
         if let Some(lifecycle) = error.downcast_ref::<crate::lifecycle::error::LifecycleError>()
             && let Some(diagnostic) = lifecycle.call_diagnostic()
@@ -847,19 +893,22 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
                 None => proven(Some(source.as_ref())),
             },
         ),
-        MarkdownError::Transclusion(inner) => (
-            match inner.as_ref() {
-                TransclusionError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
-                TransclusionError::ConditionEval { .. } => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
-                _ => TRANSCLUSION_FAILURE_CODE,
-            },
-            match inner.as_ref() {
+        // A target failure's code is its own; its site, when it names one,
+        // is the inclusion that named the target.
+        MarkdownError::Transclusion(located) => {
+            let inner = located.without_site();
+            (
+            transclusion_code(inner),
+            match inner {
+                _ if let Some(site) = located.inclusion_site() => inclusion_site_source(site, &mut span),
                 TransclusionError::ConditionEval { ctx, authored, .. }
                 | TransclusionError::ConditionParse { ctx, authored, .. } => condition_source(ctx, authored.as_ref(), &mut span),
+                TransclusionError::ParseDirective { ctx, line, authored, .. } => {
+                    parse_failure_source(ctx, *line, authored.as_ref(), &mut span)
+                }
                 // The directive's line is in the current body, so only the
                 // file is authored.
-                TransclusionError::ParseDirective { ctx, .. }
-                | TransclusionError::InvalidReference { ctx, .. }
+                TransclusionError::InvalidReference { ctx, .. }
                 | TransclusionError::InvalidFrontmatterAssignment { ctx, .. }
                 | TransclusionError::InvalidReassignedFrontmatterProperty { ctx, .. } => context_source(ctx),
                 // The last document on the chain before the repeat wrote the
@@ -870,7 +919,8 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
                 }
                 _ => None,
             },
-        ),
+            )
+        }
         MarkdownError::PageBlock(inner) => match inner.as_ref() {
             PageBlockError::Condition(condition) => match condition.as_ref() {
                 ConditionError::Parse { ctx, authored, .. } => {
@@ -880,31 +930,31 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
                     (ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE, condition_source(ctx, authored.as_ref(), &mut span))
                 }
             },
-            // The parser counts lines in the current body.
-            PageBlockError::ParseDirective { ctx, .. }
-            | PageBlockError::UnmatchedEnd { ctx, .. }
-            | PageBlockError::UnterminatedBlock { ctx, .. } => (DIRECTIVE_PARSE_CODE, context_source(ctx)),
+            // The parser counts lines in the current body: published only
+            // where the stage placed them in the file.
+            PageBlockError::ParseDirective { ctx, authored, .. }
+            | PageBlockError::UnmatchedEnd { ctx, authored, .. }
+            | PageBlockError::UnterminatedBlock { ctx, authored, .. } => {
+                (DIRECTIVE_PARSE_CODE, condition_source(ctx, authored.as_ref(), &mut span))
+            }
         },
         MarkdownError::Collection(inner) => (inner.code(), proven(inner.site().map(|site| site.source.as_ref()))),
-        MarkdownError::ShellBlock(inner) => (SHELL_FAILURE_CODE, shell_block_source(inner)),
-        MarkdownError::Reference(inner) => (
-            REFERENCE_FAILURE_CODE,
-            // The directive's line is in the prepared body, so only the file
-            // is authored.
-            match inner.as_ref() {
-                ReferenceError::ParseDirective { ctx, .. } => context_source(ctx),
-                _ => None,
-            },
-        ),
+        MarkdownError::ShellBlock(inner) => (SHELL_FAILURE_CODE, shell_block_source(inner, &mut span)),
+        MarkdownError::Reference(inner) => (reference_error_code(inner), reference_error_source(inner, &mut span)),
         MarkdownError::ParameterBinding { .. } | MarkdownError::CallerFileClassificationChanged { .. } => {
             (PARAMETER_BINDING_CODE, None)
         }
         MarkdownError::Setter { .. } => (SETTER_INVALID_CODE, None),
         // The document holding the directive, which for a transcluded child
-        // is not the composed one; the line counts the current body. A
-        // context identity is no file.
-        MarkdownError::TocLinking(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
-        MarkdownError::FileLinks(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
+        // is not the composed one, at the directive's opener when its line is
+        // authored. A context identity is no file.
+        MarkdownError::TocLinking(inner) => {
+            (toc_linking_code(inner), directive_source(inner.document(), inner.authored(), &mut span))
+        }
+        MarkdownError::FileLinks(inner) => {
+            (file_links_code(inner), directive_source(inner.document(), inner.authored(), &mut span))
+        }
+        MarkdownError::Normalization(inner) => (normalization_code(inner), None),
         _ => (COMPOSE_FAILURE_CODE, None),
     };
     Diagnostic {
@@ -918,12 +968,99 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         iteration_path: IterationPath::empty(),
         reference_details: match error {
             MarkdownError::Reference(inner) => reference_error_details(inner),
+            // A target's file-reference failure is a reference check that
+            // could not run, as the reference graph reports it.
+            MarkdownError::Transclusion(inner) => inner.resolution_failure().map(|failure| ReferenceDetails {
+                failure: Some(resolution_failure_name(failure).to_string()),
+                ..Default::default()
+            }),
             _ => None,
         },
         data_location: None,
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+    }
+}
+
+/// The code of a transclusion failure, past any inclusion site.
+pub(crate) fn transclusion_code(error: &TransclusionError) -> &'static str {
+    match error.without_site() {
+        TransclusionError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
+        TransclusionError::ConditionEval { .. } => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
+        TransclusionError::ConditionParse { .. } => ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
+        TransclusionError::InvalidReference { .. } | TransclusionError::FileReference(_) => REFERENCE_FAILURE_CODE,
+        TransclusionError::Io(_) if error.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch) => {
+            crate::markdown::compose::policy::MISSING_TRANSCLUSION_CODE
+        }
+        TransclusionError::Io(_) => INPUT_READ_CODE,
+        _ => TRANSCLUSION_FAILURE_CODE,
+    }
+}
+
+/// The code of a reference-analysis failure.
+fn reference_error_code(error: &ReferenceError) -> &'static str {
+    match error {
+        ReferenceError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
+        _ => REFERENCE_FAILURE_CODE,
+    }
+}
+
+/// Where a reference-analysis failure is authored: a directive's opener or a
+/// frontmatter key's line when proven, otherwise its file.
+fn reference_error_source(error: &ReferenceError, span: &mut Option<std::ops::Range<usize>>) -> Option<DiagnosticSource> {
+    match error {
+        ReferenceError::ParseDirective { ctx, line, authored, .. } => {
+            parse_failure_source(ctx, *line, authored.as_ref(), span)
+        }
+        _ => None,
+    }
+}
+
+/// A `::toc-linking` or `::file-links` failure's `document`, at the
+/// directive's `authored` opener when it is proven.
+fn directive_source(
+    document: Option<&Path>,
+    authored: Option<&crate::markdown::types::AuthoredSpan>,
+    span: &mut Option<std::ops::Range<usize>>,
+) -> Option<DiagnosticSource> {
+    let file = document.and_then(named)?;
+    Some(match authored {
+        Some(authored) => {
+            *span = Some(authored.range());
+            DiagnosticSource::at(Some(file), authored.line(), authored.column())
+        }
+        None => DiagnosticSource::file_only(Some(file)),
+    })
+}
+
+/// A reference-analysis failure that reached the caller without a
+/// [`MarkdownError`] around it (a `FileTree` or validator boundary), with
+/// `message`, its outermost error's text.
+fn reference_diagnostic(error: &ReferenceError, message: String) -> Diagnostic {
+    let mut span = None;
+    let source = reference_error_source(error, &mut span);
+    Diagnostic {
+        source,
+        span,
+        reference_details: reference_error_details(error),
+        ..unlocated(reference_error_code(error), Severity::Error, message)
+    }
+}
+
+/// The file that wrote a failed inclusion, at its authored position when it
+/// is proven.
+fn inclusion_site_source(
+    site: &crate::markdown::compose::InclusionSite,
+    span: &mut Option<std::ops::Range<usize>>,
+) -> Option<DiagnosticSource> {
+    let file = named(site.file());
+    match site.authored() {
+        Some(authored) => {
+            *span = Some(authored.range());
+            Some(DiagnosticSource::at(file, authored.line(), authored.column()))
+        }
+        None => file_only(file),
     }
 }
 
@@ -942,27 +1079,47 @@ fn condition_source(
     }
 }
 
-/// A shell failure's file, and a frontmatter command's line. A body or
-/// shell-block origin counts lines in the prepared body, and a command with no
-/// file of its own keeps its enclosing block's.
-fn shell_source(error: &ShellExpansionError) -> Option<DiagnosticSource> {
+/// A shell failure's file and, where it is proven, its line: a frontmatter
+/// command's key line, or the authored position composition placed a body or
+/// shell-block command at ([`ShellCommandOrigin::Authored`]). An unplaced body
+/// or shell-block origin counts lines in the current body, so it names only the
+/// file, and a command with no file of its own keeps its enclosing block's.
+fn shell_source(error: &ShellExpansionError, span: &mut Option<std::ops::Range<usize>>) -> Option<DiagnosticSource> {
     if let ShellExpansionError::PolicyIo { path, .. } = error {
         return file_only(named(path));
     }
     let file = context_file(error.context()?)?;
     let line = match error.origin() {
         Some(ShellCommandOrigin::Frontmatter { line, .. }) => *line,
+        Some(ShellCommandOrigin::Authored { at, .. }) => {
+            *span = Some(at.range());
+            return Some(DiagnosticSource::at(Some(file), at.line(), at.column()));
+        }
         _ => None,
     };
     Some(DiagnosticSource { line, ..DiagnosticSource::file_only(Some(file)) })
 }
 
-fn shell_block_source(error: &ShellBlockError) -> Option<DiagnosticSource> {
+/// A shell-block failure's file, at its command's authored line when
+/// composition placed the command ([`shell_source`]), or at the authored
+/// position a parse failure was placed at.
+fn shell_block_source(error: &ShellBlockError, span: &mut Option<std::ops::Range<usize>>) -> Option<DiagnosticSource> {
     let (file, command) = match error {
+        ShellBlockError::Parse { source_file, authored: Some(at), .. }
+        | ShellBlockError::Unterminated { source_file, authored: Some(at), .. } => {
+            let file = source_file.as_deref().and_then(named)?;
+            *span = Some(at.range());
+            return Some(DiagnosticSource::at(Some(file), at.line(), at.column()));
+        }
         ShellBlockError::Parse { source_file, .. } | ShellBlockError::Unterminated { source_file, .. } => (source_file, None),
         ShellBlockError::Command { source_file, source, .. } => (source_file, Some(source)),
     };
-    file_only(file.as_deref().and_then(named)).or_else(|| command.and_then(|command| shell_source(command)))
+    if let Some(command) = command
+        && matches!(command.origin(), Some(ShellCommandOrigin::Authored { .. }))
+    {
+        return shell_source(command, span);
+    }
+    file_only(file.as_deref().and_then(named)).or_else(|| command.and_then(|command| shell_source(command, span)))
 }
 
 /// What a reference check that could not run knows about its reference.
@@ -1175,7 +1332,9 @@ fn proven_slot_span(
 }
 
 fn shell_record(code: &str, error: &ShellExpansionError) -> Diagnostic {
-    Diagnostic { source: shell_source(error), ..unlocated(code, Severity::Error, error.to_string()) }
+    let mut span = None;
+    let source = shell_source(error, &mut span);
+    Diagnostic { source, span, ..unlocated(code, Severity::Error, error.to_string()) }
 }
 
 fn expression_code(cause: &ExpressionError) -> &'static str {
@@ -1273,6 +1432,81 @@ fn named(path: &Path) -> Option<PathBuf> {
 /// key, with no absolute path, and is no file.
 fn context_file(ctx: &SourceContext) -> Option<PathBuf> {
     named(&ctx.display).filter(|_| ctx.absolute.is_absolute())
+}
+
+/// A parse failure's file, at the body directive's `authored` opener when
+/// that is proven, or at its line when that line lies in the frontmatter
+/// `ctx` holds: a `prologue` or `epilogue` field's error names its key's line
+/// in the file as written (`parse_frontmatter_refs`), which no stage
+/// rewrites. Any other line counts the current body and stays unpublished.
+fn parse_failure_source(
+    ctx: &SourceContext,
+    line: usize,
+    authored: Option<&crate::markdown::types::AuthoredSpan>,
+    span: &mut Option<std::ops::Range<usize>>,
+) -> Option<DiagnosticSource> {
+    let file = context_file(ctx)?;
+    if let Some(authored) = authored {
+        *span = Some(authored.range());
+        return Some(DiagnosticSource::at(Some(file), authored.line(), authored.column()));
+    }
+    let frontmatter_lines = ctx.frontmatter.as_ref().map_or(0, |range| ctx.content[..range.end].lines().count());
+    Some(if (1..=frontmatter_lines).contains(&line) {
+        DiagnosticSource { line: Some(line), ..DiagnosticSource::file_only(Some(file)) }
+    } else {
+        DiagnosticSource::file_only(Some(file))
+    })
+}
+
+/// The code a tolerated `::toc-linking` or `::file-links` failure keeps as a
+/// warning: the one its failure reports, so recovering never changes how an
+/// author tells failures apart. `None` for any other error.
+pub(crate) fn directive_failure_code(error: &MarkdownError) -> Option<&'static str> {
+    match error {
+        MarkdownError::TocLinking(inner) => Some(toc_linking_code(inner)),
+        MarkdownError::FileLinks(inner) => Some(file_links_code(inner)),
+        _ => None,
+    }
+}
+
+/// The code of a `::toc-linking` failure: one per option it rejects, so an
+/// author can tell a bad `level=` from a bad `cleanup=` or filter.
+fn toc_linking_code(error: &super::TocLinkingError) -> &'static str {
+    use super::TocLinkingError;
+    match error {
+        TocLinkingError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
+        TocLinkingError::InvalidLevel { .. } => TOC_LINKING_INVALID_LEVEL_CODE,
+        TocLinkingError::InvalidCleanupService { .. } => TOC_LINKING_INVALID_CLEANUP_CODE,
+        TocLinkingError::InvalidGlob { .. } => TOC_LINKING_INVALID_FILTER_CODE,
+        TocLinkingError::Unresolved { .. } => REFERENCE_FAILURE_CODE,
+        TocLinkingError::Io(_) => INPUT_READ_CODE,
+    }
+}
+
+/// The code of a heading normalization failure.
+pub(crate) fn normalization_code(error: &crate::markdown::normalize::NormalizationError) -> &'static str {
+    use crate::markdown::normalize::NormalizationError;
+    match error {
+        NormalizationError::LevelOverflow { .. } => NORMALIZATION_LEVEL_OVERFLOW_CODE,
+        NormalizationError::ValidationFailed(_) => NORMALIZATION_VALIDATION_FAILED_CODE,
+    }
+}
+
+/// The code of a `::file-links` failure.
+pub(crate) fn file_links_code(error: &super::FileLinksError) -> &'static str {
+    use super::FileLinksError;
+    match error {
+        FileLinksError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
+        FileLinksError::InvalidDepth { .. } => FILE_LINKS_INVALID_DEPTH_CODE,
+        FileLinksError::MissingSourceContext { .. } => FILE_LINKS_MISSING_SOURCE_CODE,
+        FileLinksError::TargetNotFound { .. } => REFERENCE_FAILURE_CODE,
+        FileLinksError::TargetNotDirectory { .. } => FILE_LINKS_NOT_A_DIRECTORY_CODE,
+        FileLinksError::GlobReference { source, .. } if matches!(source.as_ref(), biscuit_file::GlobReferenceError::Io { .. }) => {
+            INPUT_READ_CODE
+        }
+        FileLinksError::GlobReference { .. } => FILE_LINKS_INVALID_GLOB_CODE,
+        FileLinksError::Unreadable { .. } | FileLinksError::Io(_) => INPUT_READ_CODE,
+    }
 }
 
 fn context_source(ctx: &SourceContext) -> Option<DiagnosticSource> {

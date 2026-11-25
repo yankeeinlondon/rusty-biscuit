@@ -36,6 +36,18 @@ pub enum ShellCommandOrigin {
         start_line: usize,
         command_line: usize,
     },
+    /// A [`Body`](Self::Body) or [`ShellBlock`](Self::ShellBlock) origin
+    /// (`site`) whose lines composition proved are the file lines the command
+    /// was written on: `at` is the directive (or block command) in the
+    /// error's loaded file. Composition places a body command's failure, and
+    /// pre-flight discovery the commands it reports, this way; nothing compares
+    /// origins, so placing never changes what is approved.
+    /// Both fields are boxed to keep `ShellExpansionError` under the
+    /// `result_large_err` threshold.
+    Authored {
+        site: Box<ShellCommandOrigin>,
+        at: Box<crate::markdown::types::AuthoredSpan>,
+    },
 }
 
 impl fmt::Display for ShellCommandOrigin {
@@ -50,6 +62,7 @@ impl fmt::Display for ShellCommandOrigin {
                 f,
                 "shell block starting at line {start_line}, command at line {command_line}"
             ),
+            Self::Authored { site, .. } => site.fmt(f),
         }
     }
 }
@@ -62,6 +75,42 @@ impl ShellCommandOrigin {
             Self::Body { line } => *line,
             Self::Frontmatter { line, .. } => line.unwrap_or(0),
             Self::ShellBlock { command_line, .. } => *command_line,
+            Self::Authored { site, .. } => site.line_number(),
+        }
+    }
+
+    /// Whether the command was written in the body (a `::shell` line or a
+    /// shell-block command), placed or not.
+    pub fn is_body(&self) -> bool {
+        !matches!(self, Self::Frontmatter { .. })
+    }
+
+    /// A [`Body`](Self::Body) origin at its authored `site`, and any other
+    /// origin or an unproven site unchanged (see [`Self::Authored`]).
+    pub(crate) fn placed(self, site: &crate::markdown::compose::site_scope::DirectiveSite) -> Self {
+        match (self, site) {
+            (Self::Body { .. }, crate::markdown::compose::site_scope::DirectiveSite::Authored(_, at)) => {
+                Self::Authored { site: Box::new(Self::Body { line: at.line() }), at: Box::new(at.clone()) }
+            }
+            (origin, _) => origin,
+        }
+    }
+
+    /// A [`ShellBlock`](Self::ShellBlock) origin at its authored block
+    /// `opener` and `command` line, when both are proven; any other origin
+    /// unchanged.
+    pub(crate) fn placed_in_block(
+        self,
+        opener: &crate::markdown::compose::site_scope::DirectiveSite,
+        command: &crate::markdown::compose::site_scope::DirectiveSite,
+    ) -> Self {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        match (self, opener, command) {
+            (Self::ShellBlock { .. }, DirectiveSite::Authored(_, block), DirectiveSite::Authored(_, at)) => Self::Authored {
+                site: Box::new(Self::ShellBlock { start_line: block.line(), command_line: at.line() }),
+                at: Box::new(at.clone()),
+            },
+            (origin, ..) => origin,
         }
     }
 }
@@ -811,6 +860,58 @@ pub enum ShellExpansionError {
 }
 
 impl ShellExpansionError {
+    /// This failure of the body `::shell` line at `span` of `markdown`'s
+    /// current body, placed where the line was written when `origin` proves
+    /// it (see [`at_site`](Self::at_site)).
+    #[must_use]
+    pub(crate) fn at_authored_directive(
+        self,
+        markdown: &crate::markdown::Markdown,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+        span: &std::ops::Range<usize>,
+    ) -> Self {
+        self.at_site(&crate::markdown::compose::site_scope::DirectiveSite::of_span(markdown, origin, span))
+    }
+
+    /// A [`Body`](ShellCommandOrigin::Body) failure moved to its authored
+    /// `site`: the loaded file becomes its context and its origin becomes
+    /// [`Authored`](ShellCommandOrigin::Authored). The line it had counts the
+    /// current body past the frontmatter, which an earlier stage may have
+    /// shifted, so an unproven site keeps it and its diagnostic names only
+    /// the file. Any other origin is unchanged.
+    #[must_use]
+    pub(crate) fn at_site(mut self, site: &crate::markdown::compose::site_scope::DirectiveSite) -> Self {
+        if let crate::markdown::compose::site_scope::DirectiveSite::Authored(context, _) = site
+            && let Some((ctx, origin)) = self.location_mut()
+            && matches!(origin, ShellCommandOrigin::Body { .. })
+        {
+            *ctx = context.clone();
+            *origin = std::mem::replace(origin, ShellCommandOrigin::Body { line: 0 }).placed(site);
+        }
+        self
+    }
+
+    /// As [`at_site`](Self::at_site), for a
+    /// [`ShellBlock`](ShellCommandOrigin::ShellBlock) command: `opener` is the
+    /// block's `::shell-block` line and `command` the command's first line.
+    /// Placed only when both are proven.
+    #[must_use]
+    pub(crate) fn at_block_sites(
+        mut self,
+        opener: &crate::markdown::compose::site_scope::DirectiveSite,
+        command: &crate::markdown::compose::site_scope::DirectiveSite,
+    ) -> Self {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        if let (DirectiveSite::Authored(..), DirectiveSite::Authored(context, _)) = (opener, command)
+            && let Some((ctx, origin)) = self.location_mut()
+            && matches!(origin, ShellCommandOrigin::ShellBlock { .. })
+        {
+            *ctx = context.clone();
+            *origin = std::mem::replace(origin, ShellCommandOrigin::Body { line: 0 }).placed_in_block(opener, command);
+        }
+        self
+    }
+
     /// The authored shell command this error is about, when the variant carries
     /// one.
     ///

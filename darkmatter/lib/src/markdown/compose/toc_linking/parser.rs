@@ -163,6 +163,7 @@ fn parse_directive_line(
             line,
             message: "Directive target cannot be empty".to_string(),
             document: None,
+            authored: None,
         });
     }
 
@@ -199,7 +200,7 @@ fn parse_directive_line(
 
 fn parse_target_chain(raw: &str, line: usize) -> Result<(Vec<String>, bool), TocLinkingError> {
     let (alternatives, suppress) = crate::markdown::compose::target_chain::split_target_chain(raw)
-        .map_err(|error| TocLinkingError::ParseDirective { line, message: error.0, document: None })?;
+        .map_err(|error| TocLinkingError::ParseDirective { line, message: error.0, document: None, authored: None })?;
     Ok((
         alternatives.into_iter().map(|(value, _)| value.to_string()).collect(),
         suppress,
@@ -264,6 +265,7 @@ fn apply_toc_linking_option(
                 line,
                 message: format!("Unknown option '{}'", key),
                 document: None,
+                authored: None,
             });
         }
     }
@@ -278,8 +280,9 @@ fn parse_heading_level(s: &str, line: usize) -> Result<HeadingLevel, TocLinkingE
         level: s.clone(),
         line,
         document: None,
+        authored: None,
     })?;
-    HeadingLevel::new(level).ok_or(TocLinkingError::InvalidLevel { level: s, line, document: None })
+    HeadingLevel::new(level).ok_or(TocLinkingError::InvalidLevel { level: s, line, document: None, authored: None })
 }
 
 fn parse_glob_prefix(value: &str) -> (&str, bool) {

@@ -93,6 +93,11 @@ pub struct ReferenceValidationReport {
     /// trigger only a child's schema roots hold is here too. Not serialized:
     /// a host delivers them as compose warnings.
     pub trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
+    /// The warnings the documents' preparation reported (an uncertain call,
+    /// say), which composition reports again when it runs: for a host that
+    /// refuses the document on this report and never composes it. Not
+    /// serialized.
+    pub earlier_warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl Serialize for ReferenceValidationReport {
@@ -164,6 +169,9 @@ pub struct ReferenceIssue {
     /// What the reason phrase does not already say: a URL parser's error, or a
     /// remote status or timeout.
     pub detail: Option<String>,
+    /// The file-reference failure class of a target that failed to resolve,
+    /// when the issue reports one; see [`resolution_failure`](Self::resolution_failure).
+    pub failure: Option<biscuit_file::ResolutionFailure>,
 }
 
 impl ReferenceIssue {
@@ -172,13 +180,15 @@ impl ReferenceIssue {
     /// A [`ReferenceIssueCode::MissingLocalTarget`] is a local path that
     /// resolved through its file reference to no file, so it is
     /// [`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch).
-    /// A resolution *error* is not an issue: validation returns it as a
+    /// A link or image target whose resolution failed carries its class in
+    /// [`failure`](Self::failure); an inclusion's resolution error is not an
+    /// issue: validation returns it as a
     /// [`ReferenceError`](super::ReferenceError), which carries its own class.
     pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
-        match self.code {
+        self.failure.or(match self.code {
             ReferenceIssueCode::MissingLocalTarget => Some(biscuit_file::ResolutionFailure::NoMatch),
             _ => None,
-        }
+        })
     }
 
     /// Whether this issue was raised for `record` in the inclusion `trail`.
@@ -252,8 +262,14 @@ pub enum ReferenceIssueCode {
     MissingSourceContext,
     /// Non-HTTP/HTTPS scheme.
     UnsupportedScheme,
+    /// A link or image target is not a file reference that can resolve: its
+    /// syntax is invalid (`[x](@)`) or a context anchor it needs is absent.
+    InvalidReference,
     /// Fragment target not found in document headings.
     MissingFragmentTarget,
+    /// The target exists but cannot be read as Markdown (unreadable, or its
+    /// frontmatter does not parse), so a fragment naming it cannot be checked.
+    UnreadableTarget,
     /// HTML tag is malformed (e.g., missing required attributes).
     ///
     /// Reserved for future use with structured HTML validation.
@@ -275,6 +291,8 @@ impl ReferenceIssueCode {
             Self::MissingLocalTarget => "file not found",
             Self::EmptyTarget => "no target",
             Self::MissingFragmentTarget => "no matching heading",
+            Self::UnreadableTarget => "unreadable target",
+            Self::InvalidReference => "invalid file reference",
             Self::InvalidUrl => "malformed URL",
             Self::RemoteUnreachable => "unreachable",
             Self::UnsupportedScheme => "unsupported scheme",
@@ -312,6 +330,10 @@ pub(crate) fn validate(
     // Keep the build and the fresh-seam call visibly adjacent: any
     // caller-controlled handoff inserted between them would break the
     // freshness invariant `validate_fresh_graph` relies on.
+    // One admitted root for the build and the validation, so the fresh
+    // graph's provenance and root context are the ones validated.
+    let admitted = options.graph.compose.admitted_document(md);
+    let md = admitted.as_ref();
     let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
         match error {
             crate::markdown::MarkdownError::Reference(source) => *source,
@@ -342,7 +364,10 @@ pub(crate) fn validate_with_graph(
     info!("validate: starting reference validation");
 
     // A caller-supplied graph must still match the document, graph options,
-    // and every local descendant before any report data is produced.
+    // and every local descendant before any report data is produced. The
+    // document is admitted as the graph build admitted it.
+    let admitted = options.graph.compose.admitted_document(md);
+    let md = admitted.as_ref();
     verify_graph_compatibility(md, options, graph)?;
 
     validate_graph_contents(md, options, graph)
@@ -389,6 +414,11 @@ fn validate_graph_contents(
     options: &ReferenceValidationOptions,
     graph: &ReferenceGraph,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    // Every caller's root is admitted here, as the graph build admitted it:
+    // a source-less buffer whose path is only on the request would otherwise
+    // prepare its root headings (schema roots, bare `$schema`) without a file.
+    let admitted = options.graph.compose.admitted_document(md);
+    let md = admitted.as_ref();
     let options = &rooted(md, options);
     let root_source = graph.root().source.clone();
     let occurrences = super::graph::flatten_occurrences(graph);
@@ -398,6 +428,7 @@ fn validate_graph_contents(
         documents: occurrences.documents.clone(),
         references: occurrences.records.iter().map(|(record, _)| record.clone()).collect(),
         trigger_warnings: graph.trigger_warnings().to_vec(),
+        earlier_warnings: graph.earlier_warnings().to_vec(),
         ..Default::default()
     };
 
@@ -431,24 +462,48 @@ fn validate_graph_contents(
         // are validated relative to their own file location.
         let ref_source = &record.origin.source;
 
+        if names_no_target(record) {
+            report.references_valid += 1;
+            continue;
+        }
+        match admit_url_inclusion(record) {
+            Ok(()) => {}
+            // A reference check running ahead of composition leaves the
+            // refusal to it, as the graph leaves a refused Markdown child.
+            Err(_) if options.graph.compose.defer_inclusion_parse_failures => {
+                report.references_valid += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        // Composition's selector refused every alternative of a required
+        // `::toc-linking` chain: that verdict stands, whether the first
+        // alternative looks like a URL, a fragment, or a path.
+        if matches!(ref_source, ComposeSource::File(_))
+            && record.attributes.contains_key(super::graph::TOC_UNRESOLVED_ATTRIBUTE)
+        {
+            report.issues.push(missing_local_target(record.target.raw().unwrap_or_default(), record, trail));
+            if options.fail_fast && report.error_count() > 0 {
+                return Ok(report);
+            }
+            continue;
+        }
+
         match &record.target {
             ReferenceTarget::LocalPath { raw } => {
-                // ::file-links targets are glob patterns or dir+depth specs, not
-                // actual file paths — skip existence validation and defer to
-                // compose-time discovery.
-                if record.origin.syntax == super::types::ReferenceSyntax::DirectiveFileLinks {
-                    report.references_valid += 1;
-                    continue;
-                }
-
                 let raw_str = raw.to_string_lossy();
                 if raw_str.trim().is_empty() {
                     report.issues.push(empty_target(record, trail));
                     continue;
                 }
 
-                // Check for fragment in local path (e.g., "./other.md#section")
-                let (path_part, fragment) = split_path_fragment(&raw_str);
+                // A link's `#…` names a heading of its file (`./other.md#section`);
+                // an inclusion's is part of the one filename it opens.
+                let (path_part, fragment) = if record.kind == ReferenceKind::Transclusion {
+                    (raw_str.to_string(), None)
+                } else {
+                    split_path_fragment(&raw_str)
+                };
                 let resolved_path = validate_local_path(
                     &path_part,
                     ref_source,
@@ -458,6 +513,13 @@ fn validate_graph_contents(
                     &options.graph,
                     &root_source,
                 )?;
+                if let Some(path) = &resolved_path {
+                    match admit_code_inclusion(record, path, &options.graph) {
+                        Ok(()) => {}
+                        Err(_) if options.graph.compose.defer_inclusion_parse_failures => {}
+                        Err(error) => return Err(error),
+                    }
+                }
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
@@ -503,6 +565,7 @@ fn validate_graph_contents(
                         origin: record.origin.clone(),
                         included_via: trail.to_vec(),
                         detail: Some(e.to_string()),
+                        failure: None,
                     });
                 } else if options.validate_remote {
                     // Remote validation will be done in a batch below
@@ -532,6 +595,7 @@ fn validate_graph_contents(
                                 origin: record.origin.clone(),
                                 included_via: trail.to_vec(),
                 detail: None,
+                failure: None,
                             });
                         } else {
                             report.references_valid += 1;
@@ -560,6 +624,7 @@ fn validate_graph_contents(
                     origin: record.origin.clone(),
                     included_via: trail.to_vec(),
                 detail: None,
+                failure: None,
                 });
                 report.references_valid += 1;
             }
@@ -574,7 +639,13 @@ fn validate_graph_contents(
         let (remote_refs, remote_trails): (Vec<_>, Vec<_>) = occurrences
             .records
             .iter()
-            .filter(|(record, _)| matches!(&record.target, ReferenceTarget::RemoteUrl { .. }))
+            .filter(|(record, _)| {
+                // A `::url` target its directive refuses is never requested,
+                // even when the check leaves the refusal to composition.
+                matches!(&record.target, ReferenceTarget::RemoteUrl { .. })
+                    && !names_no_target(record)
+                    && admit_url_inclusion(record).is_ok()
+            })
             .map(|(record, occurrence)| (record, &occurrences.documents[*occurrence].included_via))
             .unzip();
 
@@ -600,6 +671,7 @@ fn validate_graph_contents(
                             origin: record.origin.clone(),
                             included_via: trail.clone(),
                             detail: Some(detail),
+                            failure: None,
                         });
                     }
                 }
@@ -608,6 +680,58 @@ fn validate_graph_contents(
     }
 
     Ok(report)
+}
+
+/// Whether `record` names nothing validation checks, whatever its target
+/// looks like: a `::file-links` glob or `--dir` listing (composition's
+/// discovery judges it), or a `::toc-linking` chain that ends in `false` and
+/// found no file (composition omits it). Decided before any target-kind
+/// check and before the remote request batch, so no such record is reported
+/// or requested.
+fn names_no_target(record: &ReferenceRecord) -> bool {
+    record.origin.syntax == super::types::ReferenceSyntax::DirectiveFileLinks
+        || record.attributes.contains_key(super::graph::TOC_SUPPRESSED_ATTRIBUTE)
+}
+
+/// Composition's admission of a `::url` record's target: its file reference
+/// must parse and it must be an absolute URL
+/// ([`admit_url_target`](crate::markdown::compose::transclusion::admit_url_target)).
+/// A refused target is composition's typed error at the directive, decided
+/// before the hyperlink branches and the remote request batch, so a relative
+/// path, fragment, or scheme-relative address is never resolved as a file or
+/// requested. Any other record is admitted.
+fn admit_url_inclusion(record: &ReferenceRecord) -> Result<(), ReferenceError> {
+    if record.origin.syntax != super::types::ReferenceSyntax::DirectiveUrl {
+        return Ok(());
+    }
+    let raw = record.target.raw().unwrap_or_default();
+    biscuit_file::FileReference::new(raw)
+        .map_err(crate::markdown::compose::TransclusionError::from)
+        .and_then(|_| crate::markdown::compose::transclusion::admit_url_target(raw))
+        .map(drop)
+        .map_err(|error| ReferenceError::Compose(Box::new(error.at_inclusion(inclusion_site(record)).into())))
+}
+
+/// Composition's admission of `path`, the existing file a `::code` record
+/// resolved to ([`admit_local_target`](crate::markdown::compose::transclusion::admit_local_target)):
+/// refused, at the directive, when the request disallows local code sources.
+/// Nothing is read or decoded. Any other record is admitted; a `::file`,
+/// `prologue`, or `epilogue` child was admitted where the graph followed it.
+fn admit_code_inclusion(
+    record: &ReferenceRecord,
+    path: &std::path::Path,
+    graph_options: &ReferenceGraphOptions,
+) -> Result<(), ReferenceError> {
+    if record.origin.syntax != super::types::ReferenceSyntax::DirectiveCode {
+        return Ok(());
+    }
+    let canonical = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    crate::markdown::compose::transclusion::admit_local_target(
+        crate::markdown::compose::transclusion::DirectiveKind::Code,
+        &canonical,
+        &graph_options.compose.transclusion_options(),
+    )
+    .map_err(|error| ReferenceError::Compose(Box::new(error.at_inclusion(inclusion_site(record)).into())))
 }
 
 /// Verifies a prebuilt graph is compatible with a validation request.
@@ -730,35 +854,21 @@ fn validate_local_path(
                 ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
                 _ => unreachable!("file source matched above"),
             };
-            if let Some(resolved) = super::resolve_transclusion_target(
-                raw,
-                source,
-                &compose_options,
-            )? {
+            let resolved = match super::resolve_transclusion_target(raw, source, &compose_options) {
+                Ok(resolved) => resolved,
+                // A link or image target that is no usable file reference is
+                // that one reference's issue, at its authored position.
+                Err(ReferenceError::FileReference(error)) if record.kind != ReferenceKind::Transclusion => {
+                    report.issues.push(invalid_local_target(raw, &error, record, trail));
+                    return Ok(None);
+                }
+                Err(error) => return Err(super::at_inclusion(error, inclusion_site(record))),
+            };
+            if let Some(resolved) = resolved {
                 report.references_valid += 1;
                 return Ok(Some(resolved));
             }
-            // A link inside data (text an expression inserted) is content, not
-            // authored structure: a missing target warns rather than failing.
-            let in_data = record
-                .attributes
-                .get(super::graph::DATA_ORIGIN_ATTRIBUTE)
-                .is_some_and(|origin| origin == "data");
-            report.issues.push(ReferenceIssue {
-                code: ReferenceIssueCode::MissingLocalTarget,
-                message: crate::markdown::errors::with_glob_hint(
-                    format!("Missing local target: {raw}"),
-                    biscuit_file::ResolutionFailure::NoMatch,
-                    raw,
-                ),
-                severity: if in_data { ReferenceSeverity::Warning } else { ReferenceSeverity::Error },
-                kind: record.kind,
-                reference_display: raw.to_string(),
-                reference_id: record.id.clone(),
-                origin: record.origin.clone(),
-                included_via: trail.to_vec(),
-                detail: None,
-            });
+            report.issues.push(missing_local_target(raw, record, trail));
             Ok(None)
         }
         ComposeSource::Unknown => {
@@ -772,6 +882,7 @@ fn validate_local_path(
                 origin: record.origin.clone(),
                 included_via: trail.to_vec(),
                 detail: None,
+                failure: None,
             });
             Ok(None)
         }
@@ -782,6 +893,77 @@ fn validate_local_path(
             report.references_valid += 1;
             Ok(None)
         }
+    }
+}
+
+/// Where the inclusion `record` was written, for its target's failure: its
+/// file at its authored position. `None` for any other reference kind, whose
+/// failure is not an inclusion's, and for a document with no file.
+fn inclusion_site(record: &ReferenceRecord) -> Option<crate::markdown::compose::InclusionSite> {
+    let ComposeSource::File(file) = &record.origin.source else {
+        return None;
+    };
+    (record.kind == ReferenceKind::Transclusion).then(|| {
+        let authored = record.origin.authored.as_ref().map(|location| {
+            crate::markdown::types::AuthoredSpan::proven(location.span.clone(), location.line, location.column)
+        });
+        crate::markdown::compose::InclusionSite::new(file.clone(), authored)
+    })
+}
+
+/// The issue for `record`, whose local target `raw` names no file.
+fn missing_local_target(raw: &str, record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> ReferenceIssue {
+    // A link inside data (text an expression inserted) is content, not
+    // authored structure: a missing target warns rather than failing.
+    let in_data = record
+        .attributes
+        .get(super::graph::DATA_ORIGIN_ATTRIBUTE)
+        .is_some_and(|origin| origin == "data");
+    ReferenceIssue {
+        code: ReferenceIssueCode::MissingLocalTarget,
+        message: crate::markdown::errors::with_glob_hint(
+            format!("Missing local target: {raw}"),
+            biscuit_file::ResolutionFailure::NoMatch,
+            raw,
+        ),
+        severity: if in_data { ReferenceSeverity::Warning } else { ReferenceSeverity::Error },
+        kind: record.kind,
+        reference_display: raw.to_string(),
+        reference_id: record.id.clone(),
+        origin: record.origin.clone(),
+        included_via: trail.to_vec(),
+        detail: None,
+        failure: None,
+    }
+}
+
+/// The issue for `record`, a link or image whose local target `raw` failed
+/// to resolve as a file reference with `error`: an unreadable candidate is
+/// [`ReferenceIssueCode::UnreadableTarget`], and invalid syntax or a missing
+/// context anchor [`ReferenceIssueCode::InvalidReference`]. The class is kept
+/// in [`ReferenceIssue::failure`].
+fn invalid_local_target(
+    raw: &str,
+    error: &biscuit_file::FileReferenceError,
+    record: &ReferenceRecord,
+    trail: &[ReferenceTrailStep],
+) -> ReferenceIssue {
+    let failure = error.resolution_failure();
+    let code = match failure {
+        biscuit_file::ResolutionFailure::Io => ReferenceIssueCode::UnreadableTarget,
+        _ => ReferenceIssueCode::InvalidReference,
+    };
+    ReferenceIssue {
+        code,
+        message: format!("Cannot resolve local target {raw}: {error}"),
+        severity: ReferenceSeverity::Error,
+        kind: record.kind,
+        reference_display: raw.to_string(),
+        reference_id: record.id.clone(),
+        origin: record.origin.clone(),
+        included_via: trail.to_vec(),
+        detail: Some(error.to_string()),
+        failure: Some(failure),
     }
 }
 
@@ -820,6 +1002,7 @@ fn empty_target(record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> Refer
         origin: record.origin.clone(),
         included_via: trail.to_vec(),
         detail: None,
+        failure: None,
     }
 }
 
@@ -961,19 +1144,33 @@ fn validate_cross_doc_fragment(
         return;
     }
 
-    if let Ok(target_md) = Markdown::try_from(target_path) {
-        let target_source = ComposeSource::File(target_path.to_path_buf());
-        let headings = cached_prepared_heading_slugs(
-            cache,
-            &target_md,
-            &target_source,
-            target_path,
-            graph_options,
-        );
-        let frag_lower = fragment.to_lowercase();
-        if !headings.contains(&frag_lower) {
-            report.issues.push(missing_cross_doc_fragment(path, fragment, record, trail));
+    // A target that resolved but cannot be loaded has no headings to check
+    // the fragment against: reported, never passed. One that vanished since
+    // it resolved is already reported missing.
+    let target_md = match Markdown::try_from(target_path) {
+        Ok(target_md) => target_md,
+        Err(crate::markdown::MarkdownError::FileLoad(error)) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            report.issues.push(ReferenceIssue {
+                code: ReferenceIssueCode::UnreadableTarget,
+                message: format!("Cannot check '#{fragment}': {path} cannot be read: {error}"),
+                severity: ReferenceSeverity::Error,
+                kind: record.kind,
+                reference_display: format!("{path}#{fragment}"),
+                reference_id: record.id.clone(),
+                origin: record.origin.clone(),
+                included_via: trail.to_vec(),
+                detail: None,
+                failure: None,
+            });
+            return;
         }
+    };
+    let target_source = ComposeSource::File(target_path.to_path_buf());
+    let headings = cached_prepared_heading_slugs(cache, &target_md, &target_source, target_path, graph_options);
+    let frag_lower = fragment.to_lowercase();
+    if !headings.contains(&frag_lower) {
+        report.issues.push(missing_cross_doc_fragment(path, fragment, record, trail));
     }
 }
 
@@ -993,6 +1190,7 @@ fn missing_cross_doc_fragment(
         origin: record.origin.clone(),
         included_via: trail.to_vec(),
         detail: None,
+        failure: None,
     }
 }
 
@@ -1529,6 +1727,7 @@ mod tests {
                 line: Some(2),
             }],
             detail: None,
+            failure: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,
@@ -1538,6 +1737,7 @@ mod tests {
             documents: Vec::new(),
             references: Vec::new(),
             trigger_warnings: Vec::new(),
+            earlier_warnings: Vec::new(),
         };
 
         let value = serde_json::to_value(&report).unwrap();
@@ -1599,6 +1799,7 @@ mod tests {
             },
             included_via: Vec::new(),
             detail: None,
+            failure: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,
@@ -1608,6 +1809,7 @@ mod tests {
             documents: Vec::new(),
             references: Vec::new(),
             trigger_warnings: Vec::new(),
+            earlier_warnings: Vec::new(),
         };
 
         use biscuit_terminal::components::renderable::TerminalRenderable as _;
@@ -1630,6 +1832,7 @@ mod tests {
             documents: Vec::new(),
             references: Vec::new(),
             trigger_warnings: Vec::new(),
+            earlier_warnings: Vec::new(),
         };
 
         use biscuit_terminal::components::renderable::TerminalRenderable as _;

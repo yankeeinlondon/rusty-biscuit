@@ -174,15 +174,14 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
                 result.push_str(title.trim());
                 result.push_str("**\n\n");
                 cursor = *end;
-                warnings.push(
-                    ComposeWarning::new(
-                        "transclusion",
-                        format!(
-                            "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
-                        ),
-                    )
-                    .at_line(*line),
-                );
+                let mut warning = ComposeWarning::new(
+                    "transclusion",
+                    format!("Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"),
+                )
+                .at_line(*line);
+                warning.code =
+                    Some(crate::markdown::compose::report_diagnostics::TRANSCLUSION_HEADING_OVERFLOW_CODE.to_string());
+                warnings.push(warning);
             }
         }
     }
@@ -279,6 +278,8 @@ pub(crate) enum PreparedTransclusion {
         /// every line of the child's output so it stays inside the list
         /// item the directive was written in. Empty outside a collection.
         indent: String,
+        /// Where the inclusion was written, for a target that cannot be read.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     Code {
         order: usize,
@@ -286,6 +287,8 @@ pub(crate) enum PreparedTransclusion {
         path: PathBuf,
         directive_options: transclusion::BlockOptions,
         line: usize,
+        /// Where the directive was written, for a target that cannot be read.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     RemoteFile {
         order: usize,
@@ -295,6 +298,8 @@ pub(crate) enum PreparedTransclusion {
         insertion_context: Option<(usize, usize)>,
         site: Option<crate::markdown::compose::preflight::ScopedSite>,
         indent: String,
+        /// Where the inclusion was written, for a fetch that fails.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     RemoteCode {
         order: usize,
@@ -302,6 +307,8 @@ pub(crate) enum PreparedTransclusion {
         url: url::Url,
         directive_options: transclusion::BlockOptions,
         language: String,
+        /// Where the directive was written, for a fetch that fails.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     Toc {
         order: usize,
@@ -438,6 +445,20 @@ pub(crate) struct TransclusionEngine<'a> {
     /// body is immutable for the engine's lifetime, so this replaces the
     /// per-directive full re-parse in `find_preceding_heading_level`.
     heading_starts: std::sync::OnceLock<Vec<(usize, HeadingLevel)>>,
+    /// The map of the body to its loaded file, which places a tolerated
+    /// directive failure on the line it was written on.
+    origin: Option<&'a crate::markdown::compose::body_origin::BodyOrigin>,
+}
+
+/// `warning`, about the directive at `site`, at its authored opener when
+/// that is proven.
+fn placed(warning: ComposeWarning, site: &crate::markdown::compose::site_scope::DirectiveSite) -> ComposeWarning {
+    match site {
+        crate::markdown::compose::site_scope::DirectiveSite::Authored(context, opener) => {
+            warning.at_authored(Some(context.display.clone()), opener)
+        }
+        _ => warning,
+    }
 }
 
 impl<'a> TransclusionEngine<'a> {
@@ -445,7 +466,32 @@ impl<'a> TransclusionEngine<'a> {
         Self {
             markdown,
             heading_starts: std::sync::OnceLock::new(),
+            origin: None,
         }
+    }
+
+    /// Where the directive occupying `span` of this body was written.
+    fn directive_site(&self, span: &std::ops::Range<usize>) -> crate::markdown::compose::site_scope::DirectiveSite {
+        crate::markdown::compose::site_scope::DirectiveSite::of_span(self.markdown, self.origin, span)
+    }
+
+    /// ` at line N` for a message about the directive at `site`, whose line
+    /// in this body is `body_line`: its authored line, or nothing when that
+    /// is unproven or the document counts generated lines.
+    fn line_phrase(&self, site: &crate::markdown::compose::site_scope::DirectiveSite, body_line: usize) -> String {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        match site {
+            DirectiveSite::Authored(_, opener) => format!(" at line {}", opener.line()),
+            DirectiveSite::Body if self.markdown.generated_identity().is_none() => format!(" at line {body_line}"),
+            DirectiveSite::Body | DirectiveSite::Unproven => String::new(),
+        }
+    }
+
+    /// This engine, whose body `origin` maps to its loaded file.
+    #[must_use]
+    pub(crate) fn with_origin(mut self, origin: Option<&'a crate::markdown::compose::body_origin::BodyOrigin>) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// Nearest preceding heading level before `offset`, using the memoized
@@ -724,6 +770,12 @@ impl<'a> TransclusionEngine<'a> {
                 }
             }
 
+            // A target failure names the directive's opener in its file.
+            let inclusion = || {
+                let site = crate::markdown::compose::site_scope::DirectiveSite::of_span(self.markdown, origin, &directive.span);
+                transclusion::InclusionSite::of_directive(self.markdown, &site)
+            };
+            let at_directive = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
             let target = &directive.raw_target;
             // A directive a collection body repeated is matched by its
             // authored site and original item, never by target text: copies
@@ -733,6 +785,10 @@ impl<'a> TransclusionEngine<'a> {
             let scoped = match (site, options.preflight_graph()) {
                 (Some(site), Some(graph)) if !graph.is_empty() => Some(
                     self.scoped_resolution(directive, site, graph, options, &transclusion_opts)
+                        .map_err(|error| match error {
+                            crate::markdown::types::MarkdownError::Transclusion(inner) => at_directive(*inner).into(),
+                            other => other,
+                        })
                         .map_err(in_scope)?,
                 ),
                 _ => None,
@@ -789,7 +845,7 @@ impl<'a> TransclusionEngine<'a> {
                         *next_order += 1;
                         continue;
                     }
-                    Err(err) => return Err(in_scope(err.into())),
+                    Err(err) => return Err(in_scope(at_directive(err).into())),
                 }
             };
 
@@ -802,6 +858,7 @@ impl<'a> TransclusionEngine<'a> {
                             path,
                             directive_options: directive.options.clone(),
                             line: directive.line,
+                            inclusion: inclusion(),
                         }
                     } else {
                         PreparedTransclusion::Markdown {
@@ -813,6 +870,7 @@ impl<'a> TransclusionEngine<'a> {
                             insertion_context: Some((directive.span.start, directive.line)),
                             site: site.clone(),
                             indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
+                            inclusion: inclusion(),
                         }
                     };
                     prepared.push(item);
@@ -838,6 +896,7 @@ impl<'a> TransclusionEngine<'a> {
                             url,
                             directive_options: directive.options.clone(),
                             language,
+                            inclusion: inclusion(),
                         });
                     } else {
                         prepared.push(PreparedTransclusion::RemoteFile {
@@ -848,6 +907,7 @@ impl<'a> TransclusionEngine<'a> {
                             insertion_context: Some((directive.span.start, directive.line)),
                             site: site.clone(),
                             indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
+                            inclusion: inclusion(),
                         });
                     }
                     *next_order += 1;
@@ -875,7 +935,8 @@ impl<'a> TransclusionEngine<'a> {
                 }
                 transclusion::ResolvedTarget::Url { url, .. } => {
                     return Err(in_scope(
-                        transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }.into(),
+                        at_directive(transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() })
+                            .into(),
                     ));
                 }
             }
@@ -929,6 +990,15 @@ impl<'a> TransclusionEngine<'a> {
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
+        // A target failure names the key, or the list entry, that wrote it.
+        let inclusion = || {
+            let (key, index) = match slot {
+                SectionSlot::Prologue(index) => ("prologue", index),
+                SectionSlot::Epilogue(index) => ("epilogue", index),
+            };
+            transclusion::InclusionSite::of_frontmatter_value(self.markdown, key, index, reference)
+        };
+        let at_value = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
         let file_ref = match transclusion::classify_frontmatter_reference(reference) {
             transclusion::FrontmatterReference::Inline => {
                 prepared.push(PreparedTransclusion::FixedSection {
@@ -942,7 +1012,7 @@ impl<'a> TransclusionEngine<'a> {
             }
             transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
             transclusion::FrontmatterReference::ParseError(error) => {
-                return Err(transclusion::TransclusionError::from(error).into());
+                return Err(at_value(transclusion::TransclusionError::from(error)).into());
             }
         };
 
@@ -971,7 +1041,7 @@ impl<'a> TransclusionEngine<'a> {
                 *next_order += 1;
                 return Ok(());
             }
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(at_value(err).into()),
         };
 
         match resolved {
@@ -985,6 +1055,7 @@ impl<'a> TransclusionEngine<'a> {
                     insertion_context: None,
                     site: None,
                     indent: String::new(),
+                    inclusion: inclusion(),
                 });
                 *next_order += 1;
             }
@@ -1006,6 +1077,7 @@ impl<'a> TransclusionEngine<'a> {
                     insertion_context: None,
                     site: None,
                     indent: String::new(),
+                    inclusion: inclusion(),
                 });
                 *next_order += 1;
             }
@@ -1028,10 +1100,7 @@ impl<'a> TransclusionEngine<'a> {
                 *next_order += 1;
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
-                return Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                    url: url.to_string(),
-                }
-                .into());
+                return Err(at_value(transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }).into());
             }
         }
 
@@ -1117,6 +1186,7 @@ impl<'a> TransclusionEngine<'a> {
                 insertion_context,
                 site,
                 indent,
+                inclusion,
             } => {
                 let mut child_runtime = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -1126,6 +1196,7 @@ impl<'a> TransclusionEngine<'a> {
                 let content = self.render_markdown_transclusion(
                     &path,
                     opening.as_ref(),
+                    inclusion,
                     insertion_context,
                     site.as_ref(),
                     &directive_options,
@@ -1155,18 +1226,16 @@ impl<'a> TransclusionEngine<'a> {
                 path,
                 directive_options,
                 line: _line,
+                inclusion,
             } => {
                 let cache_handle = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.cache.clone()
                 };
-                let content = self.render_code_transclusion(
-                    &path,
-                    &directive_options,
-                    state,
-                    options,
-                    &cache_handle,
-                )?;
+                // Every failure here is the directive's own target's.
+                let content = self
+                    .render_code_transclusion(&path, &directive_options, state, options, &cache_handle)
+                    .map_err(|error| transclusion::target_failure_at(error, &path, inclusion))?;
                 let mut code_report = ComposeReport::new();
                 code_report.transclusions_applied = 1;
                 Ok(ResolvedTransclusion {
@@ -1185,32 +1254,17 @@ impl<'a> TransclusionEngine<'a> {
                 insertion_context,
                 site,
                 indent,
+                inclusion,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
-                let body_text = remote_fetch
-                    .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
-                    })?
-                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
-                        url: url.to_string(),
-                        reason: "URL was not registered for fetching".to_string(),
-                    })?;
+                let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 // Parse the fetched body as Markdown and recursively compose it.
-                let mut child =
-                    crate::markdown::Markdown::try_from_content(body_text).map_err(|e| {
-                        crate::markdown::types::MarkdownError::Transform(format!(
-                            "failed to parse fetched Markdown from '{}': {e}",
-                            url
-                        ))
-                    })?;
+                // A frontmatter error keeps its own code and names the URL.
+                let mut child = crate::markdown::Markdown::try_from_named_content(body_text, url.as_str())?;
 
                 // The directive's `set` values reach a remote child exactly as
                 // they reach a local one: written over its authored
@@ -1328,23 +1382,13 @@ impl<'a> TransclusionEngine<'a> {
                 url,
                 directive_options,
                 language,
+                inclusion,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
-                let body_text = remote_fetch
-                    .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
-                    })?
-                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
-                        url: url.to_string(),
-                        reason: "URL was not registered for fetching".to_string(),
-                    })?;
+                let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 let fenced = transclusion::wrap_in_code_block(&body_text, &language);
                 let spaced = transclusion::ensure_vertical_spacing(&fenced);
@@ -1385,6 +1429,10 @@ impl<'a> TransclusionEngine<'a> {
                     let display_clone = display_target.clone();
                     let path_clone = path.clone();
                     let document = self.markdown.error_document();
+                    // A selected target that cannot be read is reported at
+                    // the directive that selected it, as a child that cannot
+                    // be loaded is.
+                    let inclusion = || transclusion::InclusionSite::of_directive(self.markdown, &self.directive_site(&span));
 
                     let cached = cache_handle.get_or_compute_operation(
                         &cache_key,
@@ -1393,7 +1441,7 @@ impl<'a> TransclusionEngine<'a> {
                                 let runtime = runtime_mutex.lock().unwrap();
                                 runtime
                                     .load_toc_headings(&path_clone)
-                                    .map_err(toc_linking::TocLinkingError::Io)?
+                                    .map_err(|error| transclusion::read_failure_at(error, &path_clone, inclusion()))?
                             };
                             // Render with no indentation so the cache entry is
                             // indent-independent. Indentation is caller-local
@@ -1495,23 +1543,25 @@ impl<'a> TransclusionEngine<'a> {
                     if options.fail_fast {
                         return skipped_replace("_No matching files_".to_string(), report);
                     }
-                    // A document counting generated lines names no line.
-                    let message = match self.markdown.generated_identity() {
-                        Some(_) => "No matching files for ::file-links directive".to_string(),
-                        None => format!("No matching files for ::file-links directive at line {}", directive.line),
-                    };
-                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
+                    let site = self.directive_site(&span);
+                    let message =
+                        format!("No matching files for ::file-links directive{}", self.line_phrase(&site, directive.line));
+                    report.add_warning(placed(ComposeWarning::new("file_links", message).at_line(directive.line), &site));
                     return skipped_replace(String::new(), report);
                 }
             },
             Err(err) => {
                 if self.resolve_ignore_invalid(options) {
                     report.transclusions_skipped = 1;
+                    let site = self.directive_site(&span);
+                    let err = err.at_site(&site);
                     let message = match self.markdown.generated_identity() {
                         Some(_) => err.reason(),
                         None => err.to_string(),
                     };
-                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
+                    let code = Some(crate::markdown::compose::report_diagnostics::file_links_code(&err).to_string());
+                    let warning = ComposeWarning { code, ..ComposeWarning::new("file_links", message) }.at_line(directive.line);
+                    report.add_warning(placed(warning, &site));
                     return skipped_replace(String::new(), report);
                 }
                 return Err(err.with_document(self.markdown.error_document()).into());
@@ -1524,10 +1574,7 @@ impl<'a> TransclusionEngine<'a> {
         let mut fs =
             biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
                 .map_err(|e| {
-                    let at = match self.markdown.generated_identity() {
-                        Some(_) => String::new(),
-                        None => format!(" at line {}", directive.line),
-                    };
+                    let at = self.line_phrase(&self.directive_site(&span), directive.line);
                     crate::markdown::types::MarkdownError::Transform(format!(
                         "failed to create FileSystem for ::file-links{at}: {e}"
                     ))
@@ -1591,6 +1638,7 @@ impl<'a> TransclusionEngine<'a> {
         &self,
         path: &Path,
         opening: Option<&SourceOpening>,
+        inclusion: Option<transclusion::InclusionSite>,
         insertion_context: Option<(usize, usize)>,
         site: Option<&crate::markdown::compose::preflight::ScopedSite>,
         directive_options: &transclusion::BlockOptions,
@@ -1608,7 +1656,9 @@ impl<'a> TransclusionEngine<'a> {
         // The overlay is applied to the child's authored frontmatter only; it
         // does NOT propagate through `child_options`, so grandchildren do not
         // inherit it.
-        let mut child = runtime.load_markdown(path)?;
+        // A child that cannot be read is the inclusion's failure; one that
+        // loads names its own failures (its frontmatter's, say).
+        let mut child = runtime.load_markdown(path).map_err(|error| transclusion::target_failure_at(error, path, inclusion))?;
         apply_directive_set_overlay(&mut child, directive_options);
         let child_prose_enabled = effective_prose_interpolation(options.prose_interpolation, directive_options)
             == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
@@ -2052,6 +2102,21 @@ fn parse_bool(raw: &str) -> Option<bool> {
 
 /// Whether `options` removes the transclusion `err` failed to resolve: its
 /// target does not exist and the missing-transclusion recovery is on.
+/// The fetched body of `url`, or its failure at the inclusion `site` that
+/// named it.
+fn fetched_body(
+    remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    url: &url::Url,
+    site: Option<transclusion::InclusionSite>,
+) -> Result<String, transclusion::TransclusionError> {
+    let failed = |reason: String| transclusion::TransclusionError::RemoteFetchFailed { url: url.to_string(), reason };
+    match remote_fetch.get_content(url) {
+        Ok(Some(body)) => Ok(body),
+        Ok(None) => Err(failed("URL was not registered for fetching".to_string()).at_inclusion(site)),
+        Err(reason) => Err(failed(reason).at_inclusion(site)),
+    }
+}
+
 fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
     options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
 }
@@ -2248,15 +2313,19 @@ mod tests {
                     } => {
                         let bold_block = format!("\n\n**{}**\n\n", title.trim());
                         result = format!("{}{}{}", &result[..start], bold_block, &result[end..]);
-                        warnings.push(
-                            ComposeWarning::new(
+                        warnings.push(ComposeWarning {
+                            code: Some(
+                                crate::markdown::compose::report_diagnostics::TRANSCLUSION_HEADING_OVERFLOW_CODE
+                                    .to_string(),
+                            ),
+                            ..ComposeWarning::new(
                                 "transclusion",
                                 format!(
                                     "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
                                 ),
                             )
-                            .at_line(line),
-                        );
+                            .at_line(line)
+                        });
                     }
                 }
             }

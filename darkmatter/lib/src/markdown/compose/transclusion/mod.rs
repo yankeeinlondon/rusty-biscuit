@@ -16,17 +16,19 @@ pub use code::{ensure_vertical_spacing, generate_safe_fence, infer_language, wra
 pub use conditions::evaluate_condition;
 pub use engine::{find_preceding_heading_level, relevel_with_overflow};
 pub(crate) use engine::{
-    ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine, apply_directive_set_overlay,
+    ApplyTarget, PreparedTransclusion, ResolvedTransclusion, SectionSlot, TransclusionEngine, apply_directive_set_overlay,
     build_resolution_cache, inherited_child_options, markdown_child_options, remote_child_options,
 };
 pub use parser::{parse_directives, parse_frontmatter_refs};
+pub use resolver::frontmatter_value_is_inline;
 pub(crate) use parser::parse_directives_in;
 pub(crate) use resolver::{
-    FrontmatterReference, classify_frontmatter_reference, resolve_parsed_target, resolve_path,
+    FrontmatterReference, admit_local_target, admit_url_target, classify_frontmatter_reference, resolve_parsed_target, resolve_path,
     resolve_target, source_opening,
 };
+pub(crate) use types::{at_line, frontmatter_value_range, read_failure_at, target_failure_at};
 pub use types::{
     BlockDirective, BlockOptions, DeferredSetError, DependencyNode, DirectiveKind, FrontmatterRefs,
-    ReplaceOption, ResolvedTarget, TransclusionError, TransclusionRuntime, TransclusionSource,
+    InclusionSite, ReplaceOption, ResolvedTarget, TransclusionError, TransclusionRuntime, TransclusionSource,
 };
 pub use wrappers::wrap_quotation;

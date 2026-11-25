@@ -231,6 +231,8 @@ fn build_issue_map(report: &ReferenceValidationReport) -> IssueMap<'_> {
             ReferenceIssueCode::UnsupportedScheme => Some("[unsupported]".to_string()),
             ReferenceIssueCode::RemoteUnreachable => Some("[unreachable]".to_string()),
             ReferenceIssueCode::MissingFragmentTarget => Some("[missing fragment]".to_string()),
+            ReferenceIssueCode::UnreadableTarget => Some("[unreadable]".to_string()),
+            ReferenceIssueCode::InvalidReference => Some("[invalid reference]".to_string()),
             _ => Some("[issue]".to_string()),
         };
         map.0.entry(issue.reference_id.as_str()).or_default().push((

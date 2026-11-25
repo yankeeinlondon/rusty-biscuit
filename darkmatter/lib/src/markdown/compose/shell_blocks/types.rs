@@ -97,7 +97,13 @@ impl SourceExcerpt {
 #[derive(Debug, thiserror::Error)]
 pub enum ShellBlockError {
     /// Parse error in a shell block directive or body.
-    #[error("Shell block parse error at line {line}: {message}{}", crate::markdown::compose::block_pairs::note_suffix(note))]
+    ///
+    /// `line` is one-based: the line in `source_file` where the failing part
+    /// was written when `authored` is set; otherwise, for a document with no
+    /// file, the line of the document's text (frontmatter included); `0`
+    /// means unknown (a file whose body no longer proves where the block was
+    /// written), and the message then names no line.
+    #[error("Shell block parse error{}: {message}{}", at_line(*line), crate::markdown::compose::block_pairs::note_suffix(note))]
     Parse {
         line: usize,
         /// The reason, without a line.
@@ -108,16 +114,21 @@ pub enum ShellBlockError {
         /// Another line the reason refers to, counted like `line` (such as
         /// where a block a closer misses was opened).
         note: Option<String>,
+        /// Where `line` was written in `source_file`, when proven: the
+        /// position a diagnostic publishes. Boxed to keep the error small.
+        authored: Option<Box<crate::markdown::types::AuthoredSpan>>,
     },
 
-    /// EOF reached with an unclosed shell block.
-    #[error("Unterminated shell block opened at line {line}")]
+    /// EOF reached with an unclosed shell block. `line` and `authored` are
+    /// the block opener's, counted as for [`Self::Parse`].
+    #[error("Unterminated shell block{}", opened_at(*line))]
     Unterminated {
         line: usize,
         opening_text: String,
         excerpt: SourceExcerpt,
         /// Source file where the error occurred, if known.
         source_file: Option<PathBuf>,
+        authored: Option<Box<crate::markdown::types::AuthoredSpan>>,
     },
 
     /// A command within a shell block failed with no matching error handler.
@@ -138,49 +149,126 @@ impl ShellBlockError {
     /// Attach a source file path to this error.
     ///
     /// Returns a new error with `source_file` set; consumes `self`.
-    pub fn with_source_file(self, path: Option<PathBuf>) -> Self {
+    pub fn with_source_file(mut self, path: Option<PathBuf>) -> Self {
+        let (Self::Parse { source_file, .. } | Self::Unterminated { source_file, .. } | Self::Command { source_file, .. }) =
+            &mut self;
+        *source_file = path;
+        self
+    }
+
+    /// A parse failure whose lines count a body as starting at line 1, with
+    /// its line and excerpt moved past `offset` header lines (the convention
+    /// every shell-block failure leaves the stage in). A command failure,
+    /// already counted that way, and the unknown line `0` are unchanged.
+    #[must_use]
+    pub(crate) fn shifted(mut self, offset: usize) -> Self {
+        if let Self::Parse { line, excerpt, .. } | Self::Unterminated { line, excerpt, .. } = &mut self
+            && *line != 0
+        {
+            *line += offset;
+            excerpt.highlight_line += offset;
+            for (number, _) in &mut excerpt.lines {
+                *number += offset;
+            }
+        }
+        self
+    }
+}
+
+impl ShellBlockError {
+    /// This failure placed where its block was written in `markdown`'s loaded
+    /// file. Its lines count `markdown`'s current body past `line_offset`
+    /// header lines, which an earlier stage may have shifted, so each is moved
+    /// to the file only when `origin` proves it:
+    ///
+    /// - a command failure moves its lines, its excerpt (now of the file), and
+    ///   its command's origin ([`ShellExpansionError::at_block_sites`]) when
+    ///   both the opener and the command are proven, and is otherwise kept;
+    /// - a parse failure moves its line, excerpt, and `authored` position, and
+    ///   the line its note names (rescanned over `data`, the body's inserted
+    ///   bytes); an unproven one in a file gets the unknown line `0`, no
+    ///   excerpt, and no note line. A document with no file keeps its lines.
+    #[must_use]
+    pub(crate) fn at_authored_lines(
+        self,
+        markdown: &crate::markdown::Markdown,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+        line_offset: usize,
+        data: Option<&super::super::body_origin::DataRanges>,
+    ) -> Self {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        let site = |line: usize| {
+            line.checked_sub(line_offset)
+                .filter(|line| *line > 0)
+                .map(|line| DirectiveSite::of_line(markdown, origin, line))
+        };
         match self {
-            Self::Parse {
-                line,
-                message,
-                excerpt,
-                note,
-                ..
-            } => Self::Parse {
-                line,
-                message,
-                excerpt,
-                source_file: path,
-                note,
-            },
-            Self::Unterminated {
-                line,
-                opening_text,
-                excerpt,
-                ..
-            } => Self::Unterminated {
-                line,
-                opening_text,
-                excerpt,
-                source_file: path,
-            },
-            Self::Command {
-                block_start_line,
-                command_line,
-                partial_output,
-                excerpt,
-                source,
-                ..
-            } => Self::Command {
-                block_start_line,
-                command_line,
-                partial_output,
-                excerpt,
-                source,
-                source_file: path,
-            },
+            Self::Command { block_start_line, command_line, partial_output, excerpt, source, source_file } => {
+                match (site(block_start_line), site(command_line)) {
+                    (
+                        Some(ref opener @ DirectiveSite::Authored(_, ref block)),
+                        Some(ref command @ DirectiveSite::Authored(ref context, ref at)),
+                    ) => Self::Command {
+                        block_start_line: block.line(),
+                        command_line: at.line(),
+                        partial_output,
+                        excerpt: SourceExcerpt::from_text(&context.content, at.line(), 1, 2),
+                        source: Box::new(source.at_block_sites(opener, command)),
+                        source_file,
+                    },
+                    _ => Self::Command { block_start_line, command_line, partial_output, excerpt, source, source_file },
+                }
+            }
+            Self::Parse { mut line, message, mut excerpt, source_file, mut note, mut authored } => {
+                if let Some(placed) = site(line) {
+                    if note.is_some() {
+                        note = crate::markdown::compose::site_scope::scan_note(markdown, data, line - line_offset, |note_line| match placed {
+                            DirectiveSite::Body => Some(note_line + line_offset),
+                            _ => DirectiveSite::file_line(markdown, origin, note_line),
+                        });
+                    }
+                    place_parse(&placed, &mut line, &mut excerpt, &mut authored);
+                }
+                Self::Parse { line, message, excerpt, source_file, note, authored }
+            }
+            Self::Unterminated { mut line, opening_text, mut excerpt, source_file, mut authored } => {
+                if let Some(placed) = site(line) {
+                    place_parse(&placed, &mut line, &mut excerpt, &mut authored);
+                }
+                Self::Unterminated { line, opening_text, excerpt, source_file, authored }
+            }
         }
     }
+}
+
+/// Applies a parse failure's `site`: the authored line, position, and an
+/// excerpt of the file, or for an unproven site the unknown line `0` and no
+/// excerpt (the old one shows lines the file does not have).
+fn place_parse(
+    site: &crate::markdown::compose::site_scope::DirectiveSite,
+    line: &mut usize,
+    excerpt: &mut SourceExcerpt,
+    authored: &mut Option<Box<crate::markdown::types::AuthoredSpan>>,
+) {
+    use crate::markdown::compose::site_scope::DirectiveSite;
+    let mut placed = authored.take().map(|at| *at);
+    site.place(line, &mut placed);
+    *authored = placed.map(Box::new);
+    match site {
+        DirectiveSite::Authored(context, at) => *excerpt = SourceExcerpt::from_text(&context.content, at.line(), 1, 2),
+        DirectiveSite::Unproven => *excerpt = SourceExcerpt::default(),
+        DirectiveSite::Body => {}
+    }
+}
+
+/// ` at line N`, or nothing for the unknown line `0`.
+fn at_line(line: usize) -> String {
+    if line == 0 { String::new() } else { format!(" at line {line}") }
+}
+
+/// ` opened at line N`, or nothing for the unknown line `0`.
+fn opened_at(line: usize) -> String {
+    if line == 0 { String::new() } else { format!(" opened at line {line}") }
 }
 
 impl biscuit_terminal::errors::BlockError for ShellBlockError {
@@ -199,13 +287,18 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 excerpt,
                 source_file,
                 note,
+                ..
             } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
                 }
+                if let Some(row) = crate::markdown::compose::site_scope::line_row(*line) {
+                    body.push_str(&row);
+                    body.push('\n');
+                }
                 body.push_str(&format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}{}",
+                    "<dim>Message:</dim> {message}{}",
                     crate::markdown::compose::block_pairs::note_suffix(note)
                 ));
                 if !excerpt.lines.is_empty() {
@@ -229,12 +322,16 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 opening_text,
                 excerpt,
                 source_file,
+                ..
             } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
                 }
-                body.push_str(&format!("<dim>Opened at line:</dim> {line}\n<dim>Opener:</dim> <cyan>{opening_text}</cyan>"));
+                if *line != 0 {
+                    body.push_str(&format!("<dim>Opened at line:</dim> {line}\n"));
+                }
+                body.push_str(&format!("<dim>Opener:</dim> <cyan>{opening_text}</cyan>"));
                 if !excerpt.lines.is_empty() {
                     body.push_str("\n<dim>Context:</dim>\n");
                     for (ln, text) in &excerpt.lines {
@@ -728,6 +825,7 @@ mod tests {
                 excerpt: excerpt.clone(),
                 source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
                 note: None,
+                authored: None,
             },
             &["Source:", "Line: 1", "Message:", "Context:", ">    1 |", "2 |"],
         );
@@ -737,6 +835,7 @@ mod tests {
                 opening_text: "::shell-block".to_string(),
                 excerpt: excerpt.clone(),
                 source_file: None,
+                authored: None,
             },
             &["Opened at line: 1", "Opener:", "Context:", ">    1 |"],
         );

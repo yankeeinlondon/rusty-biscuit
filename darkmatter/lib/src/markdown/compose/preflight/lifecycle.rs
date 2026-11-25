@@ -152,7 +152,9 @@ impl Markdown {
         approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
         extra: ExtraShellSources,
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
-        let mut report = self.compose_preflight(request).map_err(|e| match e {
+        let admitted = request.admitted_document(self);
+        let this = admitted.as_ref();
+        let mut report = this.compose_preflight(request).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
             // Preserve the rich error (transform parse, ctx merge, schema
             // validation, remote fetch, …) so the caller renders its styled
@@ -165,7 +167,7 @@ impl Markdown {
         // read, any prompt is shown, or any approved command can run.
         let judged = crate::markdown::compose::pipeline::stop_if_warnings_blocked(request, &warnings)
             .map_err(|stop| ShellExpansionError::Preflight(Box::new(stop)))
-            .and_then(|()| self.approve_collected(request, approval_handler, extra, report));
+            .and_then(|()| this.approve_collected(request, approval_handler, extra, report));
         match judged {
             Ok(approvals) => {
                 let mut warnings = warnings;
@@ -304,9 +306,14 @@ impl Markdown {
         request: &crate::markdown::compose::ComposeRequest,
         handler: Option<&dyn ShellApprovalHandler>,
     ) -> Result<(Vec<Grant>, usize), ShellExpansionError> {
+        // The root as composition admits and roots it, so the slots asked
+        // about are the ones the compose pass's schema will resolve.
+        let admitted = request.admitted_document(self);
+        let markdown = admitted.as_ref();
+        let rooted = request.rooted_at(markdown);
         let mut registry = None;
-        let pending = crate::markdown::compose::schema_validation::prepare_schemas(self, request, &mut registry)
-            .map(|prepared| prepared.pending_templates_for(self))
+        let pending = crate::markdown::compose::schema_validation::prepare_schemas(markdown, &rooted, &mut registry)
+            .map(|prepared| prepared.pending_templates_for(markdown))
             .unwrap_or_default();
         if pending.is_empty() {
             return Ok((Vec::new(), 0));

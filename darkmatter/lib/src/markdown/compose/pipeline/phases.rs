@@ -7,7 +7,7 @@
 
 use super::super::super::Markdown;
 use super::super::super::cleanup;
-use super::super::super::normalize::NormalizationError;
+use super::super::super::normalize::{NormalizationError, NormalizationReport};
 use super::super::super::types::{MarkdownError, MarkdownResult};
 use super::super::{
     ComposeOperation, ComposeReport, ComposeWarning, EffectiveState, SourceRange,
@@ -18,7 +18,7 @@ use super::super::{
 };
 use tracing::{debug, info};
 
-use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
+use transclusion::{ApplyTarget, PreparedTransclusion, ResolvedTransclusion, SectionSlot, TransclusionEngine};
 use super::super::body_origin::{BodyProvenance, EditOrigin};
 use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::value_origin::DataPaths;
@@ -227,6 +227,7 @@ impl Markdown {
             line_offset,
             first,
         )
+        .map_err(|error| error.at_authored_lines(self, body.origin.as_ref(), line_offset, Some(&body.data)))
         .map_err(|error| match lookup.entered() {
             // The stage entered the failing command's line, or the block's
             // opener when the block itself failed.
@@ -293,25 +294,9 @@ impl Markdown {
                 report.cleanup_changed = biscuit_hash::xx_hash(&self.content) != original_hash;
                 Ok(())
             }
-            ComposeOperation::Normalization => match inline::normalize::run_stage(self) {
-                Ok(norm_report) => {
-                    if norm_report.has_changes() {
-                        report.normalization_report = Some(norm_report);
-                    }
-                    Ok(())
-                }
-                Err(NormalizationError::LevelOverflow { .. }) if !options.fail_fast => {
-                    report.add_warning(ComposeWarning::new(
-                        "normalization",
-                        "Skipped normalization: would overflow H6",
-                    ));
-                    Ok(())
-                }
-                Err(e) => Err(MarkdownError::Transform(format!(
-                    "Normalization failed: {}",
-                    e
-                ))),
-            },
+            ComposeOperation::Normalization => {
+                record_normalization(inline::normalize::run_stage(self), options.fail_fast, report)
+            }
             _ => Ok(()),
         }
     }
@@ -358,6 +343,8 @@ impl Markdown {
         body.data.ensure_describes(&self.content)?;
         let data = Some(&body.data);
         let iteration = runtime.iteration.clone();
+        // A parser counts lines in this body; a failure names the file's.
+        let origin = body.origin.as_ref();
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -365,12 +352,10 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(transclusion::parse_directives_in(
-                &self.content,
-                data,
-                self.source_context_for_errors(),
-                0,
-            )?)
+            Some(
+                transclusion::parse_directives_in(&self.content, data, self.source_context_for_errors(), 0)
+                    .map_err(|error| error.at_authored_directive(self, origin, 0))?,
+            )
         } else {
             None
         };
@@ -378,7 +363,7 @@ impl Markdown {
         let frontmatter_refs = if operations.contains(&ComposeOperation::FrontmatterTransclusion) {
             Some(transclusion::parse_frontmatter_refs(
                 self.frontmatter().as_map(),
-                self.source_context_for_errors(),
+                self.frontmatter_error_context(),
             )?)
         } else {
             None
@@ -387,7 +372,7 @@ impl Markdown {
         let toc_directives = if operations.contains(&ComposeOperation::TocLinking) {
             Some(
                 toc_linking::parse_directives_in(&self.content, data)
-                    .map_err(|error| error.with_document(self.error_document()))?,
+                    .map_err(|error| error.with_document(self.error_document()).at_authored_line(self, origin))?,
             )
         } else {
             None
@@ -396,7 +381,7 @@ impl Markdown {
         let file_links_directives = if operations.contains(&ComposeOperation::FileLinks) {
             Some(
                 file_links::parse_file_links_directives_in(&self.content, data)
-                    .map_err(|error| error.with_document(self.error_document()))?,
+                    .map_err(|error| error.with_document(self.error_document()).at_authored_line(self, origin))?,
             )
         } else {
             None
@@ -424,7 +409,7 @@ impl Markdown {
         // resolve stages. The borrow ends before the apply stage mutates
         // `self.content` below.
         let markdown: &Markdown = self;
-        let engine = TransclusionEngine::new(markdown);
+        let engine = TransclusionEngine::new(markdown).with_origin(origin);
         let mut watch = super::ReportWatch::new(report, options, super::FinalVerdict { markdown, state, schemas });
 
         for operation in operations {
@@ -551,6 +536,13 @@ impl Markdown {
                 // can only be skipped — which leaves the authored directive
                 // text in the document.
                 let anchor = item.failure_anchor();
+                // This document's own `::toc-linking` or `::file-links`
+                // failure counted a body line; a failure of any other item
+                // is a child's, which placed its own.
+                let listing = match &item {
+                    PreparedTransclusion::Toc { span, .. } | PreparedTransclusion::FileLinks { span, .. } => Some(span.clone()),
+                    _ => None,
+                };
                 engine
                     .resolve_prepared_transclusion(
                         item,
@@ -559,6 +551,10 @@ impl Markdown {
                         options,
                         &runtime_mutex,
                     )
+                    .map_err(|error| match listing {
+                        Some(span) => at_directive_site(error, markdown, origin, &span),
+                        None => error,
+                    })
                     // Boxed because this pair is the `Err` of a hot `Result`
                     // returned for every prepared item, and the anchor makes it
                     // large enough to widen the success path's stack footprint.
@@ -734,17 +730,55 @@ impl Markdown {
     }
 }
 
+/// `error`, a failure of the `::toc-linking` or `::file-links` directive at
+/// `span` of `markdown`'s current body, at the line it was written on.
+fn at_directive_site(
+    error: MarkdownError,
+    markdown: &Markdown,
+    origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+    span: &std::ops::Range<usize>,
+) -> MarkdownError {
+    use crate::markdown::compose::site_scope::DirectiveSite;
+    match error {
+        MarkdownError::TocLinking(inner) => {
+            MarkdownError::TocLinking(inner.at_site(&DirectiveSite::of_span(markdown, origin, span)))
+        }
+        MarkdownError::FileLinks(inner) => {
+            MarkdownError::FileLinks(inner.at_site(&DirectiveSite::of_span(markdown, origin, span)))
+        }
+        error => error,
+    }
+}
+
 /// The warning of a tolerated transclusion failure. A target that does not
-/// exist is the missing transclusion its recovery governs. A failure of a
+/// exist is the missing transclusion its recovery governs, and a
+/// `::toc-linking` or `::file-links` failure keeps the code its error reports.
+/// A failure of a
 /// directive in a document whose lines count generated text (`generated` is
 /// its identity) is worded without its line; a child's keeps its own, and
-/// names the child's file. Out of line: the caller's frame recurs once per
+/// names the child's file. A directive failure placed at its authored opener
+/// keeps that position. Out of line: the caller's frame recurs once per
 /// nested composition.
 #[inline(never)]
 fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path::Path>) -> ComposeWarning {
     let failure = error.resolution_failure();
+    // A child's inclusion target failure names the child's own inclusion.
+    let located = match error.without_iteration() {
+        MarkdownError::Transclusion(inner) if inner.inclusion_site().is_some() => Some(inner.as_ref()),
+        _ => None,
+    };
+    let site = located.and_then(transclusion::TransclusionError::inclusion_site);
     let code = (failure == Some(biscuit_file::ResolutionFailure::NoMatch))
-        .then(|| super::super::policy::MISSING_TRANSCLUSION_CODE.to_string());
+        .then_some(super::super::policy::MISSING_TRANSCLUSION_CODE)
+        .or_else(|| super::super::report_diagnostics::directive_failure_code(error))
+        .or_else(|| {
+            // A tolerated target failure keeps its error's code where a
+            // policy can name it.
+            located.map(super::super::report_diagnostics::transclusion_code).filter(|code| {
+                super::super::policy::COMPOSE_DIAGNOSTIC_CODES.iter().any(|(registered, _)| registered == code)
+            })
+        })
+        .map(str::to_string);
     let (message, document) = match error {
         MarkdownError::TocLinking(toc) if generated.is_some() && toc.document() == generated => (toc.reason(), None),
         MarkdownError::FileLinks(links) if generated.is_some() && links.document() == generated => (links.reason(), None),
@@ -753,7 +787,15 @@ fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path
         error => (error.to_string(), None),
     };
     let mut warning = ComposeWarning { code, ..ComposeWarning::new("transclusion", message) }.with_resolution_failure(failure);
-    warning.attribute_to(document);
+    let authored = match error {
+        MarkdownError::TocLinking(toc) => toc.authored(),
+        MarkdownError::FileLinks(links) => links.authored(),
+        _ => site.and_then(|site| site.authored()),
+    };
+    if let Some(opener) = authored {
+        warning = warning.at_authored(None, opener);
+    }
+    warning.attribute_to(document.or(site.map(|site| site.file())));
     warning
 }
 
@@ -772,7 +814,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         error.without_iteration(),
         MarkdownError::Transclusion(inner)
             if matches!(
-                inner.as_ref(),
+                inner.without_site(),
                 transclusion::TransclusionError::CycleDetected { .. }
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
                     | transclusion::TransclusionError::RemoteFetchFailed { .. }
@@ -788,6 +830,31 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         || error.shell_span_failure()
         // A collection failure never becomes a successful notice.
         || matches!(error.without_iteration(), MarkdownError::Collection(_))
+}
+
+/// Records the normalization stage's `outcome` in `report`: a level overflow
+/// is a warning unless `fail_fast`, and every failure keeps its typed error,
+/// so both report a `dm.normalization.*` code.
+fn record_normalization(
+    outcome: Result<NormalizationReport, NormalizationError>,
+    fail_fast: bool,
+    report: &mut ComposeReport,
+) -> MarkdownResult<()> {
+    match outcome {
+        Ok(norm_report) => {
+            if norm_report.has_changes() {
+                report.normalization_report = Some(norm_report);
+            }
+            Ok(())
+        }
+        Err(NormalizationError::LevelOverflow { .. }) if !fail_fast => {
+            let mut warning = ComposeWarning::new("normalization", "Skipped normalization: would overflow H6");
+            warning.code = Some(super::super::report_diagnostics::NORMALIZATION_LEVEL_OVERFLOW_CODE.to_string());
+            report.add_warning(warning);
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[cfg(test)]
@@ -858,6 +925,38 @@ pub(crate) mod tests {
             assert!(error.pre_approval_violation().is_none(), "{error:?}");
             assert!(error.shell_span_failure(), "{error:?}");
             assert!(transclusion_failure_is_fatal(&error), "{error:?}");
+        }
+    }
+
+    fn level_overflow() -> NormalizationError {
+        NormalizationError::LevelOverflow {
+            target: crate::markdown::normalize::HeadingLevel::H5,
+            affected_count: 1,
+            deepest_title: "Deep".to_string(),
+            would_become: 7,
+        }
+    }
+
+    #[test]
+    fn a_tolerated_normalization_overflow_is_a_coded_warning() {
+        let mut report = ComposeReport::default();
+        record_normalization(Err(level_overflow()), false, &mut report).expect("tolerated");
+        let [warning] = report.warnings.as_slice() else { panic!("{:?}", report.warnings) };
+        assert_eq!(warning.code.as_deref(), Some("dm.normalization.level_overflow"));
+    }
+
+    #[test]
+    fn a_normalization_failure_keeps_its_typed_error() {
+        use crate::markdown::compose::report_diagnostics::error_diagnostics;
+        for (outcome, fail_fast, code) in [
+            (Err(level_overflow()), true, "dm.normalization.level_overflow"),
+            (Err(NormalizationError::ValidationFailed(Vec::new())), false, "dm.normalization.validation_failed"),
+        ] {
+            let mut report = ComposeReport::default();
+            let error = record_normalization(outcome, fail_fast, &mut report).expect_err(code);
+            assert!(matches!(error, MarkdownError::Normalization(_)), "{error:?}");
+            assert_eq!(error_diagnostics(&error)[0].code, code);
+            assert!(report.warnings.is_empty(), "{:?}", report.warnings);
         }
     }
 

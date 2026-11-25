@@ -40,7 +40,7 @@ pub(crate) fn resolve_parsed_target(
         (DirectiveKind::File | DirectiveKind::Code, _) => {
             let LocalTarget { resolved, canonical: path } =
                 resolve_file_reference(file_ref, kind, options, source, line, ctx)?;
-            validate_local_target(kind, &path, options)?;
+            admit_local_target(kind, &path, options)?;
             Ok(ResolvedTarget::File {
                 id: path.to_string_lossy().to_string(),
                 path,
@@ -55,7 +55,7 @@ fn resolve_url_target(
     options: &TransclusionOptions,
 ) -> Result<ResolvedTarget, TransclusionError> {
     trace!(url = %raw_target, "transclusion: resolving URL target");
-    let url = url::Url::parse(raw_target)?;
+    let url = admit_url_target(raw_target)?;
     if !options.allow_remote {
         return Err(TransclusionError::UrlExecutionDisabled {
             url: url.to_string(),
@@ -203,7 +203,21 @@ fn source_file_path(source: &ComposeSource) -> Option<PathBuf> {
     }
 }
 
-fn validate_local_target(
+/// The passive admission rule of a `::url` target whose file reference
+/// parsed: composition opens only an absolute URL. A relative path, a
+/// fragment, or a scheme-relative address is [`TransclusionError::UrlParse`].
+/// Neither the remote policy nor the network is consulted, so the reference
+/// graph's validation applies the same rule before any request.
+pub(crate) fn admit_url_target(raw_target: &str) -> Result<url::Url, TransclusionError> {
+    Ok(url::Url::parse(raw_target)?)
+}
+
+/// The passive admission rule of a local target that resolved to `path`:
+/// `::file` (and `prologue`/`epilogue`) opens only a Markdown file
+/// ([`TransclusionError::UnsupportedFileType`] otherwise), `::code` any file.
+/// It reads nothing, so the reference graph applies it before opening a
+/// child, as composition does before reading one.
+pub(crate) fn admit_local_target(
     kind: DirectiveKind,
     path: &Path,
     options: &TransclusionOptions,
@@ -252,6 +266,17 @@ pub(crate) enum FrontmatterReference {
     Parsed(FileReference),
     /// A reference-shaped value rejected by the shared parser.
     ParseError(FileReferenceError),
+}
+
+/// Whether composition emits a `prologue`/`epilogue` value as inline Markdown
+/// rather than reading it as a file reference.
+///
+/// This is [`classify_frontmatter_reference`]'s inline decision, the one rule
+/// every reader of these values (composition, its pre-flight walk, the
+/// reference graph, the local transclusion query, and DMLS) shares. An empty
+/// value is inline, so it inserts nothing and is never resolved.
+pub fn frontmatter_value_is_inline(value: &str) -> bool {
+    matches!(classify_frontmatter_reference(value), FrontmatterReference::Inline)
 }
 
 /// Classifies a frontmatter prologue or epilogue value without suppressing

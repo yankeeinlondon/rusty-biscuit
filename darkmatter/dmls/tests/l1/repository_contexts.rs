@@ -232,6 +232,27 @@ fn a_document_in_no_repository_resolves_against_its_own_folder() {
     fixture.shutdown();
 }
 
+/// A `prologue`/`epilogue` value composition emits as inline Markdown is
+/// never a document link, even when a file of that name exists; a file
+/// reference beside it still links.
+#[test]
+fn inline_prologue_text_is_not_a_document_link() {
+    let workspace = LspWorkspace::new();
+    let folder = workspace.path().join("plain/notes");
+    let document = folder.join("doc.md");
+    let text = "---\nprologue: README\nepilogue: ./beside.md\n---\n# Doc\n";
+    write(&document, text);
+    write(&folder.join("README"), "plain text\n");
+    write(&folder.join("beside.md"), "# Beside\n");
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(&[workspace.path()]));
+    open(&fixture, &uri(&document), text);
+
+    assert_eq!(link_targets(&mut fixture, &uri(&document)), vec![canonical(&folder.join("beside.md"))]);
+    fixture.shutdown();
+}
+
 /// A single-file target whose text looks like a glob names that file
 /// literally; its broken-path diagnostic carries biscuit-file's literal-glob
 /// hint, while a plain miss and a failure other than a miss do not.

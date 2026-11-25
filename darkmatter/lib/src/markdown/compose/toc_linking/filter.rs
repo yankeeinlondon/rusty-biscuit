@@ -70,6 +70,7 @@ fn compile_globs(
                     line,
                     message: e.to_string(),
                     document: None,
+                    authored: None,
                 })
         })
         .collect()

@@ -139,7 +139,10 @@ pub(crate) fn run_stage(
                         frame,
                         &|types| body_scopes.scope_at(types, authored_offset),
                     )
-                    .map_err(|error| body.scope_failure(markdown, line.span.clone(), error))?,
+                    .map_err(|error| {
+                        let error = error.at_authored_directive(markdown, body.origin.as_ref(), &line.span);
+                        body.scope_failure(markdown, line.span.clone(), error)
+                    })?,
                     None => None,
                 }
             }
@@ -151,7 +154,7 @@ pub(crate) fn run_stage(
             .as_ref()
             .map_or_else(|| line.span.clone(), |_| directive_extent(markdown.content(), &body.data, &line));
         let parsed = match (line.parsed, &site) {
-            (Err(error), None) => return Err(error.into()),
+            (Err(error), None) => return Err(error.at_authored_directive(markdown, body.origin.as_ref(), &line.span).into()),
             (parsed, _) => parsed,
         };
         directives.push((parsed, site, line.span, extent, line.indent));
@@ -172,10 +175,13 @@ pub(crate) fn run_stage(
             StageWindow::First { refreshed: true, .. } => prepare_refreshed_site,
             _ => prepare_site,
         };
-        let prepared = prepare(parsed, site.as_ref(), options, &mut runtime.shell)
-            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
-        let execution = execute_prepared_directive(&prepared, options, &runtime.shell)
-            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
+        // A failure names the line the directive was written on: the line it
+        // carries counts the current body, which page blocks shift.
+        let placed = |error: ShellExpansionError| {
+            body.scope_failure(markdown, span.clone(), error.at_authored_directive(markdown, body.origin.as_ref(), &span))
+        };
+        let prepared = prepare(parsed, site.as_ref(), options, &mut runtime.shell).map_err(placed)?;
+        let execution = execute_prepared_directive(&prepared, options, &runtime.shell).map_err(placed)?;
         if let Some(start) = span_start {
             let raw_command = &prepared.effective.raw_command;
             perf.record_shell_span(ShellCommandSpan {

@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::site_scope::DirectiveSite;
 use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeRequest;
 use crate::markdown::compose::ComposeSource;
@@ -49,7 +50,6 @@ use crate::markdown::types::MarkdownResult;
 
 use super::super::block_pairs;
 use super::super::parse_utils::strip_blockquote_prefix;
-use super::super::shell_blocks::body::split_logical_commands;
 
 /// Renders a single action back to its raw command form for display in
 /// discovery output (without any preceding chain operator).
@@ -187,6 +187,10 @@ pub(crate) fn collect_effects(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<CollectedEffects> {
+    // The root as composition admits it, so the walk prepares the schemas
+    // and triggers the compose pass will.
+    let admitted = options.admitted_document(markdown);
+    let markdown = admitted.as_ref();
     let extended = options.extended_for(markdown);
     let options = &*extended;
     let mut seen = HashSet::new();
@@ -563,6 +567,9 @@ fn collect_document(
     // The bytes of the prepared body that interpolation inserted. Discovery
     // reads the body through the same data-aware scanners as the compose pass,
     // so the approval set is exactly what can execute.
+    // Where each byte of the prepared body was written, for a directive's
+    // parse failure.
+    let prepared_origin = prepared_report.body_origin.take();
     let body_data = prepared_report.body_data.unwrap_or_else(|| {
         crate::markdown::compose::body_origin::DataRanges::none_for(prepared.content())
     });
@@ -589,7 +596,7 @@ fn collect_document(
             .clone()
             .unwrap_or_else(|| crate::markdown::compose::body_origin::DataRanges::none_for(expanded.content()));
         data.ensure_describes(expanded.content())?;
-        Some((expanded, report.body_sites, data))
+        Some((expanded, report.body_sites, data, report.body_origin))
     } else {
         None
     };
@@ -699,8 +706,18 @@ fn collect_document(
                 site.requirement = ModeRequirement::TemplateRequired;
                 continue;
             }
-            (Err(error), _) => return Err(error.into()),
+            (Err(error), _) => {
+                return Err(error.at_authored_directive(&prepared, prepared_origin.as_ref(), &directive_line.span).into());
+            }
         };
+        // The line it was written on: the prepared body's count is shifted
+        // by whatever interpolation inserted. Only the line moves; the error
+        // contexts of discovery are the root's, so a placed origin would
+        // publish a child's line against it.
+        let mut directive = directive;
+        if let DirectiveSite::Authored(_, at) = DirectiveSite::of_span(&prepared, prepared_origin.as_ref(), &directive_line.span) {
+            directive.origin = ShellCommandOrigin::Body { line: at.line() };
+        }
         let directive = &directive;
         let line = directive.origin.line_number();
         let template_required = site
@@ -822,10 +839,19 @@ fn collect_document(
         }
         site_keys
     };
+    // A block failure is the shell-blocks stage's own typed error, placed as
+    // that stage places it: its file is this document's, so its authored
+    // line is published too.
+    let block_file = matches!(options.source, ComposeSource::File(_)).then(|| source_file.clone());
+    let block_failure = |error: super::super::shell_blocks::ShellBlockError| -> crate::markdown::types::MarkdownError {
+        error
+            .with_source_file(block_file.clone())
+            .at_authored_lines(&prepared, prepared_origin.as_ref(), line_offset, Some(&body_data))
+            .into()
+    };
     for (index, pair) in resolved_pairs.into_iter().enumerate() {
         let body_text = &prepared.content()[pair.body_span.clone()];
-        let resolved = split_logical_commands(body_text, pair.start_line + 1)
-            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))
+        let resolved = super::super::shell_blocks::split_block_commands(body_text, pair.start_line + 1, line_offset)
             .and_then(|commands| {
                 if body_data.intersects(&pair.body_span) {
                     super::super::shell_blocks::reject_data_shaped_commands(
@@ -858,8 +884,19 @@ fn collect_document(
                     }
                     let origin = site.site.origin.clone();
                     let mut keys = Vec::new();
-                    for command in split_logical_commands(raw, *start_line)
-                        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?
+                    // Its authored bytes, so its lines are the loaded file's.
+                    let authored = |error: super::super::shell_blocks::ShellBlockError| {
+                        crate::markdown::types::MarkdownError::from(
+                            error.with_source_file(block_file.clone()).at_authored_lines(
+                                markdown,
+                                crate::markdown::compose::body_origin::BodyOrigin::capture(markdown).as_ref(),
+                                authored_offset,
+                                None,
+                            ),
+                        )
+                    };
+                    for command in super::super::shell_blocks::split_block_commands(raw, *start_line, authored_offset)
+                        .map_err(authored)?
                     {
                         keys.extend(add_entries(&command.pipeline, &origin, false));
                     }
@@ -867,14 +904,19 @@ fn collect_document(
                 }
                 continue;
             }
-            (Err(error), _) => return Err(error),
+            (Err(error), _) => return Err(block_failure(error)),
         };
         let (commands, mut sites) = commands;
         let linked = sites.as_ref().is_some_and(|sites| sites.len() == commands.len());
         for (position, command) in commands.into_iter().enumerate() {
+            // The lines it was written on, as for a `::shell` line above.
+            let authored_line = |line: usize| match DirectiveSite::of_line(&prepared, prepared_origin.as_ref(), line) {
+                DirectiveSite::Authored(_, at) => at.line(),
+                _ => line + line_offset,
+            };
             let origin = ShellCommandOrigin::ShellBlock {
-                start_line: pair.start_line + line_offset,
-                command_line: command.start_line + line_offset,
+                start_line: authored_line(pair.start_line),
+                command_line: authored_line(command.start_line),
             };
             let awaiting = linked && sites.as_ref().is_some_and(|sites| sites[position].3);
             let site = sites
@@ -904,11 +946,11 @@ fn collect_document(
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
 
-    let (scan_content, scan_data, scan_ctx, scan_sites) = match &expansion {
-        Some((expanded, sites, data)) => {
-            (expanded.content(), data, expanded.full_source_context_for_errors(), Some(sites))
+    let (scan_document, scan_content, scan_data, scan_ctx, scan_sites, scan_origin) = match &expansion {
+        Some((expanded, sites, data, origin)) => {
+            (expanded, expanded.content(), data, expanded.full_source_context_for_errors(), Some(sites), origin.as_ref())
         }
-        None => (prepared.content(), &body_data, prepared_ctx.clone(), None),
+        None => (&prepared, prepared.content(), &body_data, prepared_ctx.clone(), None, prepared_origin.as_ref()),
     };
     // The site of a directive a collection body repeated, and the
     // children already walked for a repeated site's target and values.
@@ -916,8 +958,16 @@ fn collect_document(
         scan_sites?.site_at(scan_content, span, line_offset)
     };
     let mut scoped_walked: HashMap<(String, u64), std::sync::Arc<super::PreflightGraphNode>> = HashMap::new();
-    for directive in transclusion::parse_directives_in(scan_content, Some(scan_data), scan_ctx.clone(), line_offset)? {
+    for directive in transclusion::parse_directives_in(scan_content, Some(scan_data), scan_ctx.clone(), line_offset)
+        .map_err(|error| error.at_authored_directive(scan_document, scan_origin, line_offset))?
+    {
         let site = scoped_site(&directive.span);
+        // A target failure names the directive's opener in its file.
+        let inclusion = || {
+            let opener = crate::markdown::compose::site_scope::DirectiveSite::of_span(scan_document, scan_origin, &directive.span);
+            transclusion::InclusionSite::of_directive(scan_document, &opener)
+        };
+        let at_directive = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
         // A copy whose item produced no target has nothing to resolve.
         if site.is_some() && directive.raw_target.trim().is_empty() {
             continue;
@@ -944,7 +994,7 @@ fn collect_document(
                 Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
                 // Composition removes it, so nothing of it can run.
                 Err(e) if removes_missing(options, &e) => continue,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(at_directive(e).into()),
             };
             targets.push(super::PreflightTargetEdge {
                 site: site.clone(),
@@ -972,7 +1022,7 @@ fn collect_document(
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
             // A missing target composition removes contributes no command.
             Err(e) if removes_missing(options, &e) => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(at_directive(e).into()),
         };
 
         match resolved {
@@ -986,7 +1036,8 @@ fn collect_document(
                 let child = match reused {
                     Some(child) => child,
                     None => {
-                        let mut child = Markdown::try_from(path.as_path())?;
+                        let mut child = Markdown::try_from(path.as_path())
+                            .map_err(|error| transclusion::target_failure_at(error, &path, inclusion()))?;
                         transclusion::apply_directive_set_overlay(&mut child, &directive.options);
                         let child_options = transclusion::markdown_child_options(
                             options,
@@ -1032,7 +1083,7 @@ fn collect_document(
                 });
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
-                let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
+                let Some(body) = fetch_remote_child_body(&url, remote_fetch, inclusion())? else {
                     continue;
                 };
                 // Composition gives a remote child its parent's options with
@@ -1075,8 +1126,10 @@ fn collect_document(
     // first alternative's failure class is the error.
     if options.is_enabled(ComposeOperation::TocLinking) {
         // Each failure names this document, as the compose pass does.
+        // Each failure names this document, and the line it was written on,
+        // as the compose pass does.
         let in_document = |error: crate::markdown::compose::TocLinkingError| {
-            error.with_document(prepared.error_document())
+            error.with_document(prepared.error_document()).at_authored_line(&prepared, prepared_origin.as_ref())
         };
         for directive in crate::markdown::compose::toc_linking::parse_directives_in(prepared.content(), Some(&body_data))
             .map_err(in_document)?
@@ -1085,10 +1138,17 @@ fn collect_document(
                 &directive,
                 &options.source,
                 &transclusion_opts,
-                // Body-relative, as the compose pass reports this directive.
                 prepared.source_context_for_errors(),
             )
-            .map_err(in_document)?
+            .map_err(|error| {
+                error.with_document(prepared.error_document()).at_site(
+                    &crate::markdown::compose::site_scope::DirectiveSite::of_span(
+                        &prepared,
+                        prepared_origin.as_ref(),
+                        &directive.span,
+                    ),
+                )
+            })?
             {
                 targets.push(super::PreflightTargetEdge {
                     site: None,
@@ -1103,17 +1163,21 @@ fn collect_document(
     }
 
     let refs =
-        transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map(), prepared_ctx.clone())?;
+        transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map(), markdown.frontmatter_error_context())?;
     // Refcount bumps, not subtree deep-clones (Finding 16): each entry is the
     // same `Arc` already held by the corresponding edge.
     let mut children: Vec<std::sync::Arc<super::PreflightGraphNode>> =
         edges.iter().map(|e| std::sync::Arc::clone(&e.child)).collect();
-    for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
+    let values = refs.prologue.iter().enumerate().map(|(index, value)| ("prologue", index, value));
+    for (key, index, reference) in values.chain(refs.epilogue.iter().enumerate().map(|(index, value)| ("epilogue", index, value))) {
+        // A target failure names the key, or the list entry, that wrote it.
+        let inclusion = || transclusion::InclusionSite::of_frontmatter_value(markdown, key, index, reference);
+        let at_value = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
         let file_ref = match transclusion::classify_frontmatter_reference(reference) {
             transclusion::FrontmatterReference::Inline => continue,
             transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
             transclusion::FrontmatterReference::ParseError(error) => {
-                return Err(transclusion::TransclusionError::from(error).into());
+                return Err(at_value(transclusion::TransclusionError::from(error)).into());
             }
         };
 
@@ -1127,12 +1191,13 @@ fn collect_document(
         ) {
             Ok(r) => r,
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(at_value(e).into()),
         };
 
         let child = match resolved {
             transclusion::ResolvedTarget::File { path, resolved, .. } => {
-                let child = Markdown::try_from(path.as_path())?;
+                let child = Markdown::try_from(path.as_path())
+                    .map_err(|error| transclusion::target_failure_at(error, &path, inclusion()))?;
                 let child_options = transclusion::markdown_child_options(
                     options,
                     &child_state_data,
@@ -1160,7 +1225,7 @@ fn collect_document(
                 )?
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
-                let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
+                let Some(body) = fetch_remote_child_body(&url, remote_fetch, inclusion())? else {
                     continue;
                 };
                 let child = Markdown::from(body);
@@ -1246,19 +1311,18 @@ fn collect_document(
 ///
 /// Registers the URL on demand (the eager pre-scan only covers the root) and
 /// blocks until the fetch completes. Returns `None` when the URL was not
-/// registered or produced no body.
+/// registered or produced no body. A failed fetch is composition's own
+/// [`RemoteFetchFailed`](transclusion::TransclusionError::RemoteFetchFailed),
+/// at the inclusion `site` that named the URL.
 fn fetch_remote_child_body(
     url: &url::Url,
     remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    site: Option<transclusion::InclusionSite>,
 ) -> MarkdownResult<Option<String>> {
     remote_fetch.register_nested(url.clone());
-    match remote_fetch.get_content(url) {
-        Ok(body) => Ok(body),
-        Err(e) => Err(crate::markdown::types::MarkdownError::Transform(format!(
-            "pre-flight: failed to fetch remote transclusion '{}': {e}",
-            url
-        ))),
-    }
+    remote_fetch.get_content(url).map_err(|reason| {
+        transclusion::TransclusionError::RemoteFetchFailed { url: url.to_string(), reason }.at_inclusion(site).into()
+    })
 }
 
 /// Collects the frontmatter `$(...)` commands for a single document.
@@ -3676,5 +3740,24 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
         for cmd in ["echo child-frontmatter", "echo child-body", "echo root-frontmatter", "echo root-body"] {
             assert!(flattened_raw.contains(&cmd), "missing {cmd} in flattened: {flattened_raw:?}");
         }
+    }
+
+    /// R10-F2: a remote child pre-flight cannot fetch is composition's own
+    /// `RemoteFetchFailed` (`dm.transclusion.failure`), not a
+    /// `dm.compose.failure` string.
+    #[test]
+    fn a_failed_remote_child_fetch_keeps_the_transclusion_code() {
+        let runtime = remote_fetch::RemoteFetchRuntime::with_policy(
+            biscuit_file::file_reference::fetch::FetchPolicy::deny_all(),
+        );
+        let url = url::Url::parse("https://example.com/child.md").unwrap();
+        let error = fetch_remote_child_body(&url, &runtime, None).expect_err("a denied host fails the fetch");
+        assert!(
+            matches!(&error, crate::markdown::types::MarkdownError::Transclusion(inner)
+                if matches!(inner.as_ref(), transclusion::TransclusionError::RemoteFetchFailed { .. })),
+            "{error:?}"
+        );
+        let records = crate::markdown::compose::report_diagnostics::error_diagnostics(&error);
+        assert_eq!(records[0].code, "dm.transclusion.failure", "{records:#?}");
     }
 }

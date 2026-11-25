@@ -74,6 +74,7 @@ impl CursorError {
             line: self.line,
             message: self.message,
             caret_col: Some(self.column),
+            authored: None,
         }
     }
 }

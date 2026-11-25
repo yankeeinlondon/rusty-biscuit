@@ -284,14 +284,17 @@ impl TransclusionRuntime {
             return Err(TransclusionError::CycleDetected { chain });
         }
 
-        self.stack.push(DependencyNode { id, path, line });
-        self.deepest_seen = self.deepest_seen.max(self.stack.len());
-
-        if self.stack.len() > self.max_depth {
+        if self.stack.len() >= self.max_depth {
+            // The refused node is never entered, so a caller that recovers
+            // from the error has no `exit` to pair with it.
+            self.deepest_seen = self.deepest_seen.max(self.stack.len() + 1);
             return Err(TransclusionError::MaxDepthExceeded {
                 max_depth: self.max_depth,
             });
         }
+
+        self.stack.push(DependencyNode { id, path, line });
+        self.deepest_seen = self.deepest_seen.max(self.stack.len());
 
         Ok(())
     }
@@ -359,15 +362,168 @@ pub struct FrontmatterRefs {
     pub epilogue: Vec<String>,
 }
 
+/// ` at line N`, or nothing for the unknown line `0`.
+pub(crate) fn at_line(line: usize) -> String {
+    if line == 0 { String::new() } else { format!(" at line {line}") }
+}
+
+/// Where an inclusion whose target failed was written: the file holding it
+/// and, when proven, the authored position of its body directive's opener or
+/// of its `prologue`/`epilogue` value (the list entry, for a list).
+///
+/// Carried by [`TransclusionError::Located`] so every reader of that file's
+/// inclusion (composition, its pre-flight walk, the reference graph and
+/// validation) reports the same place, a nested child's included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InclusionSite {
+    file: PathBuf,
+    authored: Option<crate::markdown::types::AuthoredSpan>,
+}
+
+impl InclusionSite {
+    /// The site of the body directive at `site` of `markdown`; `None` for a
+    /// document with no file, whose body line is its only coordinate.
+    pub(crate) fn of_directive(
+        markdown: &crate::markdown::Markdown,
+        site: &crate::markdown::compose::site_scope::DirectiveSite,
+    ) -> Option<Self> {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        match site {
+            DirectiveSite::Body => None,
+            DirectiveSite::Authored(context, opener) => {
+                Some(Self { file: context.display.clone(), authored: Some(opener.clone()) })
+            }
+            DirectiveSite::Unproven => file_of(markdown).map(|file| Self { file, authored: None }),
+        }
+    }
+
+    /// The site of `markdown`'s `key` value reading `value`, entry `index` of
+    /// a list; the file alone when the value's position is not proven, and
+    /// `None` for a document with no file.
+    pub(crate) fn of_frontmatter_value(
+        markdown: &crate::markdown::Markdown,
+        key: &str,
+        index: usize,
+        value: &str,
+    ) -> Option<Self> {
+        let file = file_of(markdown)?;
+        let in_list = markdown.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
+        let authored = markdown.loaded_source().and_then(|loaded| {
+            let range = frontmatter_value_range(&loaded.text, key, in_list.then_some(index), value)?;
+            crate::markdown::types::AuthoredSpan::locate(&loaded.text, range)
+        });
+        Some(Self { file, authored })
+    }
+
+    /// `file`, at `authored` when it is proven.
+    pub fn new(file: PathBuf, authored: Option<crate::markdown::types::AuthoredSpan>) -> Self {
+        Self { file, authored }
+    }
+
+    /// The file that wrote the inclusion.
+    pub fn file(&self) -> &Path {
+        &self.file
+    }
+
+    /// The inclusion's authored position in [`file`](Self::file); `None` when
+    /// it is not proven (a body the file no longer describes).
+    pub fn authored(&self) -> Option<&crate::markdown::types::AuthoredSpan> {
+        self.authored.as_ref()
+    }
+}
+
+impl std::fmt::Display for InclusionSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.authored {
+            Some(at) => write!(f, "{}:{}:{}", self.file.display(), at.line(), at.column()),
+            None => write!(f, "{}", self.file.display()),
+        }
+    }
+}
+
+/// `error`, raised opening the inclusion target `path`, at the inclusion
+/// `site`: a file that cannot be read is the target's I/O failure (its code
+/// stays `dm.input.read_failure`) and a target failure is placed there. A
+/// child's own failure (its frontmatter, say) and any failure with no site
+/// are unchanged.
+pub(crate) fn target_failure_at(
+    error: crate::markdown::MarkdownError,
+    path: &Path,
+    site: Option<InclusionSite>,
+) -> crate::markdown::MarkdownError {
+    use crate::markdown::MarkdownError;
+    match error {
+        MarkdownError::FileLoad(source) if site.is_some() => read_failure_at(source, path, site).into(),
+        MarkdownError::Transclusion(inner) => (*inner).at_inclusion(site).into(),
+        other => other,
+    }
+}
+
+/// `source`, the failure reading `path`, a file a directive or key selected,
+/// as that target's I/O failure (code `dm.input.read_failure`), naming
+/// `path`, at the inclusion `site` that selected it. The one rule for every
+/// read of a selected target: the child load above, and the heading read of
+/// a `::toc-linking` target in composition and in the reference graph.
+pub(crate) fn read_failure_at(source: std::io::Error, path: &Path, site: Option<InclusionSite>) -> TransclusionError {
+    TransclusionError::Io(std::io::Error::new(source.kind(), format!("cannot read {}: {source}", path.display())))
+        .at_inclusion(site)
+}
+
+/// The file `markdown` was loaded from.
+fn file_of(markdown: &crate::markdown::Markdown) -> Option<PathBuf> {
+    match markdown.source() {
+        Some(crate::markdown::compose::ComposeSource::File(path)) => Some(path.clone()),
+        _ => None,
+    }
+}
+
+/// The byte range of a `prologue:`/`epilogue:` value reading `expected`
+/// (`index` for one item of a list) in the loaded document `text`; `None`
+/// when it cannot be proven. A leaf is located within its own property, so a
+/// construct elsewhere the whole-frontmatter locator cannot read does not cost
+/// it its place.
+pub(crate) fn frontmatter_value_range(
+    text: &str,
+    key: &str,
+    index: Option<usize>,
+    expected: &str,
+) -> Option<std::ops::Range<usize>> {
+    use crate::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves, locate_frontmatter_value_range};
+    let mut path = vec![FrontmatterPathSegment::Key(key.to_string())];
+    path.extend(index.map(FrontmatterPathSegment::Index));
+    match locate_frontmatter_leaves(text, std::slice::from_ref(&path)) {
+        Ok(mut leaves) => Some(leaves.pop()?.range),
+        Err(_) => locate_frontmatter_value_range(text, key, index, expected),
+    }
+}
+
 /// Errors produced by transclusion.
 #[derive(Debug, Error)]
 pub enum TransclusionError {
-    #[error("Failed to parse directive at line {line}: {message}")]
+    /// An inclusion's target failure (`source`: an invalid or unresolvable
+    /// reference, a missing file, a refused URL) at the inclusion `site` that
+    /// named the target. Code, recovery, and failure class are `source`'s;
+    /// read it with [`without_site`](Self::without_site).
+    #[error("{site}: {source}")]
+    Located {
+        site: Box<InclusionSite>,
+        source: Box<TransclusionError>,
+    },
+
+    /// `line` is one-based in `ctx`; `0` means unknown (a `prologue` or
+    /// `epilogue` field whose key is in no file, or a body directive in a file
+    /// whose body map does not prove where it was written), and the message
+    /// then names no line.
+    #[error("Failed to parse directive{}: {message}", at_line(*.line))]
     ParseDirective {
         ctx: Box<SourceContext>,
         line: usize,
         message: String,
         caret_col: Option<usize>,
+        /// A body directive's opener when `ctx` is its loaded file, which
+        /// makes `line` an authored line; `None` when `line` counts the
+        /// current body or names a frontmatter key.
+        authored: Option<crate::markdown::types::AuthoredSpan>,
     },
 
     #[error(
@@ -504,6 +660,7 @@ impl TransclusionError {
     /// when no candidate resolved to a file.
     pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
         match self {
+            Self::Located { source, .. } => source.resolution_failure(),
             Self::FileReference(source) => Some(source.resolution_failure()),
             Self::Io(source)
                 if source.get_ref().is_some_and(|inner| inner.is::<TargetNotFound>()) =>
@@ -512,6 +669,53 @@ impl TransclusionError {
             }
             _ => None,
         }
+    }
+
+    /// The failure itself, past a [`Self::Located`] inclusion site.
+    pub fn without_site(&self) -> &Self {
+        match self {
+            Self::Located { source, .. } => source,
+            other => other,
+        }
+    }
+
+    /// The inclusion site a [`Self::Located`] failure names.
+    pub fn inclusion_site(&self) -> Option<&InclusionSite> {
+        match self {
+            Self::Located { site, .. } => Some(site),
+            _ => None,
+        }
+    }
+
+    /// This target failure at the inclusion `site`; unchanged when `site` is
+    /// `None` or the failure already names one (a nested child's).
+    #[must_use]
+    pub(crate) fn at_inclusion(self, site: Option<InclusionSite>) -> Self {
+        match (self, site) {
+            (located @ Self::Located { .. }, _) | (located, None) => located,
+            (source, Some(site)) => Self::Located { site: Box::new(site), source: Box::new(source) },
+        }
+    }
+
+    /// A body directive's parse failure, whose `line` counts `markdown`'s
+    /// current body, placed where the directive was written
+    /// ([`DirectiveSite`](crate::markdown::compose::site_scope::DirectiveSite)).
+    /// `line_offset` is what the parser added to each body line. Any other
+    /// error is unchanged.
+    #[must_use]
+    pub(crate) fn at_authored_directive(
+        mut self,
+        markdown: &crate::markdown::Markdown,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+        line_offset: usize,
+    ) -> Self {
+        if let Self::ParseDirective { ctx, line, authored, .. } = &mut self
+            && *line > line_offset
+        {
+            crate::markdown::compose::site_scope::DirectiveSite::of_line(markdown, origin, *line - line_offset)
+                .place_in(ctx, line, authored);
+        }
+        self
     }
 }
 
@@ -526,16 +730,28 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
+            // The failure's own block, led by where the inclusion was written.
+            TransclusionError::Located { site, source } => {
+                use crate::markdown::compose::site_scope::{line_row, status_rows};
+                let file = format!("<dim>File:</dim> {}", Prose::escape_text(&site.file.display().to_string()));
+                let line = line_row(site.authored.as_ref().map_or(0, |at| at.line()));
+                source
+                    .status_block(_term)
+                    .prepend_body_line(Prose::new(status_rows([Some(file), line])).with_line_breaks(LineBreaks::Hard))
+            }
+
             TransclusionError::ParseDirective {
                 ctx,
                 line,
                 message,
                 caret_col,
+                ..
             } => {
-                let mut body = vec![
-                    Prose::new("Directive parsing failed here:"),
-                    ctx.excerpt_prose(*line, 1, "md"),
-                ];
+                let mut body = if *line == 0 {
+                    vec![Prose::new(format!("Directive parsing failed in {}.", ctx.linked_path_prose().content()))]
+                } else {
+                    vec![Prose::new("Directive parsing failed here:"), ctx.excerpt_prose(*line, 1, "md")]
+                };
 
                 if let Some(col) = caret_col {
                     body.push(Prose::new(format!(

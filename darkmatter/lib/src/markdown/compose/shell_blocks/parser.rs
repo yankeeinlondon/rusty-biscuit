@@ -79,6 +79,7 @@ fn parse_opener_params(
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
                 note: None,
+                authored: None,
             });
         }
 
@@ -92,6 +93,7 @@ fn parse_opener_params(
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
                     note: None,
+                    authored: None,
                 });
             }
         };
@@ -110,6 +112,7 @@ fn parse_opener_params(
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
                     note: None,
+                    authored: None,
                 });
             }
             let hint = wrong_style_hint(&key);
@@ -119,6 +122,7 @@ fn parse_opener_params(
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
                 note: None,
+                authored: None,
             });
         }
 
@@ -134,6 +138,7 @@ fn parse_opener_params(
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
                     note: None,
+                    authored: None,
                 });
             }
         };
@@ -149,6 +154,7 @@ fn parse_opener_params(
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
                 note: None,
+                authored: None,
             });
         }
 
@@ -198,6 +204,7 @@ fn parse_opener_params(
                         excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                         source_file: None,
                         note: None,
+                        authored: None,
                     });
                 }
             },
@@ -213,6 +220,7 @@ fn parse_opener_params(
                         excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                         source_file: None,
                         note: None,
+                        authored: None,
                     });
                 }
             },
@@ -223,6 +231,7 @@ fn parse_opener_params(
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
                     note: None,
+                    authored: None,
                 });
             }
         }
@@ -273,6 +282,7 @@ fn parse_code_pair(
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
             note: None,
+            authored: None,
         });
     };
 
@@ -287,6 +297,7 @@ fn parse_code_pair(
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
             note: None,
+            authored: None,
         }),
     }
 }
@@ -305,6 +316,7 @@ fn parse_string_pair(
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
             note: None,
+            authored: None,
         });
     };
 

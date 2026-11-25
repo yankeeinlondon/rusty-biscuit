@@ -137,11 +137,12 @@ failure_sources! {
     // R1-F2.6
     a_transclusion_condition_parse_keeps_its_position:
         format!("{REWRITES_BODY}::file ./x.md when=\"1 +\"\n"),
-        "dm.transclusion.failure", |file| at(file, 6, 1);
-    // R1-F2.7
-    an_omitted_transclusion_target_names_its_file:
+        "dm.expression.parse_failure", |file| at(file, 6, 1);
+    // R1-F2.7; R11-F2 places the directive at its authored opener (this
+    // test asserted only the file while the parser's line counted the body).
+    an_omitted_transclusion_target_names_its_line:
         "---\na: 1\n---\n\n::file\n",
-        "dm.directive.parse_failure", file_only;
+        "dm.directive.parse_failure", |file| at(file, 5, 1);
     // R1-F2.9
     a_frontmatter_command_names_its_key_line:
         "---\ntitle: x\nx: \"$(echo hello)\"\n---\nbody\n",
@@ -150,14 +151,15 @@ failure_sources! {
     a_frontmatter_command_is_not_located_at_a_nested_key_of_its_name:
         "---\na:\n  x: 1\nx: \"$(echo hello)\"\n---\nbody\n",
         "dm.shell.failure", |file| at_line(file, 4);
-    // R1-F2.10
+    // R1-F2.10; R11-F2 places the command at its authored line (this test
+    // asserted only the file while the origin's line counted the body).
     a_body_command_past_a_rewrite_publishes_no_prepared_line:
         format!("{REWRITES_BODY}::shell echo hi\n"),
-        "dm.shell.failure", file_only;
-    // R1-F2.11
+        "dm.shell.failure", |file| at(file, 6, 1);
+    // R1-F2.11; R11-F2 as above, at the command's own line.
     a_shell_block_command_publishes_no_prepared_line:
         format!("{REWRITES_BODY}::shell-block\necho hi\n::end-block\n"),
-        "dm.shell.failure", file_only;
+        "dm.shell.failure", |file| at(file, 7, 1);
     // R1-F2.15
     a_body_interpolation_keeps_its_position:
         "# Doc\n\n{{ 1 / 0 }}\n",
@@ -172,13 +174,14 @@ failure_sources! {
     a_multiline_flow_elsewhere_leaves_a_frontmatter_interpolation_its_position:
         "---\nother: [\n  a\n]\nvalue: \"{{ 1 / 0 }}\"\n---\nbody\n",
         "dm.expression.evaluation_failure", |file| at(file, 5, 9);
-    // R1-F2.24
+    // R1-F2.24; R11-F2 places the marker at its authored line (these tests
+    // asserted only the file while the scanner's line counted the body).
     an_unmatched_end_block_names_its_file:
         "# T\n\n::end-block\n",
-        "dm.directive.parse_failure", file_only;
+        "dm.directive.parse_failure", |file| at(file, 3, 1);
     an_unterminated_block_names_its_file:
         "# T\n\n::block when=\"true\"\nhi\n",
-        "dm.directive.parse_failure", file_only;
+        "dm.directive.parse_failure", |file| at(file, 3, 1);
 }
 
 /// R1-F2.4: `span` is the opener's first byte in the file, past a rewrite.
@@ -360,8 +363,8 @@ fn excerpt() -> SourceExcerpt {
 fn a_shell_block_failure_names_its_file() {
     let file = work("block.md");
     for error in [
-        ShellBlockError::Parse { line: 40, message: "m".into(), excerpt: excerpt(), source_file: Some(file.clone()), note: None },
-        ShellBlockError::Unterminated { line: 40, opening_text: "o".into(), excerpt: excerpt(), source_file: Some(file.clone()) },
+        ShellBlockError::Parse { line: 40, message: "m".into(), excerpt: excerpt(), source_file: Some(file.clone()), note: None, authored: None },
+        ShellBlockError::Unterminated { line: 40, opening_text: "o".into(), excerpt: excerpt(), source_file: Some(file.clone()), authored: None },
     ] {
         let error: MarkdownError = error.into();
         assert_eq!(error_diagnostics(&error)[0].source, file_only(&file), "{error}");
@@ -458,7 +461,7 @@ fn an_unproven_interpolation_keeps_its_file() {
 /// R1-F2.24: the parser's line counts the current body, so the file alone.
 #[test]
 fn a_page_block_directive_failure_publishes_no_body_line() {
-    let error: MarkdownError = PageBlockError::ParseDirective { ctx: context(), line: 40, message: "m".into(), note: None }.into();
+    let error: MarkdownError = PageBlockError::ParseDirective { ctx: context(), line: 40, message: "m".into(), note: None, authored: None }.into();
     let records = error_diagnostics(&error);
     assert_eq!(records[0].code, "dm.directive.parse_failure");
     assert_eq!(records[0].source, file_only(work("doc.md").as_path()));
@@ -468,7 +471,7 @@ fn a_page_block_directive_failure_publishes_no_body_line() {
 #[test]
 fn a_transclusion_failure_with_a_context_names_its_file() {
     for error in [
-        TransclusionError::ParseDirective { ctx: context(), line: 40, message: "m".into(), caret_col: None },
+        TransclusionError::ParseDirective { ctx: context(), line: 40, message: "m".into(), caret_col: None, authored: None },
         TransclusionError::InvalidFrontmatterAssignment { ctx: context(), line: 40, raw: "r".into(), reason: "m".into() },
         TransclusionError::InvalidReassignedFrontmatterProperty { ctx: context(), line: 40, name: "n".into() },
         TransclusionError::ConditionParse { ctx: context(), expr: "e".into(), line: 40, message: "m".into(), authored: None },
@@ -479,7 +482,8 @@ fn a_transclusion_failure_with_a_context_names_its_file() {
     }
 }
 
-/// R1-F2.18: the directive branch keeps its file; a resolution or I/O failure
+/// R1-F2.18: the directive branch keeps its file (and is a directive parse
+/// failure); a resolution or I/O failure
 /// holds none, and the composed document is its fallback.
 #[test]
 fn a_reference_failure_keeps_what_it_holds() {
@@ -489,9 +493,11 @@ fn a_reference_failure_keeps_what_it_holds() {
         message: "m".into(),
         directive_text: "::file".into(),
         caret_col: None,
+        authored: None,
     }
     .into();
     assert_eq!(error_diagnostics(&directive)[0].source, file_only(work("doc.md").as_path()));
+    assert_eq!(error_diagnostics(&directive)[0].code, "dm.directive.parse_failure");
 
     for error in [
         ReferenceError::MissingSourceContext { reference: "r".into(), line: 40 },
@@ -706,4 +712,72 @@ fn a_child_policy_stop_names_the_child() {
     let records = error_diagnostics(&failure.error);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].source, at(&child, 3, 1));
+}
+
+/// Every `::toc-linking` and `::file-links` failure takes a code naming what
+/// went wrong, never the catch-all, and keeps the file of its directive.
+#[test]
+fn toc_linking_and_file_links_failures_take_their_own_codes() {
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::{FileLinksError, TocLinkingError};
+    use darkmatter::markdown::compose::report_diagnostics::{
+        COMPOSE_FAILURE_CODE, DIRECTIVE_PARSE_CODE, INPUT_READ_CODE, FILE_LINKS_INVALID_DEPTH_CODE, FILE_LINKS_INVALID_GLOB_CODE,
+        FILE_LINKS_MISSING_SOURCE_CODE, FILE_LINKS_NOT_A_DIRECTORY_CODE, REFERENCE_FAILURE_CODE,
+        TOC_LINKING_INVALID_CLEANUP_CODE, TOC_LINKING_INVALID_FILTER_CODE, TOC_LINKING_INVALID_LEVEL_CODE,
+    };
+    use std::sync::Arc;
+    let doc = || Some(std::env::temp_dir().join("doc.md"));
+    let io = || std::io::Error::other("denied");
+    let cases: Vec<(MarkdownError, &str)> = vec![
+        (TocLinkingError::ParseDirective { line: 3, message: "m".into(), document: doc(), authored: None }.into(), DIRECTIVE_PARSE_CODE),
+        (TocLinkingError::InvalidLevel { level: "h9".into(), line: 3, document: doc(), authored: None }.into(), TOC_LINKING_INVALID_LEVEL_CODE),
+        (
+            TocLinkingError::InvalidCleanupService { service: "s".into(), line: 3, document: doc(), authored: None }.into(),
+            TOC_LINKING_INVALID_CLEANUP_CODE,
+        ),
+        (
+            TocLinkingError::InvalidGlob { pattern: "[".into(), line: 3, message: "m".into(), document: doc(), authored: None }.into(),
+            TOC_LINKING_INVALID_FILTER_CODE,
+        ),
+        (
+            TocLinkingError::Unresolved { path: "a.md".into(), line: 3, failure: None, glob_hint: None, document: doc(), authored: None }
+                .into(),
+            REFERENCE_FAILURE_CODE,
+        ),
+        (TocLinkingError::Io(io()).into(), INPUT_READ_CODE),
+        (FileLinksError::ParseDirective { line: 3, message: "m".into(), document: doc(), authored: None }.into(), DIRECTIVE_PARSE_CODE),
+        (FileLinksError::InvalidDepth { value: "two".into(), line: 3, document: doc(), authored: None }.into(), FILE_LINKS_INVALID_DEPTH_CODE),
+        (FileLinksError::MissingSourceContext { line: 3, document: doc(), authored: None }.into(), FILE_LINKS_MISSING_SOURCE_CODE),
+        (FileLinksError::TargetNotFound { path: "d".into(), line: 3, document: doc(), authored: None }.into(), REFERENCE_FAILURE_CODE),
+        (FileLinksError::TargetNotDirectory { path: "d".into(), line: 3, document: doc(), authored: None }.into(), FILE_LINKS_NOT_A_DIRECTORY_CODE),
+        (
+            FileLinksError::GlobReference {
+                line: 3,
+                source: Arc::new(biscuit_file::GlobReferenceError::NoPositivePattern),
+                document: doc(),
+                authored: None,
+            }
+            .into(),
+            FILE_LINKS_INVALID_GLOB_CODE,
+        ),
+        (
+            FileLinksError::GlobReference {
+                line: 3,
+                source: Arc::new(biscuit_file::GlobReferenceError::Io { path: "d".into(), source: io() }),
+                document: doc(),
+                authored: None,
+            }
+            .into(),
+            INPUT_READ_CODE,
+        ),
+        (FileLinksError::Unreadable { path: "d".into(), line: 3, source: io(), document: doc(), authored: None }.into(), INPUT_READ_CODE),
+        (FileLinksError::Io(io()).into(), INPUT_READ_CODE),
+    ];
+    for (error, code) in cases {
+        let records = error_diagnostics(&error);
+        assert_eq!(records.len(), 1, "{error}");
+        assert_eq!(records[0].code, code, "{error}");
+        assert_ne!(records[0].code, COMPOSE_FAILURE_CODE, "{error}");
+        assert!(records[0].source.as_ref().is_some_and(|source| source.file.is_some()) || matches!(error, MarkdownError::TocLinking(TocLinkingError::Io(_)) | MarkdownError::FileLinks(FileLinksError::Io(_))), "{error}");
+    }
 }

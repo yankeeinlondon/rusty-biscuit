@@ -148,6 +148,19 @@ its `warning` severity and names the trigger, never the document.
 `md schema validate` and `md clean` report the same warning but take no
 `--deny`, so there it never blocks.
 
+The codes of a `::toc-linking` or `::file-links` failure that `md compose`
+tolerates as a warning (`dm.toc_linking.*`, `dm.file_links.*`, and
+`dm.reference.failure` or `dm.input.read_failure` for a `--dir` that is missing
+or cannot be read) are among them too: denying one makes that failure stop the
+run. See
+[Telling directive failures apart](../errors/composition-problems.md#telling-directive-failures-apart).
+
+So are `dm.transclusion.heading_overflow`, for a `::file` child's heading
+written as bold text because it would land past H6, and
+`dm.normalization.level_overflow`, for heading normalization skipped for the
+same reason. See
+[Headings pushed past H6](../errors/composition-problems.md#headings-pushed-past-h6).
+
 `--allow` never takes a diagnostic code, and some problems cannot be allowed
 at all: a call proven wrong, a parse error, or an unavailable global always
 fails.

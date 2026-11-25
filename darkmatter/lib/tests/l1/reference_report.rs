@@ -99,6 +99,7 @@ fn issue(code: ReferenceIssueCode, severity: ReferenceSeverity, source: ComposeS
         },
         included_via: Vec::new(),
         detail: None,
+        failure: None,
     }
 }
 
@@ -288,6 +289,7 @@ fn every_issue_code_has_its_reason() {
     let reasons = [
         (ReferenceIssueCode::MissingLocalTarget, "file not found"),
         (ReferenceIssueCode::MissingFragmentTarget, "no matching heading"),
+        (ReferenceIssueCode::UnreadableTarget, "unreadable target"),
         (ReferenceIssueCode::InvalidUrl, "malformed URL"),
         (ReferenceIssueCode::RemoteUnreachable, "unreachable"),
         (ReferenceIssueCode::UnsupportedScheme, "unsupported scheme"),

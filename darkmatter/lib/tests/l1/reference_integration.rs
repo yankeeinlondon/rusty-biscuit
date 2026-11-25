@@ -126,12 +126,15 @@ impl Drop for CurrentDirGuard {
     }
 }
 
+/// A target's file-reference failure is the inclusion's typed failure,
+/// composition's own, at the directive that named the target.
 fn assert_file_reference_error(error: &darkmatter::markdown::MarkdownError) {
     assert!(
         matches!(
             error,
-            darkmatter::markdown::MarkdownError::Reference(inner)
-                if matches!(inner.as_ref(), darkmatter::markdown::reference::ReferenceError::FileReference(_))
+            darkmatter::markdown::MarkdownError::Transclusion(inner)
+                if inner.inclusion_site().is_some()
+                    && matches!(inner.without_site(), darkmatter::markdown::compose::TransclusionError::FileReference(_))
         ),
         "expected a typed file-reference error, got: {error:?}"
     );
@@ -388,10 +391,10 @@ fn depth_limit_respected() {
     // Set a depth limit of 2
     let options =
         ReferenceGraphOptions::with_compose(&crate::request_support::request_at(dir.path(), ComposeOptions::new().with_max_transclusion_depth(2)));
-    let graph = md.reference_graph(options).unwrap();
-
-    // Should not reach all 5 levels
-    assert!(graph.node_count() < 5);
+    // Past the limit the chain is unread, so the graph refuses it as
+    // composition does rather than reporting a truncated graph.
+    let error = md.reference_graph(options).unwrap_err();
+    assert!(error.to_string().contains("Maximum transclusion depth exceeded (max: 2)"), "{error}");
 }
 
 #[test]
