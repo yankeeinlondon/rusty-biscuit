@@ -19,7 +19,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented-by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
 reviewed-by: codex/gpt-6.2-sol
 reviewed-on: "2026-11-25"
 review-iterations: 0
