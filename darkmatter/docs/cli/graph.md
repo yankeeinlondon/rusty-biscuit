@@ -32,7 +32,12 @@ Each document is prepared with its own `$schema`, never with trigger schemas.
 A bare schema name such as `$schema: feature-review.yaml` is looked up in the
 document's [schema roots](../topics/schemas/definition.md#schema-roots), as
 `md compose` looks it up. A name no root holds stops preparation of that
-document.
+document. Only a document inside a repository searches the roots, and it
+searches its own repository's: an included note or link target in another
+checkout, such as `::file ~/notes/review.md` from `~/app`, finds
+`$schema: review.yaml` in `~/notes/schemas/`, while one outside every
+repository, such as `::file ~/review.md`, must name its schema by a `./` or
+absolute path, whatever repository the document that reached it is in.
 
 A document whose schema is a [template](../topics/schemas/schema-slots.md) is
 prepared with the reads its slots are already approved: the files your

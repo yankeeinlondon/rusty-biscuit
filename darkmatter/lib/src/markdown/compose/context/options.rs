@@ -95,11 +95,23 @@ pub(crate) enum ProseInterpolation {
     DisabledByInclusion,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// How a file source's context is derived from the request's context.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
+    /// Derived from the request's context, inside the request's tree.
     #[default]
     Ordinary,
+    /// Derived from the request's context across an accepted trust boundary:
+    /// the source lies outside the request's tree and in no repository the
+    /// request has not captured.
     TrustedExternal,
+    /// The source lies in a Git repository the request's context does not
+    /// name. Its context was built at its own directory when it was admitted
+    /// ([`super::request::SourceRepositories`]) and is used as is, whatever
+    /// request context a consumer passes: its own repository decides `&`,
+    /// `^`, the package anchors, and its schema roots, while `@` keeps the
+    /// request's launch scope.
+    OwnRepository(Arc<biscuit_file::FileResolutionContext>),
 }
 
 /// The reference that opened a file source, and the path the opening
@@ -136,10 +148,11 @@ impl Eq for SourceOpening {}
 pub(crate) fn source_file_context(
     snapshot: &biscuit_file::FileResolutionContext,
     path: &Path,
-    derivation: SourceDerivation,
+    derivation: &SourceDerivation,
     opening: Option<&SourceOpening>,
 ) -> biscuit_file::FileResolutionContext {
     match (opening, derivation) {
+        (_, SourceDerivation::OwnRepository(context)) => context.as_ref().clone(),
         (Some(opening), SourceDerivation::Ordinary) => {
             snapshot.for_source_reference(&opening.reference, &opening.resolved)
         }
@@ -151,22 +164,35 @@ pub(crate) fn source_file_context(
     }
 }
 
-/// The derivation a file source at `path` resolves under: `TrustedExternal`
-/// when only that derivation of `context` admits the source (it lies outside
-/// the request's tree), else `Ordinary`.
+/// The derivation a file source at `path` resolves under.
+///
+/// `OwnRepository` when the source lies outside the request's repository (or
+/// the request has none) and inside a Git repository the request's context
+/// does not name; `repositories` answers that once per repository for the
+/// whole request. Otherwise `TrustedExternal` when only that derivation of
+/// `context` admits the source (it lies outside the request's tree), else
+/// `Ordinary`.
 fn source_derivation_for(
     context: &biscuit_file::FileResolutionContext,
     path: &Path,
     opening: Option<&SourceOpening>,
+    repositories: &super::request::SourceRepositories,
 ) -> SourceDerivation {
-    let derive = |derivation| source_file_context(context, path, derivation, opening);
-    if derive(SourceDerivation::Ordinary).validate().is_err()
-        && derive(SourceDerivation::TrustedExternal).validate().is_ok()
-    {
+    let derive = |derivation: &SourceDerivation| source_file_context(context, path, derivation, opening);
+    let ordinary = derive(&SourceDerivation::Ordinary).validate().is_ok();
+    let derivation = if !ordinary && derive(&SourceDerivation::TrustedExternal).validate().is_ok() {
         SourceDerivation::TrustedExternal
     } else {
         SourceDerivation::Ordinary
+    };
+    // A source inside the request's repository keeps the request's view of
+    // it; only one the request's repository does not hold can belong to
+    // another.
+    if ordinary && context.repository_root().is_some() {
+        return derivation;
     }
+    let opening = opening.map(|opening| (&opening.reference, opening.resolved.as_path()));
+    repositories.own_repository_derivation(context, path, opening).unwrap_or(derivation)
 }
 
 /// Configuration for the compose pipeline.
@@ -1259,16 +1285,19 @@ impl ComposeOptions {
     /// resolved to, when the caller has them; the child's context is then
     /// derived from it (see [`SourceOpening`]).
     /// A source outside the request's tree that only a trusted-external
-    /// derivation of `context` admits is marked `TrustedExternal`.
+    /// derivation of `context` admits is marked `TrustedExternal`. A source
+    /// in a Git repository `context` does not name gets a context built in
+    /// that repository, decided here once ([`SourceDerivation::OwnRepository`]).
     #[must_use]
     pub(crate) fn with_accepted_source_file_in(
         mut self,
         path: impl Into<PathBuf>,
         opening: Option<SourceOpening>,
         context: &biscuit_file::FileResolutionContext,
+        repositories: &super::request::SourceRepositories,
     ) -> Self {
         let path = path.into();
-        self.source_derivation = source_derivation_for(context, &path, opening.as_ref());
+        self.source_derivation = source_derivation_for(context, &path, opening.as_ref(), repositories);
         self.source = ComposeSource::File(path);
         self.source_opening = opening;
         self
@@ -1277,10 +1306,15 @@ impl ComposeOptions {
     /// Admits the root file source the way a child source is admitted
     /// ([`Self::with_accepted_source_file_in`]): a source outside the
     /// request's tree that only a trusted-external derivation of `context`
-    /// admits is marked `TrustedExternal`.
-    pub(crate) fn admit_source_in(&mut self, context: &biscuit_file::FileResolutionContext) {
+    /// admits is marked `TrustedExternal`, and one in a repository `context`
+    /// does not name is derived in that repository.
+    pub(crate) fn admit_source_in(
+        &mut self,
+        context: &biscuit_file::FileResolutionContext,
+        repositories: &super::request::SourceRepositories,
+    ) {
         if let ComposeSource::File(path) = &self.source {
-            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref());
+            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref(), repositories);
         }
     }
 
@@ -1834,7 +1868,7 @@ impl ComposeOptions {
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
             file_resolution_context: context.clone(),
-            source_derivation: self.source_derivation,
+            source_derivation: self.source_derivation.clone(),
             source_opening: self.source_opening.clone(),
         }
     }
@@ -1852,7 +1886,7 @@ impl ComposeOptions {
     ) -> biscuit_file::FileResolutionContext {
         match &self.source {
             ComposeSource::File(path) => {
-                source_file_context(context, path, self.source_derivation, self.source_opening.as_ref())
+                source_file_context(context, path, &self.source_derivation, self.source_opening.as_ref())
             }
             _ => context.clone(),
         }
@@ -3248,6 +3282,19 @@ fn encode_file_resolution_context(
     enc.bool(context.external_relative_allowed());
 }
 
+/// An own-repository source context decides what the source's references
+/// resolve to, so the whole context is identity.
+fn encode_source_derivation(enc: &mut GraphIdentityEncoder, derivation: &SourceDerivation) {
+    match derivation {
+        SourceDerivation::Ordinary => enc.tag(0),
+        SourceDerivation::TrustedExternal => enc.tag(1),
+        SourceDerivation::OwnRepository(context) => {
+            enc.tag(2);
+            encode_file_resolution_context(enc, context);
+        }
+    }
+}
+
 fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<SourceOpening>) {
     match opening {
         Some(opening) => {
@@ -3586,10 +3633,7 @@ impl ComposeOptions {
         enc.field("file_resolution_context");
         encode_file_resolution_context(&mut enc, file_resolution_context);
         enc.field("source_derivation");
-        enc.tag(match source_derivation {
-            SourceDerivation::Ordinary => 0,
-            SourceDerivation::TrustedExternal => 1,
-        });
+        encode_source_derivation(&mut enc, source_derivation);
         enc.field("source_opening");
         encode_source_opening(&mut enc, source_opening);
 
@@ -3977,10 +4021,7 @@ impl ComposeOptions {
         cenc.field("file_resolution_context");
         encode_file_resolution_context(&mut cenc, file_resolution_context);
         cenc.field("source_derivation");
-        cenc.tag(match source_derivation {
-            SourceDerivation::Ordinary => 0,
-            SourceDerivation::TrustedExternal => 1,
-        });
+        encode_source_derivation(&mut cenc, source_derivation);
         // The opening anchor can change the source's tree root, and with it
         // what the source's relative references resolve to.
         cenc.field("source_opening");

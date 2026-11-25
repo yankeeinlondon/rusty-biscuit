@@ -42,7 +42,7 @@ fn resolve_transclusion_target(
     let context = crate::markdown::compose::context::options::source_file_context(
         options.resolution_context(),
         source_path,
-        options.source_derivation,
+        &options.source_derivation,
         options.source_opening.as_ref(),
     );
     let reference = biscuit_file::FileReference::new(raw_target)?;

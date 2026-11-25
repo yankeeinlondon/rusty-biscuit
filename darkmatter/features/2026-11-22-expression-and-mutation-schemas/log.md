@@ -4,6 +4,7 @@ implementation_2: "2026-11-25T00:38:46+00:00"
 implementation_3: "2026-11-25T01:35:06+00:00"
 implementation_4: "2026-11-25T02:33:46+00:00"
 implementation_5: "2026-11-25T03:42:27+00:00"
+implementation_6: "2026-11-25T04:20:51+00:00"
 ---
 ## Implementation of Review Findings #1
 
@@ -698,11 +699,81 @@ No author rulings or blocked findings are recorded in the review.
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 | --- | --- | --- | --- |
-| R6-F1 | Included documents and fragment targets inherit schema-root eligibility from the parent | pending | |
-| R6-F1.1 | Reference report and Mermaid graph for an inclusion of an outside-Git note: explicit spellings pass for repository and outside-Git parents; bare and missing fail at the included note | pending | |
-| R6-F1.2 | `md graph`, `--validate`, `--follow --validate` over the same inclusion accept explicit and refuse bare and missing | pending | |
-| R6-F1.3 | `md validate refs --fragments`: only explicit spellings generate the heading; static-heading fallback preserved | pending | |
-| R6-F1.4 | Named-type import `entry@types.yaml` in the external note: explicit accepted, bare and missing refused on inclusion report, follow-and-validate graph, fragment check, compose with triggers disabled | pending | |
-| R6-F1.5 | Composition of the repository parent with and without `--disable schema-triggers`: generated heading only for explicit spellings; bare and missing fail in the child | pending | |
-| R6-F1.6 | Direct checks of the external note (refs, schema validate, compose, clean, completion) and the R5-F3 in-repository controls keep their results | pending | |
-| R6-F1.7 | Default composition skips root trigger discovery for the external included note; in-repository trigger behavior preserved | pending | |
+| R6-F1 | Included documents and fragment targets inherit schema-root eligibility from the parent | fixed | `searches_schema_roots` decides from the source context `DarkmatterSchemas` is built with; both root selectors (trigger discovery, bare lookup) share it. All children verified; 6 library + 2 CLI L1 regressions and the unit test `schema_root_search_needs_a_source_repository` fail with the old check restored. |
+| R6-F1.1 | Reference report and Mermaid graph for an inclusion of an outside-Git note: explicit spellings pass for repository and outside-Git parents; bare and missing fail at the included note | fixed | Repository parent: `validate refs` and the Mermaid graph exit 1 naming `review.yaml` for bare and `absent.yaml` for missing; `./schemas/review.yaml` and absolute exit 0 (bare exited 0 before). Outside-Git parent: same results. Library test `external_included_note_refuses_a_bare_schema_under_any_parent`. |
+| R6-F1.2 | `md graph`, `--validate`, `--follow --validate` over the same inclusion accept explicit and refuse bare and missing | fixed | `graph`, `graph --validate`, `graph --follow --validate`: bare and missing exit 1, explicit exit 0. CLI test `reference_commands_refuse_a_bare_schema_in_an_included_home_note`. |
+| R6-F1.3 | `md validate refs --fragments`: only explicit spellings generate the heading; static-heading fallback preserved | fixed | `validate refs --fragments link.md`: bare and missing report the generated heading missing (exit 1), explicit exit 0; static heading with `absent.yaml` exit 0. Library test `external_fragment_target_generates_its_heading_only_from_an_explicit_schema`. |
+| R6-F1.4 | Named-type import `entry@types.yaml` in the external note: explicit accepted, bare and missing refused on inclusion report, follow-and-validate graph, fragment check, compose with triggers disabled | fixed | `entry@types.yaml`: bare and missing fail in the inclusion report, follow-and-validate graph, fragment check, and `compose --disable schema-triggers`; relative and absolute pass; direct check unchanged. Library test `external_note_refuses_a_bare_named_type_import`. |
+| R6-F1.5 | Composition of the repository parent with and without `--disable schema-triggers`: generated heading only for explicit spellings; bare and missing fail in the child | fixed | `md compose root.md` with and without `--disable schema-triggers`: bare and missing exit 1 at the child, explicit renders `# Review heading`. Library test `composing_a_repository_parent_refuses_the_external_bare_schema`. |
+| R6-F1.6 | Direct checks of the external note (refs, schema validate, compose, clean, completion) and the R5-F3 in-repository controls keep their results | clean | Direct `schema validate`, `validate refs`, `compose` of `~/review.md` give identical results before and after; orchestrator probe of `md clean ~/review.md`: bare exit 1 (`$schema unresolved`), `./schemas/review.yaml` exit 0, absent exit 1. `clean.rs`, `schema validate`, and completion already use the document context; R5-F3 in-repository tests pass. Library control `external_note_checked_directly_refuses_a_bare_schema`. |
+| R6-F1.7 | Default composition skips root trigger discovery for the external included note; in-repository trigger behavior preserved | fixed | Home trigger matching `topic: review` requiring `version`: `compose root.md` now exits 0 for both topics (review topic exited 1 before); refs exit 0 for both; in-repository control `inroot.md` → `./child.md` still exits 1 naming `version`. Library test `root_triggers_apply_to_repository_children_but_not_to_an_external_note`, CLI test `compose_skips_root_triggers_and_bare_names_for_an_included_home_note`. |
+
+### Progress
+
+- starting the work on 'R6-F1 schema-root eligibility inherited from the parent' at 04:22:10
+        - defect class: the decision whether a document may search the schema roots (bare-name lookup and trigger discovery) was taken from an enclosing request's repository scope instead of the document's own source context
+        - delegated to one foreground `rust-developer` subagent; its log items are grouped below
+        - subagent log items:
+                - `searches_schema_roots` now takes the source context that `DarkmatterSchemas` is built with (`options.source_file_resolution_context()`); both the trigger-discovery and the bare-name lookup branch of `prepare_schemas` read that one answer, so trigger application and bare lookup share one rule
+                - discovery: every caller of `prepare_schemas` passes a fresh, empty trigger registry, so a parent's registry is never reused for a child; R6-F1.7 came only from the eligibility check
+                - discovery: a child in a different repository searches its own captured repository's roots; no repository is discovered mid-request
+                - sweep (clean): `md clean` (`schemas/clean.rs`), `md schema validate` (`cli/src/commands/schema/validate.rs`), schema-aware completion, and `validate_schema()` already decide from the document's own context; DMLS keeps its own workspace-boundary rule and does not call `prepare_schemas`
+                - discovery: library compose reports a failed child as a skipped transclusion, `md compose` exits 1; library tests assert the skip count and warning text
+                - tests: 6 new library tests in `lib/tests/l1/reference_bare_schema_roots.rs` (isolated home via `FileResolutionContext::from_snapshot`), 2 new CLI tests in `cli/tests/l1/reference_bare_schema.rs`, and the unit test `schema_root_search_needs_a_source_repository`; with the old check restored, 5 of the 6 new library tests and both CLI tests fail while the R5-F3 controls pass
+                - docs: `docs/topics/schemas/definition.md#schema-roots`, `docs/cli/validate.md`, `docs/cli/graph.md`, `.claude/skills/darkmatter/SKILL.md`
+                - CLI reproduction with an isolated `HOME`, before and after the fix, recorded for every row
+        - the author committed the in-flight source change and an earlier test version mid-session as `9b9300cfb`; the later test, doc and skill edits remain uncommitted
+        - orchestrator review: caller skills (`use-dmls/schemas.md`, `use-darkmatter/*`) make no claim that an external child inherits a parent's roots; no publish needed
+- work completed for 'R6-F1 schema-root eligibility inherited from the parent' at 04:33:50
+
+### Completion Report
+
+- **outcome: complete** — elapsed 2026-11-25T04:20:51+00:00 → 04:42 UTC (about 22 minutes)
+- parent findings: total 1 = fixed 1 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: 7 = fixed 6 (R6-F1.1–.5, R6-F1.7) + clean 1 (R6-F1.6)
+- open findings: none
+- shared rule: bare-name lookup and trigger discovery use the repository recorded in the source context. Composition, reference graphs, and heading preparation agree with direct checks for documents in the captured repository and for the tested notes outside Git. A direct CLI open can capture another repository. Nested preparation in this iteration only derives from the current request and can miss that repository. See the dated review 7 correction below.
+- earlier same-class cases rerun: the R5-F3 in-repository library and CLI tests (root, child, fragment, named import, `--disable schema-triggers`) pass alongside the new probes
+- cross-OS: no OS-specific code or path comparison changed; cross-check not run, left to CI
+- changed files:
+        - R6-F1 (source, committed by the author mid-session as `9b9300cfb`): `darkmatter/lib/src/markdown/compose/schema_validation.rs`
+        - R6-F1 (tests): `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs`, `darkmatter/cli/tests/l1/reference_bare_schema.rs`
+        - R6-F1 (docs/skills): `darkmatter/docs/topics/schemas/definition.md`, `darkmatter/docs/cli/validate.md`, `darkmatter/docs/cli/graph.md`, `.claude/skills/darkmatter/SKILL.md`
+        - records: this log, `review-6.md` frontmatter
+- final verification (orchestrator, after all changes, no subagent running):
+        - `darkmatter`: `just lint` exit 0; `just test` 18,053 passed, 10 skipped, none at or above 5 s (R6-F1 and regression for every earlier finding)
+        - `just check-tier-coverage darkmatter`: 0 stranded
+        - `claudine`: `just test` 13,077 passed, 16 skipped, none at or above 5 s (consumer of `prepare_schemas`)
+        - `just slow-tests fresh` exit 0
+        - by hand: isolated-`HOME` CLI reproduction of every R6-F1 row before and after the fix (subagent), plus the orchestrator's `md clean` probe
+
+### Review 7 record correction (2026-11-25)
+
+The iteration 6 completion report said the schema-root decisions now agree across composition, reference preparation, cleaning, and validation. That holds for the seven iteration 6 instances. It does not hold for an included document in a second checkout that the request has not captured. With two temporary Git checkouts and an isolated home, the worktree-built `md schema validate ~/notes/review.md` accepted the note's bare `$schema: review.yaml`. `md compose root.md` and `md validate refs root.md` refused that schema when the root used `::file ~/notes/review.md`. The explicit spelling passed both paths. With the explicit spelling, direct composition applied the note's matching trigger and reported its missing `version` field, while inclusion skipped that trigger. The same source-context check runs in each path, but the nested context derives from the enclosing request's captured repository. [Review 7 finding](review-7.md#r7-f1-high-documents-opened-through-another-checkout-lose-their-schema-roots)
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-11-25T04:50:10+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-7.md'
+- this is iteration 7 of the review-to-implement cycle 
+- review frontmatter `implemented` confirmed `false` before repairs began
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R7-F1 | Documents opened through another checkout lose their schema roots | pending | |
+| R7-F1.1 | Reference report and Mermaid graph over body, `prologue:`, `epilogue:` inclusion of a second-checkout note: bare, relative, absolute succeed; missing fails at the child | pending | |
+| R7-F1.2 | `md graph`, `--validate`, `--follow --validate` × three parents: all accept bare and explicit, refuse missing | pending | |
+| R7-F1.3 | Fragment preparation and `::toc-linking`: bare and explicit generate the heading and let the TOC target prepare; missing fails; static fallback kept | pending | |
+| R7-F1.4 | Composition (default and disabled triggers) and `md compose --shell` discovery: accept bare and explicit, missing fails | pending | |
+| R7-F1.5 | Named-type import `entry@types.yaml` from the second checkout: bare and explicit resolve in direct and nested positions; missing fails | pending | |
+| R7-F1.6 | Root trigger selection: default compose of a parent applies the child checkout's trigger (missing `version` for `topic: review`, accepted for `other`); no child error names `parent_only`; disabled-trigger and passive checks pass | pending | |
+| R7-F1.7 | Direct document context and shell completion keep their behavior | pending | |
+| R7-F1.8 | Same-checkout resident child and outside-Git note keep their iteration 5/6 boundary behaviors | pending | |
+
+### Progress
+
+- starting the work on 'R7-F1 documents opened through another checkout lose their schema roots' at 04:51:00
+        - defect class: a source document admitted across a file boundary is given a context derived from the enclosing request's captured repositories, so a document in a repository the request never captured loses its own repository scope (schema roots, bare lookup, triggers)

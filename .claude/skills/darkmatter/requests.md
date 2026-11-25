@@ -32,7 +32,23 @@ fingerprint, like `shell_working_directory`. See
 `darkmatter/docs/topics/compose-requests.md` ("One environment per document").
 A file source (root or child) outside the request's tree is admitted
 trusted-external when only that derivation validates (`source_derivation_for`,
-applied to the root in `ComposeRequest::assemble`). The schema stage validates
+applied to the root in `ComposeRequest::assemble`). A source outside the
+request's repository (or in a request with none) that lies in another Git
+repository is admitted `SourceDerivation::OwnRepository(Arc<context>)`: a
+context built at its directory from that repository's observation, derived
+by the public `derive_in_own_repository` (trusted external from the built
+context, the request's launch `@` scope copied on), and returned by
+`source_file_context` whatever request context a consumer passes, so
+composition, pre-flight, the reference graph, TOC and fragment targets, and
+`prepare_schemas` read one answer. Discovery happens only there, through the
+request's `SourceRepositories` memo (`Arc` on `ComposeRequest`, kept by
+`derive`/`map_options`/clones): once per repository root, once per directory
+outside every repository, seeded with the request's own repository status;
+a discovery or build failure keeps the ordinary derivation. The configuration
+snapshot (permissions) stays the request's. `MdRequest::document_context`
+calls the same `derive_in_own_repository` for a directly opened document; it
+differs only in choosing the *request* context for a root, where there is no
+enclosing request to derive from. The schema stage validates
 in the source's derived context (`source_file_resolution_context`), and
 `resolve_ctx::document_file_context` recognizes that context by canonical
 directory, not spelling (`/var` vs `/private/var`); re-deriving it with

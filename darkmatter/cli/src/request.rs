@@ -358,14 +358,12 @@ impl MdRequest {
         if derived_is_valid && external.repository_root().is_none() {
             return Ok(derived);
         }
-        let source = match opening {
-            Some(reference) => external.for_trusted_external_source_reference(reference, resolved),
-            None => external.for_trusted_external_source(resolved),
-        };
         // The rebuild re-anchors `./`, bare, `&`, and `^` on the document's
         // repository; `@` keeps searching the launch tree, as it does for a
-        // source derived from the launch context.
-        Ok(source.with_launch_magic_scope(launch.launch_magic_scope().clone()))
+        // source derived from the launch context. A document nested under
+        // this one gets the same derivation from the library when it lies in
+        // a repository this context does not name.
+        Ok(darkmatter::markdown::compose::derive_in_own_repository(&external, launch, resolved, opening))
     }
 }
 

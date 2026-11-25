@@ -402,6 +402,132 @@ pub fn build_resolution_context_with_catalog(
     Ok(context)
 }
 
+/// The context a source in another Git repository resolves its own
+/// references against: `own` is a context built at the source's directory,
+/// which found that repository, and `launch` is the context of the request
+/// or invocation that reached the source.
+///
+/// The source is derived from `own` as a trusted external source (keeping
+/// the `~` or `{{VAR}}` anchor of `opening`), so `./`, bare, `&`, and `^`
+/// references, the package anchors, and the schema roots are its own
+/// repository's, while `@` keeps searching `launch`'s launch scope. The one
+/// rule `md`'s directly opened documents and every source a request admits
+/// across a file boundary share.
+pub fn derive_in_own_repository(
+    own: &FileResolutionContext,
+    launch: &FileResolutionContext,
+    resolved: &Path,
+    opening: Option<&FileReference>,
+) -> FileResolutionContext {
+    let source = match opening {
+        Some(reference) => own.for_trusted_external_source_reference(reference, resolved),
+        None => own.for_trusted_external_source(resolved),
+    };
+    source.with_launch_magic_scope(launch.launch_magic_scope().clone())
+}
+
+/// The Git repositories a request found its admitted sources in, discovered
+/// at most once per repository (and once per directory outside every
+/// repository) for the whole request.
+///
+/// A request captures its own repository when it is prepared. A source it
+/// later admits across a file boundary (a `::file`, `prologue:`, or
+/// `epilogue:` child, a `::toc-linking` or fragment target, the root of a
+/// request whose context names another repository) can lie in a different
+/// checkout; that is the one place a request discovers another repository,
+/// and every consumer of the source then reads the context decided there
+/// ([`SourceDerivation::OwnRepository`]). Shared by every derivation of the
+/// request.
+///
+/// [`SourceDerivation::OwnRepository`]: super::options::SourceDerivation::OwnRepository
+#[derive(Debug, Default)]
+pub(crate) struct SourceRepositories {
+    known: std::sync::Mutex<KnownRepositories>,
+}
+
+#[derive(Debug, Default)]
+struct KnownRepositories {
+    found: Vec<Arc<RepositoryObservation>>,
+    outside: std::collections::HashSet<PathBuf>,
+}
+
+impl SourceRepositories {
+    /// The memo for a request over `context`: its own repository is known,
+    /// and a context naming none says its request directory is outside
+    /// every repository, so neither is discovered again.
+    pub(crate) fn for_request(context: &FileResolutionContext) -> Self {
+        let mut known = KnownRepositories::default();
+        if context.repository_root().is_none() {
+            known.outside.insert(context.request_cwd().to_path_buf());
+        }
+        Self { known: std::sync::Mutex::new(known) }
+    }
+
+    /// [`SourceDerivation::OwnRepository`] for the source at `path` when it
+    /// lies in a Git repository `context` does not name, holding its
+    /// [`derive_in_own_repository`] context; `None` when it is in no
+    /// repository, in `context`'s own, or its context cannot be built, so the
+    /// caller keeps its ordinary derivation.
+    ///
+    /// [`SourceDerivation::OwnRepository`]: super::options::SourceDerivation::OwnRepository
+    pub(crate) fn own_repository_derivation(
+        &self,
+        context: &FileResolutionContext,
+        path: &Path,
+        opening: Option<(&FileReference, &Path)>,
+    ) -> Option<super::options::SourceDerivation> {
+        let dir = path.parent()?;
+        let observation = self.containing(dir)?;
+        if observation.root.as_deref() == context.repository_root() {
+            return None;
+        }
+        let mut snapshot = RequestSnapshot::new(dir)
+            .with_home(context.home_dir().map(Path::to_path_buf))
+            .with_env(context.env().clone());
+        for registration in context.magic_path_registrations() {
+            snapshot = snapshot.with_magic_root_tier(
+                registration.path().to_path_buf(),
+                registration.position(),
+                registration.tier(),
+            );
+        }
+        let own = build_with_observation(&snapshot, Some(&observation))
+            .inspect_err(|error| tracing::debug!(%error, "source repository context not built"))
+            .ok()?;
+        let resolved = opening.map_or(path, |(_, resolved)| resolved);
+        let derived = derive_in_own_repository(&own, context, resolved, opening.map(|(reference, _)| reference));
+        derived
+            .validate()
+            .is_ok()
+            .then(|| super::options::SourceDerivation::OwnRepository(Arc::new(derived)))
+    }
+
+    /// The repository containing `dir`, discovering it on the first source
+    /// there. A discovery failure counts as no repository: the source keeps
+    /// the request's derivation, as it did before it was discovered.
+    fn containing(&self, dir: &Path) -> Option<Arc<RepositoryObservation>> {
+        let mut known = self.known.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(found) = known.found.iter().find(|observation| observation.contains(dir)) {
+            return Some(Arc::clone(found));
+        }
+        if known.outside.contains(dir) {
+            return None;
+        }
+        let observation = discover_repository(dir)
+            .inspect_err(|error| tracing::debug!(%error, "source repository discovery failed"))
+            .ok()
+            .and_then(|discovery| discovery.observation)
+            .filter(|observation| observation.root.is_some());
+        match &observation {
+            Some(found) => known.found.push(Arc::clone(found)),
+            None => {
+                known.outside.insert(dir.to_path_buf());
+            }
+        }
+        observation
+    }
+}
+
 /// Compose options paired with the request's required file-resolution
 /// context.
 ///
@@ -439,6 +565,9 @@ pub struct ComposeRequest {
     /// The request's one configuration snapshot; `options` mirrors it so
     /// every stage reads it through `Deref` too.
     config: Arc<crate::config::load::ConfigSnapshot>,
+    /// The repositories admitted sources were found in, shared by every
+    /// derivation of this request.
+    repositories: Arc<SourceRepositories>,
 }
 
 impl std::ops::Deref for ComposeRequest {
@@ -461,6 +590,7 @@ impl std::fmt::Debug for ComposeRequest {
             .field("options", &self.options)
             .field("context", &self.context)
             .field("config", &self.config)
+            .field("repositories", &self.repositories)
             .finish()
     }
 }
@@ -574,20 +704,30 @@ impl ComposeRequest {
         })?;
         options.establish_request_repository();
         options.align_context_environment(context.env());
-        options.admit_source_in(context);
+        options.admit_source_in(context, &SourceRepositories::for_request(context));
         Ok(options.local_expression_resolution_context_in(context))
     }
 
     fn assemble(
-        mut options: ComposeOptions,
+        options: ComposeOptions,
         context: FileResolutionContext,
         config: Arc<crate::config::load::ConfigSnapshot>,
     ) -> Self {
+        let repositories = Arc::new(SourceRepositories::for_request(&context));
+        Self::assemble_with(options, context, config, repositories)
+    }
+
+    fn assemble_with(
+        mut options: ComposeOptions,
+        context: FileResolutionContext,
+        config: Arc<crate::config::load::ConfigSnapshot>,
+        repositories: Arc<SourceRepositories>,
+    ) -> Self {
         options.align_context_environment(context.env());
-        options.admit_source_in(&context);
+        options.admit_source_in(&context, &repositories);
         options.config_snapshot = Some(Arc::clone(&config));
         options.align_remote_network();
-        Self { options, context, config }
+        Self { options, context, config, repositories }
     }
 
     /// This request with its options changed by `change`, keeping its
@@ -597,7 +737,7 @@ impl ComposeRequest {
     /// set pre-flight computes.
     #[must_use]
     pub fn map_options(self, change: impl FnOnce(ComposeOptions) -> ComposeOptions) -> Self {
-        Self::assemble(change(self.options), self.context, self.config)
+        Self::assemble_with(change(self.options), self.context, self.config, self.repositories)
     }
 
     /// The configuration snapshot this request was captured with, shared by
@@ -673,7 +813,8 @@ impl ComposeRequest {
         opening: Option<super::options::SourceOpening>,
     ) -> Self {
         let context = self.context.clone();
-        self.derive(|options| options.with_accepted_source_file_in(path, opening, &context))
+        let repositories = Arc::clone(&self.repositories);
+        self.derive(|options| options.with_accepted_source_file_in(path, opening, &context, &repositories))
     }
 
     /// This request as the compose pass of `document` will see it, after
@@ -820,6 +961,46 @@ mod tests {
             assert!(Arc::ptr_eq(request.config_snapshot(), view.options().config_snapshot().unwrap()));
         }
         assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1, "no derivation rediscovers");
+    }
+
+    /// A source admitted from another checkout gets a context in its own
+    /// repository with the request's launch `@` scope and configuration, and
+    /// the request discovers each other repository, and each directory
+    /// outside every repository, once.
+    #[test]
+    fn admitted_sources_discover_another_repository_once_per_request() {
+        use std::sync::atomic::Ordering;
+
+        use super::super::capture::GIT_DISCOVERY_COUNT;
+
+        let temp = tempfile::tempdir().unwrap();
+        let base = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let (app, notes, loose) = (base.join("app"), base.join("notes"), base.join("loose"));
+        for dir in [&app, &notes.join("deep"), &loose] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        gix::init(&app).unwrap();
+        gix::init(&notes).unwrap();
+        let snapshot = RequestSnapshot::new(&app).with_home(Some(base.clone()));
+        let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).unwrap();
+        GIT_DISCOVERY_COUNT.store(0, Ordering::Relaxed);
+
+        for source in [notes.join("a.md"), notes.join("deep/b.md"), notes.join("a.md")] {
+            let accepted = request.clone().with_accepted_source_file(&source, None);
+            let context = accepted.source_file_resolution_context();
+            assert_eq!(context.repository_root(), Some(notes.as_path()), "{}", source.display());
+            assert_eq!(context.launch_magic_scope(), request.resolution_context().launch_magic_scope());
+            assert!(Arc::ptr_eq(request.config_snapshot(), accepted.config_snapshot()));
+        }
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1, "one discovery for the notes checkout");
+
+        for _ in 0..2 {
+            let accepted = request.clone().with_accepted_source_file(loose.join("c.md"), None);
+            assert_eq!(accepted.source_file_resolution_context().repository_root(), None);
+        }
+        let resident = request.clone().with_accepted_source_file(app.join("d.md"), None);
+        assert_eq!(resident.source_file_resolution_context().repository_root(), Some(app.as_path()));
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 2, "one more for the folder outside Git, none for the launch checkout");
     }
 
     #[test]

@@ -114,8 +114,8 @@ the library, `md`, and Claudine runners' `external_*` tests (DMLS's request
 belongs to the document's repository by design): a source in another repository takes `&`,
 `^`, and bare root lookups from its own repository and `@` from the launch
 scope. A CLI that rebuilds a context at a foreign document's directory must
-copy the launch scope back (`with_launch_magic_scope`, as
-`MdRequest::document_context` does); Claudine completion uses
+copy the launch scope back (`derive_in_own_repository`, as
+`MdRequest::document_context` and the library's source admission do); Claudine completion uses
 `claudine::composition::derive_request_context_for_source`, composition's
 policy.
 The library and DMLS runners take every form at every depth. The `md` and

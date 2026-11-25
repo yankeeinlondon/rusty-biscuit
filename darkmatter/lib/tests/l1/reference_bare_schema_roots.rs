@@ -313,13 +313,14 @@ impl HomeNote {
     /// A request launched in `parent` with the isolated home; a repository
     /// root only for the repository parent. Nothing reads the process home,
     /// environment, or working tree.
-    fn request(&self, parent: &Path, triggers: bool) -> ComposeRequest {
+    fn request(&self, parent: &Path, source: &Path, triggers: bool) -> ComposeRequest {
         let mut context = FileResolutionContext::from_snapshot(parent, Some(self.home()), std::collections::HashMap::new());
         if parent == self.repo() {
             context = context.with_repository_root(parent);
         }
         crate::request_support::request_in(
             ComposeOptions::new_with_context(ComposeContext::capture_for_content(parent, ""))
+                .with_source_file(source)
                 .with_trigger_schemas(triggers),
             context,
         )
@@ -332,8 +333,9 @@ impl HomeNote {
     /// `(node count, reference issue codes)` for `name` in `parent`, as the
     /// reference commands prepare it (no trigger schemas).
     fn check(&self, parent: &Path, name: &str, fragments: bool) -> Result<(usize, Vec<ReferenceIssueCode>), MarkdownError> {
-        let md = self.load(&parent.join(name));
-        let request = self.request(parent, false);
+        let source = parent.join(name);
+        let md = self.load(&source);
+        let request = self.request(parent, &source, false);
         let graph_options = ReferenceGraphOptions::with_compose(&request);
         let nodes = md.reference_graph(graph_options.clone())?.node_count();
         let report = md.validate_references(ReferenceValidationOptions {
@@ -347,9 +349,10 @@ impl HomeNote {
     /// be prepared is a tolerated transclusion failure, so its refusal is the
     /// report's warning, returned here as an error.
     fn compose(&self, parent: &Path, name: &str, triggers: bool) -> Result<String, String> {
+        let source = parent.join(name);
         let (composed, report) = self
-            .load(&parent.join(name))
-            .compose_with(&self.request(parent, triggers))
+            .load(&source)
+            .compose_with(&self.request(parent, &source, triggers))
             .map_err(|error| format!("{error} {error:?}"))?;
         if report.transclusions_skipped > 0 {
             return Err(format!("{report:?}"));
@@ -399,16 +402,15 @@ fn external_included_note_refuses_a_bare_schema_under_any_parent() {
     }
 }
 
-/// R6-F1.6 control: the note checked directly refuses the bare name too.
+/// R6-F1.6 control: the note checked directly, in its own context (as
+/// `md validate refs ~/review.md` opens it), refuses the bare name too.
 #[test]
 fn external_note_checked_directly_refuses_a_bare_schema() {
     let fixture = HomeNote::new();
     for spelling in External::ALL {
         let schema = spelling.reference(&fixture.home(), "review.yaml");
         fixture.write_schema_note(&schema, "{{ fm.description }}");
-        let md = fixture.load(&fixture.home().join("review.md"));
-        let graph_options = ReferenceGraphOptions::with_compose(&fixture.request(&fixture.repo(), false));
-        let result = md.reference_graph(graph_options).map(|graph| graph.node_count());
+        let result = fixture.check(&fixture.home(), "review.md", false).map(|(nodes, _)| nodes);
         if spelling.explicit() {
             assert_eq!(result.unwrap_or_else(|error| panic!("{spelling:?}: {error}")), 1);
         } else {
@@ -508,8 +510,348 @@ fn root_triggers_apply_to_repository_children_but_not_to_an_external_note() {
 
     std::fs::write(fixture.repo().join("child.md"), "---\ntopic: review\n---\n\n# In repository\n").unwrap();
     std::fs::write(fixture.repo().join("inner.md"), "::file ./child.md\n").unwrap();
-    assert_compose_names(fixture.compose(&fixture.repo(), "inner.md", true), "version", "repository child");
+    // The trigger is the only schema layer the child has, so a refusal
+    // with triggers on and success with them off is the trigger applying.
+    assert_compose_names(fixture.compose(&fixture.repo(), "inner.md", true), "child.md", "repository child");
     fixture
         .compose(&fixture.repo(), "inner.md", false)
         .expect("without trigger schemas the repository child composes");
+}
+
+// ── A note in a second checkout, reached from the first ──────────────────
+//
+// A source's own repository decides its schema roots. A note in a separate
+// Git checkout (`~/notes`), included by or linked from a document in the
+// launch checkout (`~/app`), searches `~/notes/schemas` for a bare `$schema`
+// name, a bare `Name@file` import, and root triggers, exactly as when it is
+// opened directly; a trigger of the launch checkout never applies to it.
+
+/// The three ways the launch checkout's parent includes the note.
+const INCLUSIONS: [(&str, &str); 3] = [
+    ("body.md", "::file ~/notes/review.md\n"),
+    ("prologue.md", "---\nprologue: ~/notes/review.md\n---\n\n# Root\n"),
+    ("epilogue.md", "---\nepilogue: ~/notes/review.md\n---\n\n# Root\n"),
+];
+
+/// An isolated home holding two Git checkouts: `app`, where every request
+/// is launched, and `notes`, whose `schemas/` root holds the note's schema
+/// and a types-only library.
+struct TwoCheckouts {
+    base: TempDir,
+}
+
+impl TwoCheckouts {
+    fn new() -> Self {
+        let fixture = Self { base: TempDir::new().unwrap() };
+        for checkout in [fixture.app(), fixture.notes()] {
+            // The smallest layout Git discovery accepts; no `git` process.
+            std::fs::create_dir_all(checkout.join(".git/objects")).unwrap();
+            std::fs::create_dir_all(checkout.join(".git/refs/heads")).unwrap();
+            std::fs::create_dir_all(checkout.join("schemas")).unwrap();
+            std::fs::write(checkout.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            std::fs::write(checkout.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
+        }
+        std::fs::write(
+            fixture.notes().join("schemas/review.yaml"),
+            "$schema:\n  description: string(required)\n  state: enum(open, done)\n",
+        )
+        .unwrap();
+        std::fs::write(fixture.notes().join("schemas/types.yaml"), "kind: schema\ntypes:\n  entry: string\n").unwrap();
+        for (name, text) in INCLUSIONS {
+            std::fs::write(fixture.app().join(name), text).unwrap();
+        }
+        std::fs::write(fixture.app().join("link.md"), "[go](~/notes/review.md#review-heading)\n").unwrap();
+        std::fs::write(fixture.app().join("toc.md"), "::toc-linking ~/notes/review.md\n").unwrap();
+        fixture
+    }
+
+    fn home(&self) -> std::path::PathBuf {
+        self.base.path().join("home")
+    }
+
+    fn app(&self) -> std::path::PathBuf {
+        self.home().join("app")
+    }
+
+    fn notes(&self) -> std::path::PathBuf {
+        self.home().join("notes")
+    }
+
+    /// `file` in the notes checkout's `schemas/` root, spelled `spelling`
+    /// from the note.
+    fn reference(&self, spelling: External, file: &str) -> String {
+        spelling.reference(&self.notes(), file)
+    }
+
+    fn write_note(&self, frontmatter: &str, heading: &str) {
+        std::fs::write(
+            self.notes().join("review.md"),
+            format!("---\n{frontmatter}---\n\n# {heading}\n\n## Static\n"),
+        )
+        .unwrap();
+    }
+
+    fn write_schema_note(&self, spelling: External, heading: &str) -> String {
+        let schema = self.reference(spelling, "review.yaml");
+        self.write_note(&format!("$schema: '{schema}'\ndescription: Review heading\n"), heading);
+        schema
+    }
+
+    fn write_import_note(&self, spelling: External) -> String {
+        let library = self.reference(spelling, "types.yaml");
+        self.write_note(
+            &format!("$schema:\n  description: 'entry@{library}'\ndescription: Review heading\n"),
+            "{{ fm.description }}",
+        );
+        library
+    }
+
+    /// A request launched in `checkout` (its context names only that
+    /// repository) with the isolated home. Nothing reads the process home,
+    /// environment, or working tree.
+    fn request(&self, checkout: &Path, source: &Path, triggers: bool) -> ComposeRequest {
+        let context = FileResolutionContext::from_snapshot(checkout, Some(self.home()), std::collections::HashMap::new())
+            .with_repository_root(checkout);
+        crate::request_support::request_in(
+            ComposeOptions::new_with_context(ComposeContext::capture_for_content(checkout, ""))
+                .with_source_file(source)
+                .with_trigger_schemas(triggers),
+            context,
+        )
+    }
+
+    fn load(&self, path: &Path) -> Markdown {
+        Markdown::try_from(path).unwrap().with_source(ComposeSource::File(path.to_path_buf()))
+    }
+
+    /// `(node count, reference issue codes)` for `path`, prepared as the
+    /// reference commands prepare it (no trigger schemas) from a request
+    /// launched in `checkout`.
+    fn check_in(&self, checkout: &Path, path: &Path, fragments: bool) -> Result<(usize, Vec<ReferenceIssueCode>), MarkdownError> {
+        let md = self.load(path);
+        let graph_options = ReferenceGraphOptions::with_compose(&self.request(checkout, path, false));
+        let nodes = md.reference_graph(graph_options.clone())?.node_count();
+        let report = md.validate_references(ReferenceValidationOptions {
+            validate_fragments: fragments,
+            ..ReferenceValidationOptions::with_graph(graph_options)
+        })?;
+        Ok((nodes, report.issues.iter().map(|issue| issue.code).collect()))
+    }
+
+    /// [`Self::check_in`] for an app document.
+    fn check(&self, name: &str, fragments: bool) -> Result<(usize, Vec<ReferenceIssueCode>), MarkdownError> {
+        self.check_in(&self.app(), &self.app().join(name), fragments)
+    }
+
+    /// The composed body of the app document `name`; a skipped child's
+    /// refusal is returned as an error, as in [`HomeNote::compose`].
+    fn compose(&self, name: &str, triggers: bool) -> Result<String, String> {
+        let source = self.app().join(name);
+        let (composed, report) = self
+            .load(&source)
+            .compose_with(&self.request(&self.app(), &source, triggers))
+            .map_err(|error| format!("{error} {error:?}"))?;
+        if report.transclusions_skipped > 0 {
+            return Err(format!("{report:?}"));
+        }
+        Ok(composed.content().to_owned())
+    }
+
+    /// Command discovery before composition (`md compose --shell`) of the
+    /// app document `name`.
+    fn preflight(&self, name: &str) -> Result<(), String> {
+        let source = self.app().join(name);
+        self.load(&source)
+            .compose_preflight(&self.request(&self.app(), &source, true))
+            .map(drop)
+            .map_err(|error| format!("{error} {error:?}"))
+    }
+}
+
+/// Asserts the R7-F1 verdict for one spelling: every resolvable spelling
+/// gives `expected`, and the missing one fails naming `reference`.
+fn assert_resolves_unless_missing<T: std::fmt::Debug + PartialEq>(
+    spelling: External,
+    result: Result<T, String>,
+    expected: impl FnOnce(T),
+    reference: &str,
+    shape: &str,
+) {
+    match (spelling, result) {
+        (External::Missing, Err(text)) => assert!(text.contains(reference), "{shape}: the failure must name `{reference}`: {text}"),
+        (External::Missing, Ok(value)) => panic!("{shape}: `{reference}` must not resolve, got {value:?}"),
+        (_, Ok(value)) => expected(value),
+        (_, Err(text)) => panic!("{shape}: {text}"),
+    }
+}
+
+fn shown<T>(result: Result<T, MarkdownError>) -> Result<T, String> {
+    result.map_err(|error| format!("{error} {error:?}"))
+}
+
+/// R7-F1.1, .2, .4: one test per inclusion form. The reference report and
+/// graph, composition with and without trigger schemas, and command
+/// discovery accept the bare spelling exactly like the explicit ones and
+/// refuse a missing schema at the child.
+macro_rules! second_checkout_inclusion_tests {
+    ($($test:ident => $parent:literal),* $(,)?) => {$(
+        #[test]
+        fn $test() {
+            let fixture = TwoCheckouts::new();
+            for spelling in External::ALL {
+                let schema = fixture.write_schema_note(spelling, "{{ fm.description }}");
+                let shape = format!("{spelling:?} {}", $parent);
+                assert_resolves_unless_missing(
+                    spelling,
+                    shown(fixture.check($parent, false)),
+                    |verdict| assert_eq!(verdict, (2, Vec::new()), "{shape}"),
+                    &schema,
+                    &format!("{shape} check"),
+                );
+                for triggers in [true, false] {
+                    assert_resolves_unless_missing(
+                        spelling,
+                        fixture.compose($parent, triggers),
+                        |text| assert!(text.contains("# Review heading"), "{shape} triggers={triggers}: {text}"),
+                        &schema,
+                        &format!("{shape} compose triggers={triggers}"),
+                    );
+                }
+                assert_resolves_unless_missing(spelling, fixture.preflight($parent), |()| (), &schema, &format!("{shape} pre-flight"));
+            }
+        }
+    )*};
+}
+
+second_checkout_inclusion_tests! {
+    second_checkout_body_inclusion_uses_the_notes_schema_roots => "body.md",
+    second_checkout_prologue_uses_the_notes_schema_roots => "prologue.md",
+    second_checkout_epilogue_uses_the_notes_schema_roots => "epilogue.md",
+}
+
+/// R7-F1.3: a fragment link finds the heading the note generates for every
+/// resolvable spelling; a missing schema loses only the generated heading,
+/// and the static heading still resolves through the fallback.
+#[test]
+fn second_checkout_fragment_target_generates_its_heading_from_a_bare_schema() {
+    let fixture = TwoCheckouts::new();
+    for spelling in External::ALL {
+        for heading in ["{{ fm.description }}", "Review heading"] {
+            fixture.write_schema_note(spelling, heading);
+            let (_, issues) = fixture.check("link.md", true).unwrap_or_else(|error| panic!("{spelling:?} {heading}: {error}"));
+            if spelling == External::Missing && heading.starts_with("{{") {
+                assert_eq!(issues, vec![ReferenceIssueCode::MissingFragmentTarget], "{spelling:?} {heading}");
+            } else {
+                assert!(issues.is_empty(), "{spelling:?} {heading}: {issues:?}");
+            }
+        }
+    }
+}
+
+/// R7-F1.3: a `::toc-linking` target in the notes checkout prepares in the
+/// reference check (which `md compose` runs first) for every resolvable
+/// spelling, and a missing schema fails that preparation.
+#[test]
+fn second_checkout_toc_target_prepares_with_a_bare_schema() {
+    let fixture = TwoCheckouts::new();
+    for spelling in External::ALL {
+        let schema = fixture.write_schema_note(spelling, "{{ fm.description }}");
+        assert_resolves_unless_missing(
+            spelling,
+            shown(fixture.check("toc.md", false)),
+            |verdict| assert_eq!(verdict, (2, Vec::new()), "{spelling:?}"),
+            &schema,
+            &format!("{spelling:?} check"),
+        );
+    }
+}
+
+/// R7-F1.5: a `Name@file` import in the note's inline schema resolves from
+/// the notes checkout's roots for the bare spelling, directly and in every
+/// nested position that prepares the note; a missing library fails there,
+/// and the static fragment still resolves.
+#[test]
+fn second_checkout_note_resolves_a_bare_named_type_import() {
+    let fixture = TwoCheckouts::new();
+    let note = fixture.notes().join("review.md");
+    for spelling in External::ALL {
+        let library = fixture.write_import_note(spelling);
+        let shape = format!("{spelling:?}");
+        assert_resolves_unless_missing(
+            spelling,
+            shown(fixture.check_in(&fixture.notes(), &note, false)),
+            |verdict| assert_eq!(verdict, (1, Vec::new()), "{shape} direct"),
+            &library,
+            &format!("{shape} direct"),
+        );
+        assert_resolves_unless_missing(
+            spelling,
+            shown(fixture.check("body.md", false)),
+            |verdict| assert_eq!(verdict, (2, Vec::new()), "{shape} inclusion"),
+            &library,
+            &format!("{shape} inclusion"),
+        );
+        assert_resolves_unless_missing(
+            spelling,
+            fixture.compose("body.md", true),
+            |text| assert!(text.contains("# Review heading"), "{shape}: {text}"),
+            &library,
+            &format!("{shape} compose"),
+        );
+        assert_resolves_unless_missing(spelling, fixture.preflight("body.md"), |()| (), &library, &format!("{shape} pre-flight"));
+        assert_resolves_unless_missing(spelling, shown(fixture.check("toc.md", false)), drop, &library, &format!("{shape} toc"));
+        let (_, issues) = fixture.check("link.md", true).unwrap_or_else(|error| panic!("{shape} fragment: {error}"));
+        if spelling == External::Missing {
+            assert_eq!(issues, vec![ReferenceIssueCode::MissingFragmentTarget], "{shape} fragment");
+        } else {
+            assert!(issues.is_empty(), "{shape} fragment: {issues:?}");
+        }
+    }
+}
+
+/// R7-F1.6: composing a launch-checkout parent applies the notes
+/// checkout's trigger to the note it includes and never the launch
+/// checkout's own trigger. The note's explicit schema does not require
+/// `version`, so a refusal with triggers on and success with them off is the
+/// notes trigger applying; a matching note that writes `version` but not
+/// `parent_only` composes, so the launch trigger never applied. Another
+/// topic and the passive reference check are unaffected.
+#[test]
+fn second_checkout_note_takes_root_triggers_from_its_own_checkout() {
+    let fixture = TwoCheckouts::new();
+    let trigger = |field: &str| {
+        format!("kind: schema-trigger\nmatch:\n  topic: literal(review; required)\n$schema:\n  {field}: string(required)\n")
+    };
+    std::fs::write(fixture.notes().join("schemas/gate.trigger.yaml"), trigger("version")).unwrap();
+    std::fs::write(fixture.app().join("schemas/gate.trigger.yaml"), trigger("parent_only")).unwrap();
+    let schema = fixture.reference(External::Absolute, "review.yaml");
+    for (extra, refused) in [("topic: review\n", true), ("topic: review\nversion: '1'\n", false), ("topic: other\n", false)] {
+        fixture.write_note(&format!("$schema: '{schema}'\ndescription: Review heading\n{extra}"), "{{ fm.description }}");
+        for (parent, _) in INCLUSIONS {
+            let shape = format!("{extra:?} {parent}");
+            let composed = fixture.compose(parent, true);
+            assert_eq!(composed.is_err(), refused, "{shape}: {composed:?}");
+            assert!(fixture.compose(parent, false).is_ok(), "{shape} without triggers");
+            assert_eq!(fixture.check(parent, false).unwrap_or_else(|error| panic!("{shape} check: {error}")), (2, Vec::new()));
+        }
+    }
+}
+
+/// R7-F1.7 control: the note checked in its own checkout's context, as `md`
+/// opens it directly, accepts every resolvable spelling and refuses a
+/// missing one.
+#[test]
+fn second_checkout_note_checked_directly_resolves_a_bare_schema() {
+    let fixture = TwoCheckouts::new();
+    let note = fixture.notes().join("review.md");
+    for spelling in External::ALL {
+        let schema = fixture.write_schema_note(spelling, "{{ fm.description }}");
+        assert_resolves_unless_missing(
+            spelling,
+            shown(fixture.check_in(&fixture.notes(), &note, false)),
+            |verdict| assert_eq!(verdict, (1, Vec::new()), "{spelling:?}"),
+            &schema,
+            &format!("{spelling:?} direct"),
+        );
+    }
 }

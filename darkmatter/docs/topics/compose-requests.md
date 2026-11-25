@@ -130,16 +130,19 @@ uses `ComposeRequest::with_context(options, context)`, which validates it.
 
 A context built at another repository's directory carries that directory's
 launch `@` scope. To keep `@` searching the tree the request was launched in,
-copy the launch scope onto it, as `md` does:
+derive the document with `derive_in_own_repository`, as `md` does:
 
 ```rust
-let source = build_resolution_context(&snapshot.at_request_dir(document_dir))?
-    .for_trusted_external_source(&document)
-    .with_launch_magic_scope(launch.launch_magic_scope().clone());
+use darkmatter::markdown::compose::{build_resolution_context, derive_in_own_repository};
+
+let own = build_resolution_context(&snapshot.at_request_dir(document_dir))?;
+let source = derive_in_own_repository(&own, &launch, &document, None);
 ```
 
 The document's own repository then anchors its `./`, bare, `&`, and `^`
-references, and `@` keeps the launch tree.
+references and its [schema roots](schemas/definition.md#schema-roots), and
+`@` keeps the launch tree. Pass the opening reference instead of `None` when
+the document was opened as `~/…` or `{{VAR}}/…`, so that anchor is kept.
 
 Passive readers that take a context and never discover a repository need
 that prepared context as well. Schema detection is one: given the launch
@@ -148,7 +151,33 @@ fails to resolve and is detected as `string` rather than `file`. Pass each
 document its own context with `detect_schema_with_contexts`, as `md schema
 detect` does.
 
-A source document outside the request's repository is admitted the way a
+A request applies the same rule to every source it admits across a file
+boundary: the root document, a `::file`, `prologue:`, or `epilogue:` child, a
+`::toc-linking` target, and a fragment link's target. A source inside a Git
+repository the request's context does not name (requested from `~/app`, the
+note `~/notes/review.md` in a second checkout) gets a context derived in its
+own repository with `derive_in_own_repository`, keeping the request's launch
+`@` scope and its configuration snapshot. The request discovers each such
+repository once, when its first source is admitted, and composition,
+command discovery, reference checks, and schema preparation all read that
+one context.
+
+```mermaid
+flowchart TD
+    A["source admitted
+(root, ::file, prologue/epilogue,
+::toc-linking, fragment target)"] --> I{"inside the request's
+repository?"}
+    I -- yes --> O["derived from the request's context"]
+    I -- no --> D{"in another Git checkout?
+(discovered once per request)"}
+    D -- yes --> W["derived in its own repository
+(launch @ scope, same configuration)"]
+    D -- no --> T["trusted external source
+(derived from the request's context)"]
+```
+
+A source document outside every repository is admitted the way a
 transcluded file outside it is: as a trusted external source. Requested from
 `/work/repo`, the document `/home/me/notes/doc.md` resolves `./beside.md`
 beside itself and `../../outside.md` to `/home/outside.md`; its own folder,

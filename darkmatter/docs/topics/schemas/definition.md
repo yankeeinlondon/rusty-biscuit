@@ -2079,10 +2079,39 @@ are an error rather than one shadowing the other (see
 [Schema Discovery](./schema-discovery.md)).
 
 - The package and package area are those of the **document**, not of the
-  directory you launched `md` from. `md` searches the roots only for a
-  document in a repository; DMLS searches them for any document inside an
-  open workspace folder. Outside a repository the file tree root is the tree
-  the document was opened in (often its own folder).
+  directory you launched `md` from. `md` searches the roots, for triggers and
+  for bare names alike, only for a document that is itself in a repository;
+  DMLS searches them for any document inside an open workspace folder.
+  Outside a repository the file tree root is the tree the document was opened
+  in (often its own folder).
+- That decision is made for **each** document, never inherited from the one
+  that reached it. A note outside every repository, such as `~/review.md`
+  with `$schema: review.yaml`, refuses the bare name whether you check it
+  directly, a repository document includes it (`::file ~/review.md`), or a
+  repository link points at a heading it generates
+  (`[go](~/review.md#review-heading)`): the note fails preparation, and that
+  link's fragment is reported missing. Spell the schema
+  `./schemas/review.yaml` or as an absolute path and it resolves everywhere.
+  Trigger files in the schema roots likewise never apply to such a note,
+  even while composing a repository document that includes it; a document
+  inside the repository is still matched by the same triggers, including
+  those in `~/schemas/`.
+- A document in **another** Git checkout uses that checkout's roots, however
+  it is reached. Run from `~/app`, a parent with `::file ~/notes/review.md`
+  (or `prologue:`/`epilogue:` naming it, a `::toc-linking` of it, or a link
+  to `~/notes/review.md#review-heading`) prepares the note exactly as
+  `md schema validate ~/notes/review.md` does: `$schema: review.yaml` and
+  `Name@types.yaml` resolve from `~/notes/schemas/`, a trigger there that
+  matches the note applies when the parent is composed, and a trigger in
+  `~/app/schemas/` never does. `@` references in the note still search the
+  launch folder's scope, and the run keeps the permissions it started with.
+
+  ```text
+  ~/app/root.md            ::file ~/notes/review.md
+  ~/notes/review.md        $schema: review.yaml       → ~/notes/schemas/review.yaml
+  ~/notes/schemas/gate.trigger.yaml (matches topic: review)  → applies to the note
+  ~/app/schemas/gate.trigger.yaml   (matches topic: review)  → never applies to the note
+  ```
 - Bare-name lookup does not depend on trigger schemas. `md validate refs`
   and `md graph`, which apply no triggers, and a run with
   `--disable schema-triggers` resolve `$schema: post.yaml` and

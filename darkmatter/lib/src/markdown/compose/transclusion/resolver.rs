@@ -162,7 +162,7 @@ fn resolve_file_reference(
         Some(path) => source_file_context(
             snapshot,
             &path,
-            options.source_derivation,
+            &options.source_derivation,
             options.source_opening.as_ref(),
         ),
         // A pathless source lives in the request's `cwd`.

@@ -15,7 +15,10 @@ extension.
 - Capture one request-scoped composition context. Pass the same
   `FileResolutionContext`, repository observation, remote policy, cache state,
   identity, and meta-schema controls through `ComposeOptions`; never recapture
-  CWD or repository state in a downstream resolver.
+  CWD or repository state in a downstream resolver. The one exception is
+  source admission: a source in a Git repository the request's context does
+  not name is discovered once per request (`SourceRepositories`) and carried
+  as `SourceDerivation::OwnRepository`; see [requests.md](requests.md).
 - Resolve file-like values through `biscuit_file::FileReference`. Preserve its
   source context, explicit-vs-implicit syntax, and typed errors.
 - Read the home only through `biscuit_file::home_dir()` (`RequestSnapshot::from_process`
@@ -255,6 +258,15 @@ Important contracts:
   `with_schema_root_lookup()`; `prepare_schemas`, `md clean`, and
   `md schema validate` install it for a repository document whenever
   triggers are off (the reference/graph commands, `--disable schema-triggers`).
+  Whether to search the roots at all (trigger discovery and bare lookup) is
+  decided from the **source document's** context
+  (`options.source_file_resolution_context().repository_root()`, the context
+  `DarkmatterSchemas` is built with), never from the enclosing request: a
+  `~`-opened child or link target outside Git refuses bare names and gets no
+  root triggers even under a repository parent, while one in a second Git
+  checkout searches that checkout's roots (its context was derived there at
+  admission, `SourceDerivation::OwnRepository`) and never the launch
+  checkout's.
   DMLS keeps its own workspace-boundary rule. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's

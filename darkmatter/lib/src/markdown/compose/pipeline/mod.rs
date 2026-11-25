@@ -95,7 +95,7 @@ impl Markdown {
         runtime.context_epoch.seed(options.context());
         runtime.root_source = Some((
             options.source.clone(),
-            options.source_derivation,
+            options.source_derivation.clone(),
             options.source_opening.clone(),
         ));
 

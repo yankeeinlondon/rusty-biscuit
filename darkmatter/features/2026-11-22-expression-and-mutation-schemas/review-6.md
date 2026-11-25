@@ -4,10 +4,13 @@ description: "A **feature** review of `2026-11-22-expression-and-mutation-schema
 feature: "2026-11-22-expression-and-mutation-schemas/review-6.md"
 spec: "2026-11-22-expression-and-mutation-schemas/spec.md"
 previous: "2026-11-22-expression-and-mutation-schemas/review-5.md"
+next: "2026-11-22-expression-and-mutation-schemas/review-7.md"
 created: "2026-11-25T04:11:52+00:00"
 reviewed-by: "codex/gpt-6.2-sol"
 ready: false
-implemented: false
+implemented: true
+implemented-by: "claude/opus"
+log: "/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/log.md"
 findings:
     - "R6-F1 (high): Included documents and fragment targets inherit schema-root eligibility from the parent"
 human-review: false

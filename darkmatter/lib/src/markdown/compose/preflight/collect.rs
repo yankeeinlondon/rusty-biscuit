@@ -200,7 +200,7 @@ pub(crate) fn collect_effects(
     // compose pass that follows fetches each remote URL once (single-flight),
     // not twice. Absent a shared runtime, build a private one.
     let remote_fetch = options.remote_fetch_runtime();
-    let root = (options.source.clone(), options.source_derivation, options.source_opening.clone());
+    let root = (options.source.clone(), options.source_derivation.clone(), options.source_opening.clone());
     let graph = collect_recursive(
         markdown,
         options,
@@ -1205,7 +1205,7 @@ fn collect_document(
             &transclusion::BlockOptions::default(),
         );
         nested_options.source = root.0.clone();
-        nested_options.source_derivation = root.1;
+        nested_options.source_derivation = root.1.clone();
         nested_options.source_opening = root.2.clone();
         let child = Markdown::from(content);
         let mut node = collect_recursive(

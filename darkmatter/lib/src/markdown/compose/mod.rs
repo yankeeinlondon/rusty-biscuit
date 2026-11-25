@@ -192,7 +192,7 @@ pub use context::options::{
 };
 pub use context::request::{
     ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,
-    build_resolution_context_with_catalog, capture_resolution_context,
+    build_resolution_context_with_catalog, capture_resolution_context, derive_in_own_repository,
 };
 #[cfg(test)]
 pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
