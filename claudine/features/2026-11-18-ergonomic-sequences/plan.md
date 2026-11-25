@@ -17,7 +17,7 @@ Claudine authors can state the operation with `compose:`, `inline-compose:`, or
 `sequence:`, or delegate it to `prompt:`. Each call carries overrides and
 fallbacks with predictable scope. The same document classification, provider
 resolution, and source provenance drive passive previews and real runs.
-Referenced formal sequences have their own authored state. Schema annotations
+A child sequence runs the same written inline or referenced by file. Schema annotations
 control which keys cross implicit inheritance edges in Claudine and Darkmatter.
 
 - The task and document matrices in [the specification](./spec.md) pass through
@@ -138,7 +138,9 @@ control which keys cross implicit inheritance edges in Claudine and Darkmatter.
    are an error even when the call originates in Markdown. Use the existing
    `SequencePlan::document_scope` and `SequenceSource` to distinguish these
    cases. Keep referenced shape, lifecycle and cycle checks on both first
-   read and refresh rather than inferring ownership from extension alone.
+   read and refresh rather than inferring ownership from extension alone. Formal
+   ownership decides parsing strictness, body mode and class checks only; it
+   never changes value passing (Rule 10).
 9. **Route top-level data by file format.** Extend
    `commands/sequence.rs::resolve_sequence_source` beyond its current YAML
    fallback. Resolve once with detailed outcomes; dispatch Markdown to its
@@ -153,21 +155,26 @@ control which keys cross implicit inheritance edges in Claudine and Darkmatter.
 10. **Use one origin-preserving fold.** Add `composition/sequence/caller_values.rs`
     for sequence-specific layering and project the result through the
     existing `CallerInputLayers` / `PrepareOptions` boundary. Retain separate
-    authored owner, CLI, live runtime, and current call-site layers until the
-    hop is classified. Fold direct calls in Decision 2.2 order. At a formal
-    hop rebase on the child's authored root using Decision 2.4, preserving
-    CLI and mutation origins. Current call-site `with:` becomes local
-    child-owner state for its direct calls and does not independently cross
-    the next formal hop. Pass default layers nearest first. Merge at the
+    authored owner, CLI, live runtime, and current call-site layers through
+    the fold. Fold every call in Decision 2.2 order whatever the callee: a
+    prompt document, a group leg, or a child sequence written inline or
+    referenced by file (Decision 2.4). A child sequence's folded result is
+    the live state it passes to its own tasks, preserving CLI and mutation
+    origins; its call-site `with:` is part of that result and never mutates
+    the enclosing sequence. Do not branch value passing on
+    `is_formal_sequence`, inline versus referenced, or file format; today's
+    referenced-document path, which reads only the child's own values under
+    setters and runtime writes, is replaced by this fold. Pass default
+    layers nearest first. Merge at the
     top-level key boundary, matching the shared runtime and caller-input
     maps. An explicit `with:` null replaces the effective pinned value before
     fallback, so no lower defined value is consulted. Authored null and null
     fallback entries mean absence. A standalone prompt can supply its own
     `default-values` as a document-local fallback, below sequence flow
     defaults and above schema defaults. This preserves Decision 2.2's caller
-    ranks and satisfies Decision 6's authored fallback case. A formal child
-    instead uses its own defaults above incoming call and ancestor defaults
-    per Decision 2.4.
+    ranks and satisfies Decision 6's authored fallback case. A child
+    sequence's own defaults sit above incoming call and ancestor defaults
+    for its tasks per Decision 2.4.
 11. **Filter implicit values against both owners.** Use caller ∪ callee ∪
     baseline isolation before projecting implicit defined and inherited fallback
     values. Keep the defaults declaration itself in the dedicated scoped
@@ -502,8 +509,11 @@ control which keys cross implicit inheritance edges in Claudine and Darkmatter.
     planning, proxy/retry and runtime lifecycles. Keep mutations and branch
     snapshots in `RuntimeState`. Test ranked values, leaf origin, nested
     default ordering, and `with:` null against a selected task value.
-  - Validate that a formal hop strips just the authored parent layer and
-    filtered values, while an informal list reuses its Markdown owner.
+  - Validate the interchangeability invariant of Decision 2.4: one child
+    sequence run inline, from a referenced YAML file and from a referenced
+    Markdown file resolves identical values, providers, models, outputs and
+    diagnostics. Caller authored state passes down at every hop and only
+    isolated keys are filtered. An informal list reuses its Markdown owner.
 - [ ] **Wire Source Routes**
   - Wire the shared classifier to `commands/compose/mod.rs` and the
     top-level `commands/sequence.rs` loader. Support bodyless data root
@@ -606,7 +616,7 @@ control which keys cross implicit inheritance edges in Claudine and Darkmatter.
   - Update Claudine's README overview, the full file list in spec
     “Documentation to update,” and all named Claudine repo and caller skills.
     Give the sequence topic the option and class matrices, CLI flag versus
-    setter example, split-boundary example and a Mermaid precedence diagram.
+    setter example, inline-to-file decomposition example and a Mermaid precedence diagram.
     Replace the CLI provider flowchart and report the new diagnostic and
     status behavior. Write `docs/topics/default-models.md` with the full
     cross-platform config matrix from Rule 17 and link it from the model

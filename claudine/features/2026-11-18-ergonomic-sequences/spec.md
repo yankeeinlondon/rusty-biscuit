@@ -76,9 +76,9 @@ This specification adds explicit `compose:` and `inline-compose:` task executabl
 3. **Caller → Callee Layering in `fm` & Child-Sequence Isolation.**
    - Support two distinct value channels — **defined values** (override child-authored values) and **default values** (fill only what nothing else sets, including child-authored values) — within the `fm` workspace without colliding with read-only `seq`, `group`, and `loop` workspaces.
    - Apply uniform `with:` merge semantics with zero special cases: `with:` merges onto the effective `fm` workspace first (so `with: { agent: null }` clears any pinned value), and normal resolution then consults `default-values:` or fails/prompts if required and unresolved.
-   - Preserve modular isolation across **referenced formal child sequence documents** (`is_formal_sequence == true`, via `sequence: <file-ref>`, root `sequence: <file-ref>`, or `prompt:` resolving to a formal child sequence) via a split boundary: the parent sequence's authored root `fm` does not leak across the sequence boundary, while `with:`, CLI `key=value` and runtime `set` (non-isolated keys only), and inherited `default-values:` (nearer/child wins) cross cleanly. Informal data-file, offset, or operator step lists feeding a Markdown document's own body steps keep that Markdown document's own root `fm`.
+   - Pass state from caller to callee by **one rule** for every callee (a prompt document, a group leg, and a child sequence whether written inline as `sequence: [ ... ]`, referenced by `sequence: <file-ref>`, named by a root `sequence: <file-ref>`, or reached through `prompt:`): the callee starts with its own authored `fm`, and the caller passes down its live non-isolated `fm`, the task's `with:`, and inherited `default-values:` (nearer wins). Only the `isolated` constraint stops a key passing implicitly. An inline nested `sequence: [ ... ]` and the same list moved into a referenced file run identically. Informal data-file, offset, or operator step lists feeding a Markdown document's own body steps are that document's step data, not a callee, and read its root `fm`.
    - Forbid runtime `set:` writes to `default-values` (adding `"default-values"` to `SEQUENCE_DECLARATION_KEYS`).
-   - Support `with:` and `default-values:` on group legs identically to tasks; support `default-values:` (and forbid `with:`) on inline nested `sequence: [ ... ]` blocks.
+   - Support `with:` and `default-values:` on group legs identically to tasks; support `with:` and `default-values:` on inline nested `sequence: [ ... ]` blocks exactly as on `sequence: <file-ref>`.
 4. **Schema-Driven Frontmatter Isolation (`isolated`).**
    - Introduce a property-level `isolated` metadata constraint in `simplified-schema/lib` lowering to `"x-darkmatter-isolated": true` at the top level of each property schema (and do **not** add a new `null-is-undefined` constraint).
    - Roll out `isolated` across `simplified-schema`, `darkmatter` (all four child-inheritance sites across `::file`, `as_markdown()`, preflight, and reference graph), and `claudine` sequences using sticky union semantics across baseline, matched triggers (extracted before pruning), and document `$schema`.
@@ -136,7 +136,7 @@ This specification adds explicit `compose:` and `inline-compose:` task executabl
 3. **Retained generic executable (`prompt:`):**
    - `prompt:` accepts a **plain `<file-ref>` only** (no `-> offset` or `::operator` suffixes — data-slicing stays exclusively on `sequence:`).
    - Accepts Markdown documents and YAML (plus supported data sequence formats: JSON, JSON5, JSONL, NDJSON), dispatching to `compose`, `inline-compose`, or a child `sequence` based on the unified document classifier (Decision 4).
-   - When `prompt:` resolves to a formal child sequence file, it follows the **referenced child-sequence split boundary** (Decision 2), **rejects** explicit `operation:` / `flow:` on that task (`composition.task_option_invalid`), and **silently ignores** inherited group `operation` / `flow` defaults.
+   - When `prompt:` resolves to a formal child sequence file, it passes state as every task does (Decision 2), **rejects** explicit `operation:` / `flow:` on that task (`composition.task_option_invalid`), and **silently ignores** inherited group `operation` / `flow` defaults.
 4. **Immutable `task: <file-ref>` call sites:**
    - `task: <file-ref>` accepts `name` and `when` only at the call site. All inner executable options — including `with:` and `default-values:` — live inside the referenced `kind: task` file.
 5. **Zero-executable Markdown body steps:**
@@ -176,9 +176,9 @@ Every task option outside the allowed set for its executable produces `compositi
 | `compose: <file-ref>` | Markdown only | Yes | Yes | Yes | Yes | Yes | No | No | Plain file reference; rejects inline-compose & sequence docs |
 | `inline-compose: <file-ref>` | Markdown only | Yes | Yes | Yes | Yes | Yes | No | No | Plain file reference; rejects compose & sequence docs |
 | `prompt: <file-ref>` (→ compose / inline-compose) | Markdown | Yes | Yes | Yes | Yes | Yes | No | No | Plain `<file-ref>` only (no `->` or `::`) |
-| `prompt: <file-ref>` (→ child sequence) | Markdown, YAML, JSON/JSON5/JSONL/NDJSON | Yes | Yes | Yes | Yes | **No** *(explicit rejected; group default ignored)* | No | No | Plain `<file-ref>` only; uses referenced child-sequence split boundary |
-| `sequence: <file-ref>` (referenced) | Markdown, YAML, JSON/JSON5/JSONL/NDJSON | Yes | Yes | Yes | Yes | No | No | No | Full `<file-ref> [-> offset] [::op(args)]` grammar; uses split boundary for formal child sequence documents |
-| `sequence: [ ... ]` (inline nested) | Inline task list | Yes | Yes | **No** | Yes | No | No | Yes | Executes inside parent's `fm` scope; `with:` forbidden |
+| `prompt: <file-ref>` (→ child sequence) | Markdown, YAML, JSON/JSON5/JSONL/NDJSON | Yes | Yes | Yes | Yes | **No** *(explicit rejected; group default ignored)* | No | No | Plain `<file-ref>` only; state passes as for every callee (Decision 2.2) |
+| `sequence: <file-ref>` (referenced) | Markdown, YAML, JSON/JSON5/JSONL/NDJSON | Yes | Yes | Yes | Yes | No | No | No | Full `<file-ref> [-> offset] [::op(args)]` grammar; state passes as for every callee (Decision 2.2) |
+| `sequence: [ ... ]` (inline nested) | Inline task list | Yes | Yes | Yes | Yes | No | No | Yes | Same state passing as `sequence: <file-ref>`; its `loop`, events, and declarations sit on the task entry, where a file carries them at its root |
 | `shell: <cmd \| spec>` | Command string / spec | Yes | Yes | No | No | No | Yes | No | `timeout` is a duration string |
 | `side_effect: <spec>` | Side-effect spec | Yes | Yes | No | No | No | No | No | Mutates live `fm` (forbids `SEQUENCE_DECLARATION_KEYS`) |
 | `group: <spec \| ref>` | Inline group object, file, or catalog ref | Yes | Yes | No | No | No | No | No *(live on the `group:` object itself)* | Group itself has no `default-values:`; see Group Leg row below |
@@ -198,9 +198,9 @@ The read-only workspaces `seq`, `group`, and `loop` are separate from `fm` (fron
 - Runtime `set` writes (from `initialize`, `side_effect`, and lifecycle hooks) mutate that live `fm` state as the sequence executes.
 - **Runtime `set:` on `default-values` is forbidden:** `"default-values"` is added to `SEQUENCE_DECLARATION_KEYS` alongside `"$state"` and `"template"`. Consistent with `EffectEngine::set` rejecting dotted keys and `RuntimeState.mutations` sharing upward, no value write — step state, template default, CLI setter, `with:`, or runtime `set:` — may target `default-values` or `default-values.*`.
 
-#### 2. Sequence → Direct Prompt Task (`compose:`, `inline-compose:`, `prompt:` → doc, and Group Legs)
+#### 2. Caller → Callee Precedence (Every Task, Group Leg, and Child Sequence)
 
-The owning sequence acts as the caller. Precedence for any non-isolated `fm` key on the child document, **highest to lowest**:
+The owning sequence acts as the caller. Precedence for any non-isolated `fm` key on the callee (a prompt document, a group leg's target, or a child sequence written inline or referenced by file), **highest to lowest**:
 
 | Rank | Source | Channel |
 | ---- | ------ | ------- |
@@ -219,25 +219,39 @@ The owning sequence acts as the caller. Precedence for any non-isolated `fm` key
   - Generated step fields (`GENERATED_STATE_KEYS`): `id`, `sequence_id`, `is_first`, `is_last`, `index`, `count`, `run_id`, `previous`, `next`, `outputs`
   - Sequence declarations (`SEQUENCE_DECLARATION_KEYS`): `$state`, `template`, `default-values`
 
-#### 4. Referenced Child Sequence Boundary (Nested `sequence: <file-ref>`, `prompt:` → Sequence, and Root `sequence: <file-ref>`)
+#### 4. Child Sequences: Inline and Referenced Are the Same Callee
 
-A referenced formal child sequence preserves **modular isolation** via a **split boundary**.
+*(Ruled 2026-11-25. This replaces an earlier "split boundary" under which a referenced child sequence did not receive its caller's authored root `fm`.)*
 
-- **Scope of the split boundary (`is_formal_sequence == true`):** The split boundary applies specifically to **referenced formal child sequence documents** (`is_formal_sequence == true`, such as `_provider-tasks.yaml` or another Markdown/YAML sequence document referenced via a nested task `sequence: <file-ref>`, a `prompt:` task resolving to a sequence, or a root document's `sequence: <file-ref>`).
-- **Informal data-list step sources keep the owning Markdown document's root `fm`:** When a Markdown document's `sequence:` points to an **informal data-file, offset, or operator step list** feeding that Markdown document's own body steps (for example, `claudine/docs/research/sandboxing/providers/_fleet.md` reading `claudine/docs/providers.yaml`), the target is step data rather than a formal child sequence (`is_formal_sequence == false`), so it keeps the owning Markdown document's own root `fm` without crossing a split boundary.
+A child sequence is a callee like any other, whether it is written inline (`sequence: [ ... ]`), referenced by a task (`sequence: <file-ref>`, or a `prompt:` that resolves to a sequence), or named by a root document's `sequence: <file-ref>`. It takes the Decision 2.2 precedence unchanged, and its resolved `fm` is then the live state it passes down as the caller of its own tasks.
 
-Across a split boundary (for `is_formal_sequence == true`):
+- **One rule, no per-form exceptions:** the callee starts with its own authored `fm`, and the caller passes its state down. Only the `isolated` constraint (Decision 3) stops a key passing implicitly. No value-passing rule depends on whether the child is inline or referenced, formal or not, Markdown or YAML. The same rule governs Darkmatter transclusion and lifecycle hand-offs; this specification changes only the sequence hops.
+- **Interchangeability invariant:** moving an inline `sequence: [ ... ]` into its own file and referencing it changes nothing about how it runs. The task entry's `loop`, container events, `$schema`, `$state`, and `template` become the file's root keys; `name`, `when`, `with:`, and `default-values:` stay on the calling task.
 
-- **Does NOT cross:** The parent/root sequence's own authored root `fm` (including authored root `agent:` or `model:`) does **not** leak into the referenced formal child sequence document. Authored root properties stay scoped to the parent document and its direct prompt tasks.
-- **DOES cross:**
-  - **Explicit `with:`** on the calling task (applied as a defined override on top of the child sequence's root `fm`).
-  - **Parent runtime `set` and CLI `key=value`** state (including root `initialize` `set:` writes for a root `sequence: <file-ref>`), **non-isolated keys only**: the same `isolated` filter as Decision 2.2 rank 2 applies (Decision 3.2, item 3).
-  - **Inherited `default-values:`** (propagating recursively into the child sequence, with nearer defaults winning).
+  ```yaml
+  # before: inline                          # after: decomposed, runs identically
+  topic: auth                               topic: auth
+  sequence:                                 sequence:
+      - name: checks                            - name: checks
+        with: { depth: full }                     with: { depth: full }
+        loop: { until: "done", max: 3 }           sequence: ./checks.yaml
+        sequence:
+            - compose: ./_scan.md           # checks.yaml
+                                            kind: sequence
+                                            loop: { until: "done", max: 3 }
+                                            sequence:
+                                                - compose: ./_scan.md
+  # _scan.md reads topic=auth and depth=full in both forms
+  ```
 
-Exact precedence inside a referenced formal child sequence, **highest to lowest**:
+- **A child that must keep its own value** for a key the caller also holds marks that key `isolated` in its `$schema`: the callee's isolated keys are never overwritten implicitly (Decision 3.2, item 3), and an explicit `with:` still reaches them.
+- **Runtime `set` inside a child sequence** is a runtime write of the invocation, as today, so the caller reads it afterward in both forms.
+- **Informal step lists are not callees:** when a Markdown document's `sequence:` points to an informal data-file, offset, or operator step list feeding that document's own body steps (for example, `claudine/docs/research/sandboxing/providers/_fleet.md` reading `claudine/docs/providers.yaml`), the target is step data (`is_formal_sequence == false`). Its steps are the owning Markdown document's steps and read that document's `fm`. `is_formal_sequence` decides parsing strictness, body mode, and class checks only, never value passing.
 
-- **Defined channel (`fm`):** `task with:` > `parent runtime set` > `parent CLI key=value` > `child authored fm`
-- **Defaults channel (`default-values:`):** `child sequence default-values:` > `calling task default-values:` > `parent sequence default-values:`
+Precedence inside a child sequence, **highest to lowest** (Decision 2.2 restated for this callee):
+
+- **Defined channel (`fm`):** `task with:` > `caller's live non-isolated fm (authored root < CLI key=value < runtime set)` > `child authored fm`
+- **Defaults channel (`default-values:`), as its own tasks see it:** `child sequence default-values:` > `calling task default-values:` > `parent sequence default-values:`
 
 #### 5. Group Legs
 
@@ -266,8 +280,8 @@ sequence:
       compose: ./_review.md
       with: { agent: null }                # clears _review.md's `agent: codex` -> falls back to default-values.agent (claude)
     - name: subflow
-      sequence: ./sub-sequence.yaml        # receives inherited default-values (sub-sequence's own
-      with: { topic: auth }                # default-values win); only explicit `with:` + CLI/runtime set cross
+      sequence: ./sub-sequence.yaml        # receives this sequence's live fm, this `with:`, and inherited
+      with: { topic: auth }                # default-values (sub-sequence's own default-values win)
 ```
 
 A root `agent:` (outside `default-values:`) is a **defined** value, so it overrides direct child prompts unless a task's `with:` overrides or clears it:
@@ -321,7 +335,7 @@ sequence:
      4. `darkmatter/lib/src/markdown/reference/graph.rs` (`inclusion_child_options` across body `::file`, `prologue`, and `epilogue`).
      - Sites 3 and 4 receive `isolated_keys` via `ComposeReport.isolated_keys: Option<Arc<BTreeSet<String>>>` (populated only on inline-pre-only passes where `BlockTransclusion` is disabled, matching `body_data` so normal reports keep `None` and `ComposeReport::PartialEq` tests stay green).
      - **Zero `ComposeOptions` cache-hash changes needed:** `inherited_child_options` writes the already-filtered map into `child_request.external_state`, which `ComposeOptions::classify_options` already hashes into `options_hash(&child_request)`.
-3. **`claudine`** (ruled 2026-11-23): sequence value propagation excludes a key from the defined-value implicit inheritance channel when it is isolated on **either side** of the hop: the caller's (owning sequence's) `EffectiveSchema::isolated_keys()` ∪ the callee's (child document's or child sequence's) `EffectiveSchema::isolated_keys()` ∪ `darkmatter_baseline_isolated_keys()`. The caller's controls never leak out (`sequence`, `template`), and the callee's controls are never overwritten (`prompt` on an inline-compose child). The filter applies to **every implicit channel**, at direct prompt tasks and at the split boundary alike: authored root `fm`, CLI `key=value`, and runtime `set`. Only an explicit `with:` passes an isolated key.
+3. **`claudine`** (ruled 2026-11-23): sequence value propagation excludes a key from the defined-value implicit inheritance channel when it is isolated on **either side** of the hop: the caller's (owning sequence's) `EffectiveSchema::isolated_keys()` ∪ the callee's (child document's or child sequence's) `EffectiveSchema::isolated_keys()` ∪ `darkmatter_baseline_isolated_keys()`. The caller's controls never leak out (`sequence`, `template`), and the callee's controls are never overwritten (`prompt` on an inline-compose child). The filter applies to **every implicit channel**, at every Caller → Callee hop (prompt documents, group legs, and child sequences inline or referenced): authored root `fm`, CLI `key=value`, and runtime `set`. Only an explicit `with:` passes an isolated key.
 
    ```text
    $ claudine sequence s.yaml title="Run 42" topic=auth     # with initialize: set: { prompt: "x" }
@@ -359,7 +373,7 @@ Running root `just shipped-schemas` (after bumping `PREPARATION_REVISION` in `si
 #### 5. Inline Nested Sequences (`sequence: [ ... ]`)
 
 - An inline nested `sequence: [ ... ]` block **allows** `default-values:` (scoping fallback defaults to that sub-block, with nearer defaults winning over outer defaults).
-- An inline nested `sequence: [ ... ]` block **forbids** `with:` (`composition.task_option_invalid`), since it executes within the same sequence file's `fm` scope rather than crossing a file boundary.
+- An inline nested `sequence: [ ... ]` block **accepts** `with:` with the same meaning as on `sequence: <file-ref>`: a defined override for that block's tasks that does not mutate the enclosing sequence's `fm`. Inline and referenced child sequences are the same callee (Decision 2.4).
 
 ---
 
@@ -426,7 +440,7 @@ The parallel `explicit_provider` override channel in composition and sequence ex
 
 - **Disambiguation:** On `claudine sequence`, `--<provider>` disambiguation is strictly by **file format** (Markdown vs. YAML/data).
 - **CLI conflict rule:** Passing both `--<provider>` (or `--provider <name>`) and `agent=<val>` on the same command is a **hard CLI usage error** (`usage.invalid_argument`, exit `2`).
-- **Flag vs. setter on a YAML/data sequence (ruled 2026-11-23):** the two spellings deliberately differ there. `--<provider>` is a *preference* (`default-values.agent`, which every task's `with:`, document `agent:`, and root `agent:` outrank); `agent=<val>` is a CLI setter and *forces* (root live `fm`, rank 2 in Decision 2.2, which also crosses into referenced child sequences per Decision 2.4). "Same priority as CLI `agent=<provider>`" holds only for `compose`, `inline-compose`, and Markdown `sequence`. The split exists because on a Markdown sequence the body-default steps compose the document itself, so a default would always lose to the document's own `agent:`.
+- **Flag vs. setter on a YAML/data sequence (ruled 2026-11-23):** the two spellings deliberately differ there. `--<provider>` is a *preference* (`default-values.agent`, which every task's `with:`, document `agent:`, and root `agent:` outrank); `agent=<val>` is a CLI setter and *forces* (root live `fm`, rank 2 in Decision 2.2, which passes down to every callee per Decision 2.2). "Same priority as CLI `agent=<provider>`" holds only for `compose`, `inline-compose`, and Markdown `sequence`. The split exists because on a Markdown sequence the body-default steps compose the document itself, so a default would always lose to the document's own `agent:`.
 
   ```text
   # review.yaml (kind: sequence): `find` composes _find.md (no agent), `review` composes _review.md (agent: codex)
@@ -457,7 +471,7 @@ The parallel `explicit_provider` override channel in composition and sequence ex
 | 1 | **Caller-passed `model`** | CLI `--model` on `compose`, `inline-compose`, or a Markdown `sequence`; a CLI `model=` setter on any command; or parent `with.model` on a task call. A CLI-supplied value keeps Tier 1 for **every task it reaches** inside a sequence, including referenced child sequences (ruled 2026-11-23); it is tracked by origin in the caller input layers, not read back as owning-sequence `fm`. Within Tier 1 a task's `with.model` beats the CLI value (Decision 2.2 rank 1 over rank 2). For `model` only, this places a CLI value above a runtime `set` (Tier 4), the reverse of Decision 2.2's `CLI key=value < runtime set` order for other keys. `--model` on a YAML/data sequence is Tier 5 (`default-values.model`). |
 | 2 | **Provider-specific model env var (`<PROVIDER>_MODEL`)** | Checked in each provider's declared `model_env_vars` order — 7 providers (`CLAUDE_MODEL`/`ANTHROPIC_MODEL`, `CODEX_MODEL`/`OPENAI_MODEL`, `GEMINI_MODEL`, `GOOSE_MODEL`, `KIMI_MODEL`, `OPENCODE_MODEL`, `QWEN_MODEL`); `kilo`, `pi`, and `antigravity` declare `[]` *(fixing two live generator bugs: `pi` currently leaks `PI_OFFLINE` and `kilo` leaks `KILO_PROVIDER`; pin `model_env_vars: []` in `claudine/docs/providers/overrides/{pi,kilo}.yaml` and regenerate via `claudine providers generate --yes`)* |
 | 3 | **Generic `MODEL` env var** | Sole generic env var — **do NOT add `CLAUDINE_MODEL`** |
-| 4 | **Document's authored `fm.model` (and owning sequence's authored or runtime-`set` `fm.model` for direct prompt tasks)** | CLI-supplied values never sit here (Tier 1). For direct prompt tasks, the owning sequence's authored or runtime-`set` `fm.model` outranks the child document's authored `fm.model` (Rank 2 vs. Rank 3 in Decision 2.2) |
+| 4 | **Document's authored `fm.model` (and owning sequence's authored or runtime-`set` `fm.model` for the tasks it calls)** | CLI-supplied values never sit here (Tier 1). For every callee, the caller's authored or runtime-`set` `fm.model` outranks the child document's authored `fm.model` (Rank 2 vs. Rank 3 in Decision 2.2) |
 | 5 | **`default-values.model`** | `task default-values.model` > `sequence default-values.model` > inherited parent `default-values.model` (including CLI `--model` on YAML sequences) |
 | 6 | **Provider's configured default model** | Resolved via `get_default_model(provider, ctx)` in `claudine-lib` (full 10-provider matrix in [spike-default-model.md](./spike-default-model.md)) |
 
@@ -519,7 +533,7 @@ To prevent sequences from running halfway and failing on a downstream task with 
 - `agent` is required for every runnable prompt execution (`compose`, `inline-compose`, `prompt`, and Markdown body-default steps). Resolution consults `default-values.agent` when no defined or document-authored `agent` is present.
 - For a **YAML/data** sequence, `agent` is **not** required on the sequence root itself.
 - Because `default-values` inherits recursively into child sequences, setting `default-values.agent` on any ancestor sequence satisfies all descendants.
-- When **no** ancestor provides `default-values.agent` (and no root defined `agent` covers direct prompt tasks), pre-flight validates every composition task (`compose`, `inline-compose`, `sequence`, `prompt`):
+- When **no** ancestor provides `default-values.agent` (and no enclosing sequence's defined `agent` passes down), pre-flight validates every composition task (`compose`, `inline-compose`, `sequence`, `prompt`):
   1. The task explicitly supplies `agent` via `with:` or `default-values:`, **OR**
   2. The referenced child file defines `agent` or `default-values.agent` in its authored frontmatter, **OR**
   3. An eligible **ordered runtime `set: { agent: ... }`** covers the task (see §2 below) — **targeting `agent` only** (`default-values` is forbidden as a `set:` target per Decision 2.1) — emitting `composition.agent_conditional_set` (`warning`), **OR**
@@ -559,7 +573,7 @@ All new Claudine diagnostics are added additively to `claudine/lib/src/diagnosti
 | Code | Severity | Meaning & Trigger |
 | --- | --- | --- |
 | `composition.operation_mismatch` | `error` | Explicit `compose:`, `inline-compose:`, or `sequence:` targets a document of an incompatible class or unsupported format (per the Decision 4.2 matrix). |
-| `composition.task_option_invalid` | `error` | A task or group leg declares an option forbidden for its executable (e.g., `with:` on inline `sequence: [...]`, `with:`/`default-values:` on `task:` or a zero-executable body step, explicit `operation:`/`flow:` on `prompt:` targeting a sequence). |
+| `composition.task_option_invalid` | `error` | A task or group leg declares an option forbidden for its executable (e.g., `with:`/`default-values:` on `task:` or a zero-executable body step, explicit `operation:`/`flow:` on `prompt:` targeting a sequence). |
 | `composition.default_values_invalid` | `error` | `default-values:` has an invalid shape (not a mapping/object) or contains forbidden reserved sequence keys. |
 | `composition.agent_conditional_set` | `warning` | Recursive `agent` pre-flight accepted a task solely because an eligible `initialize` or earlier `side_effect` contains `set: { agent: ... }`, which conditional/flow-control logic could skip at runtime. |
 | `composition.agent_unverifiable_target` | `warning` | A dynamic `{{ expr }}` target path cannot be statically inspected and no ancestor, task, or ordered `set:` supplies `agent`. Exits `1` in `--dry-run` when no errors are present, matching `composition.agent_conditional_set` and real pre-flight's advisory warning. |
@@ -604,16 +618,16 @@ The following confirmed behavior changes differ from current behavior:
    - *After:* Both conflict pairs emit `usage.invalid_argument` (exit `2`) instead of silently picking a winner.
 3. **Root `agent:` and `model:` on a sequence become defined overrides for direct prompt tasks.**
    - *Before:* A root `agent:` acted as a fallback when a task's `with:` and child prompt named no agent, and the child prompt's own `agent:` beat it.
-   - *After:* Root `agent:` and `model:` are non-isolated defined values, overriding direct child prompts' authored values (unless overridden or cleared via task `with:`), while still respecting the split boundary for referenced formal child sequence documents. Authors who want fallback behavior move them under `default-values:`.
+   - *After:* Root `agent:` and `model:` are non-isolated defined values, overriding direct child prompts' authored values (unless overridden or cleared via task `with:`), and pass down to child sequences, inline or referenced, by the same rule. Authors who want fallback behavior move them under `default-values:`.
 4. **Schema-driven `isolated` replaces Darkmatter's hardcoded 3-key exclusion list.**
    - *Before:* `::file` / `as_markdown()` only isolated `prologue`, `epilogue`, and `ctx`.
    - *After:* `darkmatter/schemas/partials/fm.yaml` also isolates `$schema`, `hash`, `last_updated`, `change`, `style`, `content_policy`, `ignore_invalid`, `interpolate_code_blocks`, and `md` lifecycle events. `replace`, `title`, `description`, `tags`, `draft`, and `metadata` remain non-isolated in plain Darkmatter documents (`fm.yaml`) for `::file` partial compatibility; `title`, `description`, and `metadata` are isolated in Claudine's shared/linking layer, and `replace`, `tags`, and `draft` are isolated at the Claudine sequence layer.
 5. **`--dry-run` warnings-only exit code changes from `2` to `1`.**
    - *Before (as designed in `2026-11-22-better-errors-and-dry-run`):* Both errors and warnings exited `2`.
    - *After:* Warnings with no errors exit `1`; errors (and CLI usage errors) exit `2`; clean / `info`-only exits `0`.
-6. **A root `agent:` no longer reaches referenced formal child sequences.**
-   - *Before:* A task with no `agent` of its own took the nearest enclosing sequence document's `agent`: a referenced sequence file's own first, then outward to the root.
-   - *After:* Across the split boundary (Decision 2.4) the parent's authored root `agent:` does not cross. A referenced formal child sequence's tasks resolve from the child's own `fm`, `with:`, CLI / runtime state, and inherited `default-values:`. Authors who relied on a root `agent:` reaching a referenced child move it under `default-values:`.
+6. **A referenced child sequence receives its caller's state.**
+   - *Before:* A sequence referenced by file read only its own frontmatter, invocation setters, and runtime writes. A property only the caller authored read as `null` inside it, and a property both authored kept the child's value, so an inline block and the same list in a file behaved differently.
+   - *After:* A referenced child sequence is a callee like any other (Decision 2.4): the caller's live non-isolated `fm` passes down and outranks the child's authored value, exactly as it does for an inline block and for a prompt document. A root `agent:` therefore reaches every descendant task; authors who want it as a fallback move it under `default-values:`. A child that must keep its own value for a key marks that key `isolated` in its `$schema`. Running the file directly is the same rule with no caller.
 7. **A task's `with: { model: … }` moves above the model environment variables.**
    - *Before:* A task's `with:` value resolved like frontmatter `model`, below `--model`, `<PROVIDER>_MODEL`, and `MODEL` in the model chain.
    - *After:* `with.model` is a caller-passed model (Tier 1 in Decision 5.3), so it outranks `<PROVIDER>_MODEL` and `MODEL`.
@@ -659,7 +673,7 @@ Several Claudine pages are also edited by `2026-11-22-better-errors-and-dry-run`
     - The task executables, including the new `compose:` and `inline-compose:`, with `prompt:` as generic dispatch, and the per-executable options table (Decision 1.3).
     - A new "Document classes" section: the five classes, how each is detected, and the classification matrix (Decision 4.2), including why `prompt:` takes a plain file reference while `sequence:` keeps `->` / `::`.
     - `with:` and `default-values:`: the two channels, the six-rank precedence for direct prompt tasks (Decision 2.2) as a diagram, `with: { key: null }`, inline nested `sequence: [ … ]`, and group legs.
-    - The split boundary for referenced formal child sequences versus informal step lists (Decision 2.4), with an example of what crosses and what does not, and the `isolated` filter (caller ∪ callee ∪ baseline keys, applied to authored `fm`, CLI setters, and runtime `set`; only `with:` passes an isolated key).
+    - One Caller → Callee rule for every callee (Decision 2.4): rewrite "What a referenced sequence reads", which today says the caller's authored frontmatter does not reach a referenced sequence. Show an inline `sequence: [ … ]` moved into its own file running identically, state what passes down and in what order, show informal step lists as step data of their Markdown document, and cover the `isolated` filter (caller ∪ callee ∪ baseline keys, applied to authored `fm`, CLI setters, and runtime `set`; only `with:` passes an isolated key), including a child marking a key `isolated` to keep its own value.
     - "Fail-fast, exit codes, and dry-run": the `0` / `1` / `2` dry-run statuses.
 - `claudine/docs/cli/sequence.md`:
     - "Choosing providers": replace the flowchart, whose "provider flag given → every task uses it; no review screen" branch and "nearest enclosing sequence document's `agent`" fallback stop being true. Cover `--<provider>` / `--model` writing `fm` on a Markdown sequence and `default-values` on a YAML/data sequence (with the flag-prefers / setter-forces example from Decision 5.1), recursive `agent` pre-flight, `--silent` as non-interactive, and the `composition.agent_conditional_set` / `composition.agent_unverifiable_target` warnings.
@@ -726,8 +740,8 @@ Implementation is complete when all package-level acceptance criteria and cross-
 
 ### `claudine/lib`
 
-- **Task grammar & options:** `compose:` and `inline-compose:` accept Markdown `<file-ref>` only; `prompt:` accepts plain `<file-ref>` only (rejecting `->` / `::`, rejecting explicit `operation:`/`flow:` when dispatching to a sequence, and silently ignoring inherited group `operation`/`flow` defaults); `sequence:` preserves full `<file-ref> [-> offset] [::op(args)]` grammar; `task:` remains immutable at call sites (`name` and `when` only); inline nested `sequence: [ ... ]` allows `default-values:` and rejects `with:`; zero-executable Markdown body steps reject `with:` and `default-values:`; group legs accept `with:` and `default-values:` identically to tasks; all forbidden options emit `composition.task_option_invalid`.
-- **Caller → Callee & split boundary:** Six-rank precedence for direct prompt tasks and uniform `with:` merge semantics (including `with: { agent: null }` clearing pinned values and falling back to `default-values:`) are verified by unit and integration tests. Referenced formal child sequence documents (`is_formal_sequence == true`, nested or root) enforce the split boundary; informal data-file/offset/operator step lists (`is_formal_sequence == false`) keep the owning Markdown document's root `fm`. Authored root `fm`, CLI setters, and runtime `set` are filtered by the union of caller, callee, and baseline isolated keys at every hop, and only explicit `with:` passes an isolated key. `"default-values"` is in `SEQUENCE_DECLARATION_KEYS` and rejected on `set:` writes (`composition.lifecycle_invalid`).
+- **Task grammar & options:** `compose:` and `inline-compose:` accept Markdown `<file-ref>` only; `prompt:` accepts plain `<file-ref>` only (rejecting `->` / `::`, rejecting explicit `operation:`/`flow:` when dispatching to a sequence, and silently ignoring inherited group `operation`/`flow` defaults); `sequence:` preserves full `<file-ref> [-> offset] [::op(args)]` grammar; `task:` remains immutable at call sites (`name` and `when` only); inline nested `sequence: [ ... ]` accepts `with:` and `default-values:` exactly as `sequence: <file-ref>` does; zero-executable Markdown body steps reject `with:` and `default-values:`; group legs accept `with:` and `default-values:` identically to tasks; all forbidden options emit `composition.task_option_invalid`.
+- **Caller → Callee (one rule):** The six-rank precedence of Decision 2.2 and uniform `with:` merge semantics (including `with: { agent: null }` clearing pinned values and falling back to `default-values:`) apply to every callee: prompt documents, group legs, and child sequences written inline or referenced by file, nested or root. They are verified by unit and integration tests, including an equivalence test that runs one child sequence inline, from a referenced YAML file, and from a referenced Markdown file and asserts identical resolved values, provider and model selection, outputs, and diagnostics. No value-passing code branches on `is_formal_sequence`, inline versus referenced, or file format. Informal data-file/offset/operator step lists are step data and read the owning Markdown document's root `fm`. Authored root `fm`, CLI setters, and runtime `set` are filtered by the union of caller, callee, and baseline isolated keys at every hop, and only explicit `with:` passes an isolated key. `"default-values"` is in `SEQUENCE_DECLARATION_KEYS` and rejected on `set:` writes (`composition.lifecycle_invalid`).
 - **Schema layering & parity:** `claudine/registration/{shared.yaml,document.yaml,linking.yaml,composition.yaml,inline-composition.yaml}` mark Claudine/document/linking controls (including `title`, `description`, `metadata`, `name`) `isolated` while keeping `agent` and `model` non-isolated; `sequence-document.yaml` isolates `replace`, `tags`, `draft` and sequence controls without triggering `dm.host.trigger_conflict`; `formal-sequence-file.yaml` covers Claudine root controls (`$extends: common-attributes@./shared.yaml` or sequence-valid subset) and sequence propagation unions `effective.isolated_keys()` with `darkmatter_baseline_isolated_keys()`; enforced by an L1 schema-parity test in `claudine-lib`.
 - **Unified pure document classifier:** Replaces the three fragmented classification checks (`mismatch.rs`, `preflight/mod.rs::load_prompt`, `commands/wrap/sequence/mod.rs`), inspects authored frontmatter only with absent-equals-null semantics, enforces every cell of the Decision 4.2 matrix (`composition.operation_mismatch`), leaves the `sections:` hook inactive until `2026-07-02-inline-sections`, and defers unresolved dynamic `{{ expr }}` targets to runtime (`dm.check.not_checked` in `--dry-run`).
 - **Recursive `agent` pre-flight:** Traverses nested sequences, `prompt:`-dispatched sequences, inline `sequence: [ ... ]`, `group:` (inline/file/catalog), and `task:` files with cycle detection; credits only causally preceding `initialize` and earlier sequential `side_effect` `set: { agent: ... }` (`composition.agent_conditional_set`, `warning`); emits `composition.agent_unverifiable_target` (`warning`) for unresolved dynamic targets without an upstream agent; treats `--silent` as non-interactive fail-fast with full nested `Trail` reporting while preserving interactive TTY `review_sequence`.
