@@ -209,7 +209,9 @@ and they can change which schema trigger matches.
 
 Before composing, `md compose FILE` checks references automatically. If any
 reference is broken, it prints the reference report and exits 1, unless an
-`--allow` recovery covers the problem.
+`--allow` recovery covers the problem. The `missing-*` recoveries cover an
+absent target only: an invalid (`[x](@)`), unreadable (`failure: io`), or
+malformed target always fails.
 
 ### Policy verbs
 

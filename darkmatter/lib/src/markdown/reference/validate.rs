@@ -210,6 +210,17 @@ impl ReferenceIssue {
             })
     }
 
+    /// Whether this issue is a well-formed target that names no file, the only
+    /// failure a missing-target recovery (`missing-hyperlinks`,
+    /// `missing-image-refs`, `missing-transclusions`) may cover.
+    ///
+    /// Decided by the failure class alone, never by reference kind or code: an
+    /// invalid reference (`[x](@)`), an unreadable candidate (`failure: io`),
+    /// a malformed URL, or an empty target is not a missing target.
+    pub fn is_missing_target(&self) -> bool {
+        self.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
+    }
+
     /// Whether this is a warning a composition reports: a target that is
     /// missing or empty but does not fail the document unless denied.
     pub fn is_reported_warning(&self) -> bool {

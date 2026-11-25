@@ -137,7 +137,7 @@ fn composition_warns_at_the_toc_directive_that_selected_an_unreadable_file() {
 /// R13-F2.2 and R13-F2.3: every graph reader fails with the read error at
 /// the directive, never at the input document with no line, directly and
 /// for a directive in a nested child. Pre-flight selects the target without
-/// reading it.
+/// reading it, and the local query lists inclusions without opening them.
 #[test]
 fn graph_readers_fail_at_the_toc_directive_that_selected_an_unreadable_file() {
     let repo = repository();
@@ -158,6 +158,8 @@ fn graph_readers_fail_at_the_toc_directive_that_selected_an_unreadable_file() {
                 assert_read_failure_at(record, file, line, &shape);
             }
             md.compose_preflight(&request(repo.path())).unwrap_or_else(|error| panic!("{content:?}: preflight: {error}"));
+            md.transclusions_with_options(&request(repo.path()))
+                .unwrap_or_else(|error| panic!("{content:?}: local query: {error}"));
         }
     }
 }

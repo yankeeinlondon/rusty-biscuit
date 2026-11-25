@@ -250,6 +250,7 @@ mod reference_inclusion_admission;
 mod reference_inclusion_targets;
 mod reference_inline_and_suppressed_inclusions;
 mod reference_malformed_inclusions;
+mod reference_missing_target_class;
 mod typed_diagnostic_codes;
 mod link_title_migration;
 mod link_title_warnings;

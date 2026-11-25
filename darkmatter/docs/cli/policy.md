@@ -63,6 +63,26 @@ A missing target of any other kind (a CSS, script, or font import, a `<video>`,
 `<audio>`, `<source>`, or `<iframe>`) has no recovery: `md compose` stops on it even
 with `--allow all`.
 
+The three `missing-*` recoveries cover a target that is **absent**: a
+well-formed path that names no file (`failure: no-match`). A target that is
+broken in any other way always fails the command, whatever is allowed:
+
+| Target | Reported as | With the matching `--allow` |
+|---|---|---|
+| `[Guide](./gone.md)`, `![Logo](./gone.png)`, `::file ./gone.md` | `dm.reference.missing_*`, `failure: no-match` | recovered |
+| `[Guide](@)`, `[Guide](<@>)`, `![Logo](@)`, the same in a `prologue` or `epilogue` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+| a path under a directory `md` cannot read | `dm.reference.failure`, `failure: io` | fails, status 1 |
+| `[Guide](http://[bad)` | `dm.reference.failure`, reason `malformed URL` | fails, status 1 |
+| `::file @`, `::code @`, `::url @` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+
+```sh
+md compose doc.md --allow missing-hyperlinks   # [Guide](./gone.md): composes, reports the miss
+md compose doc.md --allow missing-hyperlinks   # [Guide](@): fails, status 1, no document
+```
+
+A refused run writes no document, and in a document with lifecycle events
+it stops before `composed` runs.
+
 A recovered problem is still reported, carrying its code: on stderr in a Markdown
 run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
 allowance the problem fails the command.

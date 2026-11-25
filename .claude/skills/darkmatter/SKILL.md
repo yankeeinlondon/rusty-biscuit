@@ -375,7 +375,11 @@ passes); a nested `as_markdown` child's stop is restored on the caller
 (`NestedComposeSlot::take_blocked`), even when `||` absorbed the call;
 the last stages' warnings are checked by the CLI before writing. A new coded warning adds its
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
-naming the codes it governs.
+naming the codes it governs. The reference check (`compose.rs::check_references`, shared by the
+direct and lifecycle routes) lets a `missing-*` allowance recover an issue
+only when `ReferenceIssue::is_missing_target` (failure class `NoMatch`) holds;
+an invalid, unreadable, or malformed link, image, or inclusion target always
+refuses, whatever the kind's allowance.
 
 Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
 `CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
@@ -486,7 +490,7 @@ tolerates them). Every other graph build (`md validate refs`, `md graph`, the
 library's graph, local query, and validation APIs) fails with composition's
 typed error on an inclusion parse error (`reference/graph.rs::parsed_inclusions`),
 an unloadable included file (`ReferenceAnalysisRuntime::load_inclusion`; a
-`::toc-linking` target's headings are read raw, as composition reads them),
+`::toc-linking` target's headings are read raw, as composition reads them, and a selected file that cannot be read is `transclusion::read_failure_at` at the directive's `InclusionSite` in both, as a child load is),
 and a failing `when=` (evaluated through `conditions::ConditionSite`, as the
 transclusion stage does), and on a target its directive's admission rule
 refuses: `transclusion::admit_local_target`/`admit_url_target`, the
