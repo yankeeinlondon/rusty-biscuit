@@ -61,16 +61,16 @@
 //! shell execution, composition directive evaluation, or network access. The
 //! caller supplies the source string; all work is in-memory.
 
-use std::path::{Path, PathBuf};
+use std::{ops::Range, path::{Path, PathBuf}};
 
 use indexmap::IndexMap;
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::errors::SchemaError;
+use crate::errors::{CatalogRelated, SchemaError};
 
 use super::{
     Constraint, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaShape, SchemaSourceMap, SchemaSourcePath,
-    SchemaRoot, SuggestionLintProblem, TypeExpr, lint_suggestions,
+    SchemaRoot, SchemaSpanKind, SuggestionLintProblem, TypeExpr, grammar::FIRST_OVERLOAD, lint_suggestions,
     signature::duplicate_overload, source::parse_standalone_schema_payload_with_source,
 };
 
@@ -420,8 +420,9 @@ fn parse_standalone(
         return Err(schema_document_error(path, "the envelope has neither a `$schema` nor a `types` value"));
     };
     let description = metadata.get("description").and_then(serde_json::Value::as_str).map(str::to_string);
+    let checks = DocumentChecks { path, callable: envelope.is_callable_catalog() };
     let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
-        .map_err(|failure| failure.into_document_error(path, "invalid SimplifiedSchema payload"))?;
+        .map_err(|failure| checks.payload_failure(failure, "invalid SimplifiedSchema payload"))?;
     let local = if payload_key == "$schema" {
         recognized
             .local_types()
@@ -442,17 +443,17 @@ fn parse_standalone(
     let categories = metadata
         .get("categories")
         .filter(|value| !value.is_null())
-        .map(|value| parse_categories(path, value))
+        .map(|value| checks.categories(source, value))
         .transpose()?;
     // Only a `types` table is checked as one; `$schema` entries are document
     // properties, never overloads or categorized types.
     if let SchemaDeclaration::Schema(SchemaRoot::Single(shape)) = &parsed.value
         && payload_key == "types"
     {
-        check_named_types(path, shape, categories.as_deref())?;
+        checks.named_types(shape, &parsed.source_map, categories.as_deref())?;
     }
-    if let Some(shape) = &local_types {
-        check_named_types(path, shape, categories.as_deref())?;
+    if let (Some(shape), Some(map)) = (&local_types, &local_type_source_map) {
+        checks.named_types(shape, map, categories.as_deref())?;
     }
     let mut suggestion_lints = match &mut parsed.value {
         SchemaDeclaration::Schema(schema) => {
@@ -534,7 +535,10 @@ impl RecognizedStandalone {
 pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, UndecodedSource> {
     // Numbers are admitted here too, so a schema file's numbers follow the
     // same rules whichever loader reads the file first.
-    let document: YamlValue = crate::numeric::load_admitted_yaml(source).map_err(|error| {
+    // Preserve caller offsets in the source map, but skip the byte-order mark
+    // when decoding YAML, as the whole-document loader does.
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let document: YamlValue = crate::numeric::load_admitted_yaml(body).map_err(|error| {
         if crate::numeric::is_yaml_admission_error(&error) {
             return UndecodedSource { message: error.to_string(), span: None };
         }
@@ -620,87 +624,147 @@ fn rejected_envelope(
             // As when admitted: `types` beside an export is the named-type
             // table; without one it is the payload.
             let context = if key == recognized.payload_key() { "invalid SimplifiedSchema payload" } else { "invalid named types" };
-            return failure.into_document_error(path, context);
+            let checks = DocumentChecks { path, callable: recognized.envelope.is_callable_catalog() };
+            return checks.payload_failure(failure, context);
         }
     }
     admitted.to_error(path, source)
 }
 
-/// Reads an admitted `categories:` list: each entry `Name` or
-/// `Name -> description`, names unique and non-blank, order kept. Admission
-/// makes the list one of strings; a selected definition may not have.
-fn parse_categories(path: &Path, value: &serde_json::Value) -> Result<Vec<SchemaCategory>, SchemaError> {
-    let Some(entries) = value.as_array() else {
-        return Err(schema_document_error(path, "`categories` is not a list of category entries"));
-    };
-    let mut categories: Vec<SchemaCategory> = Vec::with_capacity(entries.len());
-    for (index, entry) in entries.iter().enumerate() {
-        let at = |message: String| schema_document_error(path, format!("`categories[{index}]`: {message}"));
-        let Some(text) = entry.as_str() else {
-            return Err(at("a category entry is not a string".into()));
-        };
-        let (name, description) = match text.split_once("->") {
-            Some((name, description)) => {
-                let description = description.trim();
-                if description.is_empty() {
-                    return Err(at("`->` must be followed by a description".into()));
-                }
-                (name.trim(), Some(description.to_string()))
-            }
-            None => (text.trim(), None),
-        };
-        if name.is_empty() {
-            return Err(at("a category name cannot be blank".into()));
-        }
-        if let Some(first) = categories.iter().position(|category| category.name == name) {
-            return Err(at(format!(
-                "duplicate category `{name}` (first declared at `categories[{first}]`)"
-            )));
-        }
-        categories.push(SchemaCategory {
-            name: name.to_string(),
-            description,
-        });
-    }
-    Ok(categories)
+/// Locates checks that need the complete declaration table or metadata list.
+struct DocumentChecks<'a> {
+    path: &'a Path,
+    callable: bool,
 }
 
-/// The checks that need a whole `types` mapping: every `category(...)` names
-/// a declared category (when a list is declared), and no overload set has two
-/// options with one binding contract once local references are resolved.
-fn check_named_types(
-    path: &Path,
-    types: &SchemaShape,
-    categories: Option<&[SchemaCategory]>,
-) -> Result<(), SchemaError> {
-    let named: &IndexMap<String, PropertyDef> = &types.properties;
-    for (name, def) in named {
-        if let PropertyDef::Union(arms) = def
-            && let Some(message) = duplicate_overload(arms, Some(named))
-        {
-            return Err(schema_document_error(path, format!("`types.{name}`: {message}")));
-        }
-        if let Some(categories) = categories {
-            let mut undeclared = None;
-            visit_def(def, &mut |atom| {
-                for constraint in atom.constraints.iter().chain(&atom.array_constraints) {
-                    if let Constraint::Category(category) = constraint
-                        && undeclared.is_none()
-                        && !categories.iter().any(|declared| &declared.name == category)
-                    {
-                        undeclared = Some(category.clone());
-                    }
-                }
-            });
-            if let Some(category) = undeclared {
-                return Err(schema_document_error(
-                    path,
-                    format!("`types.{name}`: category `{category}` is not declared in `categories:`"),
-                ));
-            }
+impl DocumentChecks<'_> {
+    fn error(&self, message: String, span: Option<Range<usize>>, related: Vec<CatalogRelated>) -> SchemaError {
+        let path = self.path.to_path_buf();
+        if self.callable {
+            SchemaError::CallableCatalog { path, message, span, related }
+        } else {
+            SchemaError::SchemaDocument { path, message, source: None, span }
         }
     }
-    Ok(())
+
+    fn payload_failure(&self, failure: super::LocatedDefinitionFailure, context: &str) -> SchemaError {
+        if self.callable && !failure.related.is_empty() {
+            let span = failure.authored_span.or(failure.value_span);
+            let related = failure.related.into_iter().map(|entry| self.related(entry.message, Some(entry.span))).collect();
+            self.error(failure.error.to_string(), span, related)
+        } else {
+            failure.into_document_error(self.path, context)
+        }
+    }
+
+    fn related(&self, message: String, span: Option<Range<usize>>) -> CatalogRelated {
+        CatalogRelated { message, file: self.path.to_path_buf(), span }
+    }
+
+    /// A selected definition may admit forms the category reader still refuses.
+    fn categories(&self, source: &str, value: &serde_json::Value) -> Result<Vec<SchemaCategory>, SchemaError> {
+        let Some(entries) = value.as_array() else {
+            return Err(self.error("`categories` is not a list of category entries".into(), top_level_value_span(source, "categories"), Vec::new()));
+        };
+        let span = |positions: &crate::PositionMap, index: usize, offset| {
+            let key = crate::yaml_documents::locating_problem(&["categories".to_string(), index.to_string()]);
+            positions.byte_range(&key).map(|range| range.start + offset..range.end + offset)
+        };
+        let mut categories: Vec<SchemaCategory> = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |message: String, first: Option<usize>| {
+                let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+                let offset = source.len() - body.len();
+                let positions = crate::PositionMap::deferred(std::sync::Arc::from(body));
+                let related = first
+                    .map(|first| self.related("the earlier category is declared here".into(), span(&positions, first, offset)))
+                    .into_iter()
+                    .collect();
+                self.error(format!("`categories[{index}]`: {message}"), span(&positions, index, offset), related)
+            };
+            let Some(text) = entry.as_str() else {
+                return Err(at("a category entry is not a string".into(), None));
+            };
+            let (name, description) = match text.split_once("->") {
+                Some((name, description)) => {
+                    let description = description.trim();
+                    if description.is_empty() {
+                        return Err(at("`->` must be followed by a description".into(), None));
+                    }
+                    (name.trim(), Some(description.to_string()))
+                }
+                None => (text.trim(), None),
+            };
+            if name.is_empty() {
+                return Err(at("a category name cannot be blank".into(), None));
+            }
+            if let Some(first) = categories.iter().position(|category| category.name == name) {
+                return Err(at(format!(
+                    "duplicate category `{name}` (first declared at `categories[{first}]`)"
+                ), Some(first)));
+            }
+            categories.push(SchemaCategory {
+                name: name.to_string(),
+                description,
+            });
+        }
+        Ok(categories)
+    }
+
+    /// Checks categories and binding contracts after local references resolve.
+    fn named_types(
+        &self,
+        types: &SchemaShape,
+        map: &SchemaSourceMap,
+        categories: Option<&[SchemaCategory]>,
+    ) -> Result<(), SchemaError> {
+        let named: &IndexMap<String, PropertyDef> = &types.properties;
+        for (name, def) in named {
+            let path = SchemaSourcePath::root().property(name);
+            let definition_span = |arm: Option<usize>| {
+                let arm_path = arm.map_or_else(|| path.clone(), |arm| path.union_arm(arm));
+                map.spans(&arm_path, SchemaSpanKind::Atom).first()
+                    .or_else(|| map.spans(&arm_path, SchemaSpanKind::Definition).first())
+                    .or_else(|| map.spans(&path, SchemaSpanKind::Definition).first())
+                    .cloned()
+            };
+            if let PropertyDef::Union(arms) = def
+                && let Some((first, later, message)) = duplicate_overload(arms, Some(named))
+            {
+                return Err(self.error(
+                    format!("`types.{name}`: {message}"),
+                    definition_span(Some(later)),
+                    vec![self.related(FIRST_OVERLOAD.into(), definition_span(Some(first)))],
+                ));
+            }
+            let Some(categories) = categories else { continue };
+            let arms = match def {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(arms) => arms.as_slice(),
+            };
+            for (index, arm) in arms.iter().enumerate() {
+                let mut undeclared = None;
+                visit_atom(arm, &mut |atom| {
+                    for constraint in atom.constraints.iter().chain(&atom.array_constraints) {
+                        if let Constraint::Category(category) = constraint
+                            && undeclared.is_none()
+                            && !categories.iter().any(|declared| &declared.name == category)
+                        {
+                            undeclared = Some(category.clone());
+                        }
+                    }
+                });
+                if let Some(category) = undeclared {
+                    return Err(self.error(
+                        format!("`types.{name}`: category `{category}` is not declared in `categories:`"),
+                        definition_span(matches!(def, PropertyDef::Union(_)).then_some(index)),
+                        Vec::new(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Calls `visit` with every atom of `def`, including those nested in inline

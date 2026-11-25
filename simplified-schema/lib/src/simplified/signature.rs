@@ -19,7 +19,7 @@ use super::types::{FunctionType, PropertyAtom, PropertyDef, TypeExpr};
 /// recursive) references compare by name.
 const MAX_REFERENCE_DEPTH: usize = 16;
 
-/// The message for the first pair of `function` options in `arms` that share
+/// The indices and message for the first pair of `function` options in `arms` that share
 /// a binding contract, or `None` when every overload binds differently.
 ///
 /// `named` resolves bare local references (`Name`, `Name@this`) to their
@@ -27,16 +27,7 @@ const MAX_REFERENCE_DEPTH: usize = 16;
 pub(crate) fn duplicate_overload(
     arms: &[PropertyAtom],
     named: Option<&IndexMap<String, PropertyDef>>,
-) -> Option<String> {
-    duplicate_overload_arm(arms, named).map(|(_, message)| message)
-}
-
-/// [`duplicate_overload`] together with the index into `arms` of the later
-/// option of the pair, the one that introduced the duplicate.
-pub(crate) fn duplicate_overload_arm(
-    arms: &[PropertyAtom],
-    named: Option<&IndexMap<String, PropertyDef>>,
-) -> Option<(usize, String)> {
+) -> Option<(usize, usize, String)> {
     let mut seen: Vec<(String, usize)> = Vec::new();
     for (index, arm) in arms.iter().enumerate() {
         let TypeExpr::Function(function) = &arm.ty else {
@@ -53,7 +44,7 @@ pub(crate) fn duplicate_overload_arm(
                 first + 1,
                 index + 1
             );
-            return Some((index, message));
+            return Some((*first, index, message));
         }
         seen.push((contract, index));
     }
@@ -263,9 +254,10 @@ mod tests {
             arms("function(parameters(a: number); returns(string))").remove(0),
             arms("function(parameters(b: string); returns(number))").remove(0),
         ];
-        let (index, message) = duplicate_overload_arm(&union, None).expect("arms 0 and 2 bind alike");
+        let (first, index, message) = duplicate_overload(&union, None).expect("arms 0 and 2 bind alike");
         assert_eq!(index, 2);
-        assert_eq!(Some(message), duplicate_overload(&union, None));
+        assert_eq!(first, 0);
+        assert!(message.contains("same binding contract"), "{message}");
     }
 }
 

@@ -146,11 +146,27 @@ is deliberately capped at these authored presentations:
 - implicit scalar-key block and flow mappings;
 - explicit scalar-key block mapping pairs, including compact mapping items in
   block sequences; and
-- mapping-value anchors and scalar aliases used by the shipped schema corpus.
+- anchors, standard YAML tags, and aliases on mapping values and on block or
+  flow sequence items.
 
 Serializers often produce indentless lists, and editors may wrap values onto
 continuation lines. Each presentation has the same meaning as its
 conventionally indented or single-line equivalent.
+
+YAML comments can follow a value or appear inside a flow collection. For
+example, `label: string # Display label` declares a string. A hash within a
+quoted value or attached to plain scalar text is part of the value.
+
+For example, these type definitions describe a label and a result that accepts
+either a label or a number. The alias refers to the anchored string type.
+
+```yaml
+types:
+  Label: &label string
+  Result: [*label, !!str number]
+```
+
+A diagnostic in the aliased arm marks the `*label` token.
 
 **Indentless sequences.** Wherever the grammar accepts a sequence, its items
 may sit at the parent key's column. The list ends at the next line at that
@@ -241,8 +257,7 @@ outside the v1 source-map and DMLS contract; a schema file that uses one fails
 to load with `could not project SimplifiedSchema expression spans through YAML
 source`. Every non-comment line of a schema value must belong to a presentation
 the grammar recognizes, so an unrecognized one fails rather than being skipped.
-Frontmatter lookup is more tolerant and also follows tags and comments
-inside a flow collection; that does not extend to schema documents. Authors should
+Frontmatter lookup also follows tags. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.

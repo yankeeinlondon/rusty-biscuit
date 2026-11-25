@@ -18,7 +18,8 @@ use simplified_schema::envelope::{
 };
 use simplified_schema::yaml_documents::{LoadedYamlDocument, duplicate_key, shipped_kind_definition_paths};
 use simplified_schema::{
-    NotSchemaReason, SchemaError, SimplifiedSchema, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    NotSchemaReason, SchemaError, SchemaSourcePath, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaEnvelope,
+    parse_standalone_schema_document,
 };
 
 /// The specification's expression catalog, with a private helper.
@@ -213,15 +214,20 @@ fn category_entries_follow_the_shared_entry_grammar() {
     let category = &trimmed.categories.expect("read")[0];
     assert_eq!((category.name.as_str(), category.description.as_deref()), ("Text", Some("Transform.")));
 
-    for (label, entries, message) in [
-        ("missing label", "    - \" -> Transform.\"\n", "blank"),
-        ("missing description", "    - \"Text ->\"\n", "must be followed by a description"),
-        ("duplicate", "    - Text\n    - Text -> Again.\n", "duplicate category `Text`"),
-        ("case-sensitive", "    - text\n", "category `Text` is not declared"),
+    for (entries, reason, failing_text, earlier_text) in [
+        ("    - \" -> Transform.\"\n", "blank", "\" -> Transform.\"", None),
+        ("    - \"Text ->\"\n", "must be followed by a description", "\"Text ->\"", None),
+        ("    - Text\n    - Text -> Again.\n", "duplicate category `Text`", "Text -> Again.", Some("Text")),
+        ("    - text\n", "category `Text` is not declared", "function(", None),
     ] {
-        match parse_standalone_schema_document(&with(entries), "catalog.yaml") {
-            Err(SchemaError::SchemaDocument { message: error, .. }) => assert!(error.contains(message), "{label}: {error}"),
-            other => panic!("{label}: {other:?}"),
+        let text = with(entries);
+        let error = parse_standalone_schema_document(&text, "catalog.yaml").unwrap_err();
+        let SchemaError::CallableCatalog { message, span, related, .. } = error else { panic!("{error:?}") };
+        assert!(message.contains(reason), "{message}");
+        assert_eq!(span.unwrap().start, text.find(failing_text).unwrap(), "{message}");
+        assert_eq!(related.len(), usize::from(earlier_text.is_some()), "{message}");
+        if let Some(earlier) = earlier_text {
+            assert_eq!(&text[related[0].span.clone().unwrap()], earlier);
         }
     }
 }
@@ -308,19 +314,37 @@ fn the_mutation_catalog_is_wired_to_the_same_validators() {
 }
 
 #[test]
-fn duplicate_overloads_are_refused_by_the_catalog_parse() {
-    let text = "kind: expression-schema
-categories: [Text]
-types:
-    pad:
-        - 'function(parameters(x: string); returns(string); category(Text))'
-        - 'function(parameters(y: string); returns(string); category(Text))'
-";
-    match parse_standalone_schema_document(text, "catalog.yaml") {
-        Err(SchemaError::SchemaDocument { message, .. }) => {
-            assert!(message.contains("`pad`") && message.contains("same binding contract"), "{message}");
+fn duplicate_overloads_locate_both_arms_in_each_catalog_carrier() {
+    let first = "function(parameters(x: string); returns(string); category(Text))";
+    let second = |ty: &str| format!("function(parameters(y: {ty}); returns(string); category(Text))");
+    for kind in ["expression-schema", "mutation-schema"] {
+        for spelling in ["sequence", "pipe", "group", "grouped-sequence"] {
+            let text = |ty: &str| {
+                let second = second(ty);
+                let arms = match spelling {
+                    "sequence" => format!("\n        - '{first}'\n        - '{second}'"),
+                    "pipe" => format!(" >-\n        {first} |\n        {second}"),
+                    "group" => format!(" >-\n        ({first} |\n        {second})"),
+                    "grouped-sequence" => format!("\n        - '({first})'\n        - '({second})'"),
+                    _ => unreachable!(),
+                };
+                format!("kind: {kind}\ncategories: [Text]\ntypes:\n    Label: string\n    pad:{arms}\n")
+            };
+            let control = parse_standalone_schema_document(&text("number"), "catalog.yaml").unwrap();
+            assert!(control.is_some(), "{kind}, {spelling}");
+            for ty in ["string", "Label@this"] {
+                let text = text(ty);
+                let error = parse_standalone_schema_document(&text, "catalog.yaml").unwrap_err();
+                let SchemaError::CallableCatalog { message, span, related, .. } = error else { panic!("{error:?}") };
+                assert!(message.contains("same binding contract"), "{message}");
+                let span = span.unwrap();
+                let second = second(ty);
+                let prefix = if spelling == "grouped-sequence" { "(" } else { "" };
+                assert!(text[span].starts_with(&format!("{prefix}{second}")), "{kind}, {spelling}, {ty}");
+                assert_eq!(related.len(), 1, "{message}");
+                assert!(text[related[0].span.clone().unwrap()].starts_with(&format!("{prefix}{first}")), "{kind}, {spelling}, {ty}");
+            }
         }
-        other => panic!("{other:?}"),
     }
 }
 
@@ -398,6 +422,76 @@ fn the_loader_refuses_trailing_documents_and_accepts_comments_and_crlf() {
     let commented = format!("# helpers\n{}", EXPRESSION.replace("\n", "\r\n"));
     parse_standalone_schema_document(&commented, "catalog.yaml").expect("comments and CRLF").expect("recognized");
     LoadedYamlDocument::load(&commented, Path::new("catalog.yaml")).expect("comments and CRLF load");
+}
+
+#[test]
+fn inline_comments_preserve_catalog_declarations_in_each_source_presentation() {
+    for (control, commented) in [
+        ("    Label: string", "    Label: string # plain"),
+        ("    Label:\n        id: string", "    Label: # nested mapping\n        id: string # leaf"),
+        ("    Label: &label\n        id: string", "    Label: &label # anchored mapping\n        id: string"),
+        ("    Label:\n        - string\n        - number", "    Label:\n        - string # sequence arm\n        - # value below\n            number"),
+        ("    Label: string | number", "    Label: string | number # scalar union"),
+        ("    Label: string |\n        number", "    Label: string |\n        number # continued scalar"),
+        ("    Label: [string, number]", "    Label: [string # flow arm\n        , number] # sequence"),
+        ("    Label: {id: string, detail: {value: number}}", "    Label: {id: # flow value\n        string, # before key\n        detail: {value: number} # nested flow mapping\n    }"),
+        ("    ? Label\n    : string", "    ? Label # explicit key\n    : string # explicit value"),
+        ("    Label: |-\n        string", "    Label: |- # block header\n        string"),
+        ("    Label: 'string -> A # tag'", "    Label: 'string -> A # tag' # quoted"),
+        ("    Label: \"string -> A # tag\"", "    Label: \"string -> A # tag\" # quoted"),
+        ("    Label: string -> A#tag", "    Label: string -> A#tag # plain with hash content"),
+        ("    Label: string -> A\u{a0}#tag", "    Label: string -> A\u{a0}#tag # non-separating space"),
+    ] {
+        let control = edited("    Label:", control);
+        let text = edited("    Label:", commented);
+        let plain = parse_standalone_schema_document(&control, "catalog.yaml").expect(&control).expect("catalog");
+        let with_comment = parse_standalone_schema_document(&text, "catalog.yaml").expect(&text).expect("catalog");
+        assert_eq!(with_comment.declaration, plain.declaration, "{text}");
+        let key = &with_comment
+            .named_type_source_map()
+            .spans(&SchemaSourcePath::root().property("Label"), SchemaSpanKind::MappingKey)[0];
+        assert_eq!(&text[key.clone()], "Label");
+    }
+}
+
+#[test]
+fn inline_comments_preserve_callable_spans_with_line_end_and_bom_variants() {
+    let callable = "function(parameters(void); returns(string); category(Files); fallible)";
+    let base = format!("kind: mutation-schema\ncategories:\n    - Files -> Update a file.\ntypes:\n    change_label: {callable}\n    Label: string(min(1))\n");
+    let plain = parse_standalone_schema_document(&base, "catalog.yaml").unwrap().unwrap();
+    let commented = base
+        .replace(callable, &format!("{callable} # Run the action."))
+        .replace("Update a file.", "Update a file. # Category")
+        .replace("Label: string(min(1))", "Label: string(min(1)) # Keep a label.");
+    let document = format!("--- # catalog\n{commented}... # end\n");
+    for (mark, line_end) in [("", "\n"), ("", "\r\n"), ("\u{feff}", "\n"), ("\u{feff}", "\r\n")] {
+        let text = format!("{mark}{}", document.replace('\n', line_end));
+        let catalog = parse_standalone_schema_document(&text, "catalog.yaml").expect(&text).expect("catalog");
+        assert_eq!(catalog.declaration, plain.declaration, "{text}");
+        let category = &catalog.categories.as_ref().unwrap()[0];
+        assert_eq!((category.name.as_str(), category.description.as_deref()), ("Files", Some("Update a file.")));
+        let map = catalog.named_type_source_map();
+        let callable_span = &map.spans(&SchemaSourcePath::root().property("change_label"), SchemaSpanKind::Definition)[0];
+        assert_eq!(&text[callable_span.clone()], callable);
+        let helper = SchemaSourcePath::root().property("Label");
+        let helper_span = &map.spans(&helper, SchemaSpanKind::Definition)[0];
+        assert_eq!(&text[helper_span.clone()], "string(min(1))");
+        let constraint = map.constraint_span(&text, &helper, "min", 0).unwrap();
+        assert_eq!(&text[constraint], "min(1)");
+    }
+}
+
+#[test]
+fn inline_comments_preserve_the_ordinary_schema_export_and_its_type_requirements() {
+    let base = "kind: schema\ntypes:\n    Label: string(required)\n$schema:\n    label: Label@this\n";
+    let commented = base.replace("string(required)", "string(required) # An authored helper");
+    for text in [base, &commented] {
+        let document = parse_standalone_schema_document(text, "schema.yaml").unwrap().unwrap();
+        assert!(document.exports_schema);
+        let schema = SimplifiedSchema::try_from(text).unwrap();
+        assert!(schema.validate_strict(&serde_json::json!({"label": "ready"})).is_ok());
+        assert!(schema.validate_strict(&serde_json::json!({"label": 3})).is_err());
+    }
 }
 
 // ── Privacy: never a document schema or an import source ───────────────────
@@ -560,4 +654,164 @@ mod file {
         let error = refused.expect_err("a listed catalog is private");
         assert_eq!(not_schema(&error), Some(NotSchemaReason::CallableCatalog), "{error}");
     }
+}
+
+#[test]
+fn decorated_and_aliased_sequence_arms_preserve_their_contracts() {
+    let number = "function(parameters(x: number, y: number); returns(string); category(Text))";
+    let string = "function(parameters(x: string); returns(string); category(Text))";
+    for kind in ["expression-schema", "mutation-schema"] {
+        let document = |body: &str| {
+            format!("kind: {kind}\ncategories: [Text]\ntypes:\n    secondary: &number '{number}'\n    pad:{body}\n")
+        };
+        let control = document(&format!(" ['{number}', '{string}']"));
+        let control = parse_standalone_schema_document(&control, "catalog.yaml").unwrap().unwrap();
+        for (body, authored) in [
+            (format!("\n        - &arm '{number}' # Keep the number arm.\n        - '{string}'"), format!("&arm '{number}'")),
+            (format!("\n        - &arm |-\n            {number}\n        - '{string}'"), format!("&arm |-\n            {number}")),
+            (format!("\n        - !!str &arm '{number}'\n        - '{string}'"), format!("!!str &arm '{number}'")),
+            (format!("\n        - &arm # Keep the number arm.\n          '{number}'\n        - '{string}'"), format!("&arm # Keep the number arm.\n          '{number}'")),
+            (format!("\n        - *number\n        - '{string}'"), "*number".into()),
+            (format!(" [&arm !!str '{number}', '{string}']"), format!("&arm !!str '{number}'")),
+            (format!(" [!!str # Type of the first arm.\n        &arm '{number}', '{string}']"), format!("!!str # Type of the first arm.\n        &arm '{number}'")),
+            (format!(" [*number, '{string}']"), "*number".into()),
+        ] {
+            let text = document(&body);
+            let parsed = parse_standalone_schema_document(&text, "catalog.yaml").unwrap_or_else(|error| panic!("{body}: {error:?}")).unwrap();
+            assert_eq!(parsed.declaration, control.declaration, "{body}");
+            let path = SchemaSourcePath::root().property("pad").union_arm(0);
+            let map = parsed.named_type_source_map();
+            let [arm] = map.spans(&path, SchemaSpanKind::UnionArm) else { panic!("{body}") };
+            assert_eq!(&text[arm.clone()], authored);
+        }
+    }
+}
+
+#[test]
+fn decorated_and_aliased_duplicate_arms_keep_their_distinct_source_ranges() {
+    let signature = "function(parameters(x: string); returns(string); category(Text))";
+    let resolved = "function(parameters(x: Label@this); returns(string); category(Text))";
+    for kind in ["expression-schema", "mutation-schema"] {
+        for (body, primary, related) in [
+            (format!("\n        - &arm '{signature}'\n        - '{signature}'"), signature, signature),
+            (format!("\n        - &arm '{signature}'\n        - *arm"), "*arm", signature),
+            (format!("\n        - *first\n        - '{signature}'"), signature, "*first"),
+            (format!(" [&arm '{signature}', *arm]"), "*arm", signature),
+            (format!(" [*first, '{resolved}']"), resolved, "*first"),
+        ] {
+            let text = format!("kind: {kind}\ncategories: [Text]\ntypes:\n    Label: &label string\n    Alias: *label\n    secondary: &first '{signature}'\n    pad:{body}\n");
+            let error = parse_standalone_schema_document(&text, "catalog.yaml").unwrap_err();
+            let SchemaError::CallableCatalog { message, span, related: notes, .. } = error else { panic!("{error:?}") };
+            assert!(message.contains("same binding contract"), "{message}");
+            let span = span.unwrap();
+            let [note] = notes.as_slice() else { panic!("{notes:?}") };
+            let first = note.span.clone().unwrap();
+            assert!(first.start >= text.find("    pad:").unwrap() && first.end < span.start, "{text}");
+            assert_eq!(&text[span], primary, "{text}");
+            assert_eq!(&text[first], related, "{text}");
+        }
+    }
+}
+
+#[test]
+fn ordinary_exports_accept_aliased_and_decorated_sequence_values() {
+    let control = "kind: schema\ntypes:\n    Label: &label string\n    Shape: &shape {detail: string}\n    Result: [string, number]\n    Nested: [string, {detail: string}]\n$schema:\n    label: Result@this\n    nested: Nested@this\n";
+    let reference = SimplifiedSchema::try_from(control).unwrap();
+    for (from, to) in [
+        ("[string, number]", "[*label, &num number]"),
+        ("[string, number]", "\n        - !!str string\n        - number"),
+        ("[string, {detail: string}]", "[string, *shape]"),
+        ("[string, {detail: string}]", "[string, {detail: !!str &detail 'string'}]"),
+        ("[string, {detail: string}]", "\n        - string\n        - &nested\n            detail: string"),
+    ] {
+        let text = control.replace(from, to);
+        let document = parse_standalone_schema_document(&text, "schema.yaml").unwrap_or_else(|error| panic!("{text}: {error:?}")).unwrap();
+        assert!(document.exports_schema, "{text}");
+        let schema = SimplifiedSchema::try_from(text.as_str()).unwrap();
+        for (value, accepted) in [
+            (serde_json::json!({"label": 3, "nested": {"detail": "ready"}}), true),
+            (serde_json::json!({"label": "ready", "nested": "ready"}), true),
+            (serde_json::json!({"label": true, "nested": "ready"}), false),
+            (serde_json::json!({"label": 3, "nested": {"detail": 3}}), false),
+        ] {
+            assert_eq!(reference.validate_strict(&value).is_ok(), accepted, "{value}");
+            assert_eq!(schema.validate_strict(&value).is_ok(), accepted, "{text}\n{value}");
+        }
+    }
+}
+
+#[test]
+fn whole_value_aliases_and_a_later_aliased_narrowing_arm_keep_their_verdicts() {
+    let first = "function(parameters(x: string); returns(boolean); narrows(x: string; true-iff); category(Text))";
+    let second = "function(parameters(x: number, y: number); returns(boolean); narrows(x: string; true-iff); category(Text))";
+    for original in [
+        format!("'{first}'"),
+        format!("'{first} | {second}'"),
+        format!("[ '{first}', '{second}' ]"),
+    ] {
+        let text = format!("kind: expression-schema\ncategories: [Text]\ntypes:\n    first: &first {original}\n    second: *first\n");
+        let control = text.replace("*first", &original);
+        let control = parse_standalone_schema_document(&control, "catalog.yaml").unwrap().unwrap();
+        let actual = parse_standalone_schema_document(&text, "catalog.yaml").unwrap().unwrap();
+        assert_eq!(actual.declaration, control.declaration, "{text}");
+        let path = SchemaSourcePath::root().property("second");
+        let [atom] = actual.named_type_source_map().spans(&path, SchemaSpanKind::Atom) else { panic!("{text}") };
+        assert_eq!(&text[atom.clone()], "*first");
+    }
+
+    let text = format!("kind: expression-schema\ndescription: &second '{second}'\ncategories: [Text]\ntypes:\n    predicate: ['{first}', *second]\n");
+    assert!(parse_standalone_schema_document(&text, "catalog.yaml").is_ok());
+    let unguarded_first = first.replace(" narrows(x: string; true-iff);", "");
+    let unguarded_second = second.replace(" narrows(x: string; true-iff);", "");
+    // The declaring clause is primary when the other overload omits it.
+    for (conflict, primary, earlier) in [
+        (text.replace(first, &unguarded_first), "*second", unguarded_first.as_str()),
+        (text.replace(second, &unguarded_second), "narrows(x: string; true-iff)", "*second"),
+    ] {
+        let error = parse_standalone_schema_document(&conflict, "catalog.yaml").unwrap_err();
+        let SchemaError::CallableCatalog { message, span, related, .. } = error else { panic!("{error:?}") };
+        assert!(message.contains("narrows"), "{message}");
+        assert_eq!(&conflict[span.unwrap()], primary);
+        let [note] = related.as_slice() else { panic!("{related:?}") };
+        assert_eq!(&conflict[note.span.clone().unwrap()], earlier);
+    }
+}
+
+#[test]
+fn ordinary_root_arms_and_constraint_mappings_keep_aliased_values() {
+    let control = "kind: schema\n$schema:\n  - first: string(required)\n    $constraints: &rules {closed: true}\n  - &shape\n    second: number(required)\n    $constraints: {closed: true}\n  - {second: 'number(required)', $constraints: {closed: true}}\n";
+    let actual = control
+        .replace("    $constraints: {closed: true}", "    $constraints: *rules")
+        .replace("  - {second: 'number(required)', $constraints: {closed: true}}", "  - *shape");
+    let expected = parse_standalone_schema_document(control, "schema.yaml").unwrap().unwrap();
+    let parsed = parse_standalone_schema_document(&actual, "schema.yaml").unwrap().unwrap();
+    assert!(parsed.exports_schema);
+    assert_eq!(parsed.declaration, expected.declaration);
+
+    let second = SchemaSourcePath::root().union_arm(1).property("$constraints");
+    let [constraints] = parsed.source_map.spans(&second, SchemaSpanKind::Definition) else { panic!("{actual}") };
+    assert_eq!(&actual[constraints.clone()], "*rules");
+    let third = SchemaSourcePath::root().union_arm(2);
+    let [arm] = parsed.source_map.spans(&third, SchemaSpanKind::UnionArm) else { panic!("{actual}") };
+    assert_eq!(&actual[arm.clone()], "*shape");
+    assert!(parsed.source_map.spans(&third.property("second"), SchemaSpanKind::MappingKey).is_empty());
+
+    let schema = SimplifiedSchema::try_from(actual.as_str()).unwrap();
+    assert!(schema.validate_strict(&serde_json::json!({"first": "ready"})).is_ok());
+    assert!(schema.validate_strict(&serde_json::json!({"second": 2})).is_ok());
+    assert!(schema.validate_strict(&serde_json::json!({"second": 2, "extra": true})).is_err());
+}
+
+#[test]
+fn a_yaml_alias_used_as_an_extends_operand_marks_the_use() {
+    let source = "kind: expression-schema\ndescription: &parent Parent@this\ncategories: [Text]\ntypes:\n    Parent: {text: string}\n    Child:\n        $extends: [*parent]\n        count: number\n    read_label: 'function(parameters(x: Child@this); returns(string); category(Text))'\n";
+    let with_alias = parse_standalone_schema_document(source, "catalog.yaml").unwrap().unwrap();
+    let written = source.replace("*parent", "Parent@this");
+    let control = parse_standalone_schema_document(&written, "catalog.yaml").unwrap().unwrap();
+    assert_eq!(with_alias.declaration, control.declaration);
+    let path = SchemaSourcePath::root().property("Child").property("$extends").union_arm(0);
+    let map = with_alias.named_type_source_map();
+    let [operand] = map.spans(&path, SchemaSpanKind::CompositionOperand) else { panic!("{source}") };
+    assert_eq!(&source[operand.clone()], "*parent");
+    assert!(map.spans(&path, SchemaSpanKind::ImportName).is_empty());
 }

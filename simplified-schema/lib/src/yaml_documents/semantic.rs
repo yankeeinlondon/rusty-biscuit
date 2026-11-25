@@ -276,7 +276,13 @@ fn definition_failure(body: &str, error: &SchemaError) -> Finding {
             message: error.to_string(),
             site: None,
         },
-        None => Finding::at(named_field(error), error),
+        None => {
+            let mut finding = Finding::at(named_field(error), error);
+            if let SchemaError::SchemaDocument { span, .. } | SchemaError::CallableCatalog { span, .. } = error {
+                finding.span = span.clone();
+            }
+            finding
+        }
     }
 }
 
@@ -284,8 +290,9 @@ fn definition_failure(body: &str, error: &SchemaError) -> Finding {
 /// `` `categories[N]` `` field, as instance-path segments; the root
 /// otherwise.
 fn named_field(error: &SchemaError) -> Vec<String> {
-    let SchemaError::SchemaDocument { message, .. } = error else {
-        return Vec::new();
+    let message = match error {
+        SchemaError::SchemaDocument { message, .. } | SchemaError::CallableCatalog { message, .. } => message,
+        _ => return Vec::new(),
     };
     let Some((field, _)) = message.strip_prefix('`').and_then(|rest| rest.split_once("`:")) else {
         return Vec::new();

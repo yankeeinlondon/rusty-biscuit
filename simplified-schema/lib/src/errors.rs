@@ -62,9 +62,8 @@ pub struct GrammarRelated {
     pub arm: Option<usize>,
 }
 
-/// Another location a [`SchemaError::CallableCatalog`] failure involves:
-/// the earlier declaration a duplicate or colliding name conflicts with, or
-/// the first spelling of a repeated key.
+/// Another location a [`SchemaError::CallableCatalog`] failure involves,
+/// such as the first of two declarations with the same binding contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogRelated {
     /// What the location is, as an editor would label it.

@@ -160,19 +160,29 @@ pub fn decode_scalar(raw: &str) -> Option<DecodedScalar> {
 
 /// Decodes the leading scalar of `raw`, adding `base` to every raw coordinate,
 /// and reports how many raw bytes it consumed (so a caller scanning a flow
-/// sequence can advance). `None` when `raw` does not begin with a scalar.
+/// sequence can advance). The range excludes any trailing YAML comment.
+/// `None` when `raw` does not begin with a scalar.
 pub fn decode_scalar_at(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
     match raw.as_bytes().first().copied()? {
         b'\'' => decode_single_quoted(raw, base, false),
         b'"' => decode_double_quoted(raw, base, false),
         _ => {
-            let content = raw.trim_end();
+            let content = raw[..plain_comment_start(raw).unwrap_or(raw.len())]
+                .trim_end_matches(|ch: char| ch.is_ascii_whitespace());
             if content.is_empty() {
                 return None;
             }
             Some((plain_scalar(content, base), content.len()))
         }
     }
+}
+
+/// A hash within a plain scalar is data unless separated by YAML whitespace.
+pub(super) fn plain_comment_start(raw: &str) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    bytes.iter().enumerate().find_map(|(index, &byte)| {
+        (byte == b'#' && (index == 0 || bytes[index - 1].is_ascii_whitespace())).then_some(index)
+    })
 }
 
 /// Decodes the leading scalar of `raw` the way [`decode_scalar_at`] does, but

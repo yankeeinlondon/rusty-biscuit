@@ -182,6 +182,14 @@ pub fn parse_type_definition(property: &str, input: &str) -> Result<PropertyDef,
     parser.parse_definition()
 }
 
+/// The written union options of a type expression, including options
+/// flattened from a parenthesized group.
+pub(super) fn definition_arm_spans(input: &str) -> Option<Vec<Range<usize>>> {
+    let mut parser = Parser::new("definition", input);
+    parser.parse_definition().ok()?;
+    Some(parser.arm_spans)
+}
+
 /// Parses the whole text of one `$extends` operand: a named object type
 /// written as `Name` or `Name@reference`, with nothing after it.
 ///
@@ -784,8 +792,7 @@ struct Parser<'a> {
     /// Whether the last union read was one parenthesized group, which a
     /// following `?` applies to as a whole.
     single_group: bool,
-    /// The span of each option the last union read returned, in order; a
-    /// group's options share the group's span.
+    /// The spans of the options of the last union, in authored order.
     arm_spans: Vec<Range<usize>>,
     /// Where a template type read now would stand; a refused position stays
     /// in force for everything nested inside it.
@@ -1027,7 +1034,15 @@ impl<'a> Parser<'a> {
                 duplicate.span,
                 vec![GrammarRelated { message: FIRST_SUGGESTION.into(), span: duplicate.first_span, arm: None }],
             ),
-            UnionInvariant::DuplicateOverload { message, .. } => self.err(message, 0..self.src.len()),
+            UnionInvariant::DuplicateOverload { first, arm, message } => self.err_related(
+                message,
+                self.arm_spans[arm].clone(),
+                vec![GrammarRelated {
+                    message: FIRST_OVERLOAD.into(),
+                    span: self.arm_spans[first].clone(),
+                    arm: None,
+                }],
+            ),
             UnionInvariant::Narrows(problem) => self.narrows_err(problem),
         }
     }
@@ -1056,11 +1071,14 @@ impl<'a> Parser<'a> {
                 }
                 Arm::Group(group) => {
                     arms.extend(group);
+                    arm_spans.append(&mut self.arm_spans);
                     true
                 }
             };
-            let end = start + self.src[start..self.lex.pos].trim_end().len();
-            arm_spans.resize(arms.len(), start..end);
+            if !grouped {
+                let end = start + self.src[start..self.lex.pos].trim_end().len();
+                arm_spans.push(start..end);
+            }
             self.lex.skip_ws();
             if self.lex.peek_byte() != Some(b'|') {
                 self.single_group = grouped && options == 1;
@@ -3776,15 +3794,17 @@ pub(crate) fn leading_slot_end(text: &str) -> Option<usize> {
 /// The message of a second `suggest` list in one property definition.
 const SECOND_SUGGESTION: &str = "a property definition may contain at most one `suggest` constraint";
 
+/// The label of the earlier declaration of a duplicate overload.
+pub(crate) const FIRST_OVERLOAD: &str = "the earlier overload is declared here";
+
 /// A violated invariant of one property definition's options, which the
 /// parser and template-type substitution both check
 /// ([`PropertyDef::check_union_invariants`]).
 pub(crate) enum UnionInvariant {
     /// A second `suggest` list.
     SecondSuggestion(SecondSuggestion),
-    /// Two `function` overloads with one binding contract; `arm` is the
-    /// later duplicate.
-    DuplicateOverload { arm: usize, message: String },
+    /// Two `function` overloads with one binding contract, in authored order.
+    DuplicateOverload { first: usize, arm: usize, message: String },
     /// A `narrows` clause the overloads cannot carry.
     Narrows(narrowing::NarrowsProblem),
 }
@@ -3795,8 +3815,8 @@ pub(crate) fn union_invariant_problem(arms: &[PropertyAtom]) -> Option<UnionInva
     if let Some(duplicate) = second_suggestion_span(arms) {
         return Some(UnionInvariant::SecondSuggestion(duplicate));
     }
-    if let Some((arm, message)) = super::signature::duplicate_overload_arm(arms, None) {
-        return Some(UnionInvariant::DuplicateOverload { arm, message });
+    if let Some((first, arm, message)) = super::signature::duplicate_overload(arms, None) {
+        return Some(UnionInvariant::DuplicateOverload { first, arm, message });
     }
     narrowing::overload_arms_problem(arms).map(UnionInvariant::Narrows)
 }

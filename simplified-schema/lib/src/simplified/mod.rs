@@ -829,7 +829,15 @@ fn list_union_failure(
                 arm: (duplicate.first_arm != duplicate.arm).then_some(duplicate.first_arm),
             }],
         ),
-        grammar::UnionInvariant::DuplicateOverload { arm, message } => (arm, message, 0..0, Vec::new()),
+        grammar::UnionInvariant::DuplicateOverload { first, arm, message } => (
+            arm,
+            message,
+            whole(arm).unwrap_or(0..0),
+            whole(first)
+                .map(|span| GrammarRelated { message: grammar::FIRST_OVERLOAD.into(), span, arm: Some(first) })
+                .into_iter()
+                .collect(),
+        ),
         grammar::UnionInvariant::Narrows(problem) => {
             let related = problem
                 .related

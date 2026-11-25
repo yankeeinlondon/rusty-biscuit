@@ -454,13 +454,15 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
   `source_offset` added once. A DMLS client converts them to its negotiated
   position encoding.
 - **`authored_span` is `None`** when the failure has no token (an empty union
-  `tags: []`, a wrong-type arm `tags: [string, 7]`, an aliased value), when
+  `tags: []`, a wrong-type arm `tags: [string, 7]`), when
   the presentation is outside the
   [source-aware boundary](language/types.md#source-aware-presentation-boundary) (such as a
-  tagged scalar continued across lines anywhere in the document), or when the
+  decorated mapping key on a separate line), or when the
   authored text does not decode to the parsed value. `value_span` is then the
   rejected value when that can still be located, and `None` otherwise. The
-  `error` is always returned; a missing location never hides it.
+  `error` is always returned; a missing location never hides it. A failure in
+  an aliased value points to the alias token, including when the value itself
+  is a sequence or mapping.
 - **A successful semantic parse whose source cannot be projected** returns
   the projection error at the root path with no ranges.
 

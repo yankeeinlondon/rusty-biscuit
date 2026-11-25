@@ -387,9 +387,13 @@ classifies a `yaml-schema` the same way.
 
 ### Categories
 
-Every envelope may also declare a `categories:` list beside `types:`. Each
-entry is a name, optionally followed by `-> description`; a description may
-span lines. Documentation shows categories in list order.
+A `categories:` list beside `types:` names the groups that `category(X)`
+constraints may use. The informal, `kind: schema`, and `kind: yaml-schema`
+envelopes may declare one; a callable catalog (`kind: expression-schema` or
+`kind: mutation-schema`) must, as described in
+[Callable catalogs](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema).
+Each entry is a name, optionally followed by `-> description`; a description
+may span lines. Documentation shows categories in list order.
 
 ```yaml
 kind: schema
@@ -409,13 +413,17 @@ types:
 ```
 
 When a file declares `categories:`, every `category(X)` in its `types` must
-name a listed category, compared exactly (`math` is not `Math`). Without the
-list any name is accepted; `categories: null` is the same as no list, and an
-empty `categories: []` is rejected. A blank name and a repeated name are
-schema-load errors naming the entry, such as `categories[1]`. `categories`
-must be a list (a single string is not wrapped into one); a number entry is
-read as its text, so `- 5` is the category `5`, while a `null` or mapping
-entry is rejected.
+name a listed category, compared exactly (`math` is not `Math`). In every
+envelope an empty `categories: []` is rejected, a blank name and a repeated
+name are schema-load errors naming the entry, such as `categories[1]`, and
+`categories` must be a list (a single string is not wrapped into one).
+
+The optional envelopes are lenient about the rest: without the list any
+category name is accepted, `categories: null` is the same as no list, and a
+number entry is read as its text, so `- 5` is the category `5`, while a
+`null` or mapping entry is rejected. A callable catalog is admitted strictly
+instead: omitting `categories`, writing `categories: null`, or listing a
+number entry is refused, and every callable must name a listed category.
 
 ### Whole-File References and Named Imports
 
@@ -458,7 +466,7 @@ description: Text helpers.
 categories:
     - Text -> Transform text.
 types:
-    Label: string(min(1))
+    Label: string(min(1)) # Require a nonempty label.
     project_slug:
         - |-
             function(
