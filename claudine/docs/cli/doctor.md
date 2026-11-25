@@ -405,6 +405,10 @@ binary would publish:
 | A path doctor would repair is a symbolic link or junction | `error`, repaired by hand |
 | The `register` edit the repair needs reaches an inline list or root mapping, or an entry or list with an anchor, alias, or tag | the finding's own severity, repaired by hand (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
 
+When a changed manifest names a catalog that fails despite matching digests,
+the report gives the file and coordinates of the first refusal. A catalog
+conflict also gives the location of the other declaration.
+
 A leftover entry for the retired manifest is easy to miss: deleting the old
 files by hand after upgrading leaves this list behind, and Darkmatter warns
 about the entry each time it loads its configuration:

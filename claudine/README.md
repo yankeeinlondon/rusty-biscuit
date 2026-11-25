@@ -308,7 +308,8 @@ Run `claudine doctor` when something does not work as expected. It checks
 your configuration files, the schemas Claudine registers with Darkmatter,
 the permissions handoff, speech, and whether `claudine` is on your `PATH`,
 and prints a remedy for every problem (exit status `1` while an error
-remains). `claudine doctor --fix` repairs the registration (upgrading older manifest
+remains). Catalog conflicts include the positions of both declarations.
+`claudine doctor --fix` repairs the registration (upgrading older manifest
 versions in place and restoring missing or modified files) and the
 permissions handoff, and `--json` prints the report for scripts. See
 [`claudine doctor`](./docs/cli/doctor.md).

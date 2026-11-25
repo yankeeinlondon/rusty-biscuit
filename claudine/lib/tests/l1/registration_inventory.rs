@@ -1,5 +1,5 @@
 //! Claudine's registration inventory (`claudine/registration/`), installed
-//! as a format 2 `darkmatter-host` bundle in a temporary home and judged
+//! as a format 3 `darkmatter-host` bundle in a temporary home and judged
 //! through Darkmatter's registered-host validation: which trigger each
 //! document selects, the inline composition's `prompt`/`sections` union, the
 //! sequence triggers, the formal `kind: sequence` YAML kind, and the

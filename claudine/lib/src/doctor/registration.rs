@@ -149,16 +149,21 @@ fn disk_findings(installation: &Installation) -> Vec<Finding> {
                         format!("the manifest uses unsupported host registration format version {version} and Darkmatter refuses it"),
                     )
                     .remedy("update Darkmatter and Claudine, then republish the registration"),
-                    Some(ManifestLoad::Refused { at }) => {
-                        let finding = Finding::new(
+                    Some(ManifestLoad::Refused { at, position, related }) => {
+                        let mut finding = Finding::new(
                             Severity::Error,
                             Scope::User,
                             "the manifest differs from the one this Claudine publishes and Darkmatter refuses the bundle it lists as Claudine's registration",
                         );
-                        match at {
-                            Some(at) => finding.note(format!("Darkmatter's first refusal is in {}", at.display())),
-                            None => finding,
+                        if let Some(at) = at {
+                            let suffix = position.map(|(line, column)| format!(":{line}:{column}")).unwrap_or_default();
+                            finding = finding.note(format!("Darkmatter's first refusal is in {}{suffix}", at.display()));
                         }
+                        for entry in related {
+                            let suffix = entry.line.zip(entry.column).map(|(line, column)| format!(":{line}:{column}")).unwrap_or_default();
+                            finding = finding.note(format!("the conflicting declaration is in {}{suffix}", entry.file.display()));
+                        }
+                        finding
                     }
                     None => Finding::new(
                         Severity::Warn,

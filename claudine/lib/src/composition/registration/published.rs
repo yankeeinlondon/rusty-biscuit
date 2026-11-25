@@ -232,6 +232,7 @@ impl RegistrationInventory {
                 line: None,
                 column: None,
                 line_prefix: None,
+                related: Vec::new(),
                 member: None,
                 label: None,
                 unsupported_format: None,

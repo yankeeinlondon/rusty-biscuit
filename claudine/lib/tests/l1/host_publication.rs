@@ -1,4 +1,4 @@
-//! Claudine publishes its format 2 `darkmatter-host` registration at fixed
+//! Claudine publishes its format 3 `darkmatter-host` registration at fixed
 //! paths (`claudine::composition::registration`): every publish is judged by
 //! Darkmatter's own verifying reader (`bundle::load_snapshot`) and its
 //! registration loader, across no-op republishes, interruptions, cooperating
@@ -141,7 +141,7 @@ fn publish_interrupted(home: &Path, inventory: &RegistrationInventory, stop_at: 
 }
 
 #[test]
-fn host_publication_fresh_publish_loads_as_a_format_2_host_with_no_warnings() {
+fn host_publication_fresh_publish_loads_as_a_format_3_host_with_no_warnings() {
     let home = Home::new();
     let inventory = RegistrationInventory::claudine();
 
@@ -155,6 +155,8 @@ fn host_publication_fresh_publish_loads_as_a_format_2_host_with_no_warnings() {
         let installed = std::fs::read(home.output().join(file.path())).unwrap();
         assert!(installed == file.bytes(), "{} is installed byte for byte", file.path());
     }
+    let manifest: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&home.manifest_bytes()).unwrap();
+    assert_eq!(manifest["format_version"], serde_yaml_ng::Value::from(3));
     let snapshot = home.read().expect("the bundle verifies");
     assert_eq!(snapshot.host(), "claudine");
     let schemas: Vec<&str> =
@@ -566,9 +568,8 @@ fn host_publication_a_valid_previous_manifest_retires_even_when_old_member_bytes
     }
 }
 
-/// Every cell is one edit of a valid previous manifest that Darkmatter's
-/// format 2 admission refuses (or that names a file Claudine never
-/// publishes); none may authorize a removal.
+/// Every cell edits a valid format 3 manifest. The edited manifest fails
+/// admission for cleanup or names a file outside the publisher's inventory.
 #[test]
 fn host_publication_a_previous_manifest_that_fails_admission_retires_nothing() {
     let zeros = "0".repeat(64);

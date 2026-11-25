@@ -99,7 +99,7 @@ fn setup_replaces_a_retired_entry_whose_manifest_is_gone_and_a_second_run_change
     );
     assert!(stderr.contains(MANIFEST_REFERENCE) && stderr.contains(LEGACY_MANIFEST_REFERENCE), "{stderr}");
     assert_eq!(read(&fixture.home().join(".claudine/config.yaml")), CLAUDINE_CONFIG, "settings are kept byte for byte");
-    let manifest = std::fs::read(manifest_path(fixture.home())).expect("the format 2 manifest is published");
+    let manifest = std::fs::read(manifest_path(fixture.home())).expect("the format 3 manifest is published");
     assert_eq!(manifest, RegistrationInventory::claudine().manifest().bytes());
     let repaired = snapshot(fixture.home());
 

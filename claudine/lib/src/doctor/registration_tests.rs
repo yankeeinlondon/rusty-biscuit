@@ -12,7 +12,7 @@ use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 
 use super::super::{CheckDescriptor, DoctorRow, Environment, Severity, file_checks, native_path, run_with};
 use super::{check_registration, repair_registration};
-use crate::composition::registration::{PublishedFile, RegistrationInventory, publish};
+use crate::composition::registration::{FileKind, PublishedFile, RegistrationInventory, publish};
 
 /// The `register` entry setup writes, spelled out: the published-tree
 /// locators are kept inside the registration module.
@@ -205,6 +205,31 @@ fn a_changed_manifest_darkmatter_still_loads_is_a_warning_and_one_it_refuses_an_
     assert_row(&fixture.check(), Severity::Error, true, "Darkmatter refuses the bundle it lists as Claudine's registration");
 
     assert_repaired(&fixture, &fixture.fix());
+}
+
+#[test]
+fn a_verified_catalog_conflict_reports_both_declarations_in_doctor() {
+    let fixture = Fixture::set_up();
+    let path = "schemas/project.yaml";
+    let companion = "schemas/project.facts.json";
+    let catalog = "kind: expression-schema\ncategories:\n    - Project -> First.\n    - Project -> Second.\ntypes:\n    project_label: function(parameters(void); returns(string); category(Project))\n";
+    let facts = serde_json::json!({
+        "catalog_hash": biscuit_hash::blake3_hash(catalog),
+        "format_version": 1,
+        "functions": {}
+    }).to_string();
+    let altered = RegistrationInventory::claudine().clone()
+        .with_member(PublishedFile::new(path, FileKind::ExpressionSchema, None::<&str>, catalog.as_bytes()))
+        .with_member(PublishedFile::new(companion, FileKind::ExpressionFacts, None::<&str>, facts.into_bytes()));
+    for member in [path, companion, "manifest.yaml"] {
+        let file = altered.file(member).expect("member is published");
+        std::fs::write(fixture.root().join(native_path(member)), file.bytes()).unwrap();
+    }
+
+    let row = assert_refused_with_correct_digests(&fixture, path);
+    let location = fixture.root().join(native_path(path));
+    assert!(row.detail.contains(&format!("Darkmatter's first refusal is in {}:4:7", location.display())), "{row:#?}");
+    assert!(row.detail.contains(&format!("the conflicting declaration is in {}:3:7", location.display())), "{row:#?}");
 }
 
 // ---------------------------------------------------------------- edited bundles
@@ -1252,4 +1277,73 @@ $schema:
     let context = fixture.environment().context().unwrap().clone();
     let profile = load_installed_profile(&fixture.root(), &context);
     assert_eq!(profile.functions().len(), 1);
+}
+
+#[rstest::rstest]
+#[case::written("        - 'STRING'\n        - 'NUMBER'", None)]
+#[case::aliased("        - &first 'STRING'\n        - *number", None)]
+#[case::written_duplicate("        - 'STRING'\n        - 'STRING'", Some((12, 12)))]
+#[case::anchored_duplicate("        - &first 'STRING'\n        - 'STRING'", Some((19, 12)))]
+#[case::aliased_duplicate("        - &first 'STRING'\n        - *first", Some((19, 11)))]
+fn doctor_and_embedded_inventory_use_the_same_aliased_overload_judgment(
+    #[case] arms: &str,
+    #[case] conflict: Option<(usize, usize)>,
+) {
+    use std::borrow::Cow;
+    use std::sync::Arc;
+
+    use darkmatter::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
+
+    let path = "schemas/project.yaml";
+    let companion = "schemas/project.facts.json";
+    let string = "function(parameters(x: string); returns(string); category(Project))";
+    let number = "function(parameters(x: number); returns(string); category(Project))";
+    let source = |arms: &str| {
+        format!("kind: expression-schema\ncategories: [Project]\ndescription: &number '{number}'\ntypes:\n    project_label:\n{arms}\n")
+    };
+    let written = source(&format!("        - '{string}'\n        - '{number}'"));
+    let catalog = HostFunctionCatalog::load(&written, path).unwrap();
+    let facts = HostFunctions::builder(catalog)
+        .function("project_label", &[], |registration| registration, Arc::new(|_| Ok(serde_json::json!("label"))))
+        .build().unwrap().facts_artifact();
+    let official = RegistrationInventory::claudine();
+    let lifecycle = official.file("globals.lifecycle.json").unwrap().bytes();
+    let fixture = Fixture::set_up();
+    let location = fixture.root().join(native_path(path));
+
+    let catalog = source(&arms.replace("STRING", string).replace("NUMBER", number));
+    let facts = facts.replace(&biscuit_hash::blake3_hash(&written), &biscuit_hash::blake3_hash(&catalog));
+    let mut sources: Vec<_> = official.members().filter(|member| member.path().ends_with(".yaml"))
+        .map(|member| (Cow::Owned(member.path().to_string()), Cow::Owned(member.bytes().to_vec())))
+        .collect();
+    sources.push((Cow::Borrowed(path), Cow::Owned(catalog.as_bytes().to_vec())));
+    let inventory = RegistrationInventory::from_embedded_sources(
+        official.version(),
+        sources,
+        lifecycle.to_vec(),
+        [(Cow::Borrowed(companion), Cow::Owned(facts.as_bytes().to_vec()))],
+    );
+    if let Some((first, second)) = conflict {
+        let Err(pass) = inventory else { panic!("{catalog}") };
+        let [refusal] = pass.as_slice() else { panic!("{pass:#?}") };
+        assert!(refusal.message.contains("same binding contract"), "{refusal:#?}");
+        assert_eq!(refusal.line.zip(refusal.column), Some((7, second)));
+        let [note] = refusal.related.as_slice() else { panic!("{refusal:#?}") };
+        assert_eq!(note.file, refusal.file);
+        assert_eq!(note.line.zip(note.column), Some((6, first)));
+
+        let altered = official.clone()
+            .with_member(PublishedFile::new(path, FileKind::ExpressionSchema, None::<&str>, catalog.into_bytes()))
+            .with_member(PublishedFile::new(companion, FileKind::ExpressionFacts, None::<&str>, facts.into_bytes()));
+        for member in [path, companion, "manifest.yaml"] {
+            std::fs::write(fixture.root().join(native_path(member)), altered.file(member).unwrap().bytes()).unwrap();
+        }
+        let row = assert_refused_with_correct_digests(&fixture, path);
+        assert!(row.detail.contains(&format!("Darkmatter's first refusal is in {}:7:{second}", location.display())), "{row:#?}");
+        assert!(row.detail.contains(&format!("the conflicting declaration is in {}:6:{first}", location.display())), "{row:#?}");
+    } else {
+        let inventory = inventory.unwrap_or_else(|error| panic!("{catalog}: {error:#?}"));
+        fixture.publish(&inventory);
+        assert_row(&fixture.check(), Severity::Warn, true, "Darkmatter still loads the bundle it lists as Claudine's registration");
+    }
 }

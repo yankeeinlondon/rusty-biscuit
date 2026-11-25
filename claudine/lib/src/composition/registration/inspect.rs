@@ -17,7 +17,7 @@ use darkmatter::config::load::{ConfigFile, Registration};
 use darkmatter::config::schema::ConfigScope as DarkmatterScope;
 use darkmatter::config::write::TargetChange;
 use darkmatter::yaml_edit::{YamlEditError, YamlEditErrorKind};
-use darkmatter::config::registration::{bundle, load_verified, md_owned_names};
+use darkmatter::config::registration::{RegistrationRelated, bundle, load_verified, md_owned_names};
 
 use super::legacy::legacy_plan;
 use super::published::{blake3_hex, portable_path};
@@ -95,9 +95,13 @@ pub(crate) enum ManifestLoad {
     /// The installed manifest declares a format version this Darkmatter does
     /// not load (1, 2, or a later version).
     UnsupportedFormat { version: i128 },
-    /// `at` is the file Darkmatter's first refusal is located in, when that
-    /// is not the manifest.
-    Refused { at: Option<PathBuf> },
+    /// Darkmatter's first refusal and the other declarations it relates.
+    /// A manifest-level refusal with no position needs no separate file.
+    Refused {
+        at: Option<PathBuf>,
+        position: Option<(usize, usize)>,
+        related: Vec<RegistrationRelated>,
+    },
 }
 
 /// An entry of the output root that is not the inventory's.
@@ -526,7 +530,11 @@ fn manifest_load(
     admitted: Result<bundle::AdmittedManifest, Box<bundle::SnapshotRefusal>>,
     context: &FileResolutionContext,
 ) -> ManifestLoad {
-    let refused = |at: &Path| ManifestLoad::Refused { at: (at != path).then(|| at.to_path_buf()) };
+    let refused = |at: &Path| ManifestLoad::Refused {
+        at: (at != path).then(|| at.to_path_buf()),
+        position: None,
+        related: Vec::new(),
+    };
     let admitted = match admitted {
         Ok(admitted) => admitted,
         Err(refusal) => {
@@ -560,7 +568,14 @@ fn manifest_load(
     };
     match load_verified(snapshot, context, md_owned_names()) {
         Ok(_) => ManifestLoad::Loads,
-        Err(refusals) => refused(refusals.first().map_or(path, |refusal| refusal.file.as_path())),
+        Err(refusals) => match refusals.into_iter().next() {
+            Some(refusal) => ManifestLoad::Refused {
+                at: (refusal.file != path || refusal.line.is_some()).then_some(refusal.file),
+                position: refusal.line.zip(refusal.column),
+                related: refusal.related,
+            },
+            None => refused(path),
+        },
     }
 }
 
