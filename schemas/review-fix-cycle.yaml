@@ -1,8 +1,8 @@
 kind: schema
 description: the key Frontmatter properties that will be used through the review/fix cycle of an implementation
 $schema:
-    - "{ ...rfc, ...pipeline }"
-    - "{ ...rfc }"
+    - $extends: [rfc, pipeline]
+    - $extends: rfc
 types:
     finding:
         # the old unstructured format
@@ -19,7 +19,7 @@ types:
         plan: file(required) -> the plan used during implementation
         implementation-log: file(required) -> the log of what happened during the implementation of the spec
         blast-radius:
-            $description: The scope of change for this spec's implementation
+            # The scope of change for this spec's implementation.
             packages: string[] -> the packages which had source code changed in them (or config files which impacted the compilation of the package).
             mutated-symbols: string[](default([])) -> those symbols in the existing code base
             new-symbols: string[](default([])) -> new symbols created during this implementation
@@ -36,5 +36,14 @@ types:
         ready: boolean(required) -> whether or not the spec is deemed "production ready"
         last-review: file -> the last review that
         last-review-findings: finding[] -> the _findings_ discovered in the last review cycle (if any).
+    # a pipeline is a grouping of specs that will be chained together to achieve
+    # some larger goal.
+    #
+    # Note: we've done this sort of thing before but as we move forward there will
+    # be some formalism around pipelines
     pipeline:
         name: string(required) -> a short name for the pipeline of specs which have been grouped together
+        next: string -> the next spec after this one in the pipeline
+        previous: string -> the previous spec in the pipeline
+        depends-on: string[] -> the specs that this spec depends on having completed before it
+        description: string -> an optional summary describing what the pipeline is about

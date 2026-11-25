@@ -1,0 +1,23 @@
+kind: schema
+description: the schema for a _specification_ document
+$schema:
+    plan: file -> the plan for this specification (if it has been created)
+    reviewed: boolean(required; default(false)) -> whether this specification has been reviewed yet by another agent
+    reviewed-by: string -> the "${agent}/${model}" which reviewed this specification
+    reviewed-on: date -> the date this
+    clarified: boolean(required; default(false)) -> whether this specification has gone through the more rigorous _clarification_ process (versus a standard review cycle)
+    implemented: boolean(required; default(false)) -> a boolean flag which indicates whether this specification has been implemented or not
+    human-review: |-
+        boolean -> Whether a human review is required now to settle open rulings.
+
+        Every effort is made to kick off the implementation with a very well defined approach and no open rulings. This is done to try to ensure that during implementation and the review/fix cycle there is not need for human involvement.
+
+        **Where can `human-review` show up?**
+
+        - the most likely time is after a normal _inline-review_ of the specification file. This is done as a non-interactive session and while we don't intend to open up new questions it does happen fairly often
+
+            > **Note:** the "clarification" process, which is a more rigorous review process than the standard inline review, is an _interactive_ session so it just builds in checks at the end to make sure there are no open rulings left.
+
+        - it is possible (but very unlikely) that after the _planning_ process something comes up. We try to avoid this and it rarely happens but the real world is funny.
+        - during implementation we STRONGLY discourage human involvement; instead the preference is for the agent to make any decisions they may have had to make and capture those decisions so a human can look them over at the end
+        - at the very beginning of the review/fix cycle is another area that **human review** may be necessary. Typically it is not but if certain functionality was blocked or deferred then it's likely human involvement will be necessary to resolve this.
