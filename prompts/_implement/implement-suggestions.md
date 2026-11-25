@@ -2,17 +2,15 @@
 $schema:
     spec: file(required; match(**/*spec*.md)) -> the specification file defining the target functionality
     design: file(match(**/*design*.md)) -> optionally, a design file which compliments the spec file with more details on the technical design
-    review: file -> the review file who's findings/suggestions we will implementing
+    review: file -> the review file who's findings/suggestions we will implementing; the latest review beside the spec
     iteration: number(required;default(1)) -> what _iteration_ of the review/implement cycle that we are on
-    log: file -> the log file we're writing to while working on the implementation
     retry: string -> if you're retrying this prompt after a failure then pass in what you know about prior progress
 description: |-
     Implements the findings in a review which was conducted to determine the drift between
     what was actually implemented versus the specification that was being targetted in that
     implementation.
-iteration: "{{ frontmatter(spec, 'review-iterations') ? frontmatter(spec, 'review-iterations') || 1 : 1 }}"
-review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
-log: {{ dirname(spec) + '/log.md' }}
+review: "{{ file_exists(dirname(spec) + '/review-1.md') ? find_last_index(dirname(spec) + '/review-1.md') : null }}"
+iteration: "{{ review ? file_index(review) : 1 }}"
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
@@ -20,7 +18,9 @@ yolo: true
 feature-or-fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
-    - ensure_file: '{{log}}'
+    - when: "!review"
+      then:
+          - error: "`{{parent_dir(spec)}}` has no review to repair: no `review-1.md` exists beside the spec"
     - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human-in-the-loop')) && frontmatter(review, 'human-resolved') != true"
       then:
           - warn: "{{basename(review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings before repairing it"
@@ -39,7 +39,7 @@ success:
           - effect: bong
     - when: "ready != true && frontmatter(review, 'implemented') != true"
       then:
-          - warn: "review #{{ file_index(review) }} repair of `{{ parent_dir(review) }}` ended with incomplete findings; see the disposition ledger in {{log}}"
+          - warn: "review #{{ file_index(review) }} repair of `{{ parent_dir(review) }}` ended with incomplete findings; see the finding ledger in {{review}}"
 failure:
     message: "💥 implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
     effect: sad-trombone
@@ -52,7 +52,6 @@ failure:
 
 > - **{{capitalize(feature-or-fix)}}:** `{{parent_dir(review)}}`
 > - **Iteration:** {{iteration}}
-> - **Log File:** {{log}}
 
 ## Key Documents
 
@@ -88,24 +87,27 @@ failure:
 The review file above has completed in the {{ctx.area}} package area with a number of findings/suggestions for implementation.
 ::end-block
 
-### Start with Logging
+::block when="!ready"
+### Record the repair in the review
 
-In order to track progress of this task we are using the '{{log}}' as a log file:
+The review file ({{review}}) is the only record of this repair. Do not write to
+`implementation-log.md` or `log.md`, and do not read them: the plan's
+implementation is recorded there, and everything this repair needs is in the
+review and the spec.
 
-- you should immediately create a section for your part of this log file:
-    - add an H2 header section called `## Implementation of Review Findings #{{iteration}}`
-    - then timestamp it with: `> **started at:** {{ctx.now}}`
-- write progress as Markdown unordered list items; use a table for the finding ledger
-    - if you have structured sub-items for something then you can and should use a nested unordered list to represent this
-- now start this unordered list by mentioning some important metadata for this implementation:
-    - `- this implementation is attempting to implement _all_ of the review findings found in '{{ review }}'`
-    - `- this is iteration {{iteration}} of the review-to-implement cycle `
-    ::block when="retry"
-    - `- we are _retrying_ iteration #{{iteration}} because in our last attempt the agent failed before achieving it's objectives`
-        - `- the only context we have about where we got to in this previous attempt is:\n\t{{retry}}`
-        - `- this does mean that some of the findings from the review are already likely implemented (but not all)`
-        - verify prior repairs before changing them and record their evidence as `already fixed`; an earlier completion claim is insufficient
-    ::end-block
+- add an H2 section `## Repair` at the end of the review, after any
+  `## Human rulings`, and timestamp it with `> **started at:** {{ctx.now}}`
+- everything you record goes in that section; leave the reviewer's own text
+  above it unchanged
+::block when="retry"
+- a `## Repair` section already exists from an attempt that failed before it
+  finished; keep it and continue in it. What is known about that attempt:
+
+    {{retry}}
+
+- verify its repairs before changing them and record their evidence as
+  `already fixed`; an earlier completion claim is insufficient
+::end-block
 
 > **Important:**
 > 
@@ -113,6 +115,7 @@ In order to track progress of this task we are using the '{{log}}' as a log file
 > - if there is a good reason to create an illustration, represent the diagram with a [Mermaid](https://mermaid.js.org/intro/) code block in your Markdown
 > - use indentation of 8 spaces
 > - be sure to use the Markdown H2/H3 headings recommended so that the document has the right structure
+::end-block
 
 ::block when="ready"
 The review marked the {{feature-or-fix}} **production ready**: a ready review has no findings, so there is nothing to repair. Explain the current state of this review/implement cycle and exit.
@@ -127,7 +130,7 @@ Read the entire review, including frontmatter findings, body findings, instance
 tables, required repairs, recurrence, robustness recommendations, and blockers.
 Set the review's `implemented` flag to `false` before starting repairs so a stale
 claim cannot make an incomplete retry look complete.
-Create a `### Finding Ledger` in this iteration's log section before editing code:
+Create a `### Finding Ledger` in the `## Repair` section before editing code:
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 |---|---|---|---|
@@ -152,19 +155,15 @@ Create a `### Finding Ledger` in this iteration's log section before editing cod
   the remaining work is explicitly blocked. Count parent findings
   separately from instance rows.
 
-From this point on in the task be sure to log progress on the task:
+The ledger is the whole record of the work. Update a row when its outcome is
+known, and put what you discovered or decided in that row's evidence column.
+Do not keep a timestamped progress narrative beside it, and do not restate a
+row's outcome anywhere else in the section.
 
-- indicate when you're _starting_ the work on a review finding: `- starting the work on '{task-name}' at {HH:MM:SS-local-time}`
-    - add sub-bullets for things you've discovered, completed, or were blocked on while working on the task
-- indicate when you've _completed_ the work on a review finding: `- work completed for '{task-name}' at {HH:MM:SS-local-time}`
-
-> **Note:** 
-> 
-> - when employing subagents to do work always inform them about the log file and ask them to update as they do their work
-> - the only exception to asking the subagents to own the logging is if you are running multiple subagents in parallel:
->    - in this case you should ask the subagents to report back to you as the orchestrator when they have a log item to report
->    - this allows you to report back to the caller in a coherent way by grouping the log messages by the various subagents
->    - Note: this does mean you'll need to accumulate the list of log items of any given subagent until it completes so you can log that subagent's log items as one group.
+> **Note:**
+>
+> - a subagent returns the disposition and evidence of each row it worked on to
+>   you, the orchestrator; only you write to the review file
 
 ### Fix the class, not the instance
 
@@ -177,7 +176,7 @@ finding is that sibling. Each such deferral costs a full review/fix cycle.
 
 For every finding, before any code changes:
 
-- name the defect class in the log, in one sentence that does not mention the
+- name the defect class in the finding's parent ledger row, in one sentence that does not mention the
   file the review named (for example: "a load-bearing field's absent, null,
   wrong-type, and invalid-element shapes are coerced to a permissive default")
 - grep for every sibling site: every parser, reader, detector, or projection
@@ -201,7 +200,7 @@ The following are not permitted for anything that is itself a defect against
 the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
 fix it in this cycle, or record it as blocked, unresolved, or disputed
-in the ledger and closing report with the reason. These outcomes do not count
+in the ledger with the reason. These outcomes do not count
 as fixed.
 
 ### Dispute a finding that has no authority
@@ -210,7 +209,7 @@ A high finding must cite its authority: a spec acceptance criterion, decision,
 or sentence it violates, or a regression from the base branch reached by an
 input a real call site, template, fixture, or user produces. When a finding
 cites neither, or its cited authority does not say what the finding claims,
-do not implement it. Record it in the ledger and closing report as
+do not implement it. Record it in the ledger as
 **disputed**, with one sentence naming the authority it lacks; the next review
 must cite that authority or drop the finding.
 
@@ -310,40 +309,43 @@ Now your task is to:
    they did not. A slow test counts as a failure (see "A Slow Test Is a
    Failing Test"). Continue with remaining findings after a blocked repair.
 
-4. Write the closing log entries to the log file ({{log}}):
+4. Close the `## Repair` section with `### Outcome`. Keep it short; the ledger
+   already holds the detail, and Git holds the changed files:
 
-    - use `### Completion Report`; state **complete**, **partial**, or **blocked**
-      and the elapsed duration. Complete requires every finding repaired or
-      independently verified already fixed, or disputed with its missing authority
-      documented, and all required checks passing.
-      Blocked means all remaining work depends on unavailable prerequisites;
-      otherwise an incomplete cycle is partial.
+    - state **complete**, **partial**, or **blocked**, and the elapsed
+      duration. Complete requires every finding repaired or independently
+      verified already fixed, or disputed with its missing authority
+      documented, and all required checks passing. Blocked means all remaining
+      work depends on unavailable prerequisites; otherwise an incomplete cycle
+      is partial.
     - count parent findings: `total = fixed + already fixed + blocked
       + unresolved + disputed`. No parent may remain pending, be counted twice, or be
       reported fixed while any required instance/consumer remains open.
-    - summarize verified repairs and list every open finding/child ID, what
-      remains, its reason, and the next required action. An evaluated finding
-      is not necessarily implemented.
+    - list every open finding/child ID with its next required action; an
+      evaluated finding is not necessarily implemented. Do not repeat rows that
+      are closed.
+    - list the final verification commands and their results
 
     - if host load prevents a legitimate required performance measurement,
-      record the deferral, set `deferred-perf-measurement` to `true` on the log,
-      and create or append to `{{ dirname(spec) + '/deferred-performance.md' }}`
+      record the deferral, set `deferred-perf-measurement` to `true` on the
+      review, and create or append to `{{ dirname(spec) + '/deferred-performance.md' }}`
       with the measurement details, finding ID, and review file ({{review}})
 
-    - list changed files and final verification commands/results, tied to the
-      findings they verify
+5. Write completion metadata to the review's frontmatter ({{review}}) before
+   exiting, including for partial or blocked work:
 
-5. Write completion metadata before exiting, including for partial or blocked work:
-
-    - update the review file's metadata ({{review}}):
-        - set the `log` frontmatter to '{{log}}'
-        - set `implemented` to `true` only for a complete cycle as defined above;
-          otherwise set it to `false` so incomplete work remains selectable
-        - set the `implemented-by` frontmatter to `{{ ctx.agent }}/{{ ctx.model }}`
-        - preserve the reviewer's readiness judgment, findings, and body; your
-          ledger is the repair claim and the next review verifies it independently
-    - update the log file's metadata ({{log}}):
-        - set the `implementation_{{iteration}}` frontmatter to "{{ ctx.now }}"
+    - on each entry of `findings`, set `result` to the parent finding's
+      disposition: `fixed`, `already-fixed`, `blocked`, `unresolved`, or
+      `disputed`. Change nothing else in an entry. An entry written as plain
+      text (a review from before the structured form) is left as it is; its
+      result is in the ledger only
+    - set `implemented` to `true` only for a complete cycle as defined above;
+      otherwise set it to `false` so incomplete work remains selectable
+    - set `implemented-by` to `{{ ctx.agent }}/{{ ctx.model }}`
+    - set `repaired-on` to "{{ ctx.now }}"
+    - preserve the reviewer's readiness judgment, the rest of its frontmatter,
+      and its body above `## Repair`; your ledger is the repair claim and the
+      next review verifies it independently
 
 Your final response must give the cycle outcome, reconciled finding counts,
 verification results, and every remaining finding ID. Use "implementation

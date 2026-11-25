@@ -311,6 +311,21 @@ from one is a defect to fix, not behavior to design around.
   Never rewrite existing feature or fix specs, plans, implementation logs, or
   reviews to match, even active ones; say in the report that in-flight work
   still carries the old form.
+- **A link never climbs two or more levels.** Write a file in the same
+  directory as `./plan.md`, and any more distant file by its path from the
+  repository root (`darkmatter/docs/topics/frontmatter.md`), never
+  `../../docs/topics/frontmatter.md`. Another feature or fix is named by its
+  `{date}-{name}` directory alone, not linked by path (see "Features and
+  Fixes").
+- **Use these terms for file paths** in new docs, skills, specs, comments,
+  and diagnostics. Existing text is not rewritten to match.
+
+    | Term | Meaning | Never write |
+    | --- | --- | --- |
+    | explicit relative path | `./x.md`, `../x.md`: relative to the document that wrote it | |
+    | implicit relative path | `feat/x.md`: nothing in front of it | "bare path", "bare reference" |
+    | launch directory | the directory the command was run in, or the one a library caller names | "request directory", "invoking cwd", "caller's CWD" |
+
 - **Transclusion works only where a document is composed.** Files under
   `prompts/` and the caller skills under `docs/use-skills/` are composed, so
   share content there with `::file`. READMEs and `docs/` pages are read as

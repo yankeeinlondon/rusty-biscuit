@@ -77,8 +77,8 @@ fix +args:
 
     dir="$(dirname "${spec}")"
 
-    # The spec has no `ready` property of its own: readiness is the latest
-    # review's `ready`, and a ready review also sets the spec's `completed`.
+    # Readiness is the latest review's `ready`, which the review prompt copies
+    # to the spec's own `ready`.
     latest_review() {
         local iterations
         iterations="$(md get --output plain "${spec}" review-iterations)" || return 1
@@ -91,8 +91,8 @@ fix +args:
     if [[ -n "${review}" && -f "${review}" ]]; then
         review_ready="$(md get --output plain "${review}" ready)"
     fi
-    completed="$(md get --output plain "${spec}" completed)"
-    if [[ "${review_ready}" == "true" || "${completed}" == "true" ]]; then
+    spec_ready="$(md get --output plain "${spec}" ready)"
+    if [[ "${review_ready}" == "true" || "${spec_ready}" == "true" ]]; then
         echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
         exit 0
     fi

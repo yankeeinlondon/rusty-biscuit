@@ -182,7 +182,7 @@ You will log your implementation progress to: {{log}}
 - the log file already has content from earlier work; keep it and append to it
 - you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
 ::block when="phase > 1"
-- since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
+- do not read the entries of earlier phases: the plan is your guide, and anything an earlier phase needed you to know is in its message below. The log is a record you append to; the one part you may read is a `## Phase {{phase}}` section an earlier, unfinished attempt at this phase left
 ::end-block
 ::end-block
 
