@@ -5,6 +5,9 @@ implementation_3: "2026-11-25T01:35:06+00:00"
 implementation_4: "2026-11-25T02:33:46+00:00"
 implementation_5: "2026-11-25T03:42:27+00:00"
 implementation_6: "2026-11-25T04:20:51+00:00"
+implementation_7: "2026-11-25T04:50:10+00:00"
+implementation_8: "2026-11-25T05:49:49+00:00"
+implementation_9: "2026-11-25T06:59:30+00:00"
 ---
 ## Implementation of Review Findings #1
 
@@ -763,17 +766,299 @@ The iteration 6 completion report said the schema-root decisions now agree acros
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 | --- | --- | --- | --- |
-| R7-F1 | Documents opened through another checkout lose their schema roots | pending | |
-| R7-F1.1 | Reference report and Mermaid graph over body, `prologue:`, `epilogue:` inclusion of a second-checkout note: bare, relative, absolute succeed; missing fails at the child | pending | |
-| R7-F1.2 | `md graph`, `--validate`, `--follow --validate` × three parents: all accept bare and explicit, refuse missing | pending | |
-| R7-F1.3 | Fragment preparation and `::toc-linking`: bare and explicit generate the heading and let the TOC target prepare; missing fails; static fallback kept | pending | |
-| R7-F1.4 | Composition (default and disabled triggers) and `md compose --shell` discovery: accept bare and explicit, missing fails | pending | |
-| R7-F1.5 | Named-type import `entry@types.yaml` from the second checkout: bare and explicit resolve in direct and nested positions; missing fails | pending | |
-| R7-F1.6 | Root trigger selection: default compose of a parent applies the child checkout's trigger (missing `version` for `topic: review`, accepted for `other`); no child error names `parent_only`; disabled-trigger and passive checks pass | pending | |
-| R7-F1.7 | Direct document context and shell completion keep their behavior | pending | |
-| R7-F1.8 | Same-checkout resident child and outside-Git note keep their iteration 5/6 boundary behaviors | pending | |
+| R7-F1 | Documents opened through another checkout lose their schema roots | fixed | Every child row is fixed or clean. Admitted sources in another Git checkout get `SourceDerivation::OwnRepository`, decided once per source at admission. A per-request `SourceRepositories` memo is shared by every consumer. 21 new tests fail with the fix reverted. |
+| R7-F1.1 | Reference report and Mermaid graph over body, `prologue:`, `epilogue:` inclusion of a second-checkout note: bare, relative, absolute succeed; missing fails at the child | fixed | CLI: bare went from exit 1 to 0 for `validate refs` and the Mermaid `graph` on body, prologue and epilogue parents. Relative and absolute: 0. Missing: 1, naming `absent.yaml`. Library tests `second_checkout_{body_inclusion,prologue,epilogue}_uses_the_notes_schema_roots`. CLI tests `second_checkout_refs_of_*`, `second_checkout_mermaid_graph`. |
+| R7-F1.2 | `md graph`, `--validate`, `--follow --validate` × three parents: all accept bare and explicit, refuse missing | fixed | Plain `graph`, `--validate` and `--follow --validate` on all three parents: bare went from 1 to 0, and missing still exits 1. CLI tests `second_checkout_validated_graph`, `second_checkout_followed_graph`. |
+| R7-F1.3 | Fragment preparation and `::toc-linking`: bare and explicit generate the heading and let the TOC target prepare; missing fails; static fallback kept | fixed | `validate refs --fragments`: bare now generates `review-heading` and exits 0 (was 1). Missing: 1. Static heading: 0 in every case. TOC target under `validate refs`, `graph --follow --validate` and compose: bare went from 1 to 0, and missing still exits 1. Library tests `second_checkout_fragment_target_generates_its_heading_from_a_bare_schema`, `second_checkout_toc_target_prepares_with_a_bare_schema`. CLI tests `second_checkout_fragment_target`, `second_checkout_toc_target_compose`. |
+| R7-F1.4 | Composition (default and disabled triggers) and `md compose --shell` discovery: accept bare and explicit, missing fails | fixed | `compose` and `compose --disable schema-triggers` on all three parents, plus `compose --shell`: bare went from 1 to 0, and missing still exits 1. CLI tests `second_checkout_compose`, `second_checkout_compose_without_triggers`, `second_checkout_command_discovery`. The library inclusion tests cover `compose_preflight`. |
+| R7-F1.5 | Named-type import `entry@types.yaml` from the second checkout: bare and explicit resolve in direct and nested positions; missing fails | fixed | `entry@types.yaml` in body refs, the follow-and-validate graph, compose, `--shell`, the fragment and the TOC: bare went from 1 to 0. Explicit: 0. Missing: 1. Direct check unchanged. Library test `second_checkout_note_resolves_a_bare_named_type_import`. CLI test `second_checkout_bare_named_type_import_resolves`. |
+| R7-F1.6 | Root trigger selection: default compose of a parent applies the child checkout's trigger (missing `version` for `topic: review`, accepted for `other`); no child error names `parent_only`; disabled-trigger and passive checks pass | fixed | Parent compose with `topic: review` went from exit 0 to 1, naming `version` and never `parent_only`. `topic: other`: 0. Disabled triggers and refs/graph: 0 for both topics. Library test `second_checkout_note_takes_root_triggers_from_its_own_checkout`. CLI test `second_checkout_compose_applies_the_notes_trigger`. |
+| R7-F1.7 | Direct document context and shell completion keep their behavior | clean | Before/after diff shows no change for direct `schema validate`, `validate refs`, `compose`, `graph --validate` and `clean`. Completion offers the enum values for the resolvable spellings only. Controls `second_checkout_note_checked_directly_resolves_a_bare_schema` and `second_checkout_note_completion_reads_its_bare_schema` pass with and without the fix. `md`'s `document_context` now shares `derive_in_own_repository`. |
+| R7-F1.8 | Same-checkout resident child and outside-Git note keep their iteration 5/6 boundary behaviors | clean | The resident child resolves bare (0). The outside-Git note refuses bare (1) and gets no root triggers. The R5-F3 and iteration 6 library and CLI tests pass with and without the fix. Unit test `admitted_sources_discover_another_repository_once_per_request` checks one discovery per repository and none for the launch checkout. |
 
 ### Progress
 
 - starting the work on 'R7-F1 documents opened through another checkout lose their schema roots' at 04:51:00
         - defect class: a source document admitted across a file boundary is given a context derived from the enclosing request's captured repositories, so a document in a repository the request never captured loses its own repository scope (schema roots, bare lookup, triggers)
+        - delegated to one foreground `rust-developer` subagent; its log items are grouped here
+        - subagent log items:
+                - cause confirmed: `source_file_context` rebuilt a source's context on every call from the request context, using only the `Ordinary` or `TrustedExternal` derivation. The request knew only the launch checkout, so a note in a second checkout had no repository. That turned off bare `$schema`, bare `Name@file` imports and root triggers for it, and also left `&/` references in that note without a repository (`missing-context`)
+                - repair: new `SourceDerivation::OwnRepository(Arc<FileResolutionContext>)`, decided once when a source is admitted (`source_derivation_for`)
+                        - every consumer gets back the same stored context: composition, pre-flight and `--shell` discovery, graph inclusion nodes, TOC and fragment targets, `prepare_schemas`, expression contexts
+                        - the graph and cache identities include it
+                - per-request memo: `SourceRepositories` sits behind an `Arc` on `ComposeRequest` and is shared by `derive` and `map_options`
+                        - it discovers each other repository root once, and each directory outside every repository once
+                        - it starts out knowing the request's own repository status
+                        - it reuses `discover_repository` and `build_with_observation`
+                        - a discovery or build failure keeps the old derivation
+                - one rule shared with the CLI: the new public `compose::derive_in_own_repository` derives a trusted external source from its own context and keeps the launch `@` scope. `md`'s `MdRequest::document_context` now calls it
+                        - the library keeps the request-derived trusted-external derivation for sources outside Git, preserving the iteration 6 behavior
+                - decision: one decision at admission. Rejected alternatives:
+                        - a probe in each validator, which the review ruled out
+                        - replacing the request context for the child, which would have changed request-level `request_cwd` and the containment rules
+                - the optional-context guard forbids `Option<FileResolutionContext>`, so the memo returns `Option<SourceDerivation>`; no allowlist entry was added
+                - sweep of every site that admits a source:
+                        - fixed: `::file`/`prologue:`/`epilogue:` children through `markdown_child_options`, graph `accepted_child_options`/`inclusion_child_options`, `validate_local_path`, `resolve_transclusion_target`, the transclusion resolver, root `assemble`/`local_expression_context`
+                        - clean: pre-flight `as_markdown` (clones the derivation), `nested.rs` root source, `with_source_file` roots, `schemas/detect.rs`, the slot evaluator (derives from the child's context)
+                        - not affected: lifecycle executor, registration and configuration loaders (root or config files)
+                        - clean: DMLS (never builds a `ComposeRequest`; keeps its own workspace contexts)
+                        - Claudine compiles and its nested compositions inherit the fix. Its own top-level `derive_request_context_for_source` is a separate builder and was left unchanged
+                - tests:
+                        - 8 library tests in `lib/tests/l1/reference_bare_schema_roots.rs`, using the `TwoCheckouts` fixture with a `.git` written directly and no `git` process
+                        - 14 CLI tests in `cli/tests/l1/reference_bare_schema.rs`, generated per row with `macro_rules!`
+                        - 1 unit test, `admitted_sources_discover_another_repository_once_per_request`
+                        - slowest 0.32 s
+                        - revert check: with the own-repository branch short-circuited, all 21 tests that prove the fix fail, and the 2 direct-open controls plus all R5-F3 and iteration 6 tests pass
+                - docs and skills: `docs/topics/schemas/definition.md`, `docs/cli/validate.md`, `docs/cli/graph.md`, `docs/topics/compose-requests.md` (admission rule with a Mermaid diagram), `docs/topics/file-referencing.md` (`&` and `@` in a second-checkout document), `.claude/skills/darkmatter/{SKILL.md,requests.md,testing.md}`
+                        - the skill now names source admission as the one place a request discovers another repository
+                - by-hand reproduction with an isolated `HOME`, two checkouts and `md` built before and after the change, covering every review row (outputs in `/tmp/r7f1/before.txt` and `/tmp/r7f1/after.txt`)
+        - orchestrator review: inspected the `request.rs`/`options.rs` diff, the memo's key and invalidation, and the shared derivation. The caller skills make no claim about this boundary, so nothing needs publishing
+- work completed for 'R7-F1 documents opened through another checkout lose their schema roots' at 05:40:32
+
+### Completion Report
+
+- **outcome: complete** (elapsed 2026-11-25T04:50:10+00:00 to 05:41 UTC, about 51 minutes)
+- parent findings: total 1 = fixed 1 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: 8 = fixed 6 (R7-F1.1–.6) + clean 2 (R7-F1.7, R7-F1.8)
+- open findings: none
+- shared rule:
+        - an admitted source in a sibling checkout uses that checkout's Git repository through `ComposeRequest`'s `SourceRepositories` and `SourceDerivation::OwnRepository`. A nested checkout can still be treated as part of the enclosing repository
+        - a directly opened `md` document in a sibling checkout also uses `derive_in_own_repository`
+        - bare lookup and trigger discovery read `source_file_resolution_context().repository_root()`. It names the source's own checkout in the sibling fixture and can name an enclosing checkout in the nested case
+        - a source outside Git keeps the request-derived trusted-external derivation, so the outside-Git boundary from iteration 6 legitimately differs: it has no repository and therefore no roots
+- earlier cases in the same class rerun: the R5-F3 in-repository and R6-F1 outside-Git library and CLI tests pass alongside the new probes
+- cross-OS:
+        - Windows passed: `just cross-check darkmatter --os windows …` (80 of 80 focused tests) and `just cross-check darkmatter-cli --os windows …` (52 of 52), filtered to `reference_bare_schema`, `context::request::tests`, `external`, `cross_repo` and `entry_point_parity`
+        - macOS did not run: the attempt on `bolt` stopped before testing with `just: command not found` on the remote host. That is a rig problem, not a test failure, and CI runs macOS on pull requests
+- unrelated working-tree changes not made by this cycle: `claudine/features/2026-11-18-ergonomic-sequences/{plan,spec}.md`, `prompts/fix.yaml`
+- changed files (all for R7-F1):
+        - source: `darkmatter/lib/src/markdown/compose/context/{options,request}.rs`, `darkmatter/lib/src/markdown/compose/{mod.rs,pipeline/mod.rs,preflight/collect.rs,transclusion/resolver.rs}`, `darkmatter/lib/src/markdown/reference/mod.rs`, `darkmatter/cli/src/request.rs`
+        - tests: `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs`, `darkmatter/cli/tests/l1/reference_bare_schema.rs`, plus the unit test in `request.rs`
+        - docs and skills: `darkmatter/docs/topics/schemas/definition.md`, `darkmatter/docs/cli/{validate,graph}.md`, `darkmatter/docs/topics/{compose-requests,file-referencing}.md`, `.claude/skills/darkmatter/{SKILL,requests,testing}.md`
+        - records: this log, the `review-7.md` frontmatter
+- final verification (run by the orchestrator after all changes, with no subagent running):
+        - `darkmatter` `just test`: 18,076 passed, 10 skipped, none at or above 5 s (R7-F1, plus regressions for every earlier finding)
+        - `darkmatter` `just lint`: exit 0
+        - `just check-tier-coverage darkmatter`: 0 stranded
+        - `claudine` `just test`: 13,077 passed, 16 skipped, none at or above 5 s (Claudine consumes nested composition and `derive_in_own_repository`'s module)
+
+### Review 8 record correction (2026-11-25)
+
+The iteration 7 completion report said every admitted source is judged against its own Git repository. All eight sibling-checkout and control rows still pass. The rule is narrower for nested Git checkouts. With the worktree-built `md`, I opened `app/vendor/review.md` from `app` and from inside `vendor`. Bare schema lookup failed from `app` and passed from `vendor`. From a separate launch checkout, including `notes/seed.md` before `notes/vendor/review.md` also made the bare lookup fail. Reversing the order restored it. With an explicit schema path the same order change switched the reported missing trigger field from `parent_only` to `version`. The completion report now limits its statement to the verified sibling checkouts. [Review 8 finding](review-8.md#r8-f1-medium-nested-git-checkouts-can-inherit-the-enclosing-checkouts-schemas)
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-11-25T05:49:49+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- the review's `implemented` flag was already `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R8-F1 | Nested Git checkouts can inherit the enclosing checkout's schemas | fixed | All 11 listed child rows fixed or clean. The shared nearest-checkout rule replaces containment in library admission and CLI `document_context`. 36 of the new tests fail with only `lib/src` and `cli/src` reverted. |
+| R8-F1.1 | Direct CLI admission and schema preparation (`schema validate`, `clean`, `compose`, `validate refs`, `graph --validate`) accept every resolvable spelling from either launch directory; missing fails | fixed | CLI `nested_checkout_{schema_validate,compose,refs,validated_graph,clean}_from_the_enclosing_checkout` plus `*_from_the_component` controls and `foreign_nested_checkout_schema_validate`: bare, relative and absolute exit 0, missing exits 1 naming `absent.yaml`. Library `nested_checkout_note_opened_directly_from_the_launch_checkout_resolves_a_bare_schema`. Orchestrator reran the bare, relative and missing cases by hand from `app` and `vendor`. |
+| R8-F1.2 | Reference report and graph inclusion nodes agree for bare and explicit paths in both trees and both visit orders; missing fails | fixed | Library `nested_checkout_inclusion_tests!` (9 tests: body, prologue and epilogue in the launch tree; the foreign note alone, before and after the seed). CLI `nested_checkout_refs_of_{a_body_inclusion,a_prologue,an_epilogue}`, `nested_checkout_followed_graph`, `foreign_nested_checkout_refs_{after,before}_the_seed`. |
+| R8-F1.3 | Fragment and TOC preparation generate the heading for every resolvable spelling, including after the seed; missing and static outcomes kept | fixed | Library `nested_checkout_fragment_and_toc_targets_generate_their_heading_from_a_bare_schema` (static-fragment control kept). CLI `nested_checkout_{fragment_target,toc_target_compose}`, `foreign_nested_checkout_{fragment,toc}_after_the_seed`. |
+| R8-F1.4 | Composition and report-only shell discovery resolve the schema the same way regardless of visit order; disabled triggers keep bare lookup | fixed | The library macro tests run compose with triggers on and off, plus pre-flight. CLI `nested_checkout_compose_of_a_body_inclusion`, `nested_checkout_compose_without_triggers`, `nested_checkout_command_discovery`, `foreign_nested_checkout_compose_{after,before}_the_seed`, `foreign_nested_checkout_command_discovery_after_the_seed`. |
+| R8-F1.5 | Named-type imports use the same component root as a standalone schema reference | fixed | Library `nested_checkout_note_resolves_a_bare_named_type_import`. CLI `nested_checkout_import_tests!` (four tests: direct, refs, compose, and after the seed). |
+| R8-F1.6 | Trigger discovery and its consumers use the component's trigger (`version`), never the enclosing `parent_only`; unmatched, disabled, passive outcomes kept | fixed | Library `nested_checkout_{matching_note_takes_the,…_trigger_is_satisfied_by_version,…_other_topic_matches_no_trigger}` for the launch and foreign components (six tests, split from one for Windows speed): `topic: review` is refused for `version`, and adding `version` composes, so `parent_only` never applies. `topic: other`, disabled triggers and the passive check pass. CLI `nested_checkout_trigger_tests!` (five tests: direct compose, `schema validate`, the body inclusion, and after and before the seed) asserts `version` and never `parent_only`. |
+| R8-F1.7 | Bash completion and schema detection see the component root from either launch directory | fixed | Completion (`args/path_completion.rs`) and `schema detect` (`commands/schema/detect.rs`) go through `document_context`. CLI `nested_checkout_completion_reads_the_component_schema` offers the value for the three resolvable spellings only. `nested_checkout_schema_detect_sees_the_component_root` infers `&marker.md` as `file` and `&absent.md` as `string`. |
+| R8-F1.8 | Schema-aware CLI editing (`md set`) and render preparation use the same source repository as direct validation | fixed | `md set` goes through `edit_schemas` → `document_context`, covered by CLI `nested_checkout_set_from_the_{enclosing_checkout,component}`. Render: the orchestrator ran `md render … style.max-width=60` by hand from `app` and from `vendor`. Bare and relative passed and missing failed with `$schema unresolved`. `md rm` prepares no schema and is unchanged. |
+| R8-F1.9 | DMLS and the iteration 7 sibling, same-checkout and outside-Git controls keep their outcomes | clean | Expected: DMLS keeps its folder-level `biscuit_file::find_git_root` lookup (`dmls/src/context.rs` `folder_key`), which the new rule wraps. The new fixtures show it recognizes a `.git` file. The R5-F3, R6-F1 and R7-F1 library and CLI tests (in-repository, outside-Git, sibling checkout) pass in the same run. |
+| R8-F1.10 | Sibling found in the sweep: the reference graph and validation passes re-set the root source with `ComposeRequest::with_source_file`, which reset a root admitted into its own repository to the ordinary derivation | fixed | Re-setting the request's own source now keeps its admitted derivation; any other path stays ordinary. The existing `accepted_external_child_keeps_authoring_provenance_across_surfaces` still passes, and the nested-checkout `validate refs` and graph tests cover the repair. |
+| R8-F1.11 | Memo order independence: the repository memo is keyed by exact checkout root, never by containment | fixed | Unit test `nested_checkouts_are_their_own_repository_in_either_order` (a `.git` file checkout inside the launch tree, and the seed before and after the nested note). `admitted_sources_discover_another_repository_once_per_request` now expects one discovery, because a folder outside Git or in the launch checkout needs no sniff discovery. |
+
+### R8-F1 work
+
+- starting the work on 'R8-F1 Nested Git checkouts can inherit the enclosing checkout's schemas' at 05:51:00
+        - defect class: a source's repository identity, and so its schema roots and root triggers, was inferred from folder containment rather than Git membership; the repository memo also returned the first cached root containing a folder, so the result depended on visit order
+        - sites found: library `source_derivation_for` (containment early return), `SourceRepositories::containing` (first containing root), CLI `MdRequest::document_context` (containment early return), and library `ComposeRequest::with_source_file` (dropped an admitted root's derivation, found in the sweep)
+        - checked and clean: `schemas/detect.rs` and the slot evaluator take their context from the caller. `schema_validation::searches_schema_roots`, `clean.rs` and `cli/commands/schema/validate.rs` read the source's own context. Claudine's `derive_request_context_for_source` already discovers at the source's folder. DMLS `folder_key` already uses `find_git_root`. Completion, `schema detect`, `md set` and render preparation all go through `document_context`
+        - intentionally unchanged: baseline loading, the slot session and configuration loading still use `launch_context`, which holds the launch scope and permission snapshot
+        - shared rule: a source belongs to its nearest Git checkout, the closest folder above it with a `.git` directory or `.git` file. `compose::nearest_repository_root` wraps `biscuit_file::find_git_root`. The source keeps the request's ordinary or trusted-external derivation only when that root is the request's or launch's root (`compose::names_another_repository`, compared canonically when the spellings differ); otherwise it gets `OwnRepository` through `derive_in_own_repository`. With no root, or a failed lookup, the source keeps its previous behavior. The library memoizes the nearest root per folder and one observation per exact root; `MdRequest::document_context` applies the same rule. Outside Git there is still no repository and so no roots, which is why the iteration 6 boundary legitimately differs
+        - decision: the repository is found once at the admission boundary rather than checked separately by each consumer. The alternative of probing containment in each consumer would repeat the path-exception pattern the recurrence section warns about
+        - decision: `find_git_root` (gix) is used for the cheap per-folder lookup and sniff only for the expensive per-root observation
+        - not covered: a `.git` file that points to no valid repository. gix skips it and walks up, so the source falls back to the enclosing root, as before
+        - earlier cases in the class rerun alongside the new probes: R5-F3, R6-F1 and R7-F1 library and CLI tests pass
+        - subagent scoped verification: `just test reference_bare_schema` 80/80; a wider filtered nextest run 3,327/3,327; slowest new test 1.59 s under load and at most 0.3 s alone; `just lint` exit 0
+        - orchestrator hand probe with the rebuilt `md`: compose, `md set`, `schema validate` and `render … style.max-width=60` of `vendor/{bare,rel,missing}.md` from `app` and from `vendor`. Bare and relative passed everywhere; missing failed with an unresolved `$schema`. An earlier probe used a stale binary from before the rebuild and was discarded
+        - Windows cross-check, attempt 1: two library failures, both from the fixtures. The unit test wrote a Windows path into Git configuration as `worktree = C:\…`, where backslashes are escapes, and the static-fragment case wrote `.display()` backslashes into a Markdown link. Fixed by dropping the `worktree` key and using the portable spellings `./vendor/review.md` and `~/notes/vendor/review.md`. CLI: 82/82
+        - Windows timing: the library trigger test took 4.8 s in the parallel run and 4.0 s alone. The CLI import and trigger tests took 3.3 and 3.6 s alone with one thread. Each was split into one test per case or command with `macro_rules!`
+        - Windows attempt 3 (final): `just cross-check darkmatter --os windows reference_bare_schema context::request cross_repo external entry_point_parity` 99/99, and `just cross-check darkmatter-cli --os windows reference_bare_schema document_context cross_repo external entry_point_parity` 89/89. The slowest test took 3.3 s in the parallel run
+- work completed for 'R8-F1 Nested Git checkouts can inherit the enclosing checkout's schemas' at 06:45:39
+
+### Completion Report
+
+- **outcome: complete** (2026-11-25T05:49:49+00:00 to 06:46 UTC, about 56 minutes)
+- parent findings: total 1 = fixed 1 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: 11 = fixed 10 (R8-F1.1–.8, plus .10 and .11 found in the sweep) + clean 1 (R8-F1.9)
+- open findings: none
+- shared rule: CLI document preparation and library admission for the tested absolute sources use the source's nearest Git checkout. The library memoizes observations by checkout root, so visit order no longer changes the result for the tested inclusions. The outside-Git controls still have no repository or schema roots. Relative library roots, roots learned from the Markdown object, and requests reusing an enclosing repository observation can still use the wrong context. The review 9 correction below records the probes.
+- earlier cases in the same class rerun alongside the new probes: R5-F3 (in-repository bare lookup), R6-F1 (outside Git) and R7-F1 (sibling checkout) library and CLI tests all pass in the full run
+- unrelated failure, reported here and not hidden:
+        - `darkmatter::l1 shipped_schema_corpus::review_fix_cycle_validates_markdown_with_and_without_pipeline_metadata` fails in both full runs with `the review cycle exports a root union`
+        - cause: the repository-root `schemas/review-fix-cycle.yaml` was rewritten in the working tree at 06:01 UTC during this cycle, by neither the orchestrator nor its subagent. It is uncommitted and was not in the starting status. The rewrite replaces the two-arm `$schema` list (`$extends: [rfc, pipeline]` / `$extends: rfc` at `HEAD`) with a single `$extends: cycle-inputs`, while the test still asserts the two-arm union
+        - this cycle left the in-flight edit in place. The corpus test still needs to follow the new inputs. The root export change also affects validation of the specification filename, as recorded in the review 9 correction below.
+        - `schemas/specification.yaml` is also modified outside this cycle, as review 8 already noted
+- changed files (all for R8-F1):
+        - source: `darkmatter/lib/src/markdown/compose/context/{request,options}.rs`, `darkmatter/lib/src/markdown/compose/mod.rs`, `darkmatter/cli/src/request.rs`
+        - tests: `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs`, `darkmatter/cli/tests/l1/reference_bare_schema.rs`, and unit tests in `request.rs`
+        - docs: `darkmatter/docs/topics/{compose-requests,file-referencing,magic-paths}.md`, `darkmatter/docs/topics/schemas/definition.md`, `darkmatter/docs/cli/{graph,validate}.md`
+        - skills: `.claude/skills/darkmatter/{SKILL,requests,testing}.md`
+        - records: this log and the `review-8.md` frontmatter
+- final verification (run by the orchestrator after the last change, with no subagent running):
+        - `darkmatter` `just test --max-fail all`: 18,132 run, 18,131 passed, 1 failed (the unrelated schema test above), 10 skipped, none at or above 5 s. This covers R8-F1 and regressions for every earlier finding
+        - `darkmatter` `just lint`: exit 0
+        - `just check-tier-coverage darkmatter`: 0 stranded
+        - `claudine` `just test`: 13,077 passed, 16 skipped, none at or above 5 s. Claudine consumes the changed library module. It ran before the final test-only splits, which changed no source
+        - Windows cross-check, attempt 3 of 3: darkmatter 99/99 and darkmatter-cli 89/89, with the filters recorded in the R8-F1 work entry
+        - orchestrator hand probe with the rebuilt `md`: compose, set, `schema validate` and render with a style setter, from both the enclosing checkout and the component
+
+
+### Review 9 record correction (2026-11-25)
+
+The iteration 8 completion report said that every source repository decision used the source's nearest checkout. That holds for the CLI and for the absolute-source and inclusion cases listed in the ledger. In a public Darkmatter API probe linked against the worktree, the documented relative path `vendor/review.md` failed schema preparation while the equivalent absolute request passed. A reference request that learned the absolute path only from the loaded Markdown also failed a bare schema and used the enclosing checkout for `&marker.md` with an explicit schema. Preparing a request in the component with a captured parent observation also kept the parent root and failed to include the component marker. Preparing a fresh request in the same component rendered the marker. The ledger summary now counts all 11 enumerated cases. [Review 9 library finding](review-9.md#r9-f1-medium-library-entry-points-can-lose-the-root-documents-checkout)
+
+The completion report treated the shared schema failure as an obsolete test. The Level 1 rerun reproduced that failure. Direct `md schema validate`, the Darkmatter API and DMLS also showed that the new export accepts an existing `plan.md` in the `spec` field. Both the committed schema and a temporary one-arm version of the new schema rejected the plan. [Review 9 shared-schema finding](review-9.md#r9-f2-high-the-shared-review-schema-accepts-a-plan-as-its-specification)
+
+## Implementation of Review Findings #9
+
+> **started at:** 2026-11-25T06:59:30+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-9.md'
+- this is iteration 9 of the review-to-implement cycle
+- the review's `implemented` flag was already `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R9-F2 | The shared review schema accepts a plan as its specification | fixed | All six child rows fixed or verified. The one-arm root union export restores enforcement, and both new tests fail with the export reverted to a mapping. |
+| R9-F2.1 | Public Markdown validator and `md schema validate`: `spec.md` and `./spec.md` pass, an existing `./plan.md` fails at `/spec`, a missing file fails | fixed | L1 `review_fix_cycle_inputs_require_an_existing_specification_file`: `spec.md` and `./spec.md` are valid; `./plan.md` and a nonexistent file fail at `/spec`; a missing `spec` fails. `md schema validate`: exit 0 for the spec, exit 1 for the plan (arm diagnostic at 3:7). |
+| R9-F2.2 | `md compose`, `md validate refs`, `md graph --validate` refuse the plan and accept the spec; `md clean` emits the frontmatter diagnostic | fixed | Hand probes with the rebuilt `md`. For the plan, `compose`, `validate refs` and `graph --validate` exit 1 and `clean` exits 0 with `schema.shape-repair … (at /spec)`. For the spec, all exit 0. Each command keeps its own handling of validation errors. |
+| R9-F2.3 | DMLS flags the plan with `dm.schema.constraint`, keeps the spec clean | fixed | New DMLS L1 `review_cycle_schema.rs` (a real LSP session): `dm.schema.constraint` on the plan's `spec:` line and none for the spec. Passes on Linux and Windows. |
+| R9-F2.4 | Corpus regression test asserts current public behavior (minimal input, optional paths, missing spec, wrong file) | fixed | The stale test is replaced and asserts the current public behavior. Optional `plan` and `implementation-log` accept absence, null, an empty string and a path, and reject a list. |
+| R9-F2.5 | Schema-language controls (inline/exported mapping vs unions) keep their documented behavior | clean | No change to the language. Union enforcement is covered by `schema_cache_validity.rs` `match_on_a_direct_file_property_of_a_root_union_arm_is_enforced`. Completion-only behavior in a mapping is covered by the `convert.rs` lowering unit test `bare_file_emits_reference_format_and_drops_match_extension`. |
+| R9-F2.6 | Specification schema imports (verdict, blast radius, pipeline) keep validating with located diagnostics | fixed | New L1 `specification_schema_validates_its_imported_cycle_fields`: the valid inputs pass, and a bad verdict, a mapping in place of `packages`, and a pipeline missing `name` each give a located problem. |
+| R9-F1 | Library entry points can lose the root document's checkout | fixed | All nine child rows fixed or preserved (.8 and .9 found in the sweep). Relative and Markdown-supplied roots go through the one admission, and observations are reused only for the same checkout. 26 of the 34 new tests fail with the source reverted. |
+| R9-F1.1 | A relative request source is resolved from the captured directory before deriving its context; relative and absolute both pass; missing names fail | fixed | `admit_source_in` makes a relative path absolute against the request directory. `source_form_tests!` relative rows pass for bare, relative and absolute schemas and imports; the missing schema fails naming `absent.yaml`. |
+| R9-F1.2 | Compose, compose-with-warnings, frontmatter-hook variants and command preflight use the same document checkout for all four source forms; component trigger requires `version` | fixed | `compose_with`, `compose_with_warnings`, `compose_with_frontmatter_hook` and preflight agree across all four forms (`extended_for`, pipeline root). The `*_takes_the_component_trigger` tests refuse `topic: review` for `version`, never `parent_only`, and adding `version` composes. |
+| R9-F1.3 | Transclusion graph, full graph, flattened references, validation with and without a prebuilt graph admit a root learned from Markdown; `&marker.md` selects the component marker | fixed | `build_graph_inner`, `validate_graph_contents` and `verify_graph_compatibility` admit the Markdown root through `with_root_source`. `*_graphs_reach_the_component_marker` and `*_validates_*` (fresh and with a prebuilt graph) reach `vendor/marker.md`. Reloading by a relative path keeps the admitted context. |
+| R9-F1.4 | `Markdown::transclusions_with_options` reports the component marker for every source form | fixed | `transclusions_in` admits the document's source; `*_transclusions_query_the_component_marker` passes for every form. |
+| R9-F1.5 | Previously admitted roots, descendants, CLI and DMLS controls keep their outcomes | fixed | Preserved. The R5-F3, R6-F1, R7-F1 and R8-F1 library and CLI tests pass (`reference_bare_schema` 128/128), as does the full darkmatter run of 18,170 tests. One unit assertion changed (decision below). |
+| R9-F1.6 | `local_expression_context` / `local_expression_resolution_context` yield the component directory and checkout for relative and absolute sources | fixed | `local_expression_context_uses_the_component_for_either_source_spelling` checks both APIs. The loaded-document form does not apply because these APIs take no Markdown. |
+| R9-F1.7 | Request construction reuses a captured repository observation only for the same checkout | fixed | `request_repository_for` requires the observation's root to be the request directory's nearest checkout. `a_captured_parent_observation_is_not_reused_for_a_component_request` covers fresh, component-capture and parent-capture options; all three render the component marker and keep the caller-owned anchor. |
+| R9-F1.8 | Found in the sweep: `effective_schema_for`, used by the host lifecycle check, judges the schema of the document's checkout for a Markdown-only or relative source | fixed | It now roots the request and document the way composition does; `*_effective_schema_is_the_component_schema` (four tests). |
+| R9-F1.9 | Found in the sweep: a schema slot session builds its repository from the request's checkout, never a caller-captured parent observation | fixed | `package()` and `package_area()` repaired (`slot_repository_describes`, `for_request_in_checkout`); `a_schema_slot_reads_the_package_layout_of_the_request_checkout` fails with the source reverted. The read grant was already correct, because it comes from the request's own configuration; `a_schema_slot_read_grant_is_the_request_checkout` locks that in, and the drifted doc comment was corrected. |
+- starting the work on 'R9-F2 The shared review schema accepts a plan as its specification' at 06:59:53
+        - orchestration note: the R9-F2 subagent was launched in the background by mistake, so it overlapped with the R9-F1 subagent instead of running before it; their files were disjoint (schema, corpus test and DMLS test versus library request, admission and reference code) and each verified only its own slice
+        - defect class: a shared schema's root `$schema` export changed from a root union to a plain mapping, so a `file(match(...))` rule stopped rejecting files and only guided completion
+        - repair: `schemas/review-fix-cycle.yaml` now exports a one-arm root union `- $extends: cycle-inputs`, with a comment explaining why; the author's revised fields and types are unchanged. The language's `match` semantics are unchanged (documented in `simplified-schema/docs/topics/language/types.md`)
+        - sweep of every `.yaml` containing `match(`:
+                - `schemas/review-fix-cycle.yaml`: fixed (a union at `HEAD`, a mapping in the worktree)
+                - `schemas/specification.yaml`: clean; it has no `match(` and imports only named types
+                - `prompts/complete.yaml`, `prompts/_fix/fix-review.yaml`, `prompts/fix.yaml`, `prompts/_implement/implement.yaml`: clean for this class; they have always exported a mapping, so nothing regressed, and `prompts/` is outside the tested surface
+                - the frozen Claudine prompt fixture: clean, frozen by design
+                - the Markdown inline `$schema` uses: none changed in the worktree
+        - the stale corpus test is replaced by `review_fix_cycle_inputs_require_an_existing_specification_file`, and `specification_schema_validates_its_imported_cycle_fields` is new
+        - new DMLS L1 test `review_cycle_schema.rs` (declared in `dmls/tests/l1/main.rs`) runs a real LSP session
+        - mutation check: with the export reverted to a plain mapping, both the corpus test and the DMLS test fail
+        - scoped verification: `just test shipped_schema_corpus` 29/29 (slowest 1.16 s); `just test review_cycle_schema` 1/1; `just lint` exit 0. Neither schema is part of a shipped artifact, so `just shipped-schemas --check` does not apply
+- work completed for 'R9-F2 The shared review schema accepts a plan as its specification' at 07:05:00
+- starting the work on 'R9-F1 Library entry points can lose the root document's checkout' at 07:01:00
+        - defect class: a document's checkout (its schema roots, triggers, `&` root and local expression context) was decided by how the caller spelled or supplied the source (relative or absolute, on the request or learned later from the loaded Markdown, or a reused enclosing observation chosen by containment) rather than by the document's resolved location
+        - divergences found:
+                - `admit_source_in` passed a relative path to `nearest_repository_root`, which returned nothing
+                - `DarkmatterSchemas` resolved against the literal relative directory of the Markdown source
+                - compose, preflight and `effective_schema_for` used only the request's source, never the Markdown's
+                - the graph and validators reset the root through `with_source_file` and took the ordinary (launch) derivation
+                - `transclusions_in` applied the request's derivation to a different path
+                - `request_repository_containing` reused an observation by containment
+        - shared rule: a root source, from the request or from the Markdown, is made absolute against the request directory and goes through the one existing admission (`admit_source_in` and the `SourceRepositories` memo). A captured observation is reused only when its root is the request directory's nearest checkout (`request_repository_for`). New request helpers `with_root_source`, `rooted_at` and `root_document` feed these consumers: the pipeline root, `extended_for` (preflight and the frontmatter shell walk), `effective_schema_for`, `build_graph_inner`, `transclusions_in`, `validate_graph_contents`, `verify_graph_compatibility` and `collect_composed_heading_slugs`
+        - sweep, clean sites with reasons:
+                - lifecycle `shell.rs`, Claudine `composition/mod.rs`, `prepare.rs` and `sequence/mod.rs`: go through `with_context` or `local_expression_context`, so the central admission covers them
+                - CLI `compose.rs`: passes an absolute path and uses the iteration 8 `document_context`
+                - `schemas/detect.rs`: its contract is that the caller passes the document's own context
+                - `slots/evaluator.rs`: derives from the source context it is given
+                - Claudine `invocation_context.rs`: guarded by `contains_nested_repository_boundary`
+                - DMLS: uses none of these APIs
+        - decision: each consumer keeps its existing precedence. Compose, preflight and the effective schema prefer the request's source; the graph, the validators and the transclusion query prefer the document's. The alternative was one global precedence, which would change how existing callers' sources are selected. Either way, both inputs now go through the same admission
+        - decision: the existing unit test `accepted_external_child_keeps_authoring_provenance_across_surfaces` expected the transclusion query to fail for a sibling queried as its own root. That relied on the inconsistent ordinary derivation, so it now asserts the same admission `ComposeRequest::prepare` gives that source
+        - tests: 34 new tests in `reference_bare_schema_roots.rs` (`source_form_tests!`) cover the absolute, relative, absolute-document-with-relative-request and loaded-document-only forms against compose (three variants), preflight, the effective schema, the graphs, validation with and without a prebuilt graph, the transclusion query, the component trigger and the local expression context, plus the captured-observation test. 26 fail with the source reverted; the 8 that pass are the absolute controls
+        - new row R9-F1.8: `effective_schema_for` ignored a source carried only by the Markdown, and a relative source
+        - new row R9-F1.9: the schema slot session took its repository observation from a caller-owned parent capture, which a second subagent repaired:
+                - `package()` and `package_area()` in a slot returned the parent's layout. Fixed: `SlotSession::for_request` now uses the request checkout's observation when the captured one describes another checkout (`slot_repository_describes`, `SessionObservations::for_request_in_checkout`)
+                - the read grant was already correct, because it comes from the request's own configuration snapshot. The stale doc comment on `slot_repository_root` claimed otherwise and was corrected (comment drift; the code was right)
+                - new tests `a_schema_slot_reads_the_package_layout_of_the_request_checkout` and `a_schema_slot_read_grant_is_the_request_checkout`. With the source reverted, the package test fails; the grant test locks in existing behavior
+                - residual, intentionally unchanged: a caller-extended context with no `Repo` capture and no observation still takes `Repo` from its own context authority, as before
+        - earlier cases in the class (R5-F3, R6-F1, R7-F1, R8-F1) rerun alongside the new probes: `just test reference_bare_schema` 128/128
+        - scoped verification: `reference` 1424, `preflight` 221, `request` 236, `compose` 4520, `transclusion` 320, `schema` 3155, `slot` 513, `external` 38, `entry_point_parity` 79 all pass; Claudine `cargo check` passes and `just test composition` passes 2912/2912; slowest new test 0.66 s; `just lint` exit 0
+        - the first subagent twice ran `--no-fail-fast` locally while iterating, against the brief; its final verification used the recipes
+        - docs: `darkmatter/docs/topics/{compose-requests,permissions}.md`, `darkmatter/docs/topics/schemas/schema-slots.md`; skills: `.claude/skills/darkmatter/{requests,schema}.md`
+- work completed for 'R9-F1 Library entry points can lose the root document's checkout' at 07:33:00
+
+### Completion Report
+
+- **outcome: complete** (2026-11-25T06:59:30+00:00 to 07:45 UTC, about 46 minutes)
+- parent findings: total 2 = fixed 2 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: 15 = fixed 14 (R9-F2.1–.4 and .6; R9-F1.1–.9, where .8 and .9 were found in the sweep and .5 is preserved behavior verified by the earlier tests) + clean 1 (R9-F2.5)
+- open findings: none
+- shared rules:
+        - R9-F2: a shared schema whose file rule must reject exports a root union (here, one arm), so `match(...)` enforces it. The language's documented mapping and union behavior is unchanged
+        - R9-F1: source admission resolves a relative path against the request directory and uses the repository memo. The four verified forms all put the path on the Markdown, either alone or alongside a request source. The request-only form can still lose the admitted source during schema preparation and reference handling. A captured repository observation is reused only for the same nearest checkout, including by the schema slot session. Outside Git there is still no repository, so the iteration 6 boundary legitimately differs
+- earlier cases in the same class rerun alongside the new probes: R5-F3, R6-F1, R7-F1 and R8-F1 library and CLI tests all pass in the full run
+- decisions (recorded in the ledger only; none needs an author ruling): per-consumer source precedence kept; the transclusion query for a root outside the request tree now gets the same admission `ComposeRequest::prepare` gives it, and its old unit assertion was updated; slot `Repo` is captured lazily from the request's checkout when the caller's observation describes another checkout
+- changed files:
+        - R9-F2: `schemas/review-fix-cycle.yaml`, `darkmatter/lib/tests/l1/shipped_schema_corpus.rs`, `darkmatter/dmls/tests/l1/{review_cycle_schema.rs (new),main.rs}`
+        - R9-F1 source: `darkmatter/lib/src/markdown/compose/context/{options,request}.rs`, `compose/context/capture/observations.rs`, `compose/pipeline/mod.rs`, `compose/schema_validation.rs`, `reference/{graph,mod,validate}.rs`, `schemas/slots/{observations,session}.rs`
+        - R9-F1 tests: `darkmatter/lib/tests/l1/reference_bare_schema_roots.rs`, plus the unit test in `reference/graph.rs`
+        - R9-F1 docs and skills: `darkmatter/docs/topics/{compose-requests,permissions}.md`, `darkmatter/docs/topics/schemas/schema-slots.md`, `.claude/skills/darkmatter/{requests,schema}.md`
+        - records: this log and the `review-9.md` frontmatter
+        - `schemas/specification.yaml` and the field rewrite in `schemas/review-fix-cycle.yaml` are the author's in-flight edits; this cycle changed only the export shape and its comment
+- final verification (run by the orchestrator after the last change, with no subagent running):
+        - `darkmatter` `just test --max-fail all`: 18,170 run, 18,170 passed, 10 skipped; `L1 run recorded: 18170 test(s), none at or above 5.0s` (R9-F1, R9-F2 and regressions for every earlier finding)
+        - `darkmatter` `just lint`: exit 0
+        - `just check-tier-coverage darkmatter`: 0 stranded
+        - `claudine` `just test --max-fail all`: 13,077 passed, 16 skipped, none at or above 5 s (Claudine consumes the changed request and admission code)
+        - Windows cross-check, attempt 1, passed: `just cross-check darkmatter --os windows reference_bare_schema slot context::request external entry_point_parity shipped_schema_corpus` 548/548, slowest 3.57 s; `just cross-check darkmatter-lsp --os windows review_cycle_schema` 1/1
+        - R9-F2 hand probes with the rebuilt `md` are recorded in the ledger
+
+### Review 10 record correction (2026-11-25)
+
+The iteration 9 completion report generalized source admission to the behavior of files supplied solely by the request. Its four tested forms all put the path on the Markdown. A program linked to the current Darkmatter library confirmed those ledger cases, then supplied the same component path only through `ComposeOptions::with_source_file`. Composition and preflight rejected a valid bare schema and skipped a matching trigger. The reference graph labeled the root `<stdin>`, and reference validation reported `MissingSourceContext` for an existing relative link. Attaching the same path to the Markdown restored the expected results. Separate direct calls showed that relative same-checkout prologue and epilogue targets still fail in the local query, outside the ledger's body-target probes. [Review 10 finding](review-10.md#r10-f1-medium-library-consumers-can-ignore-the-admitted-document-source)
+
+## Implementation of Review Findings #10
+
+> **started at:** 2026-11-25T16:14:39+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-10.md'
+- this is iteration 10 of the review-to-implement cycle
+- review `implemented` was already `false`; no human-in-the-loop items and no blocked findings
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R10-F2 | Reference validation drops malformed transclusions | pending | |
+| R10-F2.1 | Body `::file`/`::code`/`::url` without target, both graph modes: propagate line-specific parse error; valid shapes preserved | pending | |
+| R10-F2.2 | `::toc-linking level=h9`, `::file-links --depth two`, both graph modes: propagate invalid-level/depth error | pending | |
+| R10-F2.3 | `prologue`/`epilogue` invalid shapes (blank, null, number, object, mixed, all-invalid list) error; omitted and `[]` stay no-ops | pending | |
+| R10-F2.4 | `transclusions_with_options` reports parser errors for TOC, file-list, prologue, epilogue | pending | |
+| R10-F2.5 | Flattened references, fresh and prebuilt validation, `md validate refs`, `md graph --validate` fail on malformed input | pending | |
+| R10-F2.6 | Composition, command discovery, editor scanner keep existing boundaries | pending | |
+| R10-F2.7 | `has_transclusions` documents successful-parse requirement | pending | |
+| R10-F1 | Library consumers can ignore the admitted document source | pending | |
+| R10-F1.1 | Schema prep in all three compose APIs uses admitted request-only source for bare lookup and trigger eligibility | pending | |
+| R10-F1.2 | `compose_preflight`, approval entry and both command collectors apply the same schema/trigger checks; frontmatter-only scanner unchanged | pending | |
+| R10-F1.3 | `effective_schema_for` returns component schema/trigger for request-only source; unresolved names still none | pending | |
+| R10-F1.4 | Both graph builders root at admitted path; flattened origins carry it; component inclusion kept | pending | |
+| R10-F1.5 | Fresh and prebuilt reference validation resolve links from admitted source; only missing heading reported | pending | |
+| R10-F1.6 | Local query body `::file`/`::code`, `prologue`, `epilogue` resolve from admitted path (request-only and relative same-checkout); missing stays no-match | pending | |
+| R10-F1.7 | File-backed CLI/DMLS and local expression contexts stay clean | pending | |
+
+### Progress
+
+- starting the work on 'R10-F2 Reference validation drops malformed transclusions' at 16:15:00

@@ -4,10 +4,11 @@ description: "A **feature** review of `2026-11-22-expression-and-mutation-schema
 feature: "2026-11-22-expression-and-mutation-schemas/review-7.md"
 spec: "2026-11-22-expression-and-mutation-schemas/spec.md"
 previous: "2026-11-22-expression-and-mutation-schemas/review-6.md"
+next: "2026-11-22-expression-and-mutation-schemas/review-8.md"
 created: "2026-11-25T04:42:32+00:00"
 reviewed-by: "codex/gpt-6.2-sol"
 ready: false
-implemented: false
+implemented: true
 findings:
     - "R7-F1 (high): Documents opened through another checkout lose their schema roots"
 human-review: false
@@ -15,6 +16,8 @@ human-in-the-loop: null
 has-blocked-findings: false
 blocked: false
 recurrence: true
+log: "/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/log.md"
+implemented-by: "claude/opus"
 ---
 
 # Expression and mutation schemas review 7
