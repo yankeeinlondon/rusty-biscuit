@@ -19,369 +19,433 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented-by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
 reviewed-by: codex/gpt-6.2-sol
 reviewed-on: "2026-11-25"
 review-iterations: 0
-status: draft-spec
-needs-rulings: false
+status: human-in-the-loop
+needs-rulings: true
+required-rulings:
+    - Choose the spelling for repository values that need an explicit anchor.
+    - Decide what evidence is required before emitting an implicit relative path.
+    - Decide which base a missing implicit relative path is planned under.
 ---
 
 # File values are relative by default
 
-Darkmatter binds a caller-supplied local `file` to an absolute path so that a
-prompt can refer to the caller's file wherever the prompt lives. Today the
-absolute spelling also appears in rendered text. Functions such as `dirname`
-and the index functions carry that spelling forward. When a prompt asks an
-agent to record a path in a file, the generated text can name a particular
-worktree or home directory. Prompts currently work around this by assembling
-a path from pieces such as
-`{{ parent_dir(spec) }}/{{ basename(spec) }}`, which omits the higher directories
-when the target is more deeply nested.
+Darkmatter binds a caller-supplied local `file` to an absolute path so a
+prompt can find the caller's file wherever the prompt lives. The absolute
+path is what the body prints and what expressions and lifecycle state see
+(measured with `md compose` and `claudine compose` on 2026-11-25). Functions
+such as `dirname` and the index functions carry that path into generated
+text. Prompts work around this by joining `parent_dir(spec)` and
+`basename(spec)`, which drops higher directories when the file is deeply
+nested.
 
-With the prompt launched from the repository root, `spec=feat/x/spec.md`, and
-`review-2.md` present beside the spec, the output changes as follows.
+With the prompt launched from the repository root, `spec=feat/x/spec.md`,
+and `review-2.md` beside the spec, expressions produce these values.
 
 | Expression | Today | After this change |
 | --- | --- | --- |
 | `{{ spec }}` | `/home/me/repo/feat/x/spec.md` | `feat/x/spec.md` |
 | `{{ dirname(spec) }}` | `/home/me/repo/feat/x` | `feat/x` |
 | `{{ find_last_index(dirname(spec) + '/review-1.md') }}` | `/home/me/repo/feat/x/review-2.md` | `feat/x/review-2.md` |
+| `{{ contains(spec, 'repo') }}` | `true` | `false` |
 | `{{ absolute_path(spec) }}` | named `absolute` | `/home/me/repo/feat/x/spec.md` |
 
 ## Decisions
 
-The author ruled on every decision below on 2026-11-25.
+The author set the direction on 2026-11-25. The remaining choices are under
+[Open Questions](#open-questions).
 
-### Use portable spelling for local file and directory values
+### Use one portable spelling in expressions and output
 
-Rendering a bound local `file`, a local `file` selected by the schema from a
-document value or default, or a path-producing function result uses the same
-output rule. Apply the rule to file entries in arrays and nested objects as
-well. Schema-selected values follow the existing union rules, so an ambiguous
-`file | string` input stays as written. Ordinary strings, nulls, and HTTP(S)
-URLs keep their current behavior. A recursive search that resolves to a local
-file uses the spelling of its selected target.
+Apply the spelling rule to bound local files, schema-selected local files
+(including defaults and members of lists and objects), and the path-producing
+functions listed below. Preserve existing union selection, including an
+ambiguous `file | string` value that stays as written. Ordinary strings,
+nulls, and HTTP(S) values keep their current behavior.
 
-- For a target in the request's repository, emit an implicit relative path from that
-  repository's root, such as `feat/x/spec.md`. This holds for a file beside
-  the composing document too: the author ruled on 2026-11-25 that a value is
-  never `./review-2.md`, because the agent or shell that receives it is not in
-  that document's directory. A directory function returning
-  the repository root emits `.`. The request's repository is the common base
-  for this output even when the prompt lives outside it. Where the request has
-  no repository, use the composing source's repository if one was established
-  during source admission.
-- For a target outside that output root, or when there is no repository root,
-  try a declared portable environment root, then `~/`, then the absolute path.
-  A target known to belong to a second checkout follows the same fallback
-  because a path relative to that checkout could point elsewhere for the
-  reader. Use forward slashes where they preserve the target's spelling.
-  Preserve a faithful absolute spelling as the fallback if a portable
-  spelling would be ambiguous. Treat emitted environment-root text as data
-  so a spelling such as `{{NOTES}}/spec.md` does not trigger interpolation
-  again in the same composition.
-- Apply this order to the identified target. The biscuit-file
-  [`PortablePath`](biscuit-file/lib/src/file_reference/portable/evaluate.rs)
-  API generates file-reference spellings. Its shared default strategy serves
-  links as well and includes nearby routes and authored forms. Use an explicit
-  strategy for expression output, with a path-only operation where needed to
-  format an already selected target without probing it. Output never climbs
-  via `../` or `../../`.
+- Prefer an implicit relative path from the launch repository root, such as
+  `feat/x/spec.md`, when it can select the same file. A file beside a prompt
+  follows the same rule. The launch repository remains the base when the
+  prompt is stored elsewhere. The same preference applies to directories.
+  Emit `.` for the repository root only when it can denote that root in the
+  receiving context, including when followed by a filename. The grammar
+  treats `.` and `./name.md` as explicit relative, so they can otherwise
+  name the prompt's directory and its files.
+- For a target outside the launch repository, try a declared portable
+  environment root, then `~/`, then a faithful absolute spelling. Apply
+  this fallback when the run starts outside every repository, even if the
+  prompt belongs to a checkout. That checkout supplies the prompt's authored
+  `&` references, but a repository-relative output would be looked up from
+  the launch directory. Apply the same fallback to a target known to belong
+  to a second checkout, including a nested checkout identified at source
+  admission.
+- Emit forward slashes where they preserve the target. On Unix a backslash
+  can be part of the filename, so keep a faithful native spelling when
+  needed. If no expression string can faithfully name the target, report a
+  typed file-reference failure with the original reference, selected target
+  where available, and authored location. Reuse a registered code where its
+  contract fits. A new code also needs typed details, DMLS validation and
+  completion, and a documented lifecycle `failure` example.
+- Treat a generated spelling such as `{{NOTES}}/spec.md` as data through both
+  frontmatter interpolation passes, repeated preparation, child forwarding,
+  and body rendering. A file operation can expand that variable through the
+  reference grammar using the captured request environment.
 
-### Expressions see the portable spelling
-
-The portable spelling is the value an expression works with, not a form
-applied when the value is printed. With `spec=feat/x/spec.md`:
-
-| Expression | Result |
-| --- | --- |
-| `{{ dirname(spec) + '/review-1.md' }}` | `feat/x/review-1.md` |
-| `{{ contains(spec, 'fixes') }}` | tests `feat/x/spec.md`, never the worktree's path |
-| `{{ starts_with(spec, '/home/me/repo/') }}` | `false` |
-
-A path an author builds from another path is ordinary text. It names a file
-by being looked up again under the rule below, so Darkmatter does not track
-which file a piece of text came from. Prepared frontmatter and state returned
-to a library caller carry the portable spelling too.
+Expressions, prepared frontmatter, and returned composition state see the
+same text. Retain the selected target and authored origin for intact file
+values where needed for schema checks, access decisions, diagnostics, and
+child handoff. Track file selection by occurrence so a plain string with the
+same contents does not acquire file identity. Keep the raw caller value for
+fresh preparation against another schema.
 
 The alternative, keeping the absolute path inside expressions and converting
-at output, was rejected: a test such as `contains(spec, 'fixes')` would read
-the worktree's path, and text built from a path would print absolute unless
-its property were declared `file`. Neither is something an author would
-expect.
+only when a value is printed, was considered and rejected by the author on
+2026-11-25: a test such as `contains(spec, 'fixes')` would read the
+worktree's path, and text built from a path would print absolute unless its
+property were declared `file`. Neither is something an author would expect.
 
-### An implicit relative path is looked up from roots, not from the document
+Bind caller inputs before the first frontmatter interpolation. Bind
+document-authored values and defaults when their effective schema and value
+are available. Preserve the pipeline's evaluation order. An early expression
+that depends on a pending schema-selected file follows the existing deferral
+rules, including the existing failure when the dependency cannot be resolved.
+Once bound, the value is stable across repeated schema preparation.
 
-A path with nothing in front of it (`feat/x/review-1.md`: no `./`, `/`, `~`,
-or sigil) is the implicit relative form. It is looked up in this order, and
-the first match wins:
+Concatenation produces ordinary text. If a nearer base contains
+`feat/x/review-1.md`, the expression `dirname(spec) + '/review-1.md'` can
+name that nearer file when `dirname(spec)` is `feat/x`. Use
+`join(dirname(spec), 'review-1.md')` to construct a sibling in the selected
+directory and evaluate the spelling of the resulting path independently.
+When building raw text for a process, request the native path at the final
+handoff.
 
-1. the launch directory
-2. the package root
-3. the package area root
-4. the repository root
+### Resolve implicit relative paths from the launch context
 
-Outside a repository only the launch directory applies. The order is most
-local first, so `README.md` typed in `darkmatter/docs/` is the one in that
-folder, which is also what shell completion offers.
+Composition file references, command file arguments, and their completion
+use the following ordered bases for implicit relative paths. The first
+match wins.
 
-All four bases come from the run: the launch directory, then its package,
-package area, and repository. They do
-not come from the document that wrote the path, so a prompt behaves the same
-wherever it is stored. A prompt at `~/.claudine/prompts/review.md`, run from
-`/home/me/repo` with `spec=feat/x/spec.md`, builds `feat/x/review-2.md` and
-finds it in `/home/me/repo`. The `@` form already takes its roots from the
-run.
+1. Launch directory
+2. Package root at launch, when available
+3. Package area root at launch, when available
+4. Repository root at launch, when available
 
-Sibling package areas are never bases. Run from `darkmatter/` with
-`claudine compose prompts/review.md spec=features/foobar.md`, both arguments
-are looked up under `darkmatter/` (the launch directory and the package area)
-and then at the repository root; a
-`claudine/features/foobar.md` is not considered. The agent starts at the
-repository root, so the value of `spec` is `darkmatter/features/foobar.md`.
+Deduplicate equal bases in that order. Outside a repository, use only the
+launch directory. Use the captured launch context even when Claudine changes
+its process working directory to the repository root. For example, from
+`darkmatter/`, `features/foobar.md` can find
+`darkmatter/features/foobar.md` or `features/foobar.md` at the repository
+root. To reach `claudine/features/foobar.md`, include `claudine/` in the
+reference.
 
-A document in a second repository therefore cannot use the implicit form to
-reach a file in its own repository; it writes `./` or `&`.
+An authored `./plan.md` starts beside the composing document. An explicit
+relative caller argument starts at its captured authoring directory.
+Inside a second checkout, authored `./`, `../`, `&`, and `^` follow that
+document's tree. `@` continues to use the launch scope. Home, environment,
+vault, URL, and absolute forms keep their existing meanings. After expanding
+environment variables, classify the resulting path with the shared grammar.
 
-The folder of the document that wrote the path is no longer a base. A file
-beside the document is written `./plan.md`, which is the only form that is
-relative to the document. Today the implicit form tries the document's folder
-first and then the document's repository root, and tries neither the package,
-the package area, nor the launch directory.
+Use the launch order for direct implicit references, implicit `%` searches,
+and implicit composition globs such as those in `find_files` and
+`::file-links`. Preserve each consumer's search and result ordering within
+and across bases. Use the launch tree boundary for launch-relative lookup
+and the source tree boundary for explicit document-relative lookup. Preserve
+the existing lexical and symlink containment checks and typed failures.
+A miss can advance to a later base. A containment, permission, or I/O error
+keeps the resolver's existing stopping rule.
 
-This is what makes the portable spelling safe to compute with. A file beside
-a prompt can no longer be chosen in place of the repository file that a value
-names, because the prompt's folder is not searched.
+Use this policy for composed file values, file-reading directives and
+functions, lifecycle file targets, and their preflight and editor projections.
+A `file` default continues to use its existing schema authoring context for
+explicit forms. Keep document-link destinations document-relative. Keep
+schema imports and schema-root selection, configuration and permission
+references, registered bundle members, and other biscuit-file consumers on
+their existing lookup contracts. Make launch lookup an explicit choice in the
+shared resolver so a change to composition cannot silently change which
+permissions file is read.
 
-The explicit forms are unchanged: `./` and `../` are relative to the document
-that wrote them, and `&`, `^`, `@`, `~`, `{{VAR}}`, and absolute paths keep
-their meaning.
+For DMLS, use the launch context when the host supplies one. In a standalone
+editor session, use the configured workspace context for suggestions and
+syntax checks. A finding that depends on the actual launch directory should
+only be reported as definite when that directory is known.
 
-When a file exists at the repository-root path and a different file exists at
-the same path under the package or package area, the portable spelling of the
-repository file is written with the repository anchor (`&/feat/x/spec.md`), so
-that the spelling still names it.
+> **Review note.** The launch order deliberately changes the earlier
+> document-directory rule for implicit relative composition references.
+> Convert authored neighbors to `./plan.md`, and use the path from a launch
+> base to find a project input. Claudine's current design page asks for
+> explicit author approval before it is edited. Confirm the agreed wording
+> when updating that page.
 
-### Preserve file selection and access rules
+### Preserve target selection and access
 
-Resolve authored references through the existing file-reference grammar,
-using their existing origin. A caller value uses the captured launch or
-authoring context, and a schema default uses the context that already applies
-to that default. A lazy caller file keeps its first planned target even if
-the file is missing. When output needs a target for a document-authored lazy
-file, use its source context and the existing path-selection order, including
-the first planned target for a missing non-recursive reference. Eager files
-must still exist under the existing schema rules. Keep validation-only
-operations passive. Formatting an already known target preserves it without
-another lookup, repository discovery, or probe per item in a file listing.
-File reads, grants, read-set recording, and typed errors continue to use the
-selected target and its authored origin.
+Select or plan local targets through biscuit-file's file-reference resolver.
+An eager file must exist and satisfy its schema constraints. A caller's
+lazy local file keeps the first planned target without a probe, even if
+the file is missing and a later base has a file with the same name. Apply
+that planning rule to document-authored and defaulted lazy files when
+binding them. Preserve the existing refusal for recursive lazy inputs,
+which have no single planned file. A recursive reference in a context that
+allows searching uses the matched file or its existing typed miss.
 
-A `file` value passed whole to a child through a sequence task, lifecycle
-directive, or transclusion arrives as the same portable spelling and is looked
-up by the same rule, so it names the same file in the child. Each child
-starts with its own frontmatter and receives parent state under the shared
-inheritance rule, with `isolated` as the schema-controlled exception. An
-inline sequence and the same sequence in a referenced file behave alike.
+Check schema constraints such as `match(...)` against the selected target in
+its original context. A portable spelling does not grant file access. Use
+the selected target and authored location for permissions, read-set recording,
+and typed errors. Preflight and execution must agree about the target.
+Keep passive validation and editor analysis free of new probes and expression
+execution.
+
+A file passed intact through a sequence task, lifecycle directive, or
+transclusion carries its spelling, selected target, and authored origin,
+including when the child belongs to another checkout. Each child starts
+with its own frontmatter and receives the parent state under the shared
+inheritance rule, subject to schema `isolated`. An inline sequence and the
+same sequence in a referenced file behave alike. A lazy target stays bound
+after another step creates it.
 
 ### Cover path-producing functions and link labels
 
-In Darkmatter's [expression catalog](darkmatter/schemas/partials/functions.yaml),
-apply the output rule to `dirname`, `join`, `find_files`, `find_first_index`,
-`find_last_index`, `increment_file_index`, and `decrement_file_index`.
-`dirname` and `join` produce paths even though their signatures return text.
-Functions that extract pieces, such as `basename`, `parent_dir` (the immediate
-directory name), and `ext`, keep those meanings. `find_files` keeps its
-match order, deduplication, warnings, and empty result. Index functions keep
-their index and missing-file rules, including paths to siblings that have
-yet to be created.
+Apply the spelling rule to `dirname`, `join`, `find_files`,
+`find_first_index`, `find_last_index`, `increment_file_index`, and
+`decrement_file_index` in Darkmatter's
+[expression catalog](darkmatter/schemas/partials/functions.yaml). Darkmatter's
+[filesystem expression handlers](darkmatter/lib/src/markdown/compose/expression/functions/fs.rs)
+select the target and construct the result. Apply the spelling rule to that
+result even when the input was absolute. When a function accepts a directory
+operand, resolve it as a directory. A regular-file probe would miss an
+existing directory at a later base. Retain the component semantics of
+`basename`, `parent_dir`, `ext`, `file_trailing`, and `dir_leading`.
 
-`link` and `code_link` produce Markdown. A one-argument call uses the portable
-path as its label, with inline-code formatting for `code_link`. A two-argument
-call uses the supplied label and keeps existing Markdown escaping and URL
-handling. Local links carry the absolute destination into the existing link
-pipeline, which can resolve links for terminal output and normalize them for
-Markdown. For example, a Markdown link to a sibling can still be written as
-`./plan.md`. Keep ordinary link normalization rules independent of file-value
-output.
+Preserve the match order, deduplication, warnings, and empty result of
+`find_files`. Preserve the index functions' selection and missing-target
+rules, including the ability to name a future sibling. When an endpoint
+function finds no family member and returns the input target, apply the
+same spelling rule to that target.
+
+A one-argument `link` or `code_link` uses the portable path as its label,
+with inline-code formatting for `code_link`. A two-argument call uses the
+supplied label. Keep existing Markdown escaping and URL handling. Send
+the absolute local destination through the existing link pipeline so terminal
+hyperlinks reach the target and Markdown output can use a sibling link such
+as `./plan.md`.
 
 ### Rename the explicit path functions
 
-Rename `absolute(file)` to `absolute_path(file)`. It requests a native
-absolute path, including when used for output. Preserve its existing
-resolution behavior, including the first candidate for a missing
-non-recursive target and a typed error for a recursive miss or an unsupported
-URL. Use it at the final handoff when a shell command, subprocess argument, or
-other consumer requires a native path. A command may run from the launch
-directory or an explicitly configured working directory. An implicit relative path only
-works for such a consumer when the base is known to be the output root, and
-`~/` and `{{VAR}}` are Darkmatter reference forms that a process argument may
-receive literally.
+Rename `absolute(file)` to `absolute_path(file)`. It returns a native absolute
+path. Keep the existing first-candidate behavior for a missing non-recursive
+file and the typed errors for a recursive miss or unsupported URL. An
+explicit native result survives assignment or forwarding as a whole value,
+including through a `file` field. Use it at the final handoff to a process
+that requires a native path. A relative spelling works as a raw process
+argument only when the process starts at the corresponding base. A process
+argument can receive `~/` or `{{VAR}}` literally.
 
-Rename `relative(file)` to `relative_path(file)`. It explicitly requests the
-same spelling as default portable output, with the same fallbacks. Keep its
-existing matching and error behavior for unresolved inputs. Both renamed
-functions keep their null behavior. Apply `absolute_path` after the final
-path transformation when absolute output is required, for example
-`absolute_path(dirname(spec))`.
+Rename `relative(file)` to `relative_path(file)`. It explicitly requests
+the default portable spelling and keeps the existing match and error behavior
+for unresolved file inputs. Both functions keep their null behavior and
+accept directories returned by `dirname`, so
+`absolute_path(dirname(spec))` works when the receiving process needs an
+absolute directory.
 
-Remove the old names from the catalog and runtime together, with no aliases.
-Composition and DMLS report `dm.expression.unknown_function` on the old names.
-Show the new names, signatures, and examples in completion and hover.
+Remove the old names from the runtime and catalog together, including any
+aliases. Composition and DMLS report `dm.expression.unknown_function` for
+the retired names. Completion and hover show the new signatures and examples.
 
-### This narrows an earlier ruling
-
-Claudine's file-referencing page records a ruling that, during composition,
-the working directory is the folder of the file being composed, with an
-exception: a file passed in by the caller is resolved from the directory the
-caller ran the command in.
-
-That ruling still holds for the explicit forms (`./`, `../`) and for the
-exception. It no longer holds for the implicit relative form inside a
-document, which until now tried the document's folder and then the
-document's repository root. The page is rewritten to say so.
-
-## Nomenclature
+## Terms and shared implementation
 
 The three packages use different words for the same things. These are the
-terms from now on; the others are removed from docs, skills, diagnostics, and
-identifiers.
+terms for new docs, skills, diagnostics, and identifiers.
 
 | Term | Meaning | Replaces |
 | --- | --- | --- |
-| explicit relative path | `./x.md`, `../x.md`: relative to the document that wrote it | |
-| implicit relative path | `feat/x.md`: nothing in front, looked up from the bases | "bare path", "bare reference" |
+| explicit relative path | `./x.md`, `../x.md`: starts at its authoring directory | |
+| implicit relative path | `feat/x.md`: nothing in front, joined to each eligible base in order | "bare path", "bare reference" |
 | base | a directory an implicit relative path is joined to | "root" and "candidate" where they mean this |
-| launch directory | the directory the command was run in, or the one a library caller names | "request directory", "invoking cwd", "caller's CWD" |
-| portable path | the text that names a file as a value: the implicit relative path from the repository root when the file is in the repository, otherwise `~/…` or absolute | "display path", "presentation path", "repository-relative path" where it means the value |
+| launch directory | where the command was invoked, or the directory the library caller supplies | "request directory", "invoking cwd", "caller's CWD" |
+| portable path | the selected reference spelling for a known target; it never climbs with `../` | "display path", "presentation path", "repository-relative path" where it means the value |
 
-`biscuit_file::to_portable_string` only turns separators into forward
-slashes, which is not what "portable path" means here. It is renamed so that
-its name says what it does.
+Biscuit-file owns the launch base order and the spelling strategy. Extend its
+[`PortablePath`](biscuit-file/lib/src/file_reference/portable/evaluate.rs)
+API, which generates reference spellings from a target, to support the
+expression policy using the captured context. Preserve its existing default
+for link and other callers. `biscuit_file::to_portable_string` only turns
+separators into forward slashes, which is not what "portable path" means
+here; rename it so its name says what it does.
 
-## One implementation
+Use the shared ordering in resolution, completion, and the interactive
+chooser. Use the shared spelling for file values, expression results,
+completion insertions, and chooser submissions.
 
-Each of these exists once, in biscuit-file, and every caller uses it.
+Today at least a dozen routines turn a path into text by removing a
+repository root, each with its own fallback: the `relative` function, `link`
+labels, completion candidates (`CANDIDATE_STRATEGY`), the chooser's
+`path_label`, the autocomplete window's `path_label`, DMLS's `display_path`
+and two `relativize` helpers, the reference report's `relative_display`, and
+Claudine's doctor report. List every such routine in Darkmatter, DMLS, and
+Claudine, replace each with the shared one, and record any that is kept with
+the reason. A report label or editor diagnostic that deliberately uses its
+own display base is such a reason. Markdown link normalization keeps the
+document's base, because a link is read from its document and a value is not.
 
-- **The bases of the implicit relative form.** Resolution, completion's
-  search, and the interactive chooser read the same ordered list.
-- **The portable path of a file.** Today at least a dozen routines turn a path
-  into text by removing a repository root, each with its own fallback: the
-  `relative` function, `link` labels, completion candidates
-  (`CANDIDATE_STRATEGY`), the chooser's `path_label`, the autocomplete
-  window's `path_label`, DMLS's `display_path` and two `relativize` helpers,
-  the reference report's `relative_display`, and Claudine's doctor report.
-  The implementation lists every such routine in Darkmatter, DMLS, and
-  Claudine, replaces each with the shared one, and records any it keeps with
-  the reason.
+## Migration and documentation
 
-Link normalization keeps its own preference order, because a link is read
-from its document and a value is not.
-
-## Documentation
-
-The grammar is described in three places that disagree about the implicit
-relative form: biscuit-file's page says the working directory and then the
-repository root, Darkmatter's says the document's folder and then the
-repository root, and Claudine's says the current working directory and then
-spends a section on whose directory that is.
-
-- `biscuit-file/docs/topics/file-references.md` is the one description of the
-  forms, the bases, and the portable path, and it holds the table of terms
-  above.
-- Darkmatter's and Claudine's file-referencing pages state only what each
-  adds (how a value is bound, what the caller may pass, completion and the
-  chooser) and point to that page for the rest. They do not restate the
-  grammar.
-- Each page gives a worked example for the cases an author meets: a neighbor
-  file, a file elsewhere in the repository, a file passed in from a package
-  area, a prompt kept outside the repository, and a path handed to a shell
-  command.
-- The caller skills and repo skills for the three packages are updated from
-  those pages in the same change.
-
-## Scope
-
-- Darkmatter owns file values, path functions, link labels, and the lookup of
-  the implicit relative form (with biscuit-file, which defines the reference
-  grammar). The file-reference documentation in both packages states the new
-  bases.
-- Thirty-six `::file` and `::code` directives in seventeen Markdown files use
-  the implicit form today, none of them under `prompts/`. Each one that names
-  a neighbor becomes `./name.md`; test fixtures that rely on the document's
-  folder are updated the same way.
-- Update live expression callers and examples, including prompts, the
-  expression catalog and fixtures, DMLS, and Darkmatter and Claudine
-  documentation and skills. Replace workarounds such as
-  `parent_dir(spec) + '/' + basename(spec)` when the goal is portable prose.
-  Audit uses that feed lifecycle target fields, shell commands, or other
-  process arguments so they still reach the same file.
-- Verify `md compose` and Claudine's direct and sequence composition paths.
-  Share Darkmatter's output rule and preserve the file's origin through the
-  existing handoff. Update host integration wherever the chosen output
-  boundary requires it.
-- Claudine's completion of file values keeps its own list of spellings
-  (`CANDIDATE_STRATEGY` in the schema-completion candidates) and offers a
-  file in a sibling package area as `../claudine/…`. It uses the value
-  spelling instead, so a completed candidate is spelled exactly as the value
-  would be recorded: `claudine/features/x/spec.md`. Completion and its
-  chooser may still list files anywhere under the repository root, because
-  the root is a base; a sibling is reached only by its path from the root.
-- The interactive chooser that opens for an unresolved `key=value` file shares
-  completion's search but has a third spelling routine for its labels
-  (`path_label` in the schema-interactive command) and records the chosen file
-  as an absolute path. Its labels and its recorded value use the value
-  spelling too, leaving one routine for all three.
-- Existing feature and fix documents that store absolute paths are historical
-  records and retain their original text.
+- Audit live composition references in shipped documents, prompts, skills,
+  and fixtures. Include directives, defaults, read-side expressions, globs,
+  and lifecycle targets. As of 2026-11-25, thirty-six `::file` and `::code`
+  directives in seventeen Markdown files use the implicit form, none of them
+  under `prompts/`. Convert authored neighbors to `./name.md` or an
+  explicit relative glob. Check migrated targets from a different launch
+  directory.
+- Update live expression callers and examples, including
+  `prompts/feature.md`. Remove path assembly workarounds whose purpose was
+  portable prose. Check lifecycle targets, shell commands, and process
+  arguments so they still reach the same files. Preserve historical feature
+  and fix documents.
+- The grammar is described in three places that disagree about the implicit
+  relative form. Make `biscuit-file/docs/topics/file-references.md` the one
+  description of the forms, the bases, the portable path, and the terms
+  above. Darkmatter's and Claudine's file-reference topics state only what
+  each adds (how a value is bound, what a caller may pass, completion and
+  the chooser, the policy each entry point uses) and point to that page for
+  the rest; they do not restate the grammar. Show a document neighbor, a
+  repository file reached from a package area, a prompt outside the
+  repository, and a shell handoff. Update affected
+  README examples, command and error docs, and repo skills. Publish updated
+  caller skills using their package-area recipes.
+- Claudine completion and its chooser may list files under any launch base,
+  including the repository root. A sibling package area's file uses its
+  usable repository-relative spelling or the agreed pinned spelling. The
+  completion insertion, chooser label and submission, and prepared value
+  agree for a given target. Accepting a candidate must still select the file
+  that satisfied the input schema.
 
 ## Verification
 
-- Bind the same file with an implicit relative argument from the repository root,
-  an absolute argument, and a home-relative argument. Check identical output
-  for `spec`, `dirname`, and the index functions. Repeat from a subdirectory
-  using an argument that names the same file from that launch directory.
-- Cover a document-authored file, a schema default, a file inside a list or
-  object, a plain string, and an ambiguous `file | string` value. Verify that
-  a lazy missing target stays usable for a future write and that an eager
-  missing target still produces its existing error.
-- Use a file beside the prompt, a same-name local shadow, and a prompt outside
-  the request's repository. Check both displayed text and the target used by
-  a subsequent read or write. The file beside the prompt displays as its implicit
-  repository-root path. Verify inheritance across transclusion,
-  lifecycle forwarding, and equivalent inline and referenced sequences,
-  including an `isolated` property.
-- Check the environment-root, home, and absolute fallbacks, including a
-  target in a second checkout and a path reached from a deeply nested prompt.
-  Cover native Windows separators in explicit output and forward slashes in
-  portable output.
-- Check that `find_files` changes spellings while preserving match order and
-  skip warnings. Check that its results still open the listed files.
-- Check the default and explicit labels for both link functions, including a
-  label with Markdown punctuation. Verify the absolute local target when the
-  terminal renders a hyperlink and the existing sibling-relative Markdown
-  link behavior. URL handling stays the same.
-- Verify that a root-based shell example can use the rendered portable path, and
-  that a command launched in a subdirectory can use `absolute_path` for the
-  same target. Check the new function names in composition and editor help
-  and the registered unknown-function error for both retired names.
-- Check that `contains`, `starts_with`, and concatenation work on the portable
-  spelling, and that exported frontmatter carries it.
-- For the implicit form, check each base in order with a file that exists at
-  only that base, and check that a file beside the document is not found
-  without `./`. Check that a repository file shadowed under the package is
-  spelled with `&/` and still read.
+- Through `md compose` and Claudine direct and sequence composition, bind
+  the same file with implicit relative, absolute, and home-relative inputs.
+  Launch from the root and from a subdirectory. Check expression values,
+  exported frontmatter, path function results, and the target later read or
+  written.
+- Cover an authored file, a schema default, nested lists and objects, a
+  plain string matching the spelling of a bound file, and an ambiguous
+  `file | string`. Verify eager missing errors and schema matching. Check
+  that a lazy first candidate stays bound when it is missing, a later file
+  already exists, and a subsequent step writes to the selected location.
+- Check every launch base, including duplicates and missing package
+  anchors. Exercise a launch-directory shadow as well as package and
+  package-area shadows. Verify preflight, runtime, completion, and chooser
+  parity. Cover a source neighbor reached via `./`, an implicit glob and
+  recursive reference, a symlink escape, and an unchanged configuration or
+  schema import.
 - From a package area, pass a prompt and a `spec` that each exist in that
-  area and in a sibling area. Check that the area's own files are chosen, that
-  a file existing only at the repository root is still found, and that the
-  value of `spec` is the repository-root path.
-- From a package area, complete a `spec` value whose only match is in a
-  sibling area. Check that the candidate is the repository-root path, that
-  accepting it resolves, and that the area-relative spelling of that sibling
-  file fails with `no-match`.
-- Choose a file in the interactive chooser and check that its label, the
-  completion candidate for the same file, and the value the prompt receives
-  are the same text.
-- Run a prompt stored outside the repository that builds a sibling path from
-  its input, reads it with `frontmatter`, and writes it with a lifecycle step.
+  area and in a sibling area. Check that the area's own files are chosen,
+  that a file existing only at the repository root is still found, and that
+  the area-relative spelling of a file existing only in the sibling area
+  fails with `no-match`.
+- Launch with a prompt outside the repository, a child in a second checkout
+  including a nested checkout, and from outside every checkout. Confirm
+  the selected file across transclusion, lifecycle forwarding, and
+  equivalent inline and referenced sequences. Include an `isolated` field
+  and a test that the source's authored `&` still follows its own checkout.
+- Check directory lookup when a nearer and later base have the same
+  directory name, including a root file and the result of `dirname`.
+  Verify `join` constructs a sibling of the selected directory, and cover
+  new index siblings and the no-family result.
+- Check environment-root, home, and absolute fallbacks, including the
+  protection of generated variable spelling from a second interpolation.
+  Export the portable value, read it back with the same launch context, and
+  verify it names the original target.
+  Cover Windows native absolute output and a Unix file with a literal
+  backslash. Confirm that `find_files` keeps its ordering and skip warnings,
+  and that reusable results open the listed files using the approved
+  shadow rule.
+- Check both link labels, Markdown punctuation, URL behavior, terminal
+  hyperlink targets, and sibling-relative Markdown destinations. Test a
+  root-based shell handoff and a subdirectory handoff using `absolute_path`.
+  Verify the new names and retired-name diagnostic in composition and DMLS.
+- Verify the chosen spelling strategy does not make passive validation
+  effectful. Use a focused probe-count regression to enforce the approved
+  I/O rule for file listings. A separate timing spike is unnecessary for
+  the probe-free recommendation.
+
+## Open Questions
+
+### Which spelling should pin a repository target?
+
+From `/work/repo/tools`, suppose `/work/repo/tools/feat/x.md` shadows
+`/work/repo/feat/x.md`. The draft calls for using `&/feat/x.md` for the
+repository file, but authored `&` follows the source document's repository.
+A prompt in `/work/templates` can therefore look for
+`/work/templates/feat/x.md` when it consumes or builds on the emitted
+string. Holding the target when forwarding an intact value helps, but
+concatenation and serialized output can only use the spelling they receive.
+The same issue applies when a root directory would otherwise print as `.`.
+
+1. **Use the existing anchored fallbacks (recommended).** When an implicit
+   spelling cannot be used, emit `{{WORKSPACE}}/feat/x.md` if a declared
+   variable names the workspace, then try `~/`, then an absolute path.
+   Apply the same rule to directories and retain the meaning of authored
+   `&`. This works across sources with the captured environment and needs
+   no new syntax. A file inside the repository can print an absolute path
+   if it is shadowed and no portable anchor applies.
+2. **Add an explicit launch-repository reference form.** A new prefix could
+   express “the checkout this run started in,” including for a directory
+   and for a string built by concatenation. The result stays portable even
+   when nearer files shadow it. The new form needs a grammar decision,
+   completion and diagnostic support, and a documented missing-root error.
+   Processes outside Darkmatter would still need `absolute_path`.
+
+The existing fallbacks address the wrong-checkout case without changing
+authored references or expanding the language.
+
+### How should formatting establish that a nearer base will not win?
+
+From `/work/repo/tools`, a listing can already know that it found
+`/work/repo/feat/x.md` without knowing whether
+`/work/repo/tools/feat/x.md` exists. A file probe also cannot establish
+whether the corresponding directory would win in a directory lookup. The
+draft requires both a reliably reusable spelling and no extra probes per
+listing result.
+
+1. **Check the first path component under each nearer base, once per run
+   (recommended).** For `darkmatter/features/x/spec.md` launched from
+   `darkmatter/`, ask whether `darkmatter/darkmatter` exists. If it does
+   not, neither a file nor a directory can shadow anything spelled
+   `darkmatter/…`, so every such value prints short, and a listing of 500
+   files costs one check. Only when that first component does exist under
+   a nearer base is the full path checked, and the pinned form used on a
+   real shadow. The checks respect the same read approvals and tree
+   boundaries and join the read set. Passive validation makes no checks.
+2. **Use only the candidate plan and observations already made.** Emit
+   `feat/x.md` when its only candidate is the selected target, or existing
+   observations show the target wins. This adds no I/O. From any launch
+   below the repository root there is more than one candidate and nothing
+   has observed the nearer ones, so nearly every value prints in the pinned
+   form (in practice an absolute path) even though no shadow exists.
+
+The reviewer recommended the second option to keep formatting free of I/O.
+The author's stated case is a session launched from a package area, where
+the second option gives back the absolute paths this fix exists to remove.
+
+### Where is a missing implicit relative path planned?
+
+Today a missing lazy file is planned under the first base without a probe.
+With the launch directory first, a prompt launched from `darkmatter/` that
+builds `dirname(spec) + '/review-3.md'` gets
+`darkmatter/features/x/review-3.md`, which exists under no base. Planned
+under the launch directory, a lifecycle step would create
+`darkmatter/darkmatter/features/x/review-3.md`.
+
+1. **Plan under the first base where the path's containing directory exists
+   (recommended).** `darkmatter/darkmatter/features/x/` does not exist, so
+   the launch directory is skipped; `darkmatter/features/x/` exists at the
+   repository root, so the file is planned there. `features/new.md` typed
+   from `darkmatter/` is still planned in `darkmatter/features/`. When no
+   base has the directory, the launch directory is used as today. This
+   costs one directory check per base, only on a miss.
+2. **Keep the first base.** No checks. A new file's path must be built with
+   `join` on a resolved directory or pinned with `absolute_path`; a path
+   built with `+` from a launch below the repository root is written to the
+   wrong place without an error.
