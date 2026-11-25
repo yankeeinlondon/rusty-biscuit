@@ -348,6 +348,15 @@ pub(crate) fn validate_with_graph(
     validate_graph_contents(md, options, graph)
 }
 
+/// `options` with their request rooted at `md`'s own source, as the graph
+/// build roots it, so the root's checkout and the validators' root context
+/// are the ones the graph was built with.
+fn rooted(md: &Markdown, options: &ReferenceValidationOptions) -> ReferenceValidationOptions {
+    let mut rooted = options.clone();
+    rooted.graph.compose = rooted.graph.compose.with_root_source(&md.source().clone().unwrap_or(ComposeSource::Unknown));
+    rooted
+}
+
 /// Validate a graph the current operation just built, skipping the
 /// compatibility check.
 ///
@@ -380,6 +389,7 @@ fn validate_graph_contents(
     options: &ReferenceValidationOptions,
     graph: &ReferenceGraph,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    let options = &rooted(md, options);
     let root_source = graph.root().source.clone();
     let occurrences = super::graph::flatten_occurrences(graph);
 
@@ -624,12 +634,7 @@ fn verify_graph_compatibility(
     let request_document = ReferenceDocumentIdentity::capture(md);
     let request_source = md.source().clone();
     let effective_source = request_source.clone().unwrap_or(ComposeSource::Unknown);
-    let request_compose = options.graph.compose.clone();
-    let request_compose = match &effective_source {
-        ComposeSource::File(path) => request_compose.with_source_file(path),
-        ComposeSource::Url(url) => request_compose.with_source_url(url.clone()),
-        ComposeSource::Unknown => request_compose,
-    };
+    let request_compose = options.graph.compose.clone().with_root_source(&effective_source);
     let request_options = ReferenceGraphOptionsIdentity::capture(&request_compose);
 
     graph
@@ -864,7 +869,8 @@ fn collect_composed_heading_slugs(
     graph: &ReferenceGraph,
     cache: &mut HeadingSlugCache,
 ) -> Vec<String> {
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
+    // The root as the graph admitted it, which `graph_options` are rooted at.
+    let source = graph.root().source.clone();
 
     let mut all_slugs = Vec::new();
 

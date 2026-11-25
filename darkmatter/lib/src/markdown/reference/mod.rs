@@ -170,6 +170,14 @@ impl Markdown {
 
     fn transclusions_in(&self, options: &crate::markdown::compose::ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>> {
         let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        // Targets resolve from the document's own source as the request
+        // admits it, as composition and the reference graph resolve them.
+        let rooted = options.clone().with_root_source(&source);
+        let options = &rooted;
+        let resolved_source = match source {
+            ComposeSource::File(_) => &options.source,
+            _ => &source,
+        };
         let mut refs = Vec::new();
 
         // Block directives (::file, ::code, ::url)
@@ -186,7 +194,7 @@ impl Markdown {
             // Fill resolved_target using FileReference semantics (rec #4)
             let resolved_target = match &kind {
                 TransclusionRefKind::File | TransclusionRefKind::Code => {
-                    resolve_transclusion_target(&directive.raw_target, &source, options)?
+                    resolve_transclusion_target(&directive.raw_target, resolved_source, options)?
                         .map(|path| path.to_string_lossy().to_string())
                 }
                 TransclusionRefKind::Url => {

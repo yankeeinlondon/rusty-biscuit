@@ -234,7 +234,11 @@ impl SlotSession {
     /// the document never names) has it captured when it first runs: the
     /// `Repo` group from the request's repository observation, the others
     /// through the request's context authority, so a frozen context still
-    /// fails that slot. A command that composes more than once
+    /// fails that slot. The repository is always the checkout the request
+    /// resolves in: options whose observation describes another checkout
+    /// (captured in a parent of the request's nested one) have `Repo`
+    /// captured from the request's own repository instead, and slot
+    /// resolutions keyed by its root. A command that composes more than once
     /// builds it once from its first request and attaches it to every pass
     /// with [`ComposeOptions::with_slot_session`](crate::markdown::compose::ComposeOptions::with_slot_session).
     /// Attach the command's data runtime to the request first
@@ -243,15 +247,25 @@ impl SlotSession {
     /// read set.
     pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
+        let checkout = request.resolution_context();
+        let own_repository = options.slot_repository_describes(checkout);
+        let repository_root = if own_repository {
+            options.slot_repository_root()
+        } else {
+            checkout.repository_root().map(Path::to_path_buf)
+        };
         let mut session = Self::new(options.data_runtime())
-            .with_repository_root(options.slot_repository_root())
+            .with_repository_root(repository_root)
             .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect())
             .with_network(options.network_permission());
-        session.observations = Arc::new(SessionObservations::for_request(
-            options.context(),
-            options.context_authority(),
-            options.slot_repository(),
-        ));
+        session.observations = Arc::new(if own_repository {
+            SessionObservations::for_request(options.context(), options.context_authority(), options.slot_repository())
+        } else {
+            // Options captured in another checkout (a parent of the
+            // request's nested one) keep their `ctx.*` values, but a slot's
+            // `package()` describes the request's own repository.
+            SessionObservations::for_request_in_checkout(options.context(), options.context_authority(), checkout)
+        });
         session.remote = options.remote_fetch.clone();
         session.configuration = Configuration::CapturedFor(
             Arc::clone(request.config_snapshot()),

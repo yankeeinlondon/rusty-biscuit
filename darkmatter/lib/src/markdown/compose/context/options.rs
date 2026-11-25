@@ -105,8 +105,8 @@ pub(crate) enum SourceDerivation {
     /// the source lies outside the request's tree and in no repository the
     /// request has not captured.
     TrustedExternal,
-    /// The source lies in a Git repository the request's context does not
-    /// name. Its context was built at its own directory when it was admitted
+    /// The source's nearest Git checkout (a nested one included) is a
+    /// repository the request's context does not name. Its context was built at its own directory when it was admitted
     /// ([`super::request::SourceRepositories`]) and is used as is, whatever
     /// request context a consumer passes: its own repository decides `&`,
     /// `^`, the package anchors, and its schema roots, while `@` keeps the
@@ -166,33 +166,31 @@ pub(crate) fn source_file_context(
 
 /// The derivation a file source at `path` resolves under.
 ///
-/// `OwnRepository` when the source lies outside the request's repository (or
-/// the request has none) and inside a Git repository the request's context
-/// does not name; `repositories` answers that once per repository for the
-/// whole request. Otherwise `TrustedExternal` when only that derivation of
-/// `context` admits the source (it lies outside the request's tree), else
-/// `Ordinary`.
+/// `OwnRepository` when the source's nearest Git checkout (its directory's
+/// closest `.git` directory or file, a checkout nested in the request's tree
+/// included) is not the repository the request's context names;
+/// `repositories` answers that once per directory and discovers each such
+/// repository once for the whole request. Otherwise `TrustedExternal` when
+/// only that derivation of `context` admits the source (it lies outside the
+/// request's tree), else `Ordinary`.
 fn source_derivation_for(
     context: &biscuit_file::FileResolutionContext,
     path: &Path,
     opening: Option<&SourceOpening>,
     repositories: &super::request::SourceRepositories,
 ) -> SourceDerivation {
+    let pair = opening.map(|opening| (&opening.reference, opening.resolved.as_path()));
+    if let Some(own) = repositories.own_repository_derivation(context, path, pair) {
+        return own;
+    }
     let derive = |derivation: &SourceDerivation| source_file_context(context, path, derivation, opening);
-    let ordinary = derive(&SourceDerivation::Ordinary).validate().is_ok();
-    let derivation = if !ordinary && derive(&SourceDerivation::TrustedExternal).validate().is_ok() {
+    if derive(&SourceDerivation::Ordinary).validate().is_err()
+        && derive(&SourceDerivation::TrustedExternal).validate().is_ok()
+    {
         SourceDerivation::TrustedExternal
     } else {
         SourceDerivation::Ordinary
-    };
-    // A source inside the request's repository keeps the request's view of
-    // it; only one the request's repository does not hold can belong to
-    // another.
-    if ordinary && context.repository_root().is_some() {
-        return derivation;
     }
-    let opening = opening.map(|opening| (&opening.reference, opening.resolved.as_path()));
-    repositories.own_repository_derivation(context, path, opening).unwrap_or(derivation)
 }
 
 /// Configuration for the compose pipeline.
@@ -974,30 +972,56 @@ impl ComposeOptions {
             .or_else(|| self.context.observations().repository())
     }
 
-    /// The root of the request's one repository observation, which a schema
-    /// slot's automatic read grant is judged against; `None` when the request
-    /// found no repository (never a new discovery).
+    /// Whether the request's repository observation describes the checkout
+    /// `context` resolves in (the one its repository root names, or none),
+    /// so a schema slot may read it; `true` when the request holds none.
+    ///
+    /// `false` for options captured in a parent checkout composing a request
+    /// whose directory is in a checkout nested in it: the observation
+    /// describes the wider parent tree, not the request's own repository.
+    pub(crate) fn slot_repository_describes(&self, context: &biscuit_file::FileResolutionContext) -> bool {
+        let Some(repository) = self.request_repository() else {
+            return true;
+        };
+        match context.repository_root() {
+            Some(root) => !super::request::names_another_repository(root, repository.root.as_deref()),
+            None => repository.root.is_none(),
+        }
+    }
+
+    /// The root of the request's one repository observation, which keys a
+    /// schema slot's cached resolution; `None` when the request found no
+    /// repository (never a new discovery). Used only when
+    /// [`slot_repository_describes`](Self::slot_repository_describes) the
+    /// request's context.
     pub(crate) fn slot_repository_root(&self) -> Option<std::path::PathBuf> {
         self.request_repository().and_then(|repository| repository.root.clone())
     }
 
     /// The request's one repository observation, which a schema slot's
     /// `package()`/`package_area()` read; `None` when the request holds none
-    /// (never a new discovery).
+    /// (never a new discovery). Used only when
+    /// [`slot_repository_describes`](Self::slot_repository_describes) the
+    /// request's context.
     pub(crate) fn slot_repository(&self) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
         self.request_repository().cloned()
     }
 
-    /// The request's repository observation when it found a repository that
-    /// contains `dir`, so the context builder can project it instead of
+    /// The request's repository observation when it observed `dir`'s own
+    /// checkout, so the context builder can project it instead of
     /// discovering the repository a second time.
-    pub(super) fn request_repository_containing(
+    ///
+    /// The checkout is `dir`'s nearest one
+    /// ([`nearest_repository_root`](super::request::nearest_repository_root)),
+    /// never one that merely contains `dir`: options captured in a parent
+    /// checkout do not answer for a request in a checkout nested in it.
+    pub(super) fn request_repository_for(
         &self,
         dir: &Path,
     ) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
-        self.request_repository()
-            .filter(|repository| repository.contains(dir))
-            .cloned()
+        let repository = self.request_repository().filter(|repository| repository.contains(dir))?;
+        let nearest = super::request::nearest_repository_root(dir)?;
+        (!super::request::names_another_repository(&nearest, repository.root.as_deref())).then(|| repository.clone())
     }
 
     /// Makes the context builder's discovery at `dir` the request's
@@ -1271,6 +1295,10 @@ impl ComposeOptions {
     }
 
     /// Sets the compose source as a file path.
+    ///
+    /// A relative path names the file under the request directory of the
+    /// [`ComposeRequest`](super::request::ComposeRequest) these options are
+    /// prepared into, never the process directory.
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.source = ComposeSource::File(path.into());
@@ -1308,12 +1336,19 @@ impl ComposeOptions {
     /// request's tree that only a trusted-external derivation of `context`
     /// admits is marked `TrustedExternal`, and one in a repository `context`
     /// does not name is derived in that repository.
+    ///
+    /// A relative source path names a file under `context`'s request
+    /// directory and is made absolute there first, so `vendor/review.md`
+    /// and its absolute spelling are one source with one checkout.
     pub(crate) fn admit_source_in(
         &mut self,
         context: &biscuit_file::FileResolutionContext,
         repositories: &super::request::SourceRepositories,
     ) {
-        if let ComposeSource::File(path) = &self.source {
+        if let ComposeSource::File(path) = &mut self.source {
+            if path.is_relative() {
+                *path = context.request_cwd().join(&*path);
+            }
             self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref(), repositories);
         }
     }

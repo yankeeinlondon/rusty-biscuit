@@ -426,18 +426,58 @@ pub fn derive_in_own_repository(
     source.with_launch_magic_scope(launch.launch_magic_scope().clone())
 }
 
-/// The Git repositories a request found its admitted sources in, discovered
-/// at most once per repository (and once per directory outside every
-/// repository) for the whole request.
+/// The working-tree root of the Git checkout nearest to `dir`: the closest
+/// ancestor holding a `.git` directory or a `.git` file (a submodule or a
+/// `git init --separate-git-dir` checkout). `None` outside every checkout and
+/// when discovery fails, so a caller keeps the derivation it would make
+/// without one.
+///
+/// This, never containment under another checkout's root, decides which
+/// repository a source belongs to: a checkout nested inside another is its
+/// own repository.
+pub fn nearest_repository_root(dir: &Path) -> Option<PathBuf> {
+    // A relative directory would be searched from the process directory.
+    if !dir.is_absolute() {
+        return None;
+    }
+    biscuit_file::find_git_root(dir)
+        .inspect_err(|error| tracing::debug!(%error, dir = %dir.display(), "nearest repository root not found"))
+        .ok()
+        .flatten()
+}
+
+/// Whether the checkout rooted at `nearest` (from [`nearest_repository_root`])
+/// is a repository other than `root`, the one a request or launch context
+/// names; `true` when that context names none. Roots spelled differently
+/// (macOS `/var` versus `/private/var`) are compared canonically.
+pub fn names_another_repository(nearest: &Path, root: Option<&Path>) -> bool {
+    let Some(root) = root else {
+        return true;
+    };
+    if nearest == root {
+        return false;
+    }
+    match (biscuit_file::canonicalize_simplified(nearest), biscuit_file::canonicalize_simplified(root)) {
+        (Ok(nearest), Ok(root)) => nearest != root,
+        _ => true,
+    }
+}
+
+/// The Git repositories a request found its admitted sources in: the nearest
+/// checkout root of each source directory, looked up once per directory, and
+/// one repository observation per checkout root, for the whole request.
 ///
 /// A request captures its own repository when it is prepared. A source it
 /// later admits across a file boundary (a `::file`, `prologue:`, or
 /// `epilogue:` child, a `::toc-linking` or fragment target, the root of a
 /// request whose context names another repository) can lie in a different
-/// checkout; that is the one place a request discovers another repository,
-/// and every consumer of the source then reads the context decided there
+/// checkout, including one nested inside the request's own tree; that is the
+/// one place a request discovers another repository, and every consumer of
+/// the source then reads the context decided there
 /// ([`SourceDerivation::OwnRepository`]). Shared by every derivation of the
-/// request.
+/// request. Observations are keyed by exact checkout root, never by
+/// containment, so the order sources are visited in cannot change which
+/// repository a source gets.
 ///
 /// [`SourceDerivation::OwnRepository`]: super::options::SourceDerivation::OwnRepository
 #[derive(Debug, Default)]
@@ -447,25 +487,27 @@ pub(crate) struct SourceRepositories {
 
 #[derive(Debug, Default)]
 struct KnownRepositories {
-    found: Vec<Arc<RepositoryObservation>>,
-    outside: std::collections::HashSet<PathBuf>,
+    /// Source directory to its nearest checkout root (`None`: outside Git).
+    nearest: std::collections::HashMap<PathBuf, Option<PathBuf>>,
+    /// Checkout root to its observation (`None`: discovery failed).
+    observed: std::collections::HashMap<PathBuf, Option<Arc<RepositoryObservation>>>,
 }
 
 impl SourceRepositories {
-    /// The memo for a request over `context`: its own repository is known,
-    /// and a context naming none says its request directory is outside
-    /// every repository, so neither is discovered again.
+    /// The memo for a request over `context`: the request directory's
+    /// checkout (the one `context` names, or none) is known, so it is not
+    /// looked up again.
     pub(crate) fn for_request(context: &FileResolutionContext) -> Self {
         let mut known = KnownRepositories::default();
-        if context.repository_root().is_none() {
-            known.outside.insert(context.request_cwd().to_path_buf());
-        }
+        known
+            .nearest
+            .insert(context.request_cwd().to_path_buf(), context.repository_root().map(Path::to_path_buf));
         Self { known: std::sync::Mutex::new(known) }
     }
 
-    /// [`SourceDerivation::OwnRepository`] for the source at `path` when it
-    /// lies in a Git repository `context` does not name, holding its
-    /// [`derive_in_own_repository`] context; `None` when it is in no
+    /// [`SourceDerivation::OwnRepository`] for the source at `path` when its
+    /// nearest checkout is a Git repository `context` does not name, holding
+    /// its [`derive_in_own_repository`] context; `None` when it is in no
     /// repository, in `context`'s own, or its context cannot be built, so the
     /// caller keeps its ordinary derivation.
     ///
@@ -477,10 +519,7 @@ impl SourceRepositories {
         opening: Option<(&FileReference, &Path)>,
     ) -> Option<super::options::SourceDerivation> {
         let dir = path.parent()?;
-        let observation = self.containing(dir)?;
-        if observation.root.as_deref() == context.repository_root() {
-            return None;
-        }
+        let observation = self.other_repository(dir, context.repository_root())?;
         let mut snapshot = RequestSnapshot::new(dir)
             .with_home(context.home_dir().map(Path::to_path_buf))
             .with_env(context.env().clone());
@@ -502,29 +541,26 @@ impl SourceRepositories {
             .then(|| super::options::SourceDerivation::OwnRepository(Arc::new(derived)))
     }
 
-    /// The repository containing `dir`, discovering it on the first source
-    /// there. A discovery failure counts as no repository: the source keeps
-    /// the request's derivation, as it did before it was discovered.
-    fn containing(&self, dir: &Path) -> Option<Arc<RepositoryObservation>> {
+    /// The observation of `dir`'s nearest checkout when that checkout is not
+    /// `own`, discovering it on the first source there. A discovery failure
+    /// counts as no repository: the source keeps the request's derivation.
+    fn other_repository(&self, dir: &Path, own: Option<&Path>) -> Option<Arc<RepositoryObservation>> {
         let mut known = self.known.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(found) = known.found.iter().find(|observation| observation.contains(dir)) {
-            return Some(Arc::clone(found));
-        }
-        if known.outside.contains(dir) {
+        let nearest = known.nearest.entry(dir.to_path_buf()).or_insert_with(|| nearest_repository_root(dir)).clone()?;
+        if !names_another_repository(&nearest, own) {
             return None;
         }
-        let observation = discover_repository(dir)
-            .inspect_err(|error| tracing::debug!(%error, "source repository discovery failed"))
-            .ok()
-            .and_then(|discovery| discovery.observation)
-            .filter(|observation| observation.root.is_some());
-        match &observation {
-            Some(found) => known.found.push(Arc::clone(found)),
-            None => {
-                known.outside.insert(dir.to_path_buf());
-            }
-        }
-        observation
+        known
+            .observed
+            .entry(nearest)
+            .or_insert_with_key(|root| {
+                discover_repository(root)
+                    .inspect_err(|error| tracing::debug!(%error, "source repository discovery failed"))
+                    .ok()
+                    .and_then(|discovery| discovery.observation)
+                    .filter(|observation| observation.root.is_some())
+            })
+            .clone()
     }
 }
 
@@ -620,7 +656,7 @@ impl ComposeRequest {
     ) -> Result<Self, ContextBuildError> {
         let dir = snapshot.request_dir();
         options.anchor_unanchored_context(dir);
-        let observation = match options.request_repository_containing(dir) {
+        let observation = match options.request_repository_for(dir) {
             Some(observation) => Some(observation),
             None => {
                 let discovery = discover_repository(dir)?;
@@ -791,17 +827,60 @@ impl ComposeRequest {
         self
     }
 
-    /// This request composing the file at `path`; see
-    /// [`ComposeOptions::with_source_file`].
+    /// This request rooted at the file `path`, admitted as the request's own
+    /// source is when it is prepared ([`ComposeOptions::admit_source_in`]): a
+    /// relative path is taken from the request directory, and the file's
+    /// nearest checkout decides its repository. The request's own source,
+    /// however it is spelled, keeps the derivation it was admitted with
+    /// (and the reference that opened it).
     #[must_use]
     pub(crate) fn with_source_file(self, path: impl Into<PathBuf>) -> Self {
-        self.derive(|options| options.with_source_file(path))
+        let mut path = path.into();
+        if path.is_relative() {
+            path = self.context.request_cwd().join(path);
+        }
+        if matches!(&self.options.source, super::options::ComposeSource::File(current) if *current == path) {
+            return self;
+        }
+        let context = self.context.clone();
+        let repositories = Arc::clone(&self.repositories);
+        self.derive(|options| {
+            let mut options = options.with_source_file(path);
+            options.admit_source_in(&context, &repositories);
+            options
+        })
     }
 
     /// This request composing `url`; see [`ComposeOptions::with_source_url`].
     #[must_use]
     pub(crate) fn with_source_url(self, url: url::Url) -> Self {
         self.derive(|options| options.with_source_url(url))
+    }
+
+    /// This request rooted at `source`, a root document's own source: a file
+    /// through [`Self::with_source_file`], a URL as is; an unknown source
+    /// leaves the request unchanged.
+    #[must_use]
+    pub(crate) fn with_root_source(self, source: &super::options::ComposeSource) -> Self {
+        match source {
+            super::options::ComposeSource::File(path) => self.with_source_file(path),
+            super::options::ComposeSource::Url(url) => self.with_source_url(url.clone()),
+            super::options::ComposeSource::Unknown => self,
+        }
+    }
+
+    /// This request as the root pass over `document` uses it: a request
+    /// with no source of its own takes the source `document` was loaded
+    /// from ([`Self::with_root_source`]), so a caller that supplies the
+    /// path only on the [`Markdown`](crate::markdown::Markdown) gets the
+    /// same checkout as one that puts it on the request.
+    pub(crate) fn rooted_at(&self, document: &crate::markdown::Markdown) -> std::borrow::Cow<'_, Self> {
+        match (&self.options.source, document.source()) {
+            (super::options::ComposeSource::Unknown, Some(source)) if *source != super::options::ComposeSource::Unknown => {
+                std::borrow::Cow::Owned(self.clone().with_root_source(source))
+            }
+            _ => std::borrow::Cow::Borrowed(self),
+        }
     }
 
     /// Sets a child source that has already passed file-reference resolution;
@@ -817,7 +896,27 @@ impl ComposeRequest {
         self.derive(|options| options.with_accepted_source_file_in(path, opening, &context, &repositories))
     }
 
-    /// This request as the compose pass of `document` will see it, after
+    /// `document` with a relative file source made absolute at the request
+    /// directory, as [`Self::with_source_file`] admits it; borrowed when its
+    /// source is already absolute or not a file. Schema preparation reads
+    /// the document's own path (its `./` references and its `$schema`
+    /// position), so it must name the same file the request admitted.
+    pub(crate) fn root_document<'d>(
+        &self,
+        document: &'d crate::markdown::Markdown,
+    ) -> std::borrow::Cow<'d, crate::markdown::Markdown> {
+        match document.source() {
+            Some(super::options::ComposeSource::File(path)) if path.is_relative() => std::borrow::Cow::Owned(
+                document
+                    .clone()
+                    .with_source(super::options::ComposeSource::File(self.context.request_cwd().join(path))),
+            ),
+            _ => std::borrow::Cow::Borrowed(document),
+        }
+    }
+
+    /// This request as the compose pass of `document` will see it: rooted at
+    /// its source ([`Self::rooted_at`]), after
     /// [`ComposeOptions::extend_context_for`].
     ///
     /// Pre-flight discovery evaluates a document before that pass runs, so it
@@ -826,10 +925,11 @@ impl ComposeRequest {
         &self,
         document: &crate::markdown::Markdown,
     ) -> std::borrow::Cow<'_, Self> {
-        if !self.options.needs_extension_for(document) {
-            return std::borrow::Cow::Borrowed(self);
+        let rooted = self.rooted_at(document);
+        if !rooted.options.needs_extension_for(document) {
+            return rooted;
         }
-        let mut extended = self.clone();
+        let mut extended = rooted.into_owned();
         extended.options.extend_context_for(document);
         std::borrow::Cow::Owned(extended)
     }
@@ -965,8 +1065,8 @@ mod tests {
 
     /// A source admitted from another checkout gets a context in its own
     /// repository with the request's launch `@` scope and configuration, and
-    /// the request discovers each other repository, and each directory
-    /// outside every repository, once.
+    /// the request discovers each other repository once; a directory outside
+    /// every repository, or in the launch checkout, discovers none.
     #[test]
     fn admitted_sources_discover_another_repository_once_per_request() {
         use std::sync::atomic::Ordering;
@@ -1000,7 +1100,56 @@ mod tests {
         }
         let resident = request.clone().with_accepted_source_file(app.join("d.md"), None);
         assert_eq!(resident.source_file_resolution_context().repository_root(), Some(app.as_path()));
-        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 2, "one more for the folder outside Git, none for the launch checkout");
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1, "none for the folder outside Git or the launch checkout");
+    }
+
+    /// Git membership, not containment, names a source's repository: a
+    /// checkout nested in the launch checkout, or in another checkout the
+    /// request has already visited, is its own repository whichever source
+    /// the request admits first. A `.git` file (a submodule's layout) marks a
+    /// checkout as a `.git` directory does.
+    #[test]
+    fn nested_checkouts_are_their_own_repository_in_either_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let (app, notes) = (base.join("app"), base.join("notes"));
+        let (app_vendor, notes_vendor) = (app.join("vendor"), notes.join("vendor"));
+        for dir in [&app, &notes, &app_vendor, &notes_vendor] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        gix::init(&app).unwrap();
+        gix::init(&notes).unwrap();
+        gix::init(&notes_vendor).unwrap();
+        // `git init --separate-git-dir`: the checkout holds a `.git` file.
+        let separate = base.join("separate.git");
+        gix::init_bare(&separate).unwrap();
+        std::fs::write(app_vendor.join(".git"), format!("gitdir: {}\n", separate.display())).unwrap();
+        let mut config = std::fs::read_to_string(separate.join("config")).unwrap();
+        // No `worktree` key: a Windows path's backslashes are escapes in Git
+        // configuration, and discovery takes the checkout from the `.git` file.
+        config = config.replace("bare = true", "bare = false");
+        std::fs::write(separate.join("config"), config).unwrap();
+
+        let snapshot = RequestSnapshot::new(&app).with_home(Some(base.clone()));
+        let roots = |sources: &[PathBuf]| -> Vec<Option<PathBuf>> {
+            let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).unwrap();
+            sources
+                .iter()
+                .map(|source| {
+                    let accepted = request.clone().with_accepted_source_file(source, None);
+                    accepted.source_file_resolution_context().repository_root().map(Path::to_path_buf)
+                })
+                .collect()
+        };
+        let (seed, nested, component) = (notes.join("seed.md"), notes_vendor.join("review.md"), app_vendor.join("review.md"));
+        assert_eq!(roots(&[component]), [Some(app_vendor)], "nested in the launch checkout");
+        assert_eq!(
+            roots(&[seed.clone(), nested.clone()]),
+            [Some(notes.clone()), Some(notes_vendor.clone())],
+            "seed first"
+        );
+        assert_eq!(roots(&[nested, seed]), [Some(notes_vendor), Some(notes)], "nested first");
+        assert_eq!(roots(&[app.join("d.md")]), [Some(app)], "the launch checkout's own source");
     }
 
     #[test]

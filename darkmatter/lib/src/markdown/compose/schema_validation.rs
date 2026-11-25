@@ -205,6 +205,12 @@ pub fn effective_schema_for(
     markdown: &Markdown,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<(Option<crate::markdown::schemas::EffectiveSchema>, Vec<super::ComposeWarning>)> {
+    // Rooted as composition roots the document, so the host judges against
+    // the schema composition will use.
+    let rooted_markdown = request.root_document(markdown);
+    let markdown = rooted_markdown.as_ref();
+    let rooted_request = request.rooted_at(markdown);
+    let request = rooted_request.as_ref();
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, request, &mut trigger_registry)?;
     let consumer = source_path(markdown, request);

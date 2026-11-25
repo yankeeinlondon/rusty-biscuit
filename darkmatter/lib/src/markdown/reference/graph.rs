@@ -124,12 +124,12 @@ fn build_graph_inner(
     // Graph mode is the single source of truth for reference extraction.
     let extract_references = matches!(mode, ReferenceGraphMode::Full);
 
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let compose = options.compose.clone();
-    let compose = match &source {
-        ComposeSource::File(path) => compose.with_source_file(path),
-        ComposeSource::Url(url) => compose.with_source_url(url.clone()),
-        ComposeSource::Unknown => compose,
+    let compose = options.compose.clone().with_root_source(&md.source().clone().unwrap_or(ComposeSource::Unknown));
+    // The root as the request admitted it: a relative document path is the
+    // file under the request directory.
+    let source = match md.source() {
+        Some(ComposeSource::File(_)) => compose.source.clone(),
+        other => other.clone().unwrap_or(ComposeSource::Unknown),
     };
     let options = ReferenceGraphOptions::from_compose_options(compose);
     let options = &options;
@@ -1682,9 +1682,15 @@ mod tests {
             .unwrap();
         assert!(validation.is_valid(), "issues: {:?}", validation.issues);
 
+        // Queried as a root of its own, the child is admitted the way a
+        // request admits its own source, so its sibling resolves there.
         let child_md = Markdown::try_from(child_path.as_path()).unwrap();
-        let ordinary_external = compose.with_source_file(&child_path);
-        assert!(child_md.transclusions_with_options(&ordinary_external).is_err());
+        let refs = child_md.transclusions_with_options(&compose).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(
+            refs[0].resolved_target.as_deref().map(std::path::Path::new),
+            Some(grandchild_path.as_path()),
+        );
     }
 
     #[test]

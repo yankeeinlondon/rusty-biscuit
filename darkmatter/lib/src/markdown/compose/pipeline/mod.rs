@@ -56,6 +56,12 @@ impl Markdown {
         mut options: crate::markdown::compose::ComposeRequest,
         hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> (MarkdownResult<ComposeReport>, Vec<ComposeWarning>) {
+        if let std::borrow::Cow::Owned(rooted) = options.root_document(self) {
+            *self = rooted;
+        }
+        if let std::borrow::Cow::Owned(rooted) = options.rooted_at(self) {
+            options = rooted;
+        }
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
