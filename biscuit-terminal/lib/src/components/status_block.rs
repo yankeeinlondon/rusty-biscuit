@@ -151,6 +151,14 @@ impl StatusBlock {
         self.body(vec![line.into()])
     }
 
+    /// Puts `line` before the body items set so far: for a caller that adds
+    /// its own context (where a failure happened) to a block another error
+    /// built.
+    pub fn prepend_body_line(mut self, line: impl Into<Prose>) -> Self {
+        self.body.insert(0, line.into());
+        self
+    }
+
     /// Sets a prose-formatted hint.
     ///
     /// When body content is present, the hint is rendered inside the same
@@ -917,6 +925,15 @@ mod tests {
         assert!(md.contains("> first\n>\n> second"), "{md:?}");
         let rendered = strip_ansi(&block.render(&no_color_terminal(80)));
         assert!(rendered.contains("┃ first\n┃ \n┃ second"), "{rendered:?}");
+    }
+
+    #[test]
+    fn a_prepended_body_line_comes_before_the_existing_body() {
+        let block = StatusBlock::new(StatusState::Info)
+            .body(vec![Prose::new("first"), Prose::new("second")])
+            .prepend_body_line(Prose::new("where"));
+        let rendered = strip_ansi(&block.render(&no_color_terminal(80)));
+        assert!(rendered.contains("┃ where\n┃ \n┃ first\n┃ \n┃ second"), "{rendered:?}");
     }
 
     #[test]
