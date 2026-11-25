@@ -712,6 +712,7 @@ mod shared_fields {
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
         }
     }
 

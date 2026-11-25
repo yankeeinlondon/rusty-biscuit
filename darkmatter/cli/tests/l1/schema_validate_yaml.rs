@@ -768,10 +768,112 @@ fn catalog_the_shared_host_fixture_is_valid_and_its_sentinels_stay_passive() {
     assert_sentinels_untouched(&process);
 }
 
+#[test]
+fn schema_validate_accepts_inline_comments_in_callable_and_tagged_schemas() {
+    let process = CliProcessFixture::new();
+    let expression = format!(
+        "\u{feff}{HOST_CATALOG}    Label: string # A project label.\n    default_label: function(parameters(void); returns(Label@this); category(Project)) # Read a label.\n",
+    );
+    write(&process, "project.yaml", &expression.replace('\n', "\r\n"));
+    write(
+        &process,
+        "actions.yaml",
+        "kind: mutation-schema\ncategories: [Labels]\ntypes:\n    change_label: function(parameters(void); returns(string); category(Labels); fallible)\n    Label: string # A label for an action.\n",
+    );
+    write(
+        &process,
+        "label.yaml",
+        "kind: schema\ntypes:\n    Label: string # The displayed label.\n$schema:\n    label: Label@this\n",
+    );
+
+    let report = catalog_json(&process, &["project.yaml", "actions.yaml", "label.yaml"], 0);
+    let files = report["files"].as_array().expect("files");
+    assert_eq!(files.len(), 3, "{report:#}");
+    assert!(files.iter().all(|record| record["valid"] == true), "{report:#}");
+}
+
 /// `Is_Project_File` folds onto the earlier `is_project_file`: the failure
 /// is at the later key and the related location at the first, both in this
 /// file. The multi-byte sentinel text above them proves the lines come
 /// from byte offsets.
+#[test]
+fn type_reference_diagnostics_report_the_failing_signature_in_both_catalog_kinds() {
+    let process = CliProcessFixture::new();
+    let earlier = "function(parameters(Missing: string); returns(string); category(Project))";
+    let cases = [
+        ("missing", "Missing@this", "Missing", "which this catalog does not declare"),
+        ("external", "Label@./helpers.yaml", "./helpers.yaml", "resolves only its own helper types"),
+        ("callable", "show_label@this", "show_label", "uses the callable"),
+    ];
+    let mut source_by_case = Vec::new();
+    let mut controls = Vec::new();
+    for kind in ["expression-schema", "mutation-schema"] {
+        for (case, reference, decoy, message) in cases {
+            let signature = format!("function(parameters(name: number); returns({reference}); category(Project))");
+            let source = format!("kind: {kind}\ncategories: [Project]\ntypes:\n    Label: string\n    show_label:\n        - |-\n            {earlier} -> Mentions {decoy}.\n        - |- # {decoy}\n            {signature}\n");
+            let file = format!("{kind}-{case}.yaml");
+            write(&process, &file, &source);
+            let control = format!("{kind}-{case}-control.yaml");
+            write(&process, &control, &source.replace(reference, "Label@this"));
+            source_by_case.push((file, source, signature, case, message));
+            controls.push(control);
+        }
+    }
+    let controls: Vec<_> = controls.iter().map(String::as_str).collect();
+    let report = catalog_json(&process, &controls, 0);
+    assert!(report["files"].as_array().unwrap().iter().all(|row| row["valid"] == true), "{report:#}");
+
+    let files: Vec<_> = source_by_case.iter().map(|(file, ..)| file.as_str()).collect();
+    let report = catalog_json(&process, &files, 1);
+    let rows = report["files"].as_array().unwrap();
+    assert_eq!(rows.len(), source_by_case.len(), "{report:#}");
+    for ((_, source, signature, case, message), row) in source_by_case.iter().zip(rows) {
+        let start = source.find(signature).unwrap();
+        assert_eq!(row["code"], CATALOG_CODE, "{row:#}");
+        assert!(row["message"].as_str().unwrap().contains(message), "{row:#}");
+        assert_eq!(row["span"], span_of(source, signature), "{row:#}");
+        assert_eq!(row["line"], line_of(source, start), "{row:#}");
+        assert_eq!(row["column"], 13, "{row:#}");
+        let related = row["related"].as_array().unwrap();
+        if *case == "callable" {
+            assert_eq!(related.len(), 1, "{row:#}");
+            assert_eq!(related[0]["span"], span_of(source, "show_label"), "{row:#}");
+        } else {
+            assert!(related.is_empty(), "{row:#}");
+        }
+    }
+}
+
+#[test]
+fn callable_names_are_checked_by_schema_validate_at_the_authored_key() {
+    let process = CliProcessFixture::new();
+    let cases = [
+        ("space.yaml", "\"project label\"", false),
+        ("digit.yaml", "\"2fa_label\"", false),
+        ("boolean.yaml", "\"true\"", false),
+        ("quoted.yaml", "\"Project-Label\"", true),
+    ];
+    let files: Vec<_> = cases.iter().map(|(file, _, _)| *file).collect();
+    let sources: Vec<_> = cases.iter().map(|(file, key, _)| {
+        let source = sentinel_catalog("project_label:", &format!("{key}:"));
+        write(&process, file, &source);
+        source
+    }).collect();
+    let report = catalog_json(&process, &files, 1);
+    let records = report["files"].as_array().unwrap();
+    assert_eq!(records.len(), cases.len(), "{report:#}");
+    for (((_, key, valid), source), record) in cases.into_iter().zip(sources).zip(records) {
+        assert_eq!(record["valid"], valid, "{record:#}");
+        if !valid {
+            assert_eq!(record["code"], CATALOG_CODE, "{record:#}");
+            assert_eq!(record["span"], span_of(&source, key), "{record:#}");
+            assert_eq!(record["column"], 5, "{record:#}");
+            assert!(record["message"].as_str().unwrap().contains("cannot be used as an expression call name"), "{record:#}");
+        }
+    }
+    assert_sentinels_untouched(&process);
+}
+
 #[test]
 fn catalog_a_folded_name_collision_exits_1_at_the_key_with_the_earlier_declaration_related() {
     let process = CliProcessFixture::new();
@@ -800,9 +902,74 @@ fn catalog_a_folded_name_collision_exits_1_at_the_key_with_the_earlier_declarati
     assert_sentinels_untouched(&process);
 }
 
-/// A host catalog may not reuse a built-in function's name. In a checkout
-/// the related location is read from the repository's `functions.yaml`;
-/// outside one it keeps that repository path, unlocated.
+#[test]
+fn catalog_cli_reports_both_overloads_and_locates_category_failures() {
+    let process = CliProcessFixture::new();
+    let first = "function(parameters(x: string); returns(string); category(Project))";
+    let source = |kind: &str, ty: &str, sequence: bool| {
+        let second = format!("function(parameters(other: {ty}); returns(string); category(Project))");
+        let body = if sequence {
+            format!("\n        - '{first}'\n        - '{second}'")
+        } else {
+            format!(" >-\n        {first} |\n        {second}")
+        };
+        format!("kind: {kind}\ncategories: [Project]\ntypes:\n    Label: string\n    project_label:{body}\n")
+    };
+    let mut cases: Vec<(String, String, String, Option<&str>)> = Vec::new();
+    for kind in ["expression-schema", "mutation-schema"] {
+        for (sequence, ty) in [(true, "string"), (false, "string"), (true, "Label@this"), (false, "Label@this")] {
+            cases.push((
+                format!("case-{}.yaml", cases.len()),
+                source(kind, ty, sequence),
+                format!("function(parameters(other: {ty})"),
+                Some(first),
+            ));
+        }
+    }
+    for (index, (entry, needle, earlier)) in [
+        ("    - Project -> Once more.\n", "Project -> Once more.", Some("Project -> Ask about")),
+        ("    - ' -> Blank.'\n", "' -> Blank.'", None),
+        ("    - 'Other ->'\n", "'Other ->'", None),
+        ("", "function(", None),
+    ].into_iter().enumerate() {
+        let text = if entry.is_empty() {
+            HOST_CATALOG.replacen("category(Project);", "category(Missing);", 1)
+        } else {
+            HOST_CATALOG.replace("types:\n", &format!("{entry}types:\n"))
+        };
+        cases.push((format!("category-{index}.yaml"), text, needle.to_string(), earlier));
+    }
+    for (file, text, _, _) in &cases {
+        write(&process, file, text);
+    }
+    let files: Vec<_> = cases.iter().map(|(file, ..)| file.as_str()).collect();
+    let report = catalog_json(&process, &files, 1);
+    let records = report["files"].as_array().unwrap();
+    assert_eq!(records.len(), cases.len(), "{report:#}");
+    let position = |text: &str, needle: &str| {
+        let offset = text.find(needle).unwrap();
+        let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+        (Some(line_of(text, offset)), Some(text[line_start..offset].chars().count() as u64 + 1))
+    };
+    for (file, text, needle, earlier) in &cases {
+        let record = records.iter().find(|record| record["file"] == *file).unwrap();
+        assert_eq!(record["code"], CATALOG_CODE, "{record:#}");
+        assert_eq!((record["line"].as_u64(), record["column"].as_u64()), position(text, needle), "{record:#}");
+        if let Some(earlier) = earlier {
+            let related = record["related"].as_array().unwrap();
+            assert_eq!(related.len(), 1, "{record:#}");
+            assert_eq!(related[0]["file"], *file);
+            assert_eq!((related[0]["line"].as_u64(), related[0]["column"].as_u64()), position(text, earlier), "{record:#}");
+        } else {
+            assert!(record["related"].as_array().is_none_or(Vec::is_empty), "{record:#}");
+        }
+    }
+    write(&process, "valid.yaml", &source("expression-schema", "number", false));
+    assert_eq!(catalog_json(&process, &["valid.yaml"], 0)["files"][0]["valid"], true);
+}
+
+/// The related position comes from the embedded catalog, with a local file
+/// path when its bytes match the embedded source.
 #[test]
 fn catalog_a_built_in_name_reuse_exits_1_with_the_built_in_declaration_related() {
     let text = sentinel_catalog("    project_label:", "    min:");
@@ -813,12 +980,15 @@ fn catalog_a_built_in_name_reuse_exits_1_with_the_built_in_declaration_related()
     write(&process, "reuse.yaml", &text);
     let stdout = catalog_plain(&process, &["reuse.yaml"], 1);
     assert!(stdout.contains(&format!("[{CATALOG_CODE}] `types.min` reuses the name of the built-in function `min` (at reuse.yaml:{line}:5)")), "{stdout}");
-    assert!(stdout.contains(&format!("(at {FUNCTIONS_PATH})")), "{stdout}");
+    let built_in = FUNCTIONS_CATALOG.find("\n    min:").unwrap() + "\n    ".len();
+    let related_line = line_of(FUNCTIONS_CATALOG, built_in);
+    assert!(stdout.contains(&format!("(at {FUNCTIONS_PATH}:{related_line}:5)")), "{stdout}");
     let record = catalog_json(&process, &["reuse.yaml"], 1)["files"][0].clone();
     assert_eq!(record["code"], CATALOG_CODE, "{record:#}");
     assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(line), Some(5)), "{record:#}");
     assert_eq!(record["related"][0]["file"], FUNCTIONS_PATH, "{record:#}");
-    assert!(record["related"][0]["line"].is_null(), "{record:#}");
+    assert_eq!(record["related"][0]["line"], related_line, "{record:#}");
+    assert_eq!(record["related"][0]["column"], 5, "{record:#}");
     assert!(record["related"][0]["span"].is_object(), "{record:#}");
     assert_sentinels_untouched(&process);
 
@@ -843,6 +1013,19 @@ fn catalog_a_built_in_name_reuse_exits_1_with_the_built_in_declaration_related()
     assert_sentinels_untouched(&process);
 }
 
+#[test]
+fn catalog_a_builtin_alias_can_be_located_without_checkout_source() {
+    let process = CliProcessFixture::new();
+    write(&process, FUNCTIONS_PATH, "# A different source.\n");
+    write(&process, "reuse.yaml", &HOST_CATALOG.replace("project_label:", "KEBABCASE:"));
+    let report = catalog_json(&process, &["reuse.yaml"], 1);
+    let related = &report["files"][0]["related"][0];
+    let offset = FUNCTIONS_CATALOG.find("\n    kebab_case:").unwrap() + "\n    ".len();
+    assert_eq!(related["file"], FUNCTIONS_PATH);
+    assert_eq!(related["line"], line_of(FUNCTIONS_CATALOG, offset));
+    assert_eq!(related["column"], 5);
+}
+
 /// Shape failures stay what they were: an unknown top-level `$schema` is a
 /// located kind-contract problem, a duplicate key a located load error.
 /// Neither reaches the catalog reader's code, nor any sentinel.
@@ -863,11 +1046,15 @@ fn catalog_a_malformed_catalog_exits_1_located_as_a_contract_or_load_failure() {
     assert_eq!((problems[0]["line"].as_u64(), problems[0]["column"].as_u64()), (Some(2), Some(1)), "{record:#}");
 
     let line = duplicate.lines().count() as u64;
+    let first = line_of(&duplicate, duplicate.find("project_label:").unwrap());
     let stdout = catalog_plain(&process, &["duplicate.yaml"], 1);
     assert!(stdout.contains("is not a valid YAML document") && stdout.contains(&format!("(at line {line}, column 5)")), "{stdout}");
     let record = catalog_json(&process, &["duplicate.yaml"], 1)["files"][0].clone();
     assert_eq!(record["error"], "yaml_parse", "{record:#}");
     assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(line), Some(5)), "{record:#}");
+    let earlier = format!("the key is first written at line {first} column 5");
+    assert!(record["message"].as_str().unwrap().contains(&earlier), "{record:#}");
+    assert!(stdout.contains(&earlier), "{stdout}");
     assert_sentinels_untouched(&process);
 }
 
@@ -882,4 +1069,62 @@ fn catalog_route_leaves_an_ordinary_template_schema_resolved() {
     let record = catalog_json(&process, &["schema.yaml"], 1)["files"][0].clone();
     assert_eq!(record["error"], "slots", "{record:#}");
     assert!(record.get("code").is_none(), "{record:#}");
+}
+
+#[test]
+fn schema_validate_keeps_aliased_arms_and_locates_catalog_conflicts() {
+    let process = CliProcessFixture::new();
+    let string = "function(parameters(x: string); returns(string); category(Project))";
+    let number = "function(parameters(x: number); returns(string); category(Project))";
+    let missing = number.replace("returns(string)", "returns(Missing@this)");
+    let mut valid = vec!["ordinary.yaml".to_string()];
+    write(&process, &valid[0], "kind: schema\ntypes:\n    Label: &label string\n    Result: [*label, &num number]\n$schema:\n    label: Result@this\n");
+    let mut invalid = Vec::new();
+    for kind in ["expression-schema", "mutation-schema"] {
+        let document = |signature: &str, arms: &str| {
+            format!("kind: {kind}\ndescription: &other '{signature}'\ncategories: [Project, Extra]\ntypes:\n    Label: &label string\n    Result: [*label, number]\n    project_label:{arms}\n")
+        };
+        let control = format!("{kind}-control.yaml");
+        write(&process, &control, &document(number, &format!("\n        - '{number}'\n        - '{string}'")));
+        valid.push(control);
+        let accepted = format!("{kind}-alias.yaml");
+        write(&process, &accepted, &document(number, &format!("\n        - *other\n        - !!str &arm '{string}'")));
+        valid.push(accepted);
+
+        let resolved = string.replace("x: string", "x: Label@this");
+        let category = string.replace("category(Project)", "category(Extra)");
+        for (name, signature, arms, primary, related, message) in [
+            ("direct", number, format!(" [&arm '{string}', *arm]"), "*arm", Some(string), "same binding contract"),
+            ("resolved", string, format!(" [*other, '{resolved}']"), resolved.as_str(), Some("*other"), "same binding contract"),
+            ("category", number, format!(" [*other, '{category}']"), &format!("'{category}'"), Some("*other"), "different categories"),
+            ("reference", missing.as_str(), format!(" ['{string}', *other]"), "*other", None, "which this catalog does not declare"),
+        ] {
+            let file = format!("{kind}-{name}.yaml");
+            let source = document(signature, &arms);
+            write(&process, &file, &source);
+            let primary = span_of(&source, primary);
+            let related = related.map(|needle| span_of(&source, needle));
+            invalid.push((file, primary, related, message));
+        }
+    }
+    let valid: Vec<_> = valid.iter().map(String::as_str).collect();
+    let report = catalog_json(&process, &valid, 0);
+    let rows = report["files"].as_array().unwrap();
+    assert_eq!(rows.len(), valid.len(), "{report:#}");
+    assert!(rows.iter().all(|row| row["valid"] == true && row.get("error").is_none()), "{report:#}");
+
+    let files: Vec<_> = invalid.iter().map(|(file, ..)| file.as_str()).collect();
+    let report = catalog_json(&process, &files, 1);
+    let rows = report["files"].as_array().unwrap();
+    assert_eq!(rows.len(), invalid.len(), "{report:#}");
+    for ((file, primary, related, message), row) in invalid.iter().zip(rows) {
+        assert_eq!(row["code"], CATALOG_CODE, "{file}: {row:#}");
+        assert_eq!(&row["span"], primary, "{file}: {row:#}");
+        assert!(row["message"].as_str().unwrap().contains(message), "{file}: {row:#}");
+        let notes = row["related"].as_array().unwrap();
+        assert_eq!(notes.len(), usize::from(related.is_some()), "{file}: {row:#}");
+        if let Some(earlier) = related {
+            assert_eq!(&notes[0]["span"], earlier, "{file}: {row:#}");
+        }
+    }
 }

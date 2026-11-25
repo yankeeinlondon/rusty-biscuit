@@ -16,7 +16,7 @@ use biscuit_terminal::output::{
 };
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
-use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+use darkmatter::markdown::compose::expression::{Diagnostic, DiagnosticSource, Severity};
 use renderable::{CommandOutput, OutputOptions, TerminalProfile};
 
 /// The code of the warning a fractional `--width` produces.
@@ -165,6 +165,7 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     }
 }
 
@@ -199,17 +200,26 @@ pub fn report_run_notices(notices: Vec<Diagnostic>, data_output: bool) {
     }
 }
 
-/// A run notice's formatted text: its message, led by `file:line:column: `
-/// when its source has a file and a position (a notice without a position
-/// names its file in the message, if at all).
+/// A run notice and its related declarations, with their authored positions
+/// when available.
 #[must_use]
 pub fn notice_text(notice: &Diagnostic) -> String {
-    match notice.source.as_ref().and_then(|source| Some((source.file.as_ref()?, source.line?, source.column?))) {
-        Some((file, line, column)) => {
-            format!("{}:{line}:{column}: {}", biscuit_file::to_portable_string(file), notice.message)
-        }
+    let located = |source: &DiagnosticSource| {
+        let file = biscuit_file::to_portable_string(source.file.as_ref()?);
+        Some(match (source.line, source.column) {
+            (Some(line), Some(column)) => format!("{file}:{line}:{column}"),
+            _ => file,
+        })
+    };
+    let mut text = match notice.source.as_ref().filter(|source| source.line.is_some() && source.column.is_some()).and_then(located) {
+        Some(at) => format!("{at}: {}", notice.message),
         None => notice.message.clone(),
+    };
+    for related in &notice.related {
+        let prefix = located(&related.source).map(|at| format!("{at}: ")).unwrap_or_default();
+        text.push_str(&format!("\nrelated: {prefix}{}", related.message));
     }
+    text
 }
 
 /// The held run-level notices; empty for every later caller.

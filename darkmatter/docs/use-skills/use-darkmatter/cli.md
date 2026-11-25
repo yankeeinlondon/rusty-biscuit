@@ -66,6 +66,10 @@ These commands read stdin when no file is given (or the file is `-`):
 The reports from `validate refs`, `graph --validate`, `schema validate`, and
 `hash --diff` are the deliverable, so they go to stdout.
 
+Host registration conflicts in `diagnostics` include `related` entries with
+the other declaration's `message` and `source`. Read
+`.related[]?.source` to extract those positions from a data report.
+
 | Exit | Meaning |
 |---|---|
 | 0 | ran and succeeded |

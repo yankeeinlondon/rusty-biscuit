@@ -81,6 +81,7 @@ fn a_record_with_no_reference_details_omits_those_fields() {
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     };
 
     assert_eq!(

@@ -289,6 +289,10 @@ reject), so a binding failure or wrong arity proves neither side; `and`/`or`
 bind any value, so their arity check is their acceptance. There is no Rust-side
 `narrows` setter on `RegistrationBuilder`; never key a fact on a name. Host functions (`expression::host`): `HostFunctions::builder(HostFunctionCatalog)`
 validates names, catalog parity, eagerness, and facts at `build`;
+`expression::is_callable_name` requires the lexer token the parser uses for
+call names, with its text matching exactly. Expression catalog keys, builder
+names and aliases, and facts aliases all use it. The installed loader keeps
+the key or JSON element as the refusal site.
 `install_host_functions` (process-wide) or `HostFunctions::enter` (thread
 guard, DMLS) make a set visible; lookup order is test hooks → entered →
 installed → built-ins in `functions/mod.rs`. The editor rebuilds registrations from the catalog; `<stem>.facts.json`

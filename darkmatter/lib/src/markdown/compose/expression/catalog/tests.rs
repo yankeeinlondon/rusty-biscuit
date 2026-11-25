@@ -1064,9 +1064,9 @@ fn names_matching_without_ascii_case_are_one_callable() {
 #[test]
 fn helper_references_stay_inside_the_catalog_and_resolve_no_slot() {
     let cases = [
-        ("parameters(x: label)", "parameters(x: label@./other.yaml)", "references `label@./other.yaml`", Some("./other.yaml")),
-        ("parameters(x: label)", "parameters(x: missing)", "references `missing`, which this catalog does not declare", Some("missing")),
-        ("parameters(x: label)", "parameters(x: whisper)", "uses the callable `whisper` as a type", Some("whisper")),
+        ("parameters(x: label)", "parameters(x: label@./other.yaml)", "references `label@./other.yaml`", Some("function(")),
+        ("parameters(x: label)", "parameters(x: missing)", "references `missing`, which this catalog does not declare", Some("function(")),
+        ("parameters(x: label)", "parameters(x: whisper)", "uses the callable `whisper` as a type", Some("function(")),
         ("    label: string(not-empty)\n", "    label: string(not-empty)\n    unused: nowhere@./x.yaml\n", "`types.unused` references", None),
         ("    label: string(not-empty)\n", "    label: \"{{ fm.kind }}\"\n", "template slot", Some("label")),
     ];
@@ -1075,14 +1075,69 @@ fn helper_references_stay_inside_the_catalog_and_resolve_no_slot() {
         let error = authored(&source).unwrap_err();
         let (message, span, _) = located(&source, &error);
         assert!(message.contains(expected), "{to}: {message}");
-        if let Some(at) = at {
-            assert_eq!(span.as_deref(), Some(at), "{to}: {error:?}");
+        match at {
+            Some("function(") => assert!(span.as_deref().is_some_and(|span| span.starts_with("function(")), "{to}: {error:?}"),
+            Some(key) => assert_eq!(span.as_deref(), Some(key), "{to}: {error:?}"),
+            None => {}
         }
     }
     // A helper may refer to itself through a container: grammar-valid local
     // recursion is admitted.
     let recursive = AUTHORED.replacen("    label: string(not-empty)\n", "    label: string(not-empty)\n    tree: \"{ name: string, kids: tree[] }\"\n", 1);
     authored(&recursive).expect("a recursive helper loads");
+}
+
+#[test]
+fn reference_diagnostics_use_the_signature_and_its_overload_arm() {
+    let base = "kind: expression-schema\ncategories: [Text]\ntypes:\n    Label: string\n    show_label:";
+    let first = "function(parameters(Missing: string); returns(string); category(Text))";
+    let parameter = "function(parameters(Missing: Missing@this); returns(string); category(Text))";
+    let returns = "function(parameters(Missing: string); returns(Missing@this); category(Text))";
+    let second = "function(parameters(value: number); returns(Missing@this); category(Text))";
+    let cases = [
+        (format!(" |- # Missing\n        {parameter}\n"), parameter),
+        (format!(" |- # Missing\n        {returns}\n"), returns),
+        (format!("\n        - |-\n            {first} -> Mentions Missing.\n        - |-\n            {second}\n"), second),
+        (format!(" [\"{first} -> Mentions Missing.\", \"{second}\"]\n"), second),
+        (format!(" >-\n        {first} |\n        {second}\n"), second),
+        (format!(" |-\n        {first} |\n        {second}\n"), second),
+    ];
+    for (carrier, signature) in cases {
+        let source = format!("{base}{carrier}");
+        let control = source.replace("Missing@this", "Label@this");
+        authored(&control).unwrap_or_else(|error| panic!("{control}: {error}"));
+        let error = authored(&source).unwrap_err();
+        let (message, span, related) = located(&source, &error);
+        assert!(message.contains("references `Missing`"), "{error:?}");
+        assert_eq!(span.as_deref(), Some(signature), "{source}");
+        assert!(related.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn reference_diagnostics_use_the_helper_member_or_owning_atom() {
+    let cases = [
+        ("    Helper:\n        Missing: Missing@this # Missing\n", "Missing"),
+        ("    Helper: '{ Missing: Missing@this }'\n", "Missing"),
+        ("    Helper:\n        '<starting::Missing>': Missing@this\n", "Missing"),
+        ("    Helper:\n        item: string -> Check Missing.\n        $extends: Missing@this\n", "Missing"),
+        ("    Helper:\n        item: string -> Check Missing.\n        $extends: [Object@this, Missing@this]\n", "Missing"),
+        ("    Helper: '{ item: string -> Check Missing., ...Missing@this }'\n", "Missing"),
+        ("    Helper: 'tuple([string, Missing@this])'\n", "tuple([string, Missing@this])"),
+        ("    Helper: 'tuple([string, ...(number | Missing@this)[]])'\n", "tuple([string, ...(number | Missing@this)[]])"),
+        ("    Helper: '(string | Missing@this)[]'\n", "(string | Missing@this)[]"),
+    ];
+    for (declaration, marked) in cases {
+        let source = format!("{AUTHORED}    Object:\n        key: string\n{declaration}");
+        let control = source.replace("Missing@this", "Object@this");
+        authored(&control).unwrap_or_else(|error| panic!("{control}: {error}"));
+        let error = authored(&source).unwrap_err();
+        assert!(error.to_string().contains("references `Missing`"), "{error:?}");
+        let start = if marked == "Missing" { source.find("Missing@this") } else { source.find(marked) }.unwrap();
+        let CatalogError::Invalid { span, related, .. } = &error else { panic!("{error:?}") };
+        assert_eq!(*span, Some(start..start + marked.len()), "{source}\n{error:?}");
+        assert!(related.is_empty(), "{error:?}");
+    }
 }
 
 #[test]

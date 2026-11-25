@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use simplified_schema::errors::CatalogRelated;
 use simplified_schema::simplified::{
-    FunctionParameters, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaShape, SchemaSourceMap,
-    SchemaSourcePath, SchemaSpanKind, TypeExpr,
+    Extends, FunctionParameters, FunctionType, LOCAL_REFERENCE, ObjectComposition, PatternKey, PropertyAtom, PropertyDef,
+    SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, TypeExpr,
 };
 
 use super::CatalogError;
@@ -116,23 +116,6 @@ impl<'a> Locator<'a> {
             _ => self.key(name, message),
         }
     }
-
-    /// The first whole-word occurrence of `needle` inside the authored
-    /// definition of the entry `name`: where a reference written inside a
-    /// signature (which the source map does not index) is spelled.
-    fn spelled_in(&self, name: &str, needle: &str, source: Option<&str>) -> Option<Range<usize>> {
-        let source = source?;
-        let definition = self.span(&SchemaSourcePath::root().property(name), SchemaSpanKind::Definition)?;
-        let text = source.get(definition.clone())?;
-        let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-        text.match_indices(needle)
-            .find(|(start, _)| {
-                let before = text[..*start].chars().next_back().is_none_or(|c| !word(c));
-                let after = text[start + needle.len()..].chars().next().is_none_or(|c| !word(c));
-                before && after
-            })
-            .map(|(start, _)| definition.start + start..definition.start + start + needle.len())
-    }
 }
 
 /// Checks every named-type reference and template slot of the entry `name`
@@ -142,7 +125,6 @@ impl<'a> Locator<'a> {
 /// entry in authored order, used or not.
 pub(super) fn local_references(
     at: &Locator<'_>,
-    source: Option<&str>,
     name: &str,
     def: &PropertyDef,
     helpers: &IndexMap<String, PropertyDef>,
@@ -159,10 +141,14 @@ pub(super) fn local_references(
         ));
     }
     let mut references = Vec::new();
-    def_references(def, &mut references);
-    for (target, reference) in references {
+    let site = ReferenceSite {
+        at,
+        path: Some(SchemaSourcePath::root().property(name)),
+        enclosing: at.key_span(name),
+    };
+    def_references(def, &site, &mut references);
+    for (target, reference, span) in references {
         if reference != LOCAL_REFERENCE {
-            let span = at.spelled_in(name, &reference, source).or_else(|| at.key_span(name));
             return Err(at.error(
                 format!(
                     "`types.{name}` references `{target}@{reference}`; a callable catalog resolves only its own \
@@ -172,14 +158,13 @@ pub(super) fn local_references(
                 Vec::new(),
             ));
         }
-        if helpers.contains_key(&target) {
+        if helpers.contains_key(target) {
             continue;
         }
-        let span = at.spelled_in(name, &target, source).or_else(|| at.key_span(name));
-        let (message, related) = if callables.contains(&target.as_str()) {
+        let (message, related) = if callables.contains(&target) {
             (
                 format!("`types.{name}` uses the callable `{target}` as a type; only helper types can be referenced"),
-                vec![at.related(format!("`{target}` is declared here"), at.key_span(&target))],
+                vec![at.related(format!("`{target}` is declared here"), at.key_span(target))],
             )
         } else {
             (format!("`types.{name}` references `{target}`, which this catalog does not declare"), Vec::new())
@@ -223,12 +208,16 @@ pub(super) fn reserved_name(at: &Locator<'_>, name: &str) -> Result<(), CatalogE
     } else {
         format!("`types.{name}` reuses `{folded}`, an alias of the built-in function `{canonical}`")
     };
-    let related = CatalogRelated {
+    Err(at.error(message, at.key_span(name), vec![builtin_name_related(canonical)]))
+}
+
+/// The declaration claiming a built-in function's canonical name and aliases.
+pub(crate) fn builtin_name_related(canonical: &str) -> CatalogRelated {
+    CatalogRelated {
         message: format!("the built-in function `{canonical}` is declared here"),
         file: PathBuf::from(super::CATALOG_PATH),
         span: builtin_key_span(canonical),
-    };
-    Err(at.error(message, at.key_span(name), vec![related]))
+    }
 }
 
 /// The byte range of the built-in catalog's `types` key `canonical`, read
@@ -280,40 +269,100 @@ fn shape_defs(shape: &SchemaShape) -> impl Iterator<Item = &PropertyDef> {
     shape.properties.values().chain(shape.pattern_keys.iter().map(|key| &key.def))
 }
 
-/// Every `(name, reference)` a definition names, in authored order:
-/// named-type references and composition operands, through function
-/// parameters and returns, inline objects, unions, and tuples.
-fn def_references(def: &PropertyDef, out: &mut Vec<(String, String)>) {
-    for atom in def_atoms(def) {
-        atom_references(atom, out);
+/// An address into the catalog source map and the nearest enclosing range.
+#[derive(Clone)]
+struct ReferenceSite<'a> {
+    at: &'a Locator<'a>,
+    path: Option<SchemaSourcePath>,
+    enclosing: Option<Range<usize>>,
+}
+
+impl ReferenceSite<'_> {
+    fn child(&self, descend: impl FnOnce(&SchemaSourcePath) -> SchemaSourcePath) -> Self {
+        Self { path: self.path.as_ref().map(descend), ..self.clone() }
+    }
+
+    fn atom(&self) -> Self {
+        let enclosing = self.path.as_ref().and_then(|path| {
+            self.at.span(path, SchemaSpanKind::Atom).or_else(|| self.at.span(path, SchemaSpanKind::UnionArm))
+        });
+        Self { enclosing: enclosing.or_else(|| self.enclosing.clone()), ..self.clone() }
+    }
+
+    /// Function bodies, tuple elements, and grouped array unions have no
+    /// separate source-map entries. Keep the owning expression's range.
+    fn unindexed(self) -> Self {
+        Self { path: None, ..self }
+    }
+
+    fn span(&self, reference: &str) -> Option<Range<usize>> {
+        let kind = if reference == LOCAL_REFERENCE { SchemaSpanKind::ImportName } else { SchemaSpanKind::ImportReference };
+        self.path.as_ref()
+            .and_then(|path| self.at.span(path, kind).or_else(|| self.at.span(path, SchemaSpanKind::CompositionOperand)))
+            .or_else(|| self.enclosing.clone())
     }
 }
 
-fn atom_references(atom: &PropertyAtom, out: &mut Vec<(String, String)>) {
-    match &atom.ty {
-        TypeExpr::Imported { name, reference } => out.push((name.clone(), reference.clone())),
-        TypeExpr::InlineObject(shape) => {
-            if let Some(composition) = &shape.composition {
-                for operand in composition.operands() {
-                    out.push((operand.name.clone(), operand.resolved_reference().to_string()));
-                }
-            }
-            for def in shape_defs(shape) {
-                def_references(def, out);
+type LocatedReference<'a> = (&'a str, &'a str, Option<Range<usize>>);
+
+fn def_references<'a>(def: &'a PropertyDef, site: &ReferenceSite<'_>, out: &mut Vec<LocatedReference<'a>>) {
+    match def {
+        PropertyDef::Single(atom) => atom_references(atom, site, out),
+        PropertyDef::Union(arms) => {
+            let site = site.atom();
+            for (index, arm) in arms.iter().enumerate() {
+                atom_references(arm, &site.child(|path| path.union_arm(index)), out);
             }
         }
-        TypeExpr::Union(arms) => arms.iter().for_each(|arm| atom_references(arm, out)),
+    }
+}
+
+fn atom_references<'a>(atom: &'a PropertyAtom, site: &ReferenceSite<'_>, out: &mut Vec<LocatedReference<'a>>) {
+    let site = site.atom();
+    match &atom.ty {
+        TypeExpr::Imported { name, reference } => out.push((name, reference, site.span(reference))),
+        TypeExpr::InlineObject(shape) => {
+            if let Some(composition) = &shape.composition {
+                for (index, operand) in composition.operands().into_iter().enumerate() {
+                    let member = site.child(|path| match composition.as_ref() {
+                        ObjectComposition::Inline(_) => path.spread(index),
+                        ObjectComposition::Extends(Extends::Scalar(_)) => path.property("$extends"),
+                        ObjectComposition::Extends(Extends::Sequence(_)) => path.property("$extends").union_arm(index),
+                    });
+                    let reference = operand.resolved_reference();
+                    out.push((&operand.name, reference, member.span(reference)));
+                }
+            }
+            for (name, def) in &shape.properties {
+                def_references(def, &site.child(|path| path.property(name)), out);
+            }
+            for pattern in &shape.pattern_keys {
+                let member = site.child(|path| path.property(match &pattern.key {
+                    PatternKey::CatchAll => "<string>".to_string(),
+                    PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
+                    PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
+                    PatternKey::Pattern(regex) => format!("<pattern::{regex}>"),
+                }));
+                def_references(&pattern.def, &member, out);
+            }
+        }
+        TypeExpr::Union(arms) => {
+            let site = site.unindexed();
+            arms.iter().for_each(|arm| atom_references(arm, &site, out));
+        }
         TypeExpr::Tuple(tuple) => {
+            let site = site.unindexed();
             for element in &tuple.elements {
-                def_references(&element.def, out);
+                def_references(&element.def, &site, out);
             }
             if let Some(spread) = &tuple.spread {
-                atom_references(spread, out);
+                atom_references(spread, &site, out);
             }
         }
         TypeExpr::Function(function) => {
+            let site = site.unindexed();
             for def in function_defs(function) {
-                def_references(def, out);
+                def_references(def, &site, out);
             }
         }
         TypeExpr::Primitive(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}

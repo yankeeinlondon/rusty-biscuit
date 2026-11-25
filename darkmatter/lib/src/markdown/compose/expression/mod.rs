@@ -133,7 +133,7 @@ pub use catalog::{
 pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
 pub use diagnostics::{
-    DataLocation, Diagnostic, DiagnosticSource, ExpressionDiagnostic, GrantNeeded, INCOMPATIBLE_CALL_CODE, ReferenceDetails, SchemaDefaultOrigin, Severity,
+    DataLocation, Diagnostic, DiagnosticRelated, DiagnosticSource, ExpressionDiagnostic, GrantNeeded, INCOMPATIBLE_CALL_CODE, ReferenceDetails, SchemaDefaultOrigin, Severity,
     UNCERTAIN_CALL_CODE, UNDECLARED_MEMBER_CODE,
     call_severity, expression_call_diagnostics, one_based_position,
 };
@@ -170,6 +170,7 @@ pub use simplified_schema::expression::lexer::{
 pub use simplified_schema::expression::parser::{
     ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_spanned,
 };
+
 pub use prepared::{
     AuthoredMode, PlaceholderView, PreparationError, PreparedExpression, PreparedInterpolation,
     PreparedInterpolationView, PreparedPlaceholder, PreparedValue, ValidationDiagnostic,
@@ -182,6 +183,14 @@ use serde_json::Value;
 use simplified_schema::numeric::{self, NumberTextError, NumericAdmissionError};
 
 use crate::catalog::{describe_for_error, suggest};
+
+// The parser calls a Variable followed by '('. Check the exact token text
+// because the lexer skips whitespace and can stop before the input ends.
+fn is_callable_name(name: &str) -> bool {
+    let mut lexer = Lexer::new(name);
+    matches!(lexer.next_token(), Ok(Token::Variable(spelling)) if spelling == name)
+        && matches!(lexer.next_token(), Ok(Token::Eof))
+}
 
 /// A value read as an arithmetic operand.
 enum ArithmeticOperand {

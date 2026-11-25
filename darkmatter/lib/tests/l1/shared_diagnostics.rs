@@ -72,6 +72,7 @@ fn a_category_3_call_composes_with_a_located_warning() {
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     };
     assert_eq!(found, [&expected(position_of(content, "label, 9", 0)), &expected(position_of(content, "label, 5", 0))]);
     let warning = report.warnings.iter().find(|warning| warning.diagnostic.is_some()).unwrap();

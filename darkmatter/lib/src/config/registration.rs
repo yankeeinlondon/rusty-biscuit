@@ -77,7 +77,8 @@ use self::namespaces::{NamespaceMember, PreparedCatalog};
 use super::load::{ConfigSnapshot, Registration, SourcePosition, line_column};
 use crate::lifecycle::host_profile::{self, HostLifecycleProfile};
 use crate::markdown::compose::expression::host::FactsArtifact;
-use crate::markdown::compose::expression::host::artifact::analysis_only_sited;
+use crate::markdown::compose::expression::catalog::{builtin_name_related, embedded_catalog_source};
+use crate::markdown::compose::expression::host::artifact::{FactsNameSite, analysis_only_sited};
 use crate::markdown::compose::expression::{
     Availability, BindingView, HostFunctionCatalog, HostFunctions, HostGlobals, RuntimeBinding, ScopeId, Severity,
     UnavailabilityReason, is_reserved_namespace,
@@ -1291,6 +1292,21 @@ struct Claim<'a> {
     at: Option<SourcePosition>,
 }
 
+fn catalog_claim_position(
+    loaded: &simplified_schema::yaml_documents::LoadedYaml,
+    text: &str,
+    name: &str,
+) -> Option<SourcePosition> {
+    loaded
+        .byte_range(&simplified_schema::yaml_documents::locating_problem(&["types".to_string(), name.to_string()]))
+        .map(|range| line_column(text, range.start))
+}
+
+fn facts_alias_position(text: &str, name: &str, index: usize) -> Option<SourcePosition> {
+    let pointer = locate::artifact_pointer(&["functions".to_string(), name.to_string(), "aliases".to_string(), index.to_string()]);
+    biscuit_file::data_locations::locate_json(text, &pointer).map(|offset| line_column(text, offset))
+}
+
 /// Every canonical name and alias claimed by two of the host's catalogs,
 /// compared case-insensitively over the catalogs in bundle-path order: each
 /// later claimant is refused at its declaration (a catalog key, or an alias
@@ -1304,11 +1320,7 @@ fn name_collisions(snapshot: &VerifiedSnapshot, sets: &[(HostFunctionSet, &Bundl
         let facts_text = member_text(snapshot, &pair.facts).unwrap_or_default();
         let types = simplified_schema::yaml_documents::load_yaml_document(catalog_text, &pair.catalog.location).ok();
         for name in set.functions.function_names() {
-            let at = types.as_ref().and_then(|loaded| {
-                loaded
-                    .byte_range(&simplified_schema::yaml_documents::locating_problem(&["types".to_string(), name.to_string()]))
-                    .map(|range| line_column(catalog_text, range.start))
-            });
+            let at = types.as_ref().and_then(|loaded| catalog_claim_position(loaded, catalog_text, name));
             claims.push(Claim {
                 folded: name.to_ascii_lowercase(),
                 spelled: name.to_string(),
@@ -1318,8 +1330,7 @@ fn name_collisions(snapshot: &VerifiedSnapshot, sets: &[(HostFunctionSet, &Bundl
                 at,
             });
             for (index, alias) in set.functions.aliases(name).unwrap_or_default().iter().enumerate() {
-                let pointer = locate::artifact_pointer(&["functions".to_string(), name.to_string(), "aliases".to_string(), index.to_string()]);
-                let at = biscuit_file::data_locations::locate_json(facts_text, &pointer).map(|offset| line_column(facts_text, offset));
+                let at = facts_alias_position(facts_text, name, index);
                 claims.push(Claim {
                     folded: alias.to_ascii_lowercase(),
                     spelled: alias.clone(),
@@ -1355,13 +1366,7 @@ fn name_collisions(snapshot: &VerifiedSnapshot, sets: &[(HostFunctionSet, &Bundl
                 claim.folded,
                 describe(first)
             ),
-            related: vec![RegistrationRelated {
-                message: format!("the earlier {}", describe(first)),
-                file: first.file.clone(),
-                line: first.at.as_ref().map(|at| at.line),
-                column: first.at.as_ref().map(|at| at.column),
-                line_prefix: first.at.as_ref().map(|at| at.line_prefix.clone()),
-            }],
+            related: vec![registration_mark(format!("the earlier {}", describe(first)), first.file.clone(), first.at.clone())],
         });
     }
     refusals
@@ -1624,7 +1629,8 @@ fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleCompanion) -> Result
         related: error.related().iter().map(|related| catalog_related(snapshot, related)).collect(),
         ..refuse(&pair.catalog, format!("the expression catalog does not load: {error}"))
     })?;
-    let artifact = match member_text(snapshot, &pair.facts) {
+    let facts = member_text(snapshot, &pair.facts);
+    let artifact = match facts {
         Some(facts) => FactsArtifact::Text(facts),
         None => FactsArtifact::Unreadable("the file is not UTF-8 text"),
     };
@@ -1633,12 +1639,18 @@ fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleCompanion) -> Result
     let incomplete = set.incomplete_functions();
     if let Some((function, _)) = incomplete.first() {
         let reasons: Vec<String> = incomplete.iter().map(|(name, reason)| format!("`{name}`: {reason}")).collect();
-        // Reported where the reader judged the first incomplete function.
-        return Err(Refusal {
-            at: member_text(snapshot, &pair.facts)
-                .and_then(|facts| locate::artifact(facts, sites.get(*function))),
-            ..refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; ")))
-        });
+        let mut refusal = refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; ")));
+        if let Some(conflict) = sites.conflict {
+            let mark = |site| facts_name_mark(snapshot, pair, text, facts.unwrap_or_default(), site);
+            let (file, at, _) = mark(conflict.later);
+            let (earlier_file, earlier_at, message) = mark(conflict.earlier);
+            refusal.file = file;
+            refusal.at = at;
+            refusal.related.push(registration_mark(message, earlier_file, earlier_at));
+        } else {
+            refusal.at = facts.and_then(|facts| locate::artifact(facts, sites.failures.get(*function)));
+        }
+        return Err(refusal);
     }
     Ok(HostFunctionSet {
         bundle_path: pair.catalog.path.clone(),
@@ -1648,16 +1660,50 @@ fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleCompanion) -> Result
     })
 }
 
-/// A catalog failure's related location, positioned when its file is a
-/// verified member (a built-in catalog's identity has no text here).
+/// Maps a claim to the bytes that authored it, including a built-in's
+/// declaration, which is always available from its embedded source.
+fn facts_name_mark(
+    snapshot: &VerifiedSnapshot,
+    pair: &BundleCompanion,
+    catalog: &str,
+    facts: &str,
+    site: FactsNameSite,
+) -> (PathBuf, Option<SourcePosition>, String) {
+    match site {
+        FactsNameSite::Canonical(name) => {
+            let file = pair.catalog.location.clone();
+            let at = simplified_schema::yaml_documents::load_yaml_document(catalog, &file)
+                .ok()
+                .and_then(|loaded| catalog_claim_position(&loaded, catalog, &name));
+            (file, at, format!("the function `{name}` is declared here"))
+        }
+        FactsNameSite::Alias { owner, index } => (
+            pair.facts.location.clone(),
+            facts_alias_position(facts, &owner, index),
+            format!("the alias of `{owner}` is declared here"),
+        ),
+        FactsNameSite::BuiltIn(name) => {
+            let related = builtin_name_related(name);
+            let at = catalog_related_position(snapshot, &related);
+            (related.file, at, related.message)
+        }
+    }
+}
+
+fn catalog_related_position(snapshot: &VerifiedSnapshot, related: &simplified_schema::errors::CatalogRelated) -> Option<SourcePosition> {
+    let span = related.span.as_ref()?;
+    let text = embedded_catalog_source(&related.file).or_else(|| verified_text(snapshot, &related.file))?;
+    Some(line_column(text, span.start))
+}
+
 fn catalog_related(snapshot: &VerifiedSnapshot, related: &simplified_schema::errors::CatalogRelated) -> RegistrationRelated {
-    let at = related
-        .span
-        .as_ref()
-        .and_then(|span| verified_text(snapshot, &related.file).map(|text| line_column(text, span.start)));
+    registration_mark(related.message.clone(), related.file.clone(), catalog_related_position(snapshot, related))
+}
+
+fn registration_mark(message: String, file: PathBuf, at: Option<SourcePosition>) -> RegistrationRelated {
     RegistrationRelated {
-        message: related.message.clone(),
-        file: related.file.clone(),
+        message,
+        file,
         line: at.as_ref().map(|at| at.line),
         column: at.as_ref().map(|at| at.column),
         line_prefix: at.map(|at| at.line_prefix),

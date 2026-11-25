@@ -48,6 +48,15 @@ wins:
 - A file name in an earlier root **shadows** the same name in later roots,
   even when the earlier file is broken.
 - `[workspace]` settings don't affect the roots.
+- Being in a root applies only `kind: schema-trigger` files (to the Markdown
+  documents they match) and `kind: yaml-schema` files (to the YAML files
+  whose `kind` they claim). Any other schema file there is only
+  **available**: it applies to a document whose `$schema` names it, such as
+  `$schema: food.yaml`, and to no other.
+- A root reaches only the documents it serves: a package's `schemas/` that
+  package, a package area's that area, `{repo}/schemas/` the whole
+  repository, and `$SCHEMAS_DIR` and `~/schemas/` every document in any
+  repository.
 
 `md schema triggers doc.md` prints the roots for a document, which triggers
 matched (condition by condition), which files were shadowed, and which were
@@ -122,6 +131,14 @@ $schema:
 | `kind: expression-schema` | `kind`, `categories` (required), `types` (required), `description` | declares expression functions (with private local helpers); checked by `md schema validate` and DMLS (`dm.schema.callable_catalog`); never a `$schema` target or import source; disallows `when` |
 | `kind: mutation-schema` | `kind`, `categories` (required), `types` (required), `description` | declares Darkmatter's built-in signature-backed lifecycle actions; checked like `expression-schema` (refusing `narrows(...)` and `when`); refused in host registrations |
 | `.json` | a Draft 2020-12 JSON Schema | a `$schema` target. It validates, but adds no completion or hover |
+
+Callable catalog conflicts point to both declarations. DMLS links a built-in
+declaration when matching source is available and otherwise shows the
+embedded catalog's file label, line, and column. DMLS marks a callable key
+that cannot be used in an expression, such as `project label` or `true`.
+For a bad type reference, inspect the marked reference or its enclosing type
+expression, such as the specific overload's signature. An aliased arm is
+marked at its YAML alias token.
 
 Any other top-level key is a malformed-envelope error.
 

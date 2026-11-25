@@ -54,19 +54,25 @@ pub(crate) struct Probe {
 
 impl Probe {
     pub(crate) fn new() -> Self {
-        Self::with_config(DmlsConfig::default())
+        Self::with_config(DmlsConfig::default(), true)
+    }
+
+    pub(crate) fn without_repository() -> Self {
+        Self::with_config(DmlsConfig::default(), false)
     }
 
     fn strict() -> Self {
         let mut config = DmlsConfig::default();
         config.schema.strict = true;
-        Self::with_config(config)
+        Self::with_config(config, true)
     }
 
-    fn with_config(config: DmlsConfig) -> Self {
+    fn with_config(config: DmlsConfig, repository: bool) -> Self {
         let workspace = LspWorkspace::new();
-        init_repository(workspace.path());
-        write(&workspace.path().join("schemas/roster.yaml"), ROSTER_DEFINITION);
+        if repository {
+            init_repository(workspace.path());
+            write(&workspace.path().join("schemas/roster.yaml"), ROSTER_DEFINITION);
+        }
         let contexts = RepositoryContexts::new(LspFixture::fixture_snapshot(&workspace));
         Self { workspace, contexts, config, state: OverlayState::default() }
     }
@@ -87,6 +93,10 @@ impl Probe {
 
     pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.workspace.path().join(name)
+    }
+
+    pub(crate) fn change_schema_buffer(&self, name: &str, text: Option<&str>) {
+        self.state.set_schema_buffer(&self.path(name), text);
     }
 
     /// Runs `inspect` over the context of `text` opened as `name` (the file

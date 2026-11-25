@@ -30,6 +30,17 @@ document with a `categories:` list and `function(...)` entries under
 catalog is not a schema: a document cannot name it as its `$schema`, and a
 schema cannot import its types.
 
+For multiple overloads under one name, write a YAML sequence of signatures.
+You can reuse a signature with a YAML anchor and an alias. The catalog checks
+the signature at each use. If two arms conflict, diagnostics locate both arms
+and mark the alias token for an aliased arm.
+
+Every expression function name and alias must work as written before the
+parentheses of a call. For example, `project_label`, `project-label`, and
+`project.label` work. Spaces, a leading digit, and the literal tokens
+`true` and `false` make a spelling unusable. YAML quotes around a key
+preserve its spelling. Once names are admitted, lookup ignores ASCII case.
+
 ```yaml
 # schemas/project.yaml
 kind: expression-schema
@@ -86,6 +97,7 @@ location and, for a conflict, the other declaration's location, when:
 
 - `types:` declares no callable, or an entry mixes `function(...)` arms with an
   ordinary type;
+- an expression callable key cannot be used as an expression call name;
 - two callables have names that match without regard to ASCII case
   (`is_project_file` and `Is_Project_File`);
 - a callable reuses a built-in function's canonical name or alias (`min`,
@@ -100,6 +112,9 @@ location and, for a conflict, the other declaration's location, when:
 
 `md schema validate` and DMLS run the same check, so an editor shows the same
 error, code `dm.schema.callable_catalog`, before the host loads the file.
+A type-reference error identifies the reference itself where a span is
+available, or its enclosing type expression. For example, an undeclared
+type in an overload's return is reported on that overload's signature.
 
 ## Registering functions
 
@@ -128,7 +143,8 @@ install_host_functions(functions)?;
 `build()` checks the whole set before anything is evaluated and fails with a
 `HostFunctionError` when:
 
-- a canonical name or alias is used twice in the set;
+- a canonical name or alias cannot be used as an expression call name or
+  is used twice in the set;
 - an alias is already a built-in's canonical name or alias (a canonical name
   that collides is refused earlier, when the catalog loads);
 - a catalog function has no registration, or a registration names a function
@@ -264,6 +280,7 @@ no argument category and proves no narrowing, and each call is reported as
 | `functions: {}` | every function (none has an entry) |
 | a function has no entry, or its entry is not an object | that function |
 | an entry field is absent, of the wrong type, or unknown, or a field that must not be `null` is `null` | that function |
+| an alias cannot be used as an expression call name | that function |
 | one element of `facts` or `source_exclusions` is invalid (never skipped) | that function |
 | a fact names a parameter the catalog does not declare, or records the wrong position | that function |
 | the artifact's `facts` differ from the catalog's `narrows(...)` clause (a different kind, type, or parameter, a fact the catalog does not declare, or none where it does) | that function |

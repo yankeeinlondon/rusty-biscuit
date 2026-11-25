@@ -829,11 +829,14 @@ impl OverlayState {
         // claim keeps the last-good semantic model alive through malformed
         // edits; the current parse result always owns diagnostics.
         let claim = schema::standalone_envelope_claim(text);
-        // A callable catalog that does not load keeps the loader's located
-        // error (a repeated key with its first spelling), not the envelope's
-        // coarser one for the same text.
+        // A callable catalog's loader or catalog judgment already owns the
+        // located error, including the earlier declaration of a conflict.
         let reports_own_error = !(claim.is_some_and(StandaloneSchemaEnvelope::is_callable_catalog)
-            && yaml.is_some_and(|yaml| matches!(yaml.overlay.outcome, YamlDocumentOutcome::LoadFailed(_))));
+            && yaml.is_some_and(|yaml| match &yaml.overlay.outcome {
+                YamlDocumentOutcome::LoadFailed(_) => true,
+                YamlDocumentOutcome::Failed(error) => matches!(&**error, SchemaError::CallableCatalog { .. }),
+                _ => false,
+            }));
         let parsed = match yaml {
             Some(yaml) => {
                 if !claim.is_some_and(|envelope| envelope != StandaloneSchemaEnvelope::Pure) {

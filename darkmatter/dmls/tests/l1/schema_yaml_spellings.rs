@@ -448,6 +448,7 @@ fn a_wrapped_quoted_or_flow_value_ranges_its_grammar_error_at_the_token() {
         "kind: schema\ntypes:\n  t: '{ a: string,\n    n: string(bogus(2)) }'\n",
         "kind: schema\ntypes:\n  t: \"{ \\u0061: string,\n    n: string(bogus(2)) }\"\n",
         "kind: schema\ntypes:\n  t: [number,\n    'string(bogus(2))']\n",
+        "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: !!str boolean -> a\n    b\n",
     ] {
         let workspace = LspWorkspace::new();
         let mut fixture = start(&workspace, "utf-8");
@@ -459,13 +460,13 @@ fn a_wrapped_quoted_or_flow_value_ranges_its_grammar_error_at_the_token() {
     }
 }
 
-/// When the strict locator cannot read the document (here, a tagged scalar
-/// continued across lines for a sibling definition), the token cannot be
+/// When the strict locator cannot read the document (here, a YAML version
+/// directive), the token cannot be
 /// projected, so the diagnostic keeps its existing whole-value fallback and
 /// code. It is never an empty or fabricated range.
 #[test]
 fn an_unprojectable_grammar_error_keeps_the_whole_value_fallback() {
-    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: !!str boolean -> a\n    b\n";
+    let text = "%YAML 1.2\n---\nkind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: boolean\n";
     let workspace = LspWorkspace::new();
     let mut fixture = start(&workspace, "utf-8");
     let uri = open(&fixture, &workspace, "block-sibling.yaml", text);

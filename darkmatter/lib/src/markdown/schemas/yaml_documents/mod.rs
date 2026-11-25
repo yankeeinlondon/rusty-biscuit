@@ -223,9 +223,10 @@ impl DarkmatterSchemas {
             Selection::NoSchema => return Ok(None),
             Selection::Kind { kind, definition } => {
                 // A callable catalog's semantics are judged by the catalog
-                // reader before its kind contract; a document the shared
-                // reader refuses (shape, grammar) is left to that contract,
-                // which locates the same refusal.
+                // reader before its kind contract. The shared reader's
+                // located conflicts use this route as well. Shape and syntax
+                // refusals without a competing declaration stay with the
+                // kind contract.
                 if let Err(error @ SchemaError::CallableCatalog { .. }) = self.validate_callable_catalog(document) {
                     return Err(error);
                 }
@@ -300,8 +301,8 @@ impl DarkmatterSchemas {
     /// ## Errors
     ///
     /// [`SchemaError::CallableCatalog`] for a failed callable check, located
-    /// in `document`'s text; the shared reader's refusal (shape, grammar, a
-    /// duplicate overload) as the reader reports it.
+    /// in `document`'s text, with both declarations when they conflict.
+    /// Shape and other syntax refusals retain the shared reader's error.
     pub fn validate_callable_catalog(&self, document: &LoadedYamlDocument) -> Result<(), SchemaError> {
         use crate::markdown::compose::expression::catalog::{self as catalog, CatalogError};
         use simplified_schema::simplified::StandaloneSchemaEnvelope;

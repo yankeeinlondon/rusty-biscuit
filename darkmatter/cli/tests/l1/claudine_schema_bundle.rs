@@ -3,7 +3,7 @@
 //! criteria 1 and 5, `2026-10-26-task-inputs-and-providers` criterion 9, and
 //! `2026-10-30-claudine-recursive-schemas` criteria 4 and 8):
 //! the bundle's trigger, library, and namespace files and its lifecycle
-//! artifact are installed in the fixture home as a format 2 `claudine` host
+//! artifact are installed in the fixture home as a format 3 `claudine` host
 //! registration, as Claudine's setup publishes it, and a representative
 //! subset of Claudine's AC5 and sequence-schema fixture corpora, which carry
 //! no `$schema:` pointer, is judged through the CLI by the registered
@@ -13,6 +13,7 @@
 use crate::common;
 use crate::host_fixtures::{Bundle, MANIFEST_NAME};
 
+use biscuit_file::{PathIdentity, canonicalize_simplified};
 use common::{CliProcessFixture, write};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -142,11 +143,19 @@ fn assert_trigger(trace: &str, trigger: &str, matched: bool) {
     assert_eq!(!line.contains("not matched") && line.contains("matched"), matched, "`{trigger}` matched = {matched}:\n{trace}");
 }
 
-/// The `md schema triggers` trace for `document`.
-fn triggers(process: &CliProcessFixture, document: &Path) -> String {
-    let output = process.command().args(["schema", "triggers"]).arg(document).output().expect("md runs");
-    assert!(output.status.success(), "{output:?}");
-    String::from_utf8_lossy(&output.stdout).into_owned()
+/// Asserts whether the installed trigger contributed a layer during validation.
+fn assert_applied_trigger(process: &CliProcessFixture, record: &Value, trigger: &str, applied: bool) {
+    let path = canonicalize_simplified(&process.home().join(".claudine").join("schemas").join(trigger))
+        .expect("installed trigger");
+    let expected = PathIdentity::new(&path);
+    let count = record["layers"]["triggers"]
+        .as_array()
+        .expect("applied trigger paths")
+        .iter()
+        .map(|path| PathIdentity::new(Path::new(path.as_str().expect("trigger path"))))
+        .filter(|path| *path == expected)
+        .count();
+    assert_eq!(count, usize::from(applied), "{trigger} applied = {applied}: {record}");
 }
 
 #[test]
@@ -183,18 +192,11 @@ fn claudine_bundle_loads_and_its_triggers_are_discovered() {
     assert_record(&records, "controls-beside-ticket", true, &[]);
     assert_record(&records, "cancelled-container", true, &[]);
 
-    let output = process
-        .command()
-        .args(["schema", "triggers"])
-        .arg(&documents[0])
-        .output()
-        .expect("md runs");
-    assert!(output.status.success(), "{output:?}");
-    let trace = String::from_utf8_lossy(&output.stdout);
     // A prompt document is an inline composition, which `composition.yaml`
     // excludes.
-    assert_trigger(&trace, "inline-composition.yaml", true);
-    assert_trigger(&trace, "composition.yaml", false);
+    let prompt = &records["controls-beside-ticket"];
+    assert_applied_trigger(&process, prompt, "inline-composition.yaml", true);
+    assert_applied_trigger(&process, prompt, "composition.yaml", false);
 }
 
 #[test]
@@ -515,8 +517,8 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
 /// `2026-10-30-claudine-recursive-schemas` criteria 4 and 8 through the CLI:
 /// every recursive-depth, generated-verb, and overload fixture of the shared
 /// corpus gets its agreed schema verdict, problems carry their pointer and
-/// document source position, and the trigger trace confirms `composition.yaml`
-/// was the schema that judged them.
+/// document source position. The depth-six verdict identifies the installed
+/// `composition.yaml` trigger that judged it.
 #[test]
 fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     let process = CliProcessFixture::new();
@@ -577,13 +579,10 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
         ],
     );
 
-    // The listing is evidence of which schema judged depth 6, never a verdict.
-    let trace = triggers(&process, &documents[0]);
-    assert_trigger(&trace, "composition.yaml", true);
-    assert_trigger(&trace, "sequence-document.yaml", false);
-
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
+    assert_applied_trigger(&process, &records["depth6"], "composition.yaml", true);
+    assert_applied_trigger(&process, &records["depth6"], "sequence-document.yaml", false);
     for name in [
         "depth6",
         "depth1",
@@ -624,9 +623,8 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
 }
 
-/// The four depth-four container controls select `sequence-document.yaml` and `composition.yaml` and
-/// validate through the CLI; a defect in the innermost container's events is
-/// reported at its own item.
+/// The CLI validates the depth-four controls under the installed trigger layers
+/// and locates each innermost event defect at its action key.
 #[test]
 fn depth_four_container_controls_validate_and_their_innermost_defects_are_located() {
     let process = CliProcessFixture::new();
@@ -671,21 +669,26 @@ fn depth_four_container_controls_validate_and_their_innermost_defects_are_locate
         ],
     );
 
-    let trace = triggers(&process, &documents[0]);
-    // `sequence` identifies a Claudine document, so the main contract applies too.
-    assert_trigger(&trace, "sequence-document.yaml", true);
-    assert_trigger(&trace, "composition.yaml", true);
-
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
+    let sequence = &records["containers-depth4-seq-seq"];
+    assert_applied_trigger(&process, sequence, "sequence-document.yaml", true);
+    assert_applied_trigger(&process, sequence, "composition.yaml", true);
     for name in ["containers-depth4-seq-seq", "containers-depth4-seq-group", "containers-depth4-group-seq", "containers-depth4-group-group"] {
         assert_record(&records, name, true, &[]);
     }
     let seq_leaf = "/sequence/0/sequence/0/sequence/0/sequence/0";
     let group_leaf = "/sequence/0/group/tasks/0/group/tasks/0/group/tasks/0/group";
-    assert_record(&records, "seq-seq-misspelled-verb", false, &[(&format!("{seq_leaf}/start/0"), "sya")]);
-    assert_record(&records, "seq-seq-cancelled-retry", false, &[(&format!("{seq_leaf}/cancelled/0"), "retry")]);
-    assert_record(&records, "group-group-initialize-shell", false, &[(&format!("{group_leaf}/initialize/0"), "shell")]);
+    for (name, pointer, source, verb, action) in [
+        ("seq-seq-misspelled-verb", format!("{seq_leaf}/start/0"), &misspelled_verb, "sya", "sya: start"),
+        ("seq-seq-cancelled-retry", format!("{seq_leaf}/cancelled/0"), &cancelled_retry, "retry", "retry: 3"),
+        ("group-group-initialize-shell", format!("{group_leaf}/initialize/0"), &initialize_shell, "shell", "shell: ls"),
+    ] {
+        assert_record(&records, name, false, &[(&pointer, verb)]);
+        let problem = problem_at(&records, name, &pointer);
+        let (line, column) = source_position(source, action);
+        assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+    }
 }
 
 /// A generated verb's runtime registration decides its literal operands at

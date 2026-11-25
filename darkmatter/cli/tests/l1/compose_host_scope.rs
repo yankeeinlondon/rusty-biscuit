@@ -141,6 +141,22 @@ fn a_call_that_cannot_bind_is_rejected_and_one_that_binds_needs_the_host_runtime
 }
 
 #[test]
+fn compose_dispatch_does_not_see_the_callable_names_of_a_refused_installation() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let facts = double_facts().replace("\"aliases\": []", "\"aliases\": [\"acme.alias\", \"acme double\"]");
+    let bundle = Bundle::acme().with_member(CATALOG, DOUBLE_CATALOG).with_member(&companion_of(CATALOG), &facts);
+    let fixture = registered("uncallable-name-compose", &bundle);
+    fixture.write_file("cwd/call.md", &acme_document("{{ acme_double(2) }}"));
+
+    let (_, value) = compose(&fixture, "call.md");
+    assert_eq!(records(&value, UNKNOWN).len(), 1, "{value:#}");
+    let refusals = records(&value, "dm.host.registration");
+    assert!(!refusals.is_empty(), "{value:#}");
+    assert!(refusals.iter().all(|record| record["message"].as_str().unwrap().contains("cannot be used as an expression call name")), "{value:#}");
+    assert!(!value.to_string().contains(RUNTIME), "{value:#}");
+}
+
+#[test]
 fn every_transcluded_child_of_a_host_document_inherits_its_functions() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let fixture = registered("host-scope-children", &acme());
@@ -186,6 +202,66 @@ fn the_call_is_unknown_in_an_ordinary_document_and_in_another_hosts_document() {
 }
 
 #[test]
+fn a_registration_notice_keeps_both_catalog_declarations_in_data_and_plain_output() {
+    let first = "function(parameters(value: string); returns(string); category(Text))";
+    let second = "function(parameters(value: number); returns(string); category(Number))";
+    for (name, catalog, earlier, later) in [
+        (
+            "folded",
+            format!("kind: expression-schema\ncategories: [Text, Number]\ntypes:\n    label: '{first}'\n    LABEL: '{second}'\n"),
+            (4, 5),
+            (5, 5),
+        ),
+        (
+            "category",
+            format!("kind: expression-schema\ncategories: [Text, Number]\ntypes:\n    label: >-\n        {first} |\n        {second}\n"),
+            (5, 9),
+            (6, 9),
+        ),
+    ] {
+        let fixture = registered(name, &acme().with_member(CATALOG, &catalog));
+        fixture.write_file("cwd/plain.md", "# Plain");
+        let (status, output) = compose(&fixture, "plain.md");
+        assert_eq!(status, Some(0));
+        let notices = records(&output, "dm.host.registration");
+        assert_eq!(notices.len(), 1, "{output:#}");
+        let notice = notices[0];
+        assert_eq!((&notice["source"]["line"], &notice["source"]["column"]), (&json!(later.0), &json!(later.1)));
+        let related = notice["related"].as_array().unwrap();
+        assert_eq!(related.len(), 1, "{output:#}");
+        assert_eq!((&related[0]["source"]["line"], &related[0]["source"]["column"]), (&json!(earlier.0), &json!(earlier.1)));
+        assert_eq!(related[0]["source"]["file"], notice["source"]["file"]);
+
+        let output = fixture.command().args(["compose", "plain.md", "--output", "markdown"]).output().unwrap();
+        assert!(output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(&format!("functions.yaml:{}:{}:", later.0, later.1)), "{stderr}");
+        assert!(stderr.contains(&format!("functions.yaml:{}:{}:", earlier.0, earlier.1)), "{stderr}");
+    }
+}
+
+#[test]
+fn a_cross_catalog_claim_keeps_the_earlier_file_in_the_compose_notice() {
+    let extra = "schemas/later.yaml";
+    let bundle = acme().with_file(extra, DOUBLE_CATALOG).with_member(&companion_of(extra), &double_facts());
+    let fixture = registered("cross-catalog", &bundle);
+    fixture.write_file("cwd/plain.md", "# Plain");
+    let (status, output) = compose(&fixture, "plain.md");
+    assert_eq!(status, Some(0));
+    let notices = records(&output, "dm.host.registration");
+    assert_eq!(notices.len(), 1, "{output:#}");
+    let notice = notices[0];
+    let related = notice["related"].as_array().unwrap();
+    assert_eq!(related.len(), 1, "{output:#}");
+    assert!(notice["source"]["file"].as_str().unwrap().ends_with("later.yaml"), "{output:#}");
+    assert!(related[0]["source"]["file"].as_str().unwrap().ends_with("functions.yaml"), "{output:#}");
+    for claim in [&notice["source"], &related[0]["source"]] {
+        assert_eq!(claim["line"], 5, "{output:#}");
+        assert_eq!(claim["column"], "    acme_double: ".len() + 1, "{output:#}");
+    }
+}
+
+#[test]
 fn a_catalog_without_its_companion_refuses_the_host_at_its_files_entry() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let fixture = registered("host-scope-companion", &acme());
@@ -211,4 +287,53 @@ fn a_catalog_without_its_companion_refuses_the_host_at_its_files_entry() {
     assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(10), Some(7)), "{value:#}");
     let message = refusals[0]["message"].as_str().unwrap();
     assert!(message.contains("functions.facts.json"), "names the companion: {message}");
+}
+
+fn with_sequence_arms(duplicate: bool) -> Bundle {
+    let number = "function(parameters(value: number); returns(number); category(Acme))";
+    let boolean = "function(parameters(value: boolean); returns(number); category(Acme))";
+    let text = |arms: &str| {
+        format!("kind: expression-schema\ndescription: &number '{number}'\ncategories: [Acme]\ntypes:\n    acme_double:{arms}\n")
+    };
+    let written = text(&format!(" ['{boolean}', '{number}']"));
+    let control = HostFunctionCatalog::load(&written, "functions.yaml").unwrap();
+    let facts = HostFunctions::builder(control)
+        .function("acme_double", &[], |registration| registration, Arc::new(|_| Ok(json!(4))))
+        .build().unwrap().facts_artifact();
+    let first = if duplicate { number } else { boolean };
+    let catalog = text(&format!("\n        - &first '{first}'\n        - *number"));
+    let facts = facts.replace(&biscuit_hash::blake3_hash(&written), &biscuit_hash::blake3_hash(&catalog));
+    Bundle::acme().with_member(CATALOG, &catalog).with_member(&companion_of(CATALOG), &facts)
+}
+
+#[test]
+fn compose_binds_the_installed_aliased_overload() {
+    let fixture = registered("aliased-overload", &with_sequence_arms(false));
+    fixture.write_file("cwd/call.md", &acme_document("{{ acme_double(2) }}"));
+    let (status, output) = compose(&fixture, "call.md");
+    assert_eq!(status, Some(1), "{output:#}");
+    assert!(records(&output, "dm.host.registration").is_empty(), "{output:#}");
+    assert!(records(&output, UNKNOWN).is_empty(), "{output:#}");
+    assert!(records(&output, INCOMPATIBLE).is_empty(), "{output:#}");
+    let failures = located(&output, "dm.expression.evaluation_failure");
+    assert_eq!(failures.len(), 1, "{output:#}");
+    assert!(failures[0].2.contains(RUNTIME), "{output:#}");
+}
+
+#[test]
+fn compose_refuses_an_aliased_duplicate_with_both_locations() {
+    let fixture = registered("aliased-duplicate", &with_sequence_arms(true));
+    fixture.write_file("cwd/call.md", &acme_document("{{ acme_double(2) }}"));
+    let (status, output) = compose(&fixture, "call.md");
+    assert_eq!(status, Some(1), "{output:#}");
+    assert_eq!(records(&output, UNKNOWN).len(), 1, "{output:#}");
+    let notices = records(&output, "dm.host.registration");
+    let [notice] = notices.as_slice() else { panic!("{output:#}") };
+    assert!(notice["message"].as_str().unwrap().contains("same binding contract"), "{output:#}");
+    assert_eq!((&notice["source"]["line"], &notice["source"]["column"]), (&json!(7), &json!(11)));
+    let related = notice["related"].as_array().unwrap();
+    let [first] = related.as_slice() else { panic!("{output:#}") };
+    assert_eq!((&first["source"]["line"], &first["source"]["column"]), (&json!(6), &json!(19)));
+    assert_eq!(first["source"]["file"], notice["source"]["file"]);
+    assert!(!output.to_string().contains(RUNTIME), "{output:#}");
 }

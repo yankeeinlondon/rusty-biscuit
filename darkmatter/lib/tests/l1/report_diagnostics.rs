@@ -128,6 +128,7 @@ fn a_warning_keeps_its_record_or_its_code() {
                 data_location: None,
                 grants_needed: None,
                 schema_default: None,
+                related: Vec::new(),
             }
         );
     }

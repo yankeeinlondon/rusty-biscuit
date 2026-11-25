@@ -67,7 +67,6 @@ use simplified_schema::expression::ast::{SpannedExpr, SpannedExprKind};
 use super::call_binding::{BoundCall, EvaluationMode, FunctionRegistration, RegistrationBuilder, RegistrationError};
 use super::catalog::{CatalogError, FunctionCatalog, load_authored_catalog};
 use simplified_schema::errors::CatalogRelated;
-use simplified_schema::locate_standalone_definition_failure;
 use simplified_schema::simplified::StandaloneSchemaEnvelope;
 use crate::markdown::span::SourceSpan;
 
@@ -153,7 +152,8 @@ impl HostFunctionCatalog {
     /// Loads a host's `kind: expression-schema` catalog with the strict
     /// callable reader. `path` names the file in errors and locates its
     /// facts artifact ([`facts_artifact_path`]). A host catalog may not reuse
-    /// a built-in function's canonical name or alias, every callable must
+    /// a built-in function's canonical name or alias. Every callable must
+    /// have a name accepted by the expression parser and must
     /// compile for eager evaluation with the catalog's local types, and
     /// file-form examples (`example(./x.yaml)`) are not available to it.
     ///
@@ -167,7 +167,7 @@ impl HostFunctionCatalog {
     pub fn load(source: &str, path: impl AsRef<Path>) -> Result<Self, HostCatalogError> {
         let path = path.as_ref().to_path_buf();
         let catalog = load_authored_catalog(source, &path, StandaloneSchemaEnvelope::ExpressionSchema)
-            .map_err(|error| host_catalog_error(error, source))?;
+            .map_err(host_catalog_error)?;
         Ok(Self {
             inner: Arc::new(CatalogData {
                 path,
@@ -218,48 +218,26 @@ impl HostFunctionCatalog {
     }
 }
 
-/// A reader failure as a [`HostCatalogError`]. A refusal by the shared
-/// document reader is located as the editor locates it: a grammar failure at
-/// its token (with the earlier declarations it conflicts with), any other at
-/// the span the reader recorded.
-fn host_catalog_error(error: CatalogError, source: &str) -> HostCatalogError {
+/// Keeps the shared reader's authored locations on a host catalog refusal.
+fn host_catalog_error(error: CatalogError) -> HostCatalogError {
     let message = error.to_string();
     let (span, related) = match &error {
-        CatalogError::Invalid { span, related, .. } => (span.clone(), related.clone()),
-        CatalogError::Schema(schema) => {
-            let path = match schema {
-                simplified_schema::SchemaError::SchemaDocument { path, .. } => path.clone(),
-                _ => std::path::PathBuf::new(),
-            };
-            match locate_standalone_definition_failure(source)
-                .filter(|failure| schema.to_string().contains(&failure.error.to_string()))
-            {
-                Some(failure) => (
-                    failure.authored_span.or(failure.value_span),
-                    failure
-                        .related
-                        .into_iter()
-                        .map(|related| CatalogRelated { message: related.message, file: path.clone(), span: Some(related.span) })
-                        .collect(),
-                ),
-                None => (schema_span(schema), Vec::new()),
-            }
+        CatalogError::Invalid { span, related, .. }
+        | CatalogError::Schema(simplified_schema::SchemaError::CallableCatalog { span, related, .. }) => {
+            (span.clone(), related.clone())
         }
+        CatalogError::Schema(simplified_schema::SchemaError::SchemaDocument { span, .. }) => (span.clone(), Vec::new()),
+        CatalogError::Schema(_) => (None, Vec::new()),
     };
     HostCatalogError { message, span, related, error: Arc::new(error.into_schema_error()) }
-}
-
-fn schema_span(error: &simplified_schema::SchemaError) -> Option<SourceSpan> {
-    match error {
-        simplified_schema::SchemaError::SchemaDocument { span, .. } => span.clone(),
-        _ => None,
-    }
 }
 
 /// Why a set of host functions cannot be registered or installed. Every
 /// variant is reported before any evaluation.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum HostFunctionError {
+    #[error("host function name `{name}` cannot be used as an expression call name")]
+    InvalidCallName { name: String },
     #[error("host function name `{name}` is registered twice (as a canonical name or alias)")]
     DuplicateName { name: String },
     #[error("host function name `{name}` collides with a built-in function's canonical name or alias")]
@@ -318,14 +296,21 @@ impl HostFunctionsBuilder {
     ///
     /// ## Errors
     ///
-    /// A [`HostFunctionError`]: a name or alias used twice in the set or
-    /// colliding with a built-in, a catalog function without a registration
-    /// or a registration without a catalog function, a lazy registration, or
-    /// any [`RegistrationError`] (a fact on a parameter no overload declares,
-    /// a narrowing fact on a function that does not return `boolean`, …).
+    /// A [`HostFunctionError`] when a name or alias cannot be used in a call,
+    /// repeats in the set, or collides with a built-in. The builder also
+    /// refuses missing or extra registrations, lazy evaluation, and invalid
+    /// registration facts ([`RegistrationError`]).
     pub fn build(self) -> Result<HostFunctions, HostFunctionError> {
         let catalog_names = self.catalog.function_names();
-        validate_names(self.pending.iter().map(|pending| (pending.canonical.as_str(), pending.aliases.as_slice())))?;
+        for pending in &self.pending {
+            for name in std::iter::once(&pending.canonical).chain(&pending.aliases) {
+                if !super::is_callable_name(name) {
+                    return Err(HostFunctionError::InvalidCallName { name: name.clone() });
+                }
+            }
+        }
+        validate_names(self.pending.iter().map(|pending| (pending.canonical.as_str(), pending.aliases.as_slice())))
+            .map_err(NameConflict::into_error)?;
         for name in &catalog_names {
             if !self.pending.iter().any(|pending| pending.canonical == *name) {
                 return Err(HostFunctionError::MissingRegistration {
@@ -359,20 +344,56 @@ impl HostFunctionsBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+struct NameClaim<'a> {
+    canonical: &'a str,
+    alias: Option<(usize, &'a str)>,
+}
+
+impl<'a> NameClaim<'a> {
+    fn spelling(self) -> &'a str {
+        self.alias.map_or(self.canonical, |(_, alias)| alias)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EarlierName<'a> {
+    BuiltIn(&'static str),
+    Host(NameClaim<'a>),
+}
+
+struct NameConflict<'a> {
+    earlier: EarlierName<'a>,
+    later: NameClaim<'a>,
+}
+
+impl NameConflict<'_> {
+    fn into_error(self) -> HostFunctionError {
+        let name = self.later.spelling().to_string();
+        match self.earlier {
+            EarlierName::BuiltIn(_) => HostFunctionError::BuiltinCollision { name },
+            EarlierName::Host(_) => HostFunctionError::DuplicateName { name },
+        }
+    }
+}
+
 /// Rejects a canonical name or alias used twice in the set, or used by a
-/// built-in. Names compare lowercased, as dispatch resolves them.
+/// built-in. The first conflicting claim in function and alias order wins.
 fn validate_names<'a>(
     functions: impl IntoIterator<Item = (&'a str, &'a [String])>,
-) -> Result<(), HostFunctionError> {
-    let mut seen = std::collections::HashSet::new();
+) -> Result<(), NameConflict<'a>> {
+    let mut seen = std::collections::HashMap::new();
     for (canonical, aliases) in functions {
-        for name in std::iter::once(canonical).chain(aliases.iter().map(String::as_str)) {
-            let lower = name.to_ascii_lowercase();
-            if super::functions::is_builtin_name(&lower) {
-                return Err(HostFunctionError::BuiltinCollision { name: name.to_string() });
+        let claims = std::iter::once(NameClaim { canonical, alias: None }).chain(
+            aliases.iter().enumerate().map(|(index, alias)| NameClaim { canonical, alias: Some((index, alias)) }),
+        );
+        for later in claims {
+            let lower = later.spelling().to_ascii_lowercase();
+            if let Some(builtin) = super::functions::reserved_builtin_name(&lower) {
+                return Err(NameConflict { earlier: EarlierName::BuiltIn(builtin), later });
             }
-            if !seen.insert(lower) {
-                return Err(HostFunctionError::DuplicateName { name: name.to_string() });
+            if let Some(earlier) = seen.insert(lower, later) {
+                return Err(NameConflict { earlier: EarlierName::Host(earlier), later });
             }
         }
     }

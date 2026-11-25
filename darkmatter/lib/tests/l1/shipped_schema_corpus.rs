@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{resolve::{resolve_schema_with_roots, resolve_yaml_schema}};
+use darkmatter::markdown::{
+    Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::{resolve_schema_with_roots, resolve_yaml_schema}},
+};
 use simplified_schema::triggers::{MatchExpr, PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::{
@@ -82,11 +84,10 @@ enum Class {
     /// a trigger, and it is refused as a `$schema` target because it is
     /// selected by `kind`. Every definition it carries parses passively.
     YamlSchemaDefinition,
-    /// A function catalog (`kind: schema` with `categories:` and `function`
-    /// types, and no `$schema`): it parses as a standalone schema, but as a
-    /// `types`-only document it is never a `$schema` target; each of its
-    /// other named types imports and lowers.
-    FunctionCatalog,
+    /// A standalone `expression-schema` or `mutation-schema` document with
+    /// private types. Schema resolution refuses both `$schema` targets and
+    /// named-type imports from these catalogs.
+    CallableCatalog,
 }
 
 struct Exception {
@@ -165,14 +166,14 @@ const EXCEPTIONS: &[Exception] = &[
     exception(
         "darkmatter/schemas",
         "partials/functions.yaml",
-        Class::FunctionCatalog,
-        "the expression-function catalog, embedded by Darkmatter's catalog loader",
+        Class::CallableCatalog,
+        "the built-in expression-schema catalog",
     ),
     exception(
         "darkmatter/schemas",
         "partials/mutations.yaml",
-        Class::FunctionCatalog,
-        "the mutation-function catalog",
+        Class::CallableCatalog,
+        "the built-in mutation-schema catalog",
     ),
     exception(
         "darkmatter/schemas",
@@ -723,7 +724,11 @@ fn shipped_schema_artifacts_parse_passively() {
     // A single top-level directory is too coarse for CI's test-input index, so
     // the repository-root schemas are also named file by file.
     for file in [
+        "schemas/ci-evidence.yaml",
         "schemas/feature-review.yaml",
+        "schemas/kind.yaml",
+        "schemas/review-fix-cycle.yaml",
+        "schemas/specification.yaml",
         "schemas/suggestion-review.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
@@ -774,7 +779,7 @@ fn shipped_schema_artifacts_parse_passively() {
                 record_core_types(&mut core_type_users, &label, &parsed);
                 loadable += 1;
             }
-            Class::FunctionCatalog => {
+            Class::CallableCatalog => {
                 let Ok(Some(parsed_document)) = &outcome else {
                     panic!("{label} must parse as a standalone schema: {outcome:?}");
                 };
@@ -922,7 +927,11 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     ];
     let artifacts = collect_artifacts(&groups);
     for file in [
+        "schemas/ci-evidence.yaml",
         "schemas/feature-review.yaml",
+        "schemas/kind.yaml",
+        "schemas/review-fix-cycle.yaml",
+        "schemas/specification.yaml",
         "schemas/suggestion-review.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
@@ -1007,7 +1016,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     "{label}: {error}"
                 );
             }
-            Class::FunctionCatalog => {
+            Class::CallableCatalog => {
                 // A callable catalog is private: never a document schema, and
                 // none of its entries (helpers included) is an import source.
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
@@ -1051,6 +1060,97 @@ fn loadable_shipped_schemas_resolve_and_lower() {
         inline_bodies >= 9,
         "only {inline_bodies} rejected-envelope bodies resolved inline"
     );
+}
+
+#[test]
+fn repository_kind_schema_validates_markdown_catalog_kinds() {
+    let schema = repo_root().join("schemas/kind.yaml");
+    let source = ComposeSource::File(schema.with_file_name("kind-validation.md"));
+    let scratch = tempfile::tempdir().expect("isolated validation context");
+    let context = FileResolutionContext::new(scratch.path()).without_home_dir();
+    let api = DarkmatterSchemas::new(context);
+    let validate = |kind: &str| {
+        let document = Markdown::from(format!(
+            "---\n$schema: ./kind.yaml\nkind: {kind}\n---\n# Catalog\n"
+        ))
+        .with_source(source.clone());
+        api.validate(&document).expect("resolve the repository kind schema")
+    };
+
+    for kind in ["expression-schema", "mutation-schema"] {
+        let report = validate(kind);
+        assert!(report.valid && report.problems.is_empty(), "{kind}: {:?}", report.problems);
+    }
+
+    let report = validate("unsupported-catalog");
+    assert!(!report.valid);
+    let [problem] = report.problems.as_slice() else {
+        panic!("expected one kind error: {:?}", report.problems);
+    };
+    assert_eq!(problem.path, "/kind");
+    assert_eq!(problem.code, simplified_schema::ValidationProblemCode::ConstraintViolation);
+    assert_eq!((problem.line, problem.column), (Some(3), Some(7)));
+}
+
+#[test]
+fn review_fix_cycle_validates_markdown_with_and_without_pipeline_metadata() {
+    let schema = include_str!("../../../../schemas/review-fix-cycle.yaml");
+    let dir = tempfile::tempdir().expect("review workspace");
+    fs::write(dir.path().join("review-fix-cycle.yaml"), schema).expect("write schema");
+    for name in ["spec.md", "plan.md", "implementation-log.md"] {
+        fs::write(dir.path().join(name), "# Fixture\n").expect("write referenced document");
+    }
+    let context = FileResolutionContext::new(dir.path()).without_home_dir();
+    let resolved = resolve_schema_with_roots(
+        &serde_json::json!("./review-fix-cycle.yaml"),
+        dir.path(),
+        &[],
+        &context,
+    )
+    .expect("resolve the exported schema");
+    let Some(simplified_schema::SchemaRoot::Union(arms)) = resolved.simplified else {
+        panic!("the review cycle exports a root union");
+    };
+    assert_eq!(arms.len(), 2);
+    let arm_properties = |index: usize| {
+        let simplified_schema::SchemaArm::Inline(shape) = &arms[index] else {
+            panic!("expected a resolved mapping at arm {index}");
+        };
+        &shape.properties
+    };
+    assert!(arm_properties(0)["name"].is_required());
+    assert!(!arm_properties(1).contains_key("name"));
+
+    let api = DarkmatterSchemas::new(context);
+    let base = "\
+$schema: ./review-fix-cycle.yaml
+spec: ./spec.md
+plan: ./plan.md
+implementation-log: ./implementation-log.md
+blast-radius:
+    packages: [darkmatter]
+implemented: true
+ready: false
+";
+    let validate = |frontmatter: &str| {
+        let document = Markdown::from(format!("---\n{frontmatter}---\n# Review\n"))
+            .with_source(ComposeSource::File(dir.path().join("review.md")));
+        api.validate(&document).expect("validate against the review schema")
+    };
+    for pipeline in ["", "name: Review pipeline\n"] {
+        let fields = format!("{base}{pipeline}");
+        let positive = validate(&format!("{fields}reviewed: true\n"));
+        assert!(positive.valid, "{pipeline:?}: {:?}", positive.problems);
+        let missing = validate(&fields);
+        assert!(!missing.valid, "{pipeline:?}: reviewed must be required");
+        assert!(missing.problems.iter().any(|problem| problem.property.as_deref() == Some("reviewed")),
+            "{pipeline:?}: {:?}", missing.problems);
+    }
+    let wrong_packages = base.replace("[darkmatter]", "{package: darkmatter}");
+    let invalid = validate(&format!("{wrong_packages}reviewed: true\n"));
+    assert!(!invalid.valid, "the blast radius still validates its packages");
+    assert!(invalid.problems.iter().any(|problem| problem.path == "/blast-radius/packages"),
+        "{:?}", invalid.problems);
 }
 
 struct InlineSchema {

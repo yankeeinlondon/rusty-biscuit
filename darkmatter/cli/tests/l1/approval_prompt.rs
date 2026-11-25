@@ -309,9 +309,10 @@ fn without_a_terminal_a_command_shape_is_not_prompted_for() {
     let fixture = CliProcessFixture::named("approval_prompt_without_a_terminal");
     let md_path = fixture.write_file("cwd/doc.md", "---\nout: dist\n---\n::shell just clean --out {{ out }}/build\n");
 
+    // The interpolated command and approval decision do not depend on the baseline schema.
     fixture
         .command()
-        .arg("compose")
+        .args(["compose", "--disable", "baseline-schema"])
         .arg(&md_path)
         .assert()
         .failure()

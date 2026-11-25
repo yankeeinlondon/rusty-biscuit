@@ -1310,8 +1310,9 @@ Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
 indentless sequences, plain scalars continued onto more-indented lines,
 literal/folded block scalars, quoted scalars and flow collections that cross
-line breaks, and empty values; only tolerant follows tags and comments inside
-a flow collection. Strict fails unless every non-comment line belongs to the value, and
+line breaks, empty values, and YAML comments. Both recognize YAML node
+properties and aliases on values and sequence items.
+Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -1327,7 +1328,7 @@ Located Failures, and `darkmatter/dmls/docs/diagnostics.md` § Ranging). The sha
 `SchemaSourcePath` of the node it rejected: property keys literally, sequence
 members and root-union arms by index, `$constraints` entries by key, and
 cross-arm checks at the arm that introduced the violation
-(`second_suggestion_span` and `duplicate_overload_arm` return the arm index).
+(`second_suggestion_span` and `signature::duplicate_overload` retain both arm indices).
 `parse_property_definition_with_source` and
 `parse_schema_declaration_with_source` return `LocatedDefinitionFailure`
 (`path`, boxed `error`, `authored_span`, `value_span`, document bytes with
@@ -1337,9 +1338,9 @@ does the same for a standalone document, prefixing `types`/`$schema`, sharing
 for outer envelope and declaration-shape failures (any failure path without a
 property segment). Projection follows the path through the strict located
 tree in lockstep with the parsed YAML and projects a grammar span only through
-a scalar whose decoded text equals the rejected string; a mismatch,
-unsupported presentation, or alias leaves the range `None` but always keeps
-the error. A projection-only failure after a successful parse is the
+a scalar whose decoded text equals the rejected string. An alias stops the
+walk and supplies its own token as the range. A mismatch or unsupported
+presentation leaves the range `None` and keeps the error. A projection-only failure after a successful parse is the
 projection error at the root path. Source-free parsers discard the path.
 
 A failure with two locations carries them structurally, never as offsets in
@@ -1354,10 +1355,12 @@ option's scalar). Registration's text path keeps them on
 `InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
 located in the catalog source. A standalone file's payload failure is a
 `SchemaError::SchemaDocument` whose message repeats the cause and which keeps
-the typed cause (`source`) and its byte `span` in that file; DMLS locates it
-with secondary locations when the overlay is assembled (`overlay::file_failures`, keyed by the path the error
-names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
-request must never read or parse a file.
+the typed cause (`source`) and its byte `span` in that file. Callable-catalog
+conflicts use `SchemaError::CallableCatalog` with both authored spans, including
+when comparison resolves local helper types. DMLS locates other standalone
+payload failures with secondary locations while assembling
+`overlay::file_failures`, keyed by the path in the error. Diagnostics read
+`DocumentOverlay::file_failures` without file I/O or parsing.
 
 `decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
 restricted to plain scalars (same-line tags/anchors skipped; quoted, block,

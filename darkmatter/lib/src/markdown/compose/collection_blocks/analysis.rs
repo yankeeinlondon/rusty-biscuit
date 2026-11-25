@@ -273,6 +273,7 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

@@ -32,13 +32,12 @@
 //! }
 //! ```
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use super::super::functions::is_builtin_name;
-use super::{FunctionState, HostFunction, HostFunctionCatalog, HostFunctionError, HostFunctions, validate_names};
+use super::{EarlierName, FunctionState, HostFunction, HostFunctionCatalog, HostFunctionError, HostFunctions, NameClaim, NameConflict, validate_names};
 use simplified_schema::coercion::ValueKind;
 use crate::markdown::compose::expression::call_binding::{
     EvaluationMode, FactKind, FactType, FunctionRegistration, RegistrationBuilder,
@@ -135,6 +134,34 @@ impl HostFunctions {
     }
 }
 
+/// The authored declaration of a conflicting name.
+pub(crate) enum FactsNameSite {
+    Canonical(String),
+    Alias { owner: String, index: usize },
+    BuiltIn(&'static str),
+}
+
+impl From<NameClaim<'_>> for FactsNameSite {
+    fn from(claim: NameClaim<'_>) -> Self {
+        match claim.alias {
+            Some((index, _)) => Self::Alias { owner: claim.canonical.to_string(), index },
+            None => Self::Canonical(claim.canonical.to_string()),
+        }
+    }
+}
+
+pub(crate) struct FactsNameConflict {
+    pub(crate) earlier: FactsNameSite,
+    pub(crate) later: FactsNameSite,
+}
+
+pub(crate) struct AnalysisSites {
+    /// Positions inside the facts file for structural or binding failures.
+    pub(crate) failures: HashMap<String, ReasonSite>,
+    /// A name conflict can involve the facts file, catalog or built-in source.
+    pub(crate) conflict: Option<FactsNameConflict>,
+}
+
 /// [`HostFunctions::analysis_only_at`] plus where in the artifact each
 /// incomplete function's reason is, by canonical name, as the reader judged
 /// it (never recovered from the reason's text). A function the map does not
@@ -144,14 +171,14 @@ pub(crate) fn analysis_only_sited(
     catalog: HostFunctionCatalog,
     facts_path: &Path,
     artifact: FactsArtifact<'_>,
-) -> Result<(HostFunctions, HashMap<String, ReasonSite>), HostFunctionError> {
+) -> Result<(HostFunctions, AnalysisSites), HostFunctionError> {
     let names = catalog.function_names();
-    validate_names(names.iter().map(|name| (*name, &[][..])))?;
+    validate_names(names.iter().map(|name| (*name, &[][..]))).map_err(NameConflict::into_error)?;
     let file = format!("the facts artifact `{}`", facts_path.display());
-    let mut sites = HashMap::new();
+    let mut sites = AnalysisSites { failures: HashMap::new(), conflict: None };
     let mut fail = |name: &str, fault: Fault| {
         if let Some(site) = fault.site {
-            sites.insert(name.to_string(), site);
+            sites.failures.insert(name.to_string(), site);
         }
         incomplete(name, fault.reason)
     };
@@ -181,10 +208,16 @@ pub(crate) fn analysis_only_sited(
     let named = functions.iter().map(|function| (function.canonical.as_str(), function.aliases.as_slice()));
     let functions = match validate_names(named) {
         Ok(()) => functions,
-        Err(error) => {
+        Err(conflict) => {
+            sites.conflict = Some(FactsNameConflict {
+                earlier: match conflict.earlier {
+                    EarlierName::BuiltIn(name) => FactsNameSite::BuiltIn(name),
+                    EarlierName::Host(claim) => claim.into(),
+                },
+                later: conflict.later.into(),
+            });
+            let error = conflict.into_error();
             let reason = format!("{file} is invalid: {error}");
-            let site = refused_name_site(&functions);
-            sites = names.iter().map(|name| ((*name).to_string(), site.clone())).collect();
             names.iter().map(|name| incomplete(name, reason.clone())).collect()
         }
     };
@@ -197,26 +230,6 @@ fn incomplete(name: &str, reason: String) -> HostFunction {
         aliases: Vec::new(),
         state: FunctionState::Incomplete { reason },
     }
-}
-
-/// Where the name [`validate_names`] refuses in `functions` is: the first
-/// canonical name or alias, in the order it checks them, that a built-in or
-/// an earlier name already claims (compared lowercased, as dispatch resolves
-/// them). The artifact root when none is.
-fn refused_name_site(functions: &[HostFunction]) -> ReasonSite {
-    let mut seen = HashSet::new();
-    for function in functions {
-        let entry = Pointer::root().join("functions").join(&function.canonical);
-        let names = std::iter::once((entry.clone(), &function.canonical))
-            .chain(function.aliases.iter().enumerate().map(|(index, alias)| (entry.join("aliases").join(index), alias)));
-        for (at, name) in names {
-            let lower = name.to_ascii_lowercase();
-            if is_builtin_name(&lower) || !seen.insert(lower) {
-                return at.site();
-            }
-        }
-    }
-    Pointer::root().site()
 }
 
 // ── writer ──────────────────────────────────────────────────────────────────
@@ -448,7 +461,11 @@ fn rebuild(
         .iter()
         .enumerate()
         .map(|(index, alias)| {
-            string(alias, &format!("aliases[{index}]")).map(str::to_string).map_err(|reason| aliases_at.join(index).fault(reason))
+            let alias = string(alias, &format!("aliases[{index}]")).map_err(|reason| aliases_at.join(index).fault(reason))?;
+            if !super::super::is_callable_name(alias) {
+                return Err(aliases_at.join(index).fault(format!("alias `{alias}` cannot be used as an expression call name")));
+            }
+            Ok(alias.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -840,7 +857,7 @@ mod tests {
     fn judged(artifact: FactsArtifact<'_>) -> (String, Option<ReasonSite>) {
         let (functions, sites) = analysis_only_sited(catalog(), Path::new("f.json"), artifact).expect("the catalog's names are valid");
         let [(name, reason)] = functions.incomplete_functions()[..] else { panic!("`pick` is incomplete") };
-        (reason.to_string(), sites.get(name).cloned())
+        (reason.to_string(), sites.failures.get(name).cloned())
     }
 
     fn field(segments: &[&str]) -> Option<ReasonSite> {
@@ -866,7 +883,6 @@ mod tests {
             (edited("\"lazy\": false", "\"lazy\": 1"), field(&["functions", "pick", "lazy"]), "its facts artifact entry has `lazy` a number instead of a boolean"),
             (edited("\"conversion_recovery\": null,", ""), field(&["functions", "pick"]), "has no `conversion_recovery` field (write `null` for none)"),
             (edited("\"aliases\": []", "\"aliases\": [1]"), field(&["functions", "pick", "aliases", "0"]), "has `aliases[0]` a number instead of a string"),
-            (edited("\"aliases\": []", "\"aliases\": [\"MIN\"]"), field(&["functions", "pick", "aliases", "0"]), "the facts artifact `f.json` is invalid"),
             (
                 edited("\"source_exclusions\": []", "\"source_exclusions\": [{\"kinds\": [], \"parameter\": \"value\"}]"),
                 field(&["functions", "pick", "source_exclusions", "0", "kinds"]),
@@ -882,6 +898,13 @@ mod tests {
             assert_eq!(site, expected, "{text}: {judged_reason}");
             assert!(judged_reason.contains(reason), "{text}: {judged_reason}");
         }
+        let collision = edited("\"aliases\": []", "\"aliases\": [\"MIN\"]");
+        let (functions, sites) = analysis_only_sited(catalog(), Path::new("f.json"), FactsArtifact::Text(&collision)).unwrap();
+        let conflict = sites.conflict.expect("the two name claims");
+        assert!(matches!(conflict.earlier, FactsNameSite::BuiltIn("min")));
+        assert!(matches!(conflict.later, FactsNameSite::Alias { owner, index: 0 } if owner == "pick"));
+        assert!(sites.failures.is_empty());
+        assert_eq!(functions.incomplete_functions().len(), 1);
         assert_eq!(judged(FactsArtifact::Absent), ("the facts artifact `f.json` is absent".to_string(), None), "a file-level reason");
         assert_eq!(judged(FactsArtifact::Unreadable("boom")).1, None);
     }
@@ -892,7 +915,7 @@ mod tests {
         assert_eq!(judged(FactsArtifact::Text(&text)), ("the facts artifact has no entry for it".to_string(), field(&["functions"])));
         let complete = written();
         let (functions, sites) = analysis_only_sited(catalog(), Path::new("f.json"), FactsArtifact::Text(&complete)).unwrap();
-        assert!(functions.incomplete_functions().is_empty() && sites.is_empty());
+        assert!(functions.incomplete_functions().is_empty() && sites.failures.is_empty());
     }
 
     #[test]

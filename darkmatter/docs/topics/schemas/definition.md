@@ -1412,7 +1412,7 @@ The `layers` object says which schema layers judged the document, so a consumer 
 
 The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), a `schema` record for a callable catalog that fails the catalog reader has `code` `dm.schema.callable_catalog`, the failing declaration's `line`, `column` (in characters), and byte `span`, and `related`, one `{"message", "file", "line", "column", "span"}` object for each other location the failure involves (a built-in function's declaration names `darkmatter/schemas/partials/functions.yaml`, located when that file is in the repository and unlocated otherwise), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), a `schema` record for a callable catalog that fails the catalog reader has `code` `dm.schema.callable_catalog`, the failing declaration's `line`, `column` (in characters), and byte `span`, and `related`, one `{"message", "file", "line", "column", "span"}` object for each other location the failure involves (a built-in function's declaration names `darkmatter/schemas/partials/functions.yaml`, with coordinates from the embedded catalog and a local file path when the checkout source matches), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 
@@ -2111,6 +2111,37 @@ are an error rather than one shadowing the other (see
 - Both values come from the environment the process started with. DMLS reads
   them when the editor starts the server, so a GUI editor that lacks a shell
   variable lacks `SCHEMAS_DIR` too; restart the server after changing it.
+
+#### What each kind of file does in a root
+
+A file's `kind` decides what it does in a schema root. Two kinds apply
+because of where they are placed. Every other schema file is only
+available, and applies to a document that names it.
+
+| File in a root | Applies to | Example |
+|---|---|---|
+| `kind: schema-trigger` | every Markdown document its `match` selects; never named in `$schema` | `schemas/report.yaml` types every document with `kind: report` |
+| `kind: yaml-schema` | every YAML document whose `kind` it claims; never named in `$schema` | `schemas/roster.yaml` validates every YAML file with `kind: roster` |
+| `kind: schema` or no `kind`, with a `$schema` | only a document whose `$schema` names it | `$schema: food.yaml` in one document; others are unaffected |
+| `kind: schema` with only `types` | nothing directly; it supplies types to the files that import them | `owner: person@people.yaml` |
+
+"Every document" is limited to the documents the root serves:
+
+| Root | Serves |
+|---|---|
+| `{package}/schemas/` | documents in that package |
+| `{package-area}/schemas/` | documents in that package area, never a sibling area |
+| `{root}/schemas/` | every document in the file tree |
+| `SCHEMAS_DIR` and `~/schemas/` | every document Darkmatter checks, in any repository |
+
+For example, in a monorepo with `claudine/schemas/sequence-trigger.yaml` and
+`darkmatter/schemas/food.yaml`:
+
+- the trigger can apply to `claudine/docs/plan.md`, but never to
+  `darkmatter/docs/notes.md`
+- `darkmatter/docs/notes.md` gets `food.yaml` only when it writes
+  `$schema: food.yaml`, and `claudine/docs/plan.md` cannot name it by bare
+  name, because `darkmatter/schemas/` is not one of its roots
 
 #### Matching a path with `$path`
 

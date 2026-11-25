@@ -37,13 +37,6 @@ const PROJECT_LABEL: &str = "    project_label: |-
         ) -> Returns the project's label for a name.
 ";
 
-/// `project_label` as two arms with one signature: the second inherits the
-/// first's category, so it repeats the first.
-const DUPLICATE_OVERLOAD: &str = "    project_label:
-        - \"function(parameters(name: string); returns(string); category(Project))\"
-        - \"function(parameters(name: string); returns(string))\"
-";
-
 const NAME: &str = "project.yaml";
 
 /// The range of the first `needle` in `text` at or after byte `from`.
@@ -97,6 +90,72 @@ fn the_shared_catalog_control_is_validated_by_its_kind_with_no_findings() {
 }
 
 #[test]
+fn inline_comments_in_callable_and_tagged_schemas_keep_editor_diagnostics_clean() {
+    let probe = Probe::new();
+    let expression = format!(
+        "{CATALOG}    Label: string # A label.\n    default_label: function(parameters(void); returns(Label@this); category(Project)) # Read a label.\n"
+    );
+    let mutation = format!(
+        "{}    Label: string # A label.\n",
+        edited("kind: expression-schema", "kind: mutation-schema").replace("            narrows(value: file; true-implies);\n", "")
+    );
+    let ordinary = "kind: schema\ntypes:\n    Label: string # The displayed label.\n$schema:\n    label: Label@this\n";
+    for (name, text) in [("expressions.yaml", expression.as_str()), ("actions.yaml", &mutation), ("label.yaml", ordinary)] {
+        assert_eq!(probe.outcome(name, text), "validated", "{name}");
+        assert_eq!(probe.schema_diagnostics(name, text), Vec::new(), "{name}");
+    }
+}
+
+#[test]
+fn type_reference_diagnostics_select_the_second_signature_and_preserve_the_related_key() {
+    let probe = Probe::new();
+    let first = "function(parameters(Missing: string); returns(string); category(Project))";
+    for kind in ["expression-schema", "mutation-schema"] {
+        for (reference, decoy, message, is_callable) in [
+            ("Missing@this", "Missing", "which this catalog does not declare", false),
+            ("Label@./helpers.yaml", "./helpers.yaml", "resolves only its own helper types", false),
+            ("show_label@this", "show_label", "uses the callable", true),
+        ] {
+            let signature = format!("function(parameters(name: number); returns({reference}); category(Project))");
+            let source = format!("kind: {kind}\ncategories: [Project]\ntypes:\n    Label: string\n    show_label:\n        - |-\n            {first} -> Mentions {decoy}.\n        - |- # {decoy}\n            {signature}\n");
+            let control = source.replace(reference, "Label@this");
+            assert_eq!(probe.outcome(NAME, &control), "validated", "{control}");
+            assert!(probe.diagnostics(NAME, &control).is_empty(), "{control}");
+
+            assert_eq!(probe.outcome(NAME, &source), "failed", "{source}");
+            let diagnostics = probe.diagnostics(NAME, &source);
+            let error = only_catalog_error(&diagnostics);
+            assert!(error.message.contains(message), "{error:#?}");
+            assert_eq!(error.range, range_of(&source, &signature, 0), "{error:#?}");
+            let expected = if is_callable {
+                vec![(uri_of(&probe, NAME), range_of(&source, "show_label", 0), "`show_label` is declared here".to_string())]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(related(error), expected, "{error:#?}");
+        }
+    }
+}
+
+#[test]
+fn uncallable_names_receive_one_editor_diagnostic_at_the_authored_key() {
+    let probe = Probe::new();
+    let valid = edited("project_label:", "\"Project.Label\":");
+    assert_eq!(probe.outcome(NAME, &valid), "validated");
+    assert!(probe.schema_diagnostics(NAME, &valid).is_empty());
+
+    for key in ["\"project label\"", "\"2fa_label\"", "\"true\""] {
+        let text = edited("project_label:", &format!("{key}:"));
+        assert_eq!(probe.outcome(NAME, &text), "failed", "{key}");
+        let diagnostics = probe.diagnostics(NAME, &text);
+        let error = only_catalog_error(&diagnostics);
+        assert_eq!(error.range, range_of(&text, key, 0), "{key}: {error:?}");
+        assert!(error.message.contains("cannot be used as an expression call name"), "{error:?}");
+        assert!(related(error).is_empty(), "{error:?}");
+    }
+}
+
+#[test]
 fn a_folded_name_collision_is_one_catalog_error_related_to_the_earlier_declaration() {
     let probe = Probe::new();
     let text = edited("project_label:", "Is_Project_File:");
@@ -113,20 +172,62 @@ fn a_folded_name_collision_is_one_catalog_error_related_to_the_earlier_declarati
     );
 }
 
-/// Overloads with one binding contract are refused by the shared document
-/// reader, not the callable checks: the catalog's envelope reports it once,
-/// on the later arm, as a `kind: schema` document's would be.
 #[test]
-fn a_duplicate_overload_is_one_error_ranged_at_the_later_arm() {
+fn a_duplicate_overload_is_one_error_with_both_authored_arms() {
     let probe = Probe::new();
-    let text = edited(PROJECT_LABEL, DUPLICATE_OVERLOAD);
-    assert_eq!(probe.outcome(NAME, &text), "validated");
-    let diagnostics = probe.diagnostics(NAME, &text);
-    assert_eq!(codes(&diagnostics), vec!["dm.schema.invalid_type_definition"], "{diagnostics:#?}");
-    assert!(diagnostics[0].message.contains("overloads 1 and 2"), "{diagnostics:#?}");
-    // The whole later arm, its quotes included.
-    let arm = "\"function(parameters(name: string); returns(string))\"";
-    assert_eq!(diagnostics[0].range, range_of(&text, arm, 0), "{diagnostics:#?}");
+    let first = "function(parameters(name: string); returns(string); category(Project))";
+    for kind in ["expression-schema", "mutation-schema"] {
+        for (carrier, ty) in [("sequence", "string"), ("pipe", "string"), ("sequence", "Label@this"), ("pipe", "Label@this")] {
+            let later = format!("function(parameters(other: {ty}); returns(string); category(Project))");
+            let decl = if carrier == "sequence" {
+                format!("    project_label:\n        - '{first}'\n        - '{later}'\n")
+            } else {
+                format!("    project_label: >-\n        {first} |\n        {later}\n")
+            };
+            let text = format!("{}    Label: string\n", edited(PROJECT_LABEL, &decl))
+                .replace("kind: expression-schema", &format!("kind: {kind}"))
+                .replace("            narrows(value: file; true-implies);\n", "");
+            assert_eq!(probe.outcome(NAME, &text), "failed");
+            let diagnostics = probe.diagnostics(NAME, &text);
+            let error = only_catalog_error(&diagnostics);
+            assert!(error.message.contains("overloads 1 and 2"), "{error:#?}");
+            assert_eq!(error.range, range_of(&text, &later, 0), "{error:#?}");
+            assert_eq!(related(error), vec![(
+                uri_of(&probe, NAME),
+                range_of(&text, first, 0),
+                "the earlier overload is declared here".to_string(),
+            )]);
+            let control = text.replace(&format!("other: {ty}"), "other: number");
+            assert!(probe.diagnostics(NAME, &control).is_empty(), "{carrier} {kind}");
+        }
+    }
+}
+
+#[test]
+fn category_failures_have_one_diagnostic_at_the_authored_entry_or_callable() {
+    let probe = Probe::new();
+    for (entry, rejected, has_earlier) in [
+        ("    - Project -> Again.\n", "Project -> Again.", true),
+        ("    - ' -> Blank label.'\n", "' -> Blank label.'", false),
+        ("    - 'Extra ->'\n", "'Extra ->'", false),
+        ("", "function(", false),
+    ] {
+        let text = if entry.is_empty() {
+            edited("category(Project);", "category(Missing);")
+        } else {
+            edited("types:\n", &format!("{entry}types:\n"))
+        };
+        let diagnostics = probe.diagnostics(NAME, &text);
+        let error = only_catalog_error(&diagnostics);
+        assert_eq!(error.range.start, range_of(&text, rejected, 0).start, "{error:#?}");
+        if has_earlier {
+            let category = text.find("    - Project").unwrap() + "    - ".len();
+            assert_eq!(related(error).len(), 1, "{error:#?}");
+            assert_eq!(related(error)[0].1.start, position_at(&text, category), "{error:#?}");
+        } else {
+            assert!(related(error).is_empty(), "{error:#?}");
+        }
+    }
 }
 
 #[test]
@@ -165,6 +266,29 @@ fn a_reused_built_in_name_relates_the_built_in_declaration_under_the_repository_
 }
 
 #[test]
+fn a_built_in_alias_without_a_checkout_reports_embedded_coordinates_and_links_matching_source() {
+    let built_in = "darkmatter/schemas/partials/functions.yaml";
+    let text = edited("project_label:", "KEBABCASE:");
+    let offset = BUILT_IN_FUNCTIONS.find("\n    kebab_case:").unwrap() + "\n    ".len();
+    let at = position_at(BUILT_IN_FUNCTIONS, offset);
+    let probe = Probe::without_repository();
+    for copy in [None, Some("# Different source.\n"), Some(BUILT_IN_FUNCTIONS), Some("# Changed source.\n"), None] {
+        probe.change_schema_buffer(built_in, copy);
+        let diagnostics = probe.diagnostics("sub/project.yaml", &text);
+        let error = only_catalog_error(&diagnostics);
+        assert_eq!(error.range, range_of(&text, "KEBABCASE", 0), "{error:#?}");
+        if copy == Some(BUILT_IN_FUNCTIONS) {
+            assert_eq!(related(error).len(), 1, "{error:#?}");
+            assert_eq!(related(error)[0].0, uri_of(&probe, built_in));
+            assert_eq!(related(error)[0].1.start, at);
+        } else {
+            assert!(related(error).is_empty(), "{error:#?}");
+            assert!(error.message.contains(&format!("{built_in}:{}:{}", at.line + 1, at.character + 1)), "{error:#?}");
+        }
+    }
+}
+
+#[test]
 fn a_mutation_catalog_refuses_narrowing_at_the_declaration() {
     let probe = Probe::new();
     let text = edited("kind: expression-schema", "kind: mutation-schema");
@@ -185,7 +309,8 @@ fn a_catalog_import_is_refused_without_resolving_the_imported_file() {
     let before = library_work::snapshot();
     let diagnostics = probe.diagnostics(NAME, &text);
     let error = only_catalog_error(&diagnostics);
-    assert_eq!(error.range, range_of(&text, "./lib.yaml", 0), "{error:#?}");
+    let signature = "function(\n            parameters(name: string);\n            returns(Label@./lib.yaml);\n            category(Project);\n        )";
+    assert_eq!(error.range, range_of(&text, signature, 0), "{error:#?}");
     let work = library_work::snapshot().since(&before);
     for kind in [Work::StandaloneImportCheck, Work::NamedTypeTableParse] {
         assert_eq!(work.get(kind), 0, "{kind:?} in {:?}", work.nonzero());
@@ -315,4 +440,44 @@ fn catalog_findings_follow_the_buffer_version_and_repeated_reads_prepare_nothing
         assert_eq!(library.get(work), 0, "{work:?} in {:?}", library.nonzero());
     }
     fixture.shutdown();
+}
+
+#[test]
+fn aliased_sequence_arms_keep_editor_admission_and_related_ranges() {
+    let probe = Probe::new();
+    let string = "function(parameters(x: string); returns(string); category(Project))";
+    let number = "function(parameters(x: number); returns(string); category(Project))";
+    let resolved = string.replace("x: string", "x: Label@this");
+    let category = string.replace("category(Project)", "category(Extra)");
+    let missing = number.replace("returns(string)", "returns(Missing@this)");
+    for kind in ["expression-schema", "mutation-schema"] {
+        let text = |signature: &str, arms: &str| {
+            format!("kind: {kind}\ndescription: &other '{signature}'\ncategories: [Project, Extra]\ntypes:\n    Label: string\n    project_label:{arms}\n")
+        };
+        for control in [
+            text(number, &format!(" ['{number}', '{string}']")),
+            text(number, &format!(" [&arm !!str '{string}', *other]")),
+        ] {
+            assert_eq!(probe.outcome(NAME, &control), "validated", "{control}");
+            assert!(probe.diagnostics(NAME, &control).is_empty(), "{control}");
+        }
+        for (source, primary, earlier, message) in [
+            (text(number, &format!("\n        - &arm |- \n            {string}\n        - *arm")), "*arm", Some(string), "same binding contract"),
+            (text(string, &format!(" [*other, '{resolved}']")), resolved.as_str(), Some("*other"), "same binding contract"),
+            (text(number, &format!(" [*other, '{category}']")), &format!("'{category}'"), Some("*other"), "different categories"),
+            (text(&missing, &format!(" ['{string}', *other]")), "*other", None, "which this catalog does not declare"),
+        ] {
+            let arms = source.find("    project_label:").unwrap();
+            assert_eq!(probe.outcome(NAME, &source), "failed", "{source}");
+            let diagnostics = probe.diagnostics(NAME, &source);
+            let error = only_catalog_error(&diagnostics);
+            assert_eq!(error.range, range_of(&source, primary, arms), "{error:#?}");
+            assert!(error.message.contains(message), "{error:#?}");
+            let notes = related(error);
+            assert_eq!(notes.len(), usize::from(earlier.is_some()), "{error:#?}");
+            if let Some(earlier) = earlier {
+                assert_eq!((&notes[0].0, notes[0].1), (&uri_of(&probe, NAME), range_of(&source, earlier, arms)), "{error:#?}");
+            }
+        }
+    }
 }

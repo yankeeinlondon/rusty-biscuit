@@ -88,6 +88,53 @@ const LABEL: &str = "project_label(42)";
 
 // ── registration ────────────────────────────────────────────────────────────
 
+#[test]
+fn authored_and_runtime_callable_names_must_parse_as_the_exact_call_name() {
+    let source = include_str!("../fixtures/host_functions/project.yaml");
+    let catalog = load(source);
+    let handler: darkmatter::markdown::compose::expression::HostHandler = Arc::new(|_| Ok(json!("label")));
+    let nested = format!("{}project_label{}", "(".repeat(500), ")".repeat(500));
+    for name in ["project label", "2fa_label", "true", "false", "", " project_label", "project_label ", "project--label", "project..label", &nested] {
+        let key = json!(name).to_string();
+        let edited = source.replace("project_label:", &format!("{key}:"));
+        let start = edited.find(&key).expect("edited key");
+        let refusal = HostFunctionCatalog::load(&edited, "project.yaml").expect_err("catalog refuses the name");
+        assert_eq!(refusal.span(), Some(start..start + key.len()).as_ref(), "{name:?}: {refusal}");
+        assert!(refusal.to_string().contains("cannot be used as an expression call name"), "{refusal}");
+        assert!(refusal.related().is_empty(), "{refusal:?}");
+
+        for (canonical, aliases) in [(name, &[][..]), ("project_label", &[name][..])] {
+            let result = HostFunctions::builder(catalog.clone())
+                .function("is_project_file", &[], |r| r, Arc::new(|_| Ok(json!(true))))
+                .function(canonical, aliases, |_| panic!("invalid names must fail before configuration"), handler.clone())
+                .build();
+            assert_eq!(result.expect_err("builder refuses the name"), HostFunctionError::InvalidCallName { name: name.into() });
+        }
+    }
+}
+
+#[test]
+fn accepted_callable_names_dispatch_through_the_parser_and_runtime() {
+    let source = include_str!("../fixtures/host_functions/project.yaml");
+    let edited = source.replace("project_label:", "\"Project-Label\":");
+    let catalog = load(&edited);
+    assert_eq!(catalog.function_names(), ["Project-Label", "is_project_file"]);
+    let functions = HostFunctions::builder(catalog)
+        .function("is_project_file", &[], |r| r, Arc::new(|_| Ok(json!(true))))
+        .function("Project-Label", &["project_label", "project.alias", "True"], |r| r, Arc::new(|call| {
+            Ok(json!(format!("label:{}", call.args().text(0).unwrap())))
+        }))
+        .build()
+        .expect("callable names are admitted");
+    install_host_functions(functions).expect("installs");
+
+    let dir = TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    let result = compose_in(&root, "{{ project-label('dash') }} {{ PROJECT_LABEL('underscore') }} {{ Project.Alias('dot') }} {{ True('case') }}\n")
+        .expect("each spelling reaches the same handler");
+    assert_eq!(result.content().trim(), "label:dash label:underscore label:dot label:case");
+}
+
 /// Criterion 37, registration half: every invalid set fails `build` (or
 /// installation) before anything is evaluated.
 #[test]

@@ -883,6 +883,7 @@ impl ComposeWarning {
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -946,6 +947,7 @@ impl ComposeWarning {
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
         };
         Self {
             stage: "link_titles".to_string(),

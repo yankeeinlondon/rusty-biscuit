@@ -163,7 +163,7 @@ fn load_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Diagnostic {
 
 /// A callable catalog's failed callable check, ranged where the library
 /// located it (else on the `kind` value), with each related location: in
-/// this document, or in another file whose text the preparation captured.
+/// this document, in a matching file, or as a textual embedded location.
 fn catalog_diagnostic(
     ctx: &DocumentContext,
     yaml: &YamlDocumentOverlay,
@@ -185,12 +185,18 @@ fn catalog_diagnostic(
             let (uri, range) = if entry.file == ctx.path {
                 let range = entry.span.clone().and_then(|span| ctx.source_map.byte_range_to_lsp(span));
                 (ctx.uri.clone(), range)
-            } else {
-                let uri = file_path_to_uri(&entry.file)?;
-                let text = yaml.catalog_sources.get(&entry.file)?;
+            } else if let (Some(uri), Some(text)) = (file_path_to_uri(&entry.file), yaml.catalog_sources.get(&entry.file)) {
                 let map = SourceMap::new(uri.clone(), 0, ctx.source_map.encoding(), Arc::clone(text));
                 let range = entry.span.clone().and_then(|span| map.byte_range_to_lsp(span));
                 (uri, range)
+            } else {
+                let source = darkmatter::markdown::compose::expression::catalog::embedded_catalog_source(&entry.file);
+                let position = source.zip(entry.span.as_ref()).map(|(source, span)| {
+                    let (line, column) = simplified_schema::line_col_of_offset(source, span.start);
+                    format!(":{line}:{column}")
+                }).unwrap_or_default();
+                out.message.push_str(&format!("\n{} (at {}{position})", entry.message, entry.file.display()));
+                return None;
             };
             Some(DiagnosticRelatedInformation {
                 location: Location::new(uri, range.unwrap_or_default()),

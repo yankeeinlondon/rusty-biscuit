@@ -422,18 +422,18 @@ impl ContractJob {
     pub(super) fn run(self) -> PreparedJob {
         work_counters::record_yaml_preparation();
         let Self { path, text, key, context, kinds, hosts, workspace_roots, sources, epoch, seq } = self;
-        let (prepared, observed) = buffers::with(&sources, || {
+        let (prepared, mut observed) = buffers::with(&sources, || {
             observed::collect(|| prepare(&path, &text, &context, kinds, hosts, &workspace_roots))
         });
         let Prepared { mut contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
-        deps.extend(observed.read);
         let mut catalog_sources = CatalogSources::default();
         if let Err(error) = &contract
-            && let Some((resolved, texts)) = resolve_catalog_related(error, &path, &context, &sources)
+            && let Some((resolved, texts)) = resolve_catalog_related(error, &path, &context, &workspace_roots, &sources, &mut observed)
         {
             contract = Err(Arc::new(resolved));
             catalog_sources = Arc::new(texts);
         }
+        deps.extend(observed.read);
         let mut probes = schema_references.probes();
         for (probe, existed) in &mut probes {
             *existed |= sources.get(probe).is_some();
@@ -469,20 +469,16 @@ impl ContractJob {
     }
 }
 
-/// A [`SchemaError::CallableCatalog`] whose related locations name their
-/// files as an editor opens them, with the text of each file other than the
-/// catalog at `path`; `None` for any other error.
-///
-/// A relative related file (a built-in catalog's identity, such as
-/// `darkmatter/schemas/partials/functions.yaml`) is resolved against the
-/// context's captured repository root, as the library matches it; a related
-/// location whose file cannot be resolved or read is dropped, since no
-/// editor could open it. Reads through the open buffers.
+/// Resolves a catalog's related locations to editor files when their source
+/// matches. An embedded declaration without a matching file keeps its
+/// embedded source identity for a textual diagnostic.
 fn resolve_catalog_related(
     error: &SchemaError,
     path: &Path,
     context: &FileResolutionContext,
+    workspace_roots: &[PathBuf],
     sources: &SourceBuffers,
+    observed: &mut observed::Observed,
 ) -> Option<(SchemaError, HashMap<PathBuf, Arc<str>>)> {
     let SchemaError::CallableCatalog { path: catalog, message, span, related } = error else {
         return None;
@@ -490,20 +486,32 @@ fn resolve_catalog_related(
     let mut texts = HashMap::new();
     let related = related
         .iter()
-        .filter_map(|entry| {
+        .map(|entry| {
+            let mut entry = entry.clone();
+            let embedded = darkmatter::markdown::compose::expression::catalog::embedded_catalog_source(&entry.file);
             let file = if entry.file.is_absolute() {
                 entry.file.clone()
             } else {
-                context.repository_root()?.join(&entry.file)
+                let path = biscuit_file::PathIdentity::new(path);
+                let workspace = workspace_roots.iter()
+                    .filter(|root| path.starts_with(&biscuit_file::PathIdentity::new(root)))
+                    .max_by_key(|root| root.components().count());
+                context.repository_root().or(workspace.map(PathBuf::as_path)).unwrap_or(context.cwd()).join(&entry.file)
             };
             if file != path && file != *catalog && !texts.contains_key(&file) {
-                let text = match sources.get(&file) {
-                    Some(text) => Arc::clone(text),
-                    None => Arc::from(work_counters::read_to_string(&file).ok()?),
-                };
-                texts.insert(file.clone(), text);
+                let text = sources.get(&file).cloned().or_else(|| work_counters::read_to_string(&file).ok().map(Arc::from));
+                if text.is_some() || present(&file, sources) {
+                    observed.read.insert(file.clone());
+                }
+                observed.searched.insert(file.clone());
+                if let Some(text) = text.filter(|text| embedded.is_none_or(|embedded| &**text == embedded)) {
+                    texts.insert(file.clone(), text);
+                } else {
+                    return entry;
+                }
             }
-            Some(simplified_schema::errors::CatalogRelated { file, ..entry.clone() })
+            entry.file = file;
+            entry
         })
         .collect();
     let resolved = SchemaError::CallableCatalog { path: catalog.clone(), message: message.clone(), span: span.clone(), related };

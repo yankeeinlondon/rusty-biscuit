@@ -202,14 +202,19 @@ pub(crate) fn registration_diagnostic(
     encoding: PositionEncoding,
 ) -> Diagnostic {
     let range = registration_range(found, encoding).unwrap_or_else(zero_range);
-    let mut out = diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone());
+    let mut message = found.message.clone();
+    for related in found.related.iter().filter(|related| !related.file.is_absolute()) {
+        let position = related.line.zip(related.column).map(|(line, column)| format!(":{line}:{column}")).unwrap_or_default();
+        message.push_str(&format!("\n{} (at {}{position})", related.message, related.file.display()));
+    }
+    let mut out = diagnostic(range, registration_severity(found), source::SCHEMA, found.code, message);
     out.related_information = registration_related(found, encoding);
     out
 }
 
 /// A registration warning's secondary locations (the earlier declaration a
 /// name or alias collides with, the built-in a catalog name reuses), each
-/// positioned like the primary range; one whose file has no URI is dropped.
+/// positioned like the primary range. Embedded locations use the message.
 fn registration_related(
     found: &darkmatter::config::registration::RegistrationDiagnostic,
     encoding: PositionEncoding,

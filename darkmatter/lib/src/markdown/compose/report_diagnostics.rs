@@ -41,7 +41,7 @@ use super::expression::iteration::IterationPath;
 use super::expression::data::locate::SourceLocator;
 use super::expression::data::{DataError, DataSourceLocation, TabularSource};
 use super::expression::{
-    DataLocation, Diagnostic, DiagnosticSource, ExpressionError, FileRefFailure, FileReferenceDiagnostic,
+    DataLocation, Diagnostic, DiagnosticRelated, DiagnosticSource, ExpressionError, FileRefFailure, FileReferenceDiagnostic,
     ReferenceDetails, Severity,
 };
 use super::page_blocks::PageBlockError;
@@ -166,6 +166,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     }
 }
 
@@ -268,16 +269,25 @@ pub fn config_notice_diagnostics(notice: &crate::config::load::ConfigDiagnostic)
         .collect()
 }
 
-/// A refused host registration or a same-host conflict
-/// ([`crate::config::registration`]) as one record at the file, line, and
-/// column the problem is in.
+/// A refused registration at its authored position, with the other
+/// declarations of a conflict attached to the same diagnostic.
 pub fn registration_diagnostic(diagnostic: &crate::config::registration::RegistrationDiagnostic) -> Diagnostic {
-    let file = Some(diagnostic.file.clone());
-    let source = match (diagnostic.line, diagnostic.column) {
-        (Some(line), Some(column)) => DiagnosticSource::at(file, line, column),
-        _ => DiagnosticSource::file_only(file),
+    let source = |file: &Path, line: Option<usize>, column: Option<usize>| {
+        let file = Some(file.to_path_buf());
+        match (line, column) {
+            (Some(line), Some(column)) => DiagnosticSource::at(file, line, column),
+            _ => DiagnosticSource::file_only(file),
+        }
     };
-    Diagnostic { source: Some(source), ..unlocated(diagnostic.code, diagnostic.severity, diagnostic.message.clone()) }
+    let related = diagnostic.related.iter().map(|related| DiagnosticRelated {
+        message: related.message.clone(),
+        source: source(&related.file, related.line, related.column),
+    }).collect();
+    Diagnostic {
+        source: Some(source(&diagnostic.file, diagnostic.line, diagnostic.column)),
+        related,
+        ..unlocated(diagnostic.code, diagnostic.severity, diagnostic.message.clone())
+    }
 }
 
 fn config_problem_source(problem: &crate::config::load::ConfigProblem) -> DiagnosticSource {
@@ -389,6 +399,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                         reference_details: None,
                         data_location: expression.and_then(|expression| expression.data),
                         grants_needed: None,
+                        related: Vec::new(),
                         schema_default: problem
                             .default
                             .as_ref()
@@ -912,6 +923,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     }
 }
 
@@ -1285,5 +1297,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
     }
 }

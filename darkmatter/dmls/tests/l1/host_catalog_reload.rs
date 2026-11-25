@@ -308,6 +308,29 @@ fn a_selected_hosts_function_is_found_case_insensitively_by_name_or_alias() {
     fixture.shutdown();
 }
 
+#[test]
+fn a_refused_callable_name_is_never_offered_by_completion() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    strict_repository(root, &[".relay"]);
+    let facts = facts_for(FUNCTIONS, &[("acme_label", &["acme.alias"])]);
+    let refused = facts.replace("\"acme.alias\"", "\"acme.alias\", \"acme label\"");
+    assert_ne!(facts, refused);
+    relay(&[]).with_member("schemas/functions.facts.json", &refused).write_to(&root.join("home/.relay"));
+    let mut fixture = start(&workspace);
+    let text = format!("{CALLS}{{{{ acme.ali }}}}");
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "notes/calls.md", &text);
+    assert_eq!(exposure(&mut fixture, &document, &diagnostics), NONE, "{diagnostics:#?}");
+    assert!(!completion_at(&mut fixture, &document, "{{ acme.ali").contains(&"acme_label".to_string()));
+
+    settle(&mut fixture, &document);
+    let warnings = warnings_on(&mut fixture, COMPANION);
+    let [warning] = warnings.as_slice() else { panic!("one warning on the companion: {warnings:#?}") };
+    assert!(warning["message"].as_str().unwrap().contains("cannot be used as an expression call name"), "{warning:#?}");
+    fixture.shutdown();
+}
+
 /// A second catalog claiming `acme_label` refuses the relay at its own
 /// declaration, with the earlier catalog's declaration as related
 /// information; the host exposes nothing.

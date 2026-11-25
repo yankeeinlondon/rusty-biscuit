@@ -769,10 +769,8 @@ fn is_callable_kind(kind: &str) -> bool {
 
 /// The [`FileOutcome::CallableCatalog`] of `error`, a catalog failure of the
 /// document at `path` whose text is `text`, each span converted to a line
-/// and column of its own file. A related location in another file is read
-/// from that file: an absolute path as it is, a relative one (a built-in
-/// catalog's repository path) under `context`'s repository root, else its
-/// working directory. A file that cannot be read keeps its span unlocated.
+/// and column of its source. Built-in coordinates come from the embedded
+/// catalog. A checkout path is reported when its text matches that source.
 fn catalog_outcome(error: SchemaError, path: &Path, text: &str, context: &FileResolutionContext) -> FileOutcome {
     let SchemaError::CallableCatalog { message, span, related, .. } = &error else {
         return FileOutcome::schema_error(error, path);
@@ -795,10 +793,11 @@ fn catalog_outcome(error: SchemaError, path: &Path, text: &str, context: &FileRe
             } else {
                 context.repository_root().unwrap_or(context.cwd()).join(&related.file)
             };
-            let (file, position) = match std::fs::read_to_string(&resolved) {
-                Ok(other) => (resolved, position(&other, &related.span)),
-                Err(_) => (related.file.clone(), None),
-            };
+            let disk = std::fs::read_to_string(&resolved).ok();
+            let embedded = darkmatter::markdown::compose::expression::catalog::embedded_catalog_source(&related.file);
+            let matches = disk.as_deref().is_some_and(|disk| embedded.is_none_or(|embedded| disk == embedded));
+            let file = if matches { resolved } else { related.file.clone() };
+            let position = embedded.or(disk.as_deref()).and_then(|source| position(source, &related.span));
             CatalogMark { message: related.message.clone(), file: Some(file), position, span: related.span.clone() }
         })
         .collect();

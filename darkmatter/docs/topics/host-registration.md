@@ -718,6 +718,10 @@ types:
 
   Another host may publish the same name or alias; each host's functions
   are entered only for its own documents.
+- **Names work in expressions.** The parser must recognize each declared
+  name or alias as written in a call, such as `project-label()` or
+  `project.label()`. An unusable spelling is refused at its catalog
+  `types` key or at the alias element in the facts companion.
 - **Signatures only.** A catalog grants no permission, adds no lifecycle
   action key, and changes no event; `when` is not available in a catalog.
 - **Registration is the only way in.** A catalog sitting in a schema root is
@@ -883,8 +887,10 @@ manifest for its own shape or a member that is missing or does not match its
 digest, and the member file for a member that does not load. When the problem
 involves a second place (the earlier claim of a function name, or the
 built-in a catalog name reuses), `RegistrationDiagnostic::related` lists it
-with its own file, line, and column, and DMLS attaches it as related
-information.
+with its own file, line, and column. `md compose` includes these locations in
+the warning and the data output's diagnostic `related` list. DMLS links
+related bundle files and displays the embedded source label and coordinates
+for built-ins.
 
 A member is shown by its display label when it has one. A trigger or
 types-only library that declares a valid `name` is written `name (path)`

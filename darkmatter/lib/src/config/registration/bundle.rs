@@ -33,7 +33,7 @@ use biscuit_file::FileResolutionContext;
 use serde_json::json;
 
 use super::manifest::{self, ManifestRefusal, MemberRoots, MemberSpec, ReadManifest};
-use super::{HOST_REGISTRATION_CODE, HostDependency, Refusal, RegistrationDiagnostic};
+use super::{HOST_REGISTRATION_CODE, HostDependency, Refusal, RegistrationDiagnostic, RegistrationRelated};
 use crate::config::load::{Registration, SourcePosition};
 
 /// One member of a manifest, resolved and checked: an entry it lists, or an
@@ -286,6 +286,8 @@ pub struct SnapshotRefusal {
     /// The line's text before [`Self::column`] (see
     /// [`SourcePosition::line_prefix`]), when [`Self::line`] is known.
     pub line_prefix: Option<String>,
+    /// Earlier declarations involved in a conflict.
+    pub related: Vec<RegistrationRelated>,
     /// The manifest field of the failing entry (`files[1]`, `lifecycle`,
     /// `digests../schemas/a.yaml`); `None` when the manifest itself failed.
     pub member: Option<String>,
@@ -317,6 +319,7 @@ impl SnapshotRefusal {
             line,
             column,
             line_prefix,
+            related: refusal.related,
             member: refusal.member,
             label: None,
             unsupported_format,
@@ -340,7 +343,7 @@ impl SnapshotRefusal {
             at: self.position(),
             member: self.member.clone(),
             message: self.message.clone(),
-            related: Vec::new(),
+            related: self.related.clone(),
         }
         .into_diagnostic(entry)
     }

@@ -266,7 +266,7 @@ fn a_broken_document_or_schema_leaves_the_baseline_without_a_word() {
     let fixture = fixture("completion-broken");
     write_in_cwd(&fixture, "broken.md", "---\ntitle: [unclosed\n---\n");
     write_in_cwd(&fixture, "missing-schema.md", "---\n$schema: ./nowhere.yaml\nmine: 1\n---\n");
-    write_in_cwd(&fixture, "bad.yaml", "$schema:\n  lang: enum(two words)\n");
+    write_in_cwd(&fixture, "bad.yaml", "$schema:\n  lang: enum(one, two\n");
     write_in_cwd(&fixture, "bad-schema.md", "---\n$schema: ./bad.yaml\nmine: 1\n---\n");
     write_in_cwd(&fixture, "remote-schema.md", "---\n$schema: https://127.0.0.1:9/never.yaml\nmine: 1\n---\n");
 
@@ -485,7 +485,7 @@ fn an_interpolated_tag_is_not_evaluated_to_narrow_a_union() {
 fn assert_failures_add_no_text(shell: &str) {
     let fixture = CliProcessFixture::named("completion-no-diagnostics");
     write_in_cwd(&fixture, "clean.md", "---\nmine: 1\n---\n");
-    write_in_cwd(&fixture, "bad.yaml", "$schema:\n  lang: enum(two words)\n");
+    write_in_cwd(&fixture, "bad.yaml", "$schema:\n  lang: enum(one, two\n");
     write_in_cwd(&fixture, "missing-schema.md", "---\n$schema: ./nowhere.yaml\nmine: 1\n---\n");
     write_in_cwd(&fixture, "bad-schema.md", "---\n$schema: ./bad.yaml\nmine: 1\n---\n");
     write_in_cwd(&fixture, "remote-schema.md", "---\n$schema: https://127.0.0.1:9/never.yaml\nmine: 1\n---\n");

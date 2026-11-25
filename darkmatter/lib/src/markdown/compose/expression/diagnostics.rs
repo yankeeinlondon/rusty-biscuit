@@ -113,6 +113,7 @@ impl ExpressionDiagnostic {
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
         }
     }
 
@@ -161,6 +162,18 @@ pub struct Diagnostic {
     /// every other record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_default: Option<SchemaDefaultOrigin>,
+    /// The other declarations involved in a conflict.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<DiagnosticRelated>,
+}
+
+/// A secondary location of a diagnostic, with its own authored source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiagnosticRelated {
+    /// What the location contributes to the diagnostic.
+    pub message: String,
+    /// The file and position of the related declaration.
+    pub source: DiagnosticSource,
 }
 
 /// Where a schema default that composition or validation inserted is

@@ -50,6 +50,15 @@ pub(crate) fn catalog_source() -> &'static str {
     CATALOG_SOURCE
 }
 
+/// The embedded source named by a built-in declaration's diagnostic label.
+#[must_use]
+pub fn embedded_catalog_source(path: &Path) -> Option<&'static str> {
+    (biscuit_file::PathIdentity::new(path) == biscuit_file::PathIdentity::new(Path::new(CATALOG_PATH)))
+        .then_some(CATALOG_SOURCE)
+}
+
+pub(crate) use checks::builtin_name_related;
+
 /// The file-form example artifacts a catalog entry may reference with
 /// `example(./function-examples/<name>.yaml)`, keyed by that reference
 /// without its leading `./`. Compiled in so reading the catalog never touches
@@ -515,8 +524,15 @@ fn read_catalog(
         ));
     }
     let callable_names: Vec<&str> = callables.iter().map(|(name, _)| name.as_str()).collect();
+    if expected == StandaloneSchemaEnvelope::ExpressionSchema {
+        for &name in &callable_names {
+            if !super::is_callable_name(name) {
+                return Err(at.key(name, format!("`types.{name}` cannot be used as an expression call name")));
+            }
+        }
+    }
     for (name, def) in &types.properties {
-        checks::local_references(&at, Some(source), name, def, &named_types, &callable_names)?;
+        checks::local_references(&at, name, def, &named_types, &callable_names)?;
     }
     checks::folded_names(&at, &callable_names)?;
 

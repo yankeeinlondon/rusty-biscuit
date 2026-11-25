@@ -34,6 +34,10 @@ types:
         data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed, dm.data.contract_mismatch, and a schema problem on a property whose value is one load_data call's result
         grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
         schema_default: schema-default -> the schema default that supplied the problem's value; schema problems with an inserted default only
+        related: related-diagnostic[] -> other declarations involved in the conflict
+    related-diagnostic:
+        message: string(required)
+        source: source(required)
     source:
         file: string -> null for stdin
         line: number -> 1-based authored line; null when unknown

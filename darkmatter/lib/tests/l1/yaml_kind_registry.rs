@@ -187,13 +187,15 @@ fn a_callable_catalog_validates_against_its_shipped_kind_definition() {
     assert!(!refused.report.valid);
     assert!(refused.report.problems.iter().any(|problem| problem.path == "/description"), "{:?}", refused.report.problems);
 
-    // An undeclared category is the kind check's finding, at its line.
     let undeclared = CATALOG.replace("category(Text)", "category(Math)");
-    let checked = validated(schemas.validate_yaml_document(&undeclared, Path::new("text.yaml")));
-    assert!(!checked.report.valid);
-    let problem = checked.report.problems.first().expect("a finding");
-    assert!(problem.message.contains("Math"), "{problem:?}");
-    assert_eq!(problem.line, Some(4), "{problem:?}");
+    let result = schemas.validate_yaml_document(&undeclared, Path::new("text.yaml"));
+    let Err(SchemaError::CallableCatalog { path, message, span: Some(span), related }) = result else {
+        panic!("expected a located catalog error, got {result:?}");
+    };
+    assert_eq!(path, Path::new("text.yaml"));
+    assert!(message.contains("category `Math` is not declared"), "{message}");
+    assert_eq!(&undeclared[span], "function(parameters(x: string); returns(string); category(Math))");
+    assert!(related.is_empty(), "{related:?}");
 }
 
 /// Each shipped file, as compiled in, validates against the shipped

@@ -322,10 +322,9 @@ pub(crate) fn alias_canonical(name: &str) -> Option<&'static str> {
 }
 
 /// The built-in canonical name a lowercased `name` reserves: its own, when
-/// it is a canonical name, or the one it is an alias of. The same comparison
-/// as [`is_builtin_name`], over the static binding tables only, so an
-/// authored catalog is checked without building the registry (which loads
-/// the built-in catalog).
+/// it is a canonical name, or the one it is an alias of. Reads only the
+/// static binding tables, so an authored catalog is checked without
+/// building the registry (which loads the built-in catalog).
 pub(crate) fn reserved_builtin_name(name: &str) -> Option<&'static str> {
     bindings()
         .find(|binding| binding.canonical == name || binding.aliases.contains(&name))
@@ -902,11 +901,6 @@ pub(crate) fn slot_class(name: &str) -> Option<SlotClass> {
 #[cfg(test)]
 pub(crate) fn input_reading_functions() -> Vec<&'static str> {
     bindings().filter(|binding| binding.reads.is_some()).map(|binding| binding.canonical).collect()
-}
-
-/// Whether the lowercased `name` is a built-in's canonical name or alias.
-pub(crate) fn is_builtin_name(name: &str) -> bool {
-    find_binding(name).is_some()
 }
 
 /// Runs `inspect` on the registration a call to `name` binds against, for

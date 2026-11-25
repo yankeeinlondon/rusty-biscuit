@@ -1141,20 +1141,10 @@ fn structural_failures_have_a_value_range_but_no_token() {
 
 #[test]
 fn an_unprojectable_failure_keeps_its_semantic_error() {
-    // A tagged scalar continued across lines is outside the strict locator,
-    // so the document cannot be located at all.
-    let sibling = "a: !!str string(min(1);\n  max(2))\nb: string(min(nope))\n";
+    let sibling = "%YAML 1.2\n---\na: string\nb: string(min(nope))\n";
     let failure = located_declaration_failure(sibling, 0);
     assert_eq!(failure.path, root().property("b"));
     assert_eq!((failure.authored_span, failure.value_span), (None, None));
-
-    // An alias has no scalar of its own to project the token into; its
-    // value range is still the alias where the definition is used.
-    let alias = "a: &s string(suggest(red))\nb: [*s, *s]\n";
-    let failure = located_declaration_failure(alias, 0);
-    assert_eq!(failure.path, root().property("b").union_arm(1));
-    assert_eq!(failure.authored_span, None);
-    assert_eq!(covered(alias, 0, failure.value_span), Some("*s"));
 
     // Source text that authors different text from the parsed value.
     let value = yaml("b: string(min(nope))");
@@ -1163,6 +1153,16 @@ fn an_unprojectable_failure_keeps_its_semantic_error() {
     assert_eq!(failure.path, root().property("b"));
     assert_eq!((failure.authored_span, failure.value_span), (None, None));
     assert!(matches!(*failure.error, SchemaError::Grammar { .. }), "{:?}", failure.error);
+}
+
+#[test]
+fn a_failure_in_an_aliased_arm_points_to_its_use() {
+    let alias = "a: &s string(suggest(red))\nb: [*s, *s]\n";
+    let failure = located_declaration_failure(alias, 0);
+    assert_eq!(failure.path, root().property("b").union_arm(1));
+    let later = alias.rfind("*s").unwrap();
+    assert_eq!(failure.authored_span, Some(later..later + 2));
+    assert_eq!(failure.value_span, Some(later..later + 2));
 }
 
 #[test]
@@ -1245,10 +1245,19 @@ fn standalone_definition_failures_are_located_in_both_envelopes() {
 
 #[test]
 fn a_standalone_failure_is_returned_even_when_it_cannot_be_located() {
-    let source = "kind: schema\ntypes:\n  note: !!str string(min(1);\n    max(2))\n  slug: string(min(nope))\n";
+    let source = "%YAML 1.2\n---\nkind: schema\ntypes:\n  note: string\n  slug: string(min(nope))\n";
     let failure = standalone_failure(source);
     assert_eq!(failure.path, root().property("types").property("slug"));
     assert_eq!((failure.authored_span, failure.value_span), (None, None));
+}
+
+#[test]
+fn a_standalone_failure_remains_located_beside_a_tagged_sibling() {
+    let source = "kind: schema\ntypes:\n  note: !!str string(min(1);\n    max(2))\n  slug: string(min(nope))\n";
+    let failure = standalone_failure(source);
+    assert_eq!(failure.path, root().property("types").property("slug"));
+    assert_eq!(covered(source, 0, failure.authored_span), Some("nope"));
+    assert_eq!(covered(source, 0, failure.value_span), Some("string(min(nope))"));
 }
 
 #[test]
