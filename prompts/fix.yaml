@@ -20,6 +20,7 @@ plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 implementation-log: "{{ spec ? dirname(spec) + '/implementation-log.md'  : null }}"
 implemented: "{{ frontmatter(spec, 'implemented') ? true : false }}"
 ready: "{{ frontmatter(spec, 'ready') ? true : false }}"
+human-in-the-loop: "{{ frontmatter(spec, 'human-in-the-loop') }}"
 
 initialize:
     - when: "!implemented"
