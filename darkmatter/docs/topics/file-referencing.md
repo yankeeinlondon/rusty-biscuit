@@ -78,7 +78,10 @@ point anywhere.
 A document in another Git repository takes its tree from that repository,
 whether you open it directly or a document in the repository you ran `md` in
 reaches it. Its `./`, bare, `&`, and `^` references resolve in its own
-repository, while `@` keeps searching the folder you ran `md` from:
+repository, while `@` keeps searching the folder you ran `md` from. The
+repository is the nearest checkout above the document (a folder holding a
+`.git` folder or `.git` file), so a checkout nested inside another one, such
+as a submodule at `/work/app/vendor`, is its own repository too:
 
 ```md
 <!-- /work/app/root.md, composed from /work/app -->

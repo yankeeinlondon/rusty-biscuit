@@ -577,7 +577,13 @@ over the parsed slot, so referenced, imported, trigger, contract, and
 later-round slots all demand theirs) and it captures a missing `Repo`/
 `Network`/`Agent` part once per session: `for_request` from the request's
 repository observation (`ComposeOptions::slot_repository`) and context
-authority (frozen = stays missing), `for_context` with the context's env at
+authority (frozen = stays missing), `for_request_in_checkout` when that
+observation does not describe the request's own checkout
+(`ComposeOptions::slot_repository_describes` against
+`request.resolution_context()`, e.g. options captured in a parent of a
+nested checkout: `Repo` is captured like `for_context` from the request's
+context, authority permitting, and the session's resolution key uses that
+root), `for_context` with the context's env at
 its repository root (`RepositoryObservation::default()` when it has none),
 `SlotSession::new` never. `serves` re-calls each captured call against the
 requesting session's `SessionObservations`, covered for the calls' groups (a

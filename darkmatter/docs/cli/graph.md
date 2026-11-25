@@ -35,7 +35,10 @@ document's [schema roots](../topics/schemas/definition.md#schema-roots), as
 document. Only a document inside a repository searches the roots, and it
 searches its own repository's: an included note or link target in another
 checkout, such as `::file ~/notes/review.md` from `~/app`, finds
-`$schema: review.yaml` in `~/notes/schemas/`, while one outside every
+`$schema: review.yaml` in `~/notes/schemas/`. A checkout nested in another
+(a submodule, or any folder with its own `.git`) counts as another
+checkout, so `::file ./vendor/review.md` from `~/app` searches
+`~/app/vendor/schemas/` when `~/app/vendor` is one. One outside every
 repository, such as `::file ~/review.md`, must name its schema by a `./` or
 absolute path, whatever repository the document that reached it is in.
 

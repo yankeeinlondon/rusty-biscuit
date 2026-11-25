@@ -113,7 +113,12 @@ repositories with disjoint `magic.md` markers and `order.yaml` enums) backs
 the library, `md`, and Claudine runners' `external_*` tests (DMLS's request
 belongs to the document's repository by design): a source in another repository takes `&`,
 `^`, and bare root lookups from its own repository and `@` from the launch
-scope. A CLI that rebuilds a context at a foreign document's directory must
+scope. `reference_bare_schema_roots.rs` (library) and `reference_bare_schema.rs`
+(CLI) also hold the nested-checkout fixtures (`NestedCheckouts`,
+`nested_checkouts`): a component inside the launch checkout made with a
+`.git` file naming a separate Git directory, and one nested in an unrelated
+checkout beside a `seed.md` included before and after it, so a containment
+shortcut or an order-dependent repository memo fails them. A CLI that rebuilds a context at a foreign document's directory must
 copy the launch scope back (`derive_in_own_repository`, as
 `MdRequest::document_context` and the library's source admission do); Claudine completion uses
 `claudine::composition::derive_request_context_for_source`, composition's

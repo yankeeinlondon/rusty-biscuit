@@ -16,9 +16,11 @@ extension.
   `FileResolutionContext`, repository observation, remote policy, cache state,
   identity, and meta-schema controls through `ComposeOptions`; never recapture
   CWD or repository state in a downstream resolver. The one exception is
-  source admission: a source in a Git repository the request's context does
-  not name is discovered once per request (`SourceRepositories`) and carried
-  as `SourceDerivation::OwnRepository`; see [requests.md](requests.md).
+  source admission: a source whose nearest Git checkout (its closest `.git`
+  directory or file, never containment under a known root) is a repository
+  the request's context does not name is discovered once per request
+  (`SourceRepositories`) and carried as `SourceDerivation::OwnRepository`;
+  see [requests.md](requests.md).
 - Resolve file-like values through `biscuit_file::FileReference`. Preserve its
   source context, explicit-vs-implicit syntax, and typed errors.
 - Read the home only through `biscuit_file::home_dir()` (`RequestSnapshot::from_process`
@@ -263,10 +265,11 @@ Important contracts:
   (`options.source_file_resolution_context().repository_root()`, the context
   `DarkmatterSchemas` is built with), never from the enclosing request: a
   `~`-opened child or link target outside Git refuses bare names and gets no
-  root triggers even under a repository parent, while one in a second Git
-  checkout searches that checkout's roots (its context was derived there at
-  admission, `SourceDerivation::OwnRepository`) and never the launch
-  checkout's.
+  root triggers even under a repository parent, while one whose nearest
+  `.git` (directory or file, so a checkout nested in the launch tree too) is
+  a second Git checkout searches that checkout's roots (its context was
+  derived there at admission, `SourceDerivation::OwnRepository`) and never
+  the launch checkout's.
   DMLS keeps its own workspace-boundary rule. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's

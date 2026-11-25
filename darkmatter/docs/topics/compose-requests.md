@@ -34,6 +34,16 @@ let (composed, report) = md.compose_with(&request)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+A relative source path names the file under the snapshot's request
+directory, so `docs/guide.md` above and its absolute spelling are the same
+source: same repository, schema roots, triggers, and `&` root. The source can
+be given on the request, on the `Markdown` (`Markdown::try_from(path)` or
+`with_source`), or both. A request with no source of its own takes the
+document's when it composes, pre-flights, builds a reference graph,
+validates references, lists transclusions, or prepares the effective schema
+(`effective_schema_for`); the reference graph, the validators, and the
+transclusion query always root at the document's own source when it has one.
+
 `from_process` takes the home directory from `biscuit_file::home_dir()`:
 `HOME` on macOS and Linux, `USERPROFILE` on native Windows (`HOME` alone does
 not move it there), with the platform's profile lookup as the fallback when
@@ -153,28 +163,46 @@ detect` does.
 
 A request applies the same rule to every source it admits across a file
 boundary: the root document, a `::file`, `prologue:`, or `epilogue:` child, a
-`::toc-linking` target, and a fragment link's target. A source inside a Git
-repository the request's context does not name (requested from `~/app`, the
-note `~/notes/review.md` in a second checkout) gets a context derived in its
-own repository with `derive_in_own_repository`, keeping the request's launch
-`@` scope and its configuration snapshot. The request discovers each such
-repository once, when its first source is admitted, and composition,
-command discovery, reference checks, and schema preparation all read that
-one context.
+`::toc-linking` target, and a fragment link's target. Which repository a
+source belongs to is decided by Git, not by folder nesting: it is the
+checkout whose root is the nearest folder above the source holding a `.git`
+folder or a `.git` file (the file a submodule or `git init
+--separate-git-dir` leaves). A source whose nearest checkout is not the
+repository the request's context names gets a context derived in its own
+repository with `derive_in_own_repository`, keeping the request's launch `@`
+scope and its configuration snapshot. That covers a note in a second checkout
+(requested from `~/app`, the note `~/notes/review.md`) and a component
+checked out inside the launch tree (`~/app/vendor/review.md`, where
+`~/app/vendor` has its own `.git`): each uses its own `schemas/` root and
+root triggers, never `~/app`'s.
+
+The request directory follows the same rule. Options that already hold a
+repository observation (captured by `ComposeOptions::for_document` in
+`~/app`, say) lend it to a request only when it describes the request
+directory's own nearest checkout: a request prepared in `~/app/vendor`
+discovers `~/app/vendor` instead, and its `&marker.md` is
+`~/app/vendor/marker.md`. The options' captured `ctx.*` values stay as the
+caller captured them.
+
+The request looks up the nearest checkout once per source folder and
+discovers each other repository once, when its first source is admitted, and
+composition, command discovery, reference checks, and schema preparation all
+read that one context. The order sources are visited in never matters:
+including `~/notes/seed.md` before `~/notes/vendor/review.md` gives the
+nested note the same repository as including it alone.
 
 ```mermaid
 flowchart TD
     A["source admitted
 (root, ::file, prologue/epilogue,
-::toc-linking, fragment target)"] --> I{"inside the request's
-repository?"}
-    I -- yes --> O["derived from the request's context"]
-    I -- no --> D{"in another Git checkout?
-(discovered once per request)"}
-    D -- yes --> W["derived in its own repository
+::toc-linking, fragment target)"] --> G{"nearest .git folder or file
+above the source"}
+    G -- "the request's repository" --> O["derived from the request's context"]
+    G -- "another checkout
+(nested or not)" --> W["derived in its own repository
 (launch @ scope, same configuration)"]
-    D -- no --> T["trusted external source
-(derived from the request's context)"]
+    G -- none --> T["derived from the request's context
+(trusted external outside its tree)"]
 ```
 
 A source document outside every repository is admitted the way a

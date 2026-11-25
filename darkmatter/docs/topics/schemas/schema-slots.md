@@ -249,8 +249,11 @@ $schema:
 ```
 
 - `md compose`, `md graph`, and `md validate refs` capture from their
-  request: the package layout from the repository the request found, the
-  other values the way the request captures a `ctx.*` group. A library
+  request: the package layout from the repository the request resolves in
+  (its nearest Git checkout, so a request in `app/vendor` with its own
+  `.git` reads `app/vendor`'s packages even when a library caller captured
+  its options in `app`), the other values the way the request captures a
+  `ctx.*` group. A library
   caller that composes with a fixed context of its own gets no new capture,
   and the slot fails with `dm.schema.slot_failed`, as a document expression
   reading that value would.
@@ -353,7 +356,8 @@ flowchart TD
    any of them removes that pre-approval. With no `file-read` written, the
    defaults apply: files with a common data or text extension (`txt`, `md`,
    `json`, `yaml`, `csv`, …) beside the reading document (user scope) or
-   anywhere in its repository (repository scope). See
+   anywhere in the repository the request resolves in (repository scope;
+   for a request in a checkout nested in another, the nested one). See
    [Defaults and overrides](../permissions.md#defaults-and-overrides) and
    [How the scopes combine](../permissions.md#how-the-scopes-combine).
 4. **Otherwise the approval handler is asked** (see

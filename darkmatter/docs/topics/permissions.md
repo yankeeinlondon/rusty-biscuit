@@ -163,6 +163,14 @@ working copy (see
 [The Repository File at HEAD and in the Working Copy](./configuration.md#the-repository-file-at-head-and-in-the-working-copy)).
 Outside a repository only the user file applies.
 
+The repository is the Git checkout the request resolves in: the nearest
+folder holding a `.git` directory or `.git` file. A checkout nested inside
+another (a submodule, or `app/vendor` with its own `.git` inside `app`) is
+its own repository, so a request there reads `app/vendor`'s configuration,
+and its repository default (`&**/*.<ext>`) covers `app/vendor` only, never
+the rest of `app`. That holds even when a library caller captured its
+options in `app`, unless the caller supplied the configuration itself.
+
 A file read or a shell command is **pre-approved** (it runs without asking)
 when:
 

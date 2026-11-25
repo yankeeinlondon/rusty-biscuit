@@ -2112,6 +2112,17 @@ are an error rather than one shadowing the other (see
   ~/notes/schemas/gate.trigger.yaml (matches topic: review)  → applies to the note
   ~/app/schemas/gate.trigger.yaml   (matches topic: review)  → never applies to the note
   ```
+- A checkout is found by Git membership, not by folder nesting: a
+  document's repository is the nearest folder above it that holds a `.git`
+  folder or a `.git` file (the file a submodule or `git init
+  --separate-git-dir` leaves). A component checked out inside another
+  repository is therefore its own checkout. With `~/app/vendor` holding its
+  own `.git`, `md compose ./vendor/review.md` from `~/app` and
+  `md compose review.md` from `~/app/vendor` both resolve
+  `$schema: review.yaml` from `~/app/vendor/schemas/`, and only the triggers
+  there apply. The same holds for `~/notes/vendor` inside `~/notes`, in
+  whatever order a parent includes `~/notes/seed.md` and
+  `~/notes/vendor/review.md`.
 - Bare-name lookup does not depend on trigger schemas. `md validate refs`
   and `md graph`, which apply no triggers, and a run with
   `--disable schema-triggers` resolve `$schema: post.yaml` and

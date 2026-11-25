@@ -32,9 +32,24 @@ fingerprint, like `shell_working_directory`. See
 `darkmatter/docs/topics/compose-requests.md` ("One environment per document").
 A file source (root or child) outside the request's tree is admitted
 trusted-external when only that derivation validates (`source_derivation_for`,
-applied to the root in `ComposeRequest::assemble`). A source outside the
-request's repository (or in a request with none) that lies in another Git
-repository is admitted `SourceDerivation::OwnRepository(Arc<context>)`: a
+applied to the root in `ComposeRequest::assemble` through
+`ComposeOptions::admit_source_in`, which first joins a relative root path to
+the request directory). A root learned later goes through the same
+admission: `ComposeRequest::with_source_file`/`with_root_source` (graph,
+validators, `transclusions_with_options`) admit it, keeping the request's
+own admitted derivation for an equal absolute path; `rooted_at(document)`
+gives a source-less request the `Markdown`'s source (pipeline root entry,
+`extended_for` so pre-flight sees it, `effective_schema_for`); and
+`root_document` makes a relative `Markdown` source absolute, because schema
+preparation reads the document's own path. A request directory reuses the
+options' repository observation (`request_repository_for`) only when it is
+that directory's nearest checkout, never by containment. A source whose nearest Git checkout
+(`compose::nearest_repository_root`, `biscuit_file::find_git_root`: the
+closest `.git` directory or file, so a submodule or a checkout nested inside
+the request's tree counts) is not the repository the request's context names
+(`compose::names_another_repository`, canonical comparison) is admitted
+`SourceDerivation::OwnRepository(Arc<context>)`; containment under a root is
+never the test: a
 context built at its directory from that repository's observation, derived
 by the public `derive_in_own_repository` (trusted external from the built
 context, the request's launch `@` scope copied on), and returned by
@@ -42,11 +57,14 @@ context, the request's launch `@` scope copied on), and returned by
 composition, pre-flight, the reference graph, TOC and fragment targets, and
 `prepare_schemas` read one answer. Discovery happens only there, through the
 request's `SourceRepositories` memo (`Arc` on `ComposeRequest`, kept by
-`derive`/`map_options`/clones): once per repository root, once per directory
-outside every repository, seeded with the request's own repository status;
-a discovery or build failure keeps the ordinary derivation. The configuration
+`derive`/`map_options`/clones): the nearest root once per source directory
+(seeded with the request directory's), and one `RepositoryObservation` per
+exact checkout root, never looked up by "contains", so visit order cannot
+change a source's repository; a lookup, discovery, or build failure keeps the
+ordinary derivation. The configuration
 snapshot (permissions) stays the request's. `MdRequest::document_context`
-calls the same `derive_in_own_repository` for a directly opened document; it
+applies the same nearest-root rule and calls the same
+`derive_in_own_repository` for a directly opened document; it
 differs only in choosing the *request* context for a root, where there is no
 enclosing request to derive from. The schema stage validates
 in the source's derived context (`source_file_resolution_context`), and
