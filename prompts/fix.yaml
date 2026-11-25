@@ -10,12 +10,12 @@ description: |-
 
     This sequence will leverage the following tasks to achieve it's outcome:
 
-    1. `.fix/cycle.yaml`
+    1. `_fix/cycle.yaml`
         - this is the primary loop where we _review_ and then _fix_
         - this process of _reviewing_ and then _fixing_ will loop for up to
           five times before finally stopping if production readiness can't be
           achieved in those
-    2. `.fix/handler.md`
+    2. `_fix/handler.md`
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 implementation-log: "{{ spec ? dirname(spec) + '/implementation-log.md'  : null }}"
 implemented: "{{ frontmatter(spec, 'implemented') ? true : false }}"
