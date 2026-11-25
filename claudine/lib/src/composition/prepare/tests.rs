@@ -2081,7 +2081,11 @@ fn inline_shell_execution_failure_in_a_child_keeps_the_child_origin() {
     let CompositionError::ShellExpansionFailed { error: shell, .. } = &error else {
         panic!("expected a shell failure, got {error:?}");
     };
-    assert_eq!(shell.origin(), Some(&darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 3 }), "{shell:?}");
+    // The child's own line, placed where the child wrote it.
+    let Some(darkmatter::markdown::compose::ShellCommandOrigin::Authored { site, .. }) = shell.origin() else {
+        panic!("the child's body origin, placed: {shell:?}");
+    };
+    assert_eq!(**site, darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 3 }, "{shell:?}");
     assert!(same_file(&shell.context().unwrap().absolute, &dir.path().join("child.md")), "{shell:?}");
 }
 

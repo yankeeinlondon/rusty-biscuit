@@ -231,7 +231,7 @@ fn is_missing_include(error: &CompositionError) -> bool {
     matches!(
         error,
         CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(inner))
-            if matches!(inner.as_ref(), TransclusionError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
+            if matches!(inner.without_site(), TransclusionError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
     )
 }
 

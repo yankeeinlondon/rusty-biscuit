@@ -171,6 +171,12 @@ fn only_a_not_found_include_at_preflight_earns_the_missing_include_note() {
     use darkmatter::markdown::compose::TransclusionError;
 
     assert!(is_missing_include(&transclusion_io(std::io::ErrorKind::NotFound)));
+    // Pre-flight names the directive that wrote the include.
+    let located = TransclusionError::Located {
+        site: Box::new(darkmatter::markdown::compose::InclusionSite::new("prompt.md".into(), None)),
+        source: Box::new(TransclusionError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found: notes.md"))),
+    };
+    assert!(is_missing_include(&CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(Box::new(located)))));
 
     let unrelated = [
         transclusion_io(std::io::ErrorKind::PermissionDenied),
