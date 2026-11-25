@@ -266,6 +266,68 @@ Update alongside code changes:
   skill: each carries what its audience needs, and neither restates the
   other's details.
 
+## Design Principles
+
+These hold across every package. A document, spec, or code path that departs
+from one is a defect to fix, not behavior to design around.
+
+### One rule for passing state from parent to child
+
+- A child document always starts with its own frontmatter, and the parent that
+  calls it passes its state down.
+- The only thing that stops a property passing down is the schema `isolated`
+  constraint on that property. Never add a per-site list of excluded keys.
+- The rule is the same wherever a parent reaches a child: sequence tasks,
+  lifecycle flow-control directives (`proxy`, `prep`, …), and transclusion
+  (`::file`, `::code`, …). Do not give one of these its own rule.
+- An inline `sequence: [ … ]` and the same list in a referenced file are
+  interchangeable: moving an inline block into its own file must change
+  nothing about how it runs.
+
+### Errors are for document authors
+
+- Every error has a specific, registered code that says what kind of thing
+  went wrong, with typed structured detail. Free-form text carries only what
+  varies beneath that. A new error never goes to a catch-all code such as
+  `composition.failed`.
+- A Markdown author handles errors in a lifecycle `failure` event by reading
+  `err.*`, and knows nothing of the implementation. Judge an error from that
+  seat: an author must be able to tell it apart with
+  `when: "err.code == '…'"`, never by matching message text.
+- Error work includes the DMLS guardrails for it (completion and validation of
+  codes and their detail) and a `docs/` example of the common way to handle
+  it.
+
+## Document Conventions
+
+- **New frontmatter properties are kebab-case** (`default-values`, not
+  `default_values`). Expression functions and the properties of global
+  namespaces such as `ctx` stay snake_case (`ctx.current_package_area`,
+  `file_exists`). Older snake_case frontmatter keys (`side_effect`,
+  `fail_fast`, lifecycle verbs like `ensure_file`) remain as they are; do not
+  argue for snake_case to match them, and do not rename them unasked.
+- **A convention change applies going forward only.** Update the prompts,
+  schemas, `just` recipes, docs, and skills that produce or read documents.
+  Never rewrite existing feature or fix specs, plans, implementation logs, or
+  reviews to match, even active ones; say in the report that in-flight work
+  still carries the old form.
+- **Transclusion works only where a document is composed.** Files under
+  `prompts/` and the caller skills under `docs/use-skills/` are composed, so
+  share content there with `::file`. READMEs and `docs/` pages are read as
+  written (there is no `md publish` yet), so a directive there shows as
+  literal text: keep them standalone and point to the canonical source instead
+  of repeating it.
+
+## Asking the Author to Decide
+
+Each decision question must stand on its own, since the author may read it
+without the surrounding discussion. Give:
+
+- the context: what the code or document does today and why the choice matters
+- a concrete example of what each option produces (syntax or output)
+- the cost of each option
+- a recommendation with its reason, listed first
+
 ## Rules
 
 - **Rule 1** — Think Before Coding.
