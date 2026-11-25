@@ -1,17 +1,5 @@
 ---
 $schema:
-    status: |-
-        enum(
-            draft-spec,
-            finalized-spec,
-            planned,
-            implemented,
-            review-findings,
-            human-in-the-loop,
-            completed,
-            on-hold,
-            abandoned
-        ) -> an indicator of progress for this specification
     reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
     reviewed-by: string -> the agent and model used in the spec review
     reviewed-on: date -> the date the spec was reviewed
@@ -23,7 +11,6 @@ reviewed: true
 reviewed-by: codex/gpt-6.2-sol
 reviewed-on: "2026-11-25"
 review-iterations: 0
-status: draft-spec
 needs-rulings: false
 ---
 
