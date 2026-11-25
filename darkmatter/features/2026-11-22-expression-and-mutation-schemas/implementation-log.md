@@ -63,9 +63,9 @@ decisions-for-review:
     - |-
       The one catalog reader has two modes rather than a growing list of flags: `CatalogOrigin::BuiltIn` (Darkmatter's own two files: compiled-in file examples allowed, registered aliases projected) and `Authored` (every other catalog: no file examples, no reuse of a built-in name, every callable compiled eagerly). The CLI and editor pick the built-in mode only for the exact paths `darkmatter/schemas/partials/{functions,mutations}.yaml`, relative or under the captured repository root, compared by path identity. Alternative: separate boolean parameters per check. Redo cost: small, internal to `catalog/mod.rs` and `yaml_documents/mod.rs`.
     - |-
-      Only callable failures become the new `dm.schema.callable_catalog` error. `prepare_yaml_contract` returns an error only for `SchemaError::CallableCatalog`; shape, grammar, unknown-field, duplicate-key, and duplicate-overload failures stay with the kind's existing contract reporting, so each problem is reported once, with the code users already see for that class. Alternative: report every catalog failure under the new code, which would duplicate the kind-contract findings. Redo cost: moderate (CLI, editor, and their tests).
+      Callable semantic failures become `dm.schema.callable_catalog`. The first review repair also brings duplicate-overload failures through this route to carry both declaration locations. Shape, ordinary grammar, and unknown-field problems keep the kind contract's reporting. Duplicate YAML keys keep the YAML loader's diagnostic.
     - |-
-      Reusing a built-in function's name is checked against canonical names when a host catalog loads, and against aliases when the host function set is built (aliases are declared in Rust, not in the catalog). The lookup reads only the static binding table (`functions::reserved_builtin_name`), never the joined function registry, because building that registry loads the catalog and would loop. Redo cost: small.
+      An authored canonical name is checked against both built-in canonical names and built-in aliases when the catalog loads. Aliases supplied by the host are separately checked when its function set is built. The lookup reads only the static binding table (`functions::reserved_builtin_name`), never the joined function registry, because building that registry loads the catalog and would loop. Redo cost: small.
     - |-
       Where a reference inside a callable's declaration is reported (an unknown helper, a callable used as a type, a reference to another file), the location is found by a whole-word search for the name inside that entry's declared text span, because the parser's source map does not record spans for names inside a type string. If the name is not found the error falls back to the entry's key. Alternative: extend Simplified Schema's source map with per-reference spans. Redo cost: moderate (parser work in another crate).
     - |-
@@ -73,9 +73,9 @@ decisions-for-review:
     - |-
       The fixed-work test for Claudine's registration load (`claudine_registration_load_does_fixed_work`) now parses a tiny ordinary schema before it starts counting. The fixture's catalog is now an `expression-schema`, whose one-time envelope preparation moved inside the measured window and raised the count from 4 to 7; the warm-up puts that one-time process work back outside, so the test still measures per-load work. Alternative: raise the expected count (it would then measure one-time work too). Redo cost: trivial.
     - |-
-      A duplicate overload (two overloads that bind the same calls) is located at the later overload with a message naming both by position ("overloads 1 and 2 …"), but without a separate related location for the first. Simplified Schema's parser refuses it before Darkmatter's reader runs, and the CLI and the editor report it identically (a kind-contract/type-definition finding at the later arm). The plan's "attach the first matching arm" mapping exists in the reader but cannot be reached by a catalog. Alternative: have the parser return a located error with a related location for catalogs, which needs a new error shape in Simplified Schema and de-duplication against the kind check. Redo cost: moderate.
+      In the Phase 2 implementation, duplicate overloads named both arms in the message and could lose the authored locations. The first review repair marks the later arm and attaches the earlier arm for the tested written YAML sequence and scalar pipe overloads, including duplicates found after local helper resolution. Anchors and aliases on individual sequence arms still interfere with those locations.
     - |-
-      The CLI shows a related location in another file with a line and column only when it can read that file: an absolute path as is, a relative one under the captured repository root (or the working directory outside a repository). The built-in name case outside a checkout therefore prints `darkmatter/schemas/partials/functions.yaml` with no line. The compiled-in catalog text is private, and the shared error carries byte spans, not lines. Alternative: put line and column on `CatalogRelated`, or expose the built-in text. Redo cost: small.
+      The original CLI projection needed a readable source file to calculate a related line and column. The first review repair calculates built-in marks from the embedded catalog even outside a checkout. A matching checkout file gives the mark a local source path.
     - |-
       In the CLI's JSON output a catalog failure keeps `error: "schema"` and adds `code`, `line`, `column`, a byte `span`, and a `related` list of location objects. The output contract (`darkmatter/cli/schemas/output/schema-validate.yaml`) was widened so `related` may hold either the existing strings (trigger conflicts) or the new objects. Alternative: a new `error` value for catalogs, or converting trigger conflicts to objects too. Redo cost: small (contract, renderer, tests).
     - |-
@@ -618,7 +618,7 @@ together without regard to ASCII case (later key, earlier related); category
 presence and agreement across overloads (missing at the key, disagreement at
 the later arm with the earlier related); no `narrows(...)` in a mutation,
 nested signatures included; the declared narrowing facts; and, for
-`Authored` only, no reuse of a built-in canonical name (related: the
+`Authored` only, no reuse of a built-in canonical name or alias (related: the
 built-in's key in `functions.yaml`) and an eager compile of each callable
 (`FunctionRegistration::builder_from_types(..).build_with`), with overload
 indices from `RegistrationError` mapped back to arms (`checks::Locator`).
@@ -983,7 +983,11 @@ Failure outside this change: `test-toolkit::real_kache_config_selector::real_kac
 | Shipped artifact provenance and fallback | Each area's `just shipped-schemas --check`, Simplified Schema `shipped_artifacts`, Darkmatter `shipped_schema_corpus`, and Claudine `claudine_schemas_embedded` (L1, F1/F2). |
 | Selected documents, companion reload, host-runtime refusal | Darkmatter CLI `host_runtime_scope` and DMLS `host_catalog_reload` (L1, F2). The editor withdraws a host after companion removal or digest mismatch and restores it when the verified bytes return. |
 | Format 2 repair and repeat reads, inventory kinds and fingerprints | Claudine CLI `doctor::doctor_fix_upgrades_frozen_v2_registration_in_place_and_repeats_as_noop`, library `installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop` and `companion_fixture_missing_companion_errors_modified_warns_and_repair_restores_agreement`, and `callable_and_companion_kinds_format_with_xxh64_fingerprints` (L1, F1/F2). |
-| Repository kind schema accepts the two new literals | `target/debug/md schema validate … --output plain` over temporary Markdown documents referencing `schemas/kind.yaml`: both catalog kinds passed and `unsupported-catalog` produced a located enum error (L1, F2). |
+| Repository kind schema accepts the two new literals | Both catalog kinds pass and `unsupported-catalog` produces a located enum error (L1, F2). The worktree contains the restored schema. The dated notes record the earlier deletion and the confirmed restoration. |
+
+**2026-11-25 verification update.** The original row described the Phase 5 result without identifying its checkout state. At the start of review 4, `target/debug/md schema validate --output plain` reported an unresolved `$schema` for all three Markdown probes because `schemas/kind.yaml` was missing. The same command against a temporary copy from `git show HEAD:schemas/kind.yaml` accepted both callable kinds and rejected `unsupported-catalog` at line 3, column 7. `target/debug/md compose docs/kind-documents.md --deny all --output markdown` also reported the missing file at line 5, column 1.
+
+**2026-11-25 review 5 verification update.** The row still described the schema as missing after the review 4 repair. The current `schemas/kind.yaml` matches the committed bytes. The repository-built CLI validated Markdown using both callable kinds and rejected `unsupported-catalog` at line 3, column 7. Composing the kind guide with `--deny all` succeeded, and reference validation located the repository prompt's working schema link at line 30, column 100. Both required-file corpus tests passed.
 
 ### Fresh generation regression
 
@@ -1003,3 +1007,46 @@ Failure outside this change: `test-toolkit::real_kache_config_selector::real_kac
 - Republished `use-darkmatter`, `use-dmls`, and `use-claudine` with `just publish-skills` in the two owning areas. The published examples preserve the format 3 companion guidance and the intentional fenced triple-brace literal alongside its double-brace result. Claudine's separate research-summary step reported the existing undeclared `err` warning in the plugins summary and skipped the ungenerated steering summary. Caller skill publication succeeded.
 - The serial dependent checks passed. `just test-cli` filtered to registration listing, the frozen format 2 doctor upgrade, and setup ran 19 tests with 5,382 outside the filter. `just test-contract` ran all 48 tests. Neither run had a test at or above five seconds.
 - The required root scope command, `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`, reported `packages: [claudine, test-toolkit, darkmatter, darkmatter-cli]`, `source_packages: [claudine]`, `reverse_dependencies: [claudine-cli, claudine-contract]`, and `change_class: package`. No required gate was skipped. Two untracked schemas, `schemas/review-fix-cycle.yaml` and `schemas/specificaiton.yaml`, appeared independently during verification and are outside the phase inventory.
+
+
+### Review 1 record corrections (2026-11-24)
+
+- The recorded reserved-name check implied that built-in aliases were first
+  checked when the host builds its function set. The catalog loader checks an
+  authored canonical name against both kinds of built-in names. I verified this
+  by changing only `project_label` to `KEBABCASE` in a copy of the project
+  fixture. The repository-built `md schema validate --output json` refused it
+  at the declaration as an alias of `kebab_case`.
+- The recorded duplicate-overload check generalized the later-arm position
+  beyond YAML sequences. In both callable kinds, the CLI and the editor pointed
+  to the later declaration for the sequence spelling and to the first
+  declaration for the folded scalar pipe spelling. With a local helper
+  making the two contracts equivalent, the CLI pointed to the entry and the
+  editor pointed to the document start. I reproduced these with the
+  repository-built `md schema validate` and with the DMLS diagnostics for
+  the same edited fixture texts. Neither spelling included the earlier related
+  location.
+
+
+### Review 2 record corrections (2026-11-25)
+
+- The decision entries still described duplicate overloads as kind-contract
+  failures without a related mark. They now record the repaired behavior.
+  The rebuilt CLI returned the later arm and the earlier related mark for
+  sequence and pipe-union catalogs. The focused CLI, editor, and installed
+  registration tests also verified both marks for duplicates resolved
+  through a local helper and one editor diagnostic per conflict.
+- The CLI source-location entry still said a disk copy was needed to get a
+  built-in line and column. The rebuilt CLI's outside-checkout built-in alias
+  test reported the embedded `kebab_case` declaration with its line, column,
+  and byte span. The same-source checkout tests verified the local path.
+
+### Review 3 record correction (2026-11-25)
+
+- The duplicate-overload summary generalized the repaired locations to YAML
+  sequences. The rebuilt CLI and headless DMLS report both locations when
+  both arms are written out. Adding an unused anchor to the earlier arm
+  preserves the duplicate verdict but drops the earlier location. A
+  digest-matched installed copy reproduces the missing mark through
+  `md compose` and `claudine doctor --json`. The summary now limits the
+  claim to the verified spellings.
