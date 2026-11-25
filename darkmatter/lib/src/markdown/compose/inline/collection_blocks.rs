@@ -64,7 +64,10 @@ pub(crate) fn run_stage(
     }
     let source = markdown.source_context_for_errors();
     let pages = if options.is_enabled(ComposeOperation::PageBlocks) {
-        page_blocks::parser::parse_page_blocks_in(content, Some(&body.data), source.clone())?
+        page_blocks::parser::parse_page_blocks_in(content, Some(&body.data), source.clone()).map_err(|error| {
+            let origin = body.origin.as_ref().filter(|origin| origin.describes(content));
+            error.at_authored_lines(markdown, origin, Some(&body.data))
+        })?
     } else {
         Vec::new()
     };
@@ -110,6 +113,7 @@ pub(crate) fn run_stage(
 }
 
 fn rejection(markdown: &Markdown, body: &BodyProvenance, error: CollectionError) -> MarkdownError {
+    let error = error.with_file_note(markdown, body.origin.as_ref(), Some(&body.data));
     anchor(markdown, body, error.into())
 }
 

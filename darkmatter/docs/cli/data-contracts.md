@@ -339,16 +339,19 @@ classified by what failed:
 |---|---|
 | `dm.frontmatter.yaml_parse` | the frontmatter YAML, or its `---` fence, does not parse; located |
 | `dm.input.read_failure` | the input, or a file it needs, cannot be read |
-| `dm.expression.parse_failure` | an expression does not parse |
+| `dm.expression.parse_failure` | an expression does not parse, including a `when=` condition on `::file` or `::block`; located at the directive's opener |
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
 | `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`, `invalid_options`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function; see [Data errors](#data-errors) |
-| `dm.directive.parse_failure` | a `::` directive does not parse |
+| `dm.directive.parse_failure` | a `::` directive does not parse (located at its opener in the file as written; a `::shell-block`'s own option or command is `dm.shell.failure`), a block marker has no partner (located at the marker), or a `prologue`/`epilogue` is not a string or a list of strings (located at its key's line) |
+| `dm.toc_linking.invalid_level`, `dm.toc_linking.invalid_cleanup`, `dm.toc_linking.invalid_filter` | a `::toc-linking` `level=` names no level from `h1` to `h6`, a `cleanup=` names an unknown service, or a `keep=`/`filter=` pattern does not compile; a target chain that resolves nothing is `dm.reference.failure`, and a target that cannot be read `dm.input.read_failure` |
+| `dm.file_links.invalid_depth`, `dm.file_links.missing_source`, `dm.file_links.not_a_directory`, `dm.file_links.invalid_glob` | a `::file-links` `--depth` is not a non-negative integer, the directive is in a document with no source file, a `--dir` target is not a directory, or its glob is invalid, leaves the file tree, or cannot be rooted; a `--dir` target that does not exist is `dm.reference.failure`, and a directory that cannot be read `dm.input.read_failure` |
 | `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
-| `dm.shell.failure` | a shell command fails, times out, or is refused |
-| `dm.transclusion.failure` | a transclusion fails for another reason |
-| `dm.reference.failure` | a file reference does not resolve |
+| `dm.shell.failure` | a shell command fails, times out, or is refused, or a `::shell-block`'s option or command does not parse (located at that line in the file that holds the block) |
+| `dm.reference.missing_transclusion` | a `::file` or `::code` target matches no file; a target that exists but cannot be read is `dm.input.read_failure` |
+| `dm.transclusion.failure` | a transclusion fails for another reason (such as a cycle or an unsupported file type) |
+| `dm.reference.failure` | a file reference does not resolve or is invalid (such as a bare `@`), from `md compose`, `md validate refs`, and `md graph` alike; a link's or image's record (`[x](@)`, reason `invalid file reference`) names the link's line and column; an inclusion's record names the directive or `prologue`/`epilogue` value that wrote the target, in the file that wrote it (a child's included), and so does the warning when a `::file` tolerates a child's failure |
 | `dm.compose.parameter_binding` | a supplied value does not bind to its parameter |
 | `dm.setter.invalid` | a `key.path=value` setter cannot be applied: its value is an invalid container, its path meets a scalar parent or an index out of range in a document, or a scalar setter overlaps a setter below it. The message names the argument and its path; `source` is null, because a command-line value is in no file |
 | `dm.lifecycle.failure` | a lifecycle event fails (an `error:` action, a failed action) |
@@ -360,7 +363,17 @@ classified by what failed:
 | `dm.config.invalid`, `dm.config.reference` | `~/.darkmatter.yaml` or the repository's `.darkmatter.yaml` does not load, for a command that reads the configuration (`md compose`, `md graph`, `md validate refs`); one record per problem, with the file, line, and column. See [Configuration Files](../topics/configuration.md#how-md-and-claudine-report-configuration) |
 | `dm.config.not_saved` | `md init` has nowhere to write: no home directory can be found. See [`md init`](./init.md#exit-status) |
 | `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
+| `dm.normalization.level_overflow`, `dm.normalization.validation_failed` | heading normalization would push a heading past H6, or a heading structure rule failed; `Markdown::normalize` and `Markdown::relevel` return these too. See [Headings pushed past H6](../errors/composition-problems.md#headings-pushed-past-h6) |
 | `dm.compose.failure` | anything else, on any command |
+
+A `::toc-linking` or `::file-links` failure that `md compose` tolerates (it
+leaves the directive out and continues) is a `warning` with the code from the
+table above, never a generic one.
+
+A heading that composition cannot place within H6 is a `warning` with its own
+code too: `dm.transclusion.heading_overflow` when a `::file` child's heading
+is written as bold text instead, and `dm.normalization.level_overflow` when
+heading normalization is skipped.
 
 A warning whose producer declares no code reports `dm.compose.warning`. These
 warnings belong to the run's output rather than to composition:

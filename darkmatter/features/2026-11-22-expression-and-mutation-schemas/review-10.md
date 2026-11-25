@@ -4,10 +4,11 @@ description: "A **feature** review of `2026-11-22-expression-and-mutation-schema
 feature: "2026-11-22-expression-and-mutation-schemas/review-10.md"
 spec: "2026-11-22-expression-and-mutation-schemas/spec.md"
 previous: "2026-11-22-expression-and-mutation-schemas/review-9.md"
+next: "2026-11-22-expression-and-mutation-schemas/review-11.md"
 created: "2026-11-25T07:44:06+00:00"
 reviewed-by: "codex/gpt-6.2-sol"
 ready: false
-implemented: false
+implemented: true
 findings:
     - "R10-F2 (high): Reference validation drops malformed transclusions"
     - "R10-F1 (medium): Library consumers can ignore the admitted document source"
@@ -16,6 +17,8 @@ human-in-the-loop: null
 has-blocked-findings: false
 blocked: false
 recurrence: true
+log: "/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/log.md"
+implemented-by: "claude/opus"
 ---
 
 # Expression and mutation schemas review 10

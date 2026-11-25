@@ -818,8 +818,7 @@ impl<'a> PromptOrigin<'a> {
 
     /// Move a discovered site of the generated body to the `prompt` property.
     pub(crate) fn site(&self, source_file: &Path, origin: &mut darkmatter::markdown::compose::ShellCommandOrigin) {
-        use darkmatter::markdown::compose::ShellCommandOrigin;
-        if self.is_source(source_file) && matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+        if self.is_source(source_file) && origin.is_body() {
             *origin = Self::origin();
         }
     }
@@ -828,7 +827,6 @@ impl<'a> PromptOrigin<'a> {
     /// file, and one of its generated body against the `prompt` property.
     /// Whether it moved.
     fn shell_error(&self, error: &mut darkmatter::markdown::compose::ShellExpansionError) -> bool {
-        use darkmatter::markdown::compose::ShellCommandOrigin;
         let Some((ctx, origin)) = error.location_mut() else {
             return false;
         };
@@ -837,7 +835,7 @@ impl<'a> PromptOrigin<'a> {
         }
         let absolute = biscuit_file::canonicalize_simplified(self.path).unwrap_or_else(|_| self.path.to_path_buf());
         *ctx = biscuit_terminal::errors::SourceContext::new(absolute, self.path.to_path_buf(), self.text);
-        if matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+        if origin.is_body() {
             *origin = Self::origin();
         }
         true

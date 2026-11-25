@@ -7,7 +7,7 @@ use darkmatter::markdown::compose::TransclusionError;
 
 use darkmatter::markdown::compose::expression::ExpressionError;
 
-use super::helpers::{assert_contains_all, render, test_ctx_lines};
+use super::helpers::{assert_contains_all, assert_rows_on_own_lines, render, test_ctx_lines};
 
 #[test]
 fn parse_directive_has_syntax_hint() {
@@ -16,6 +16,7 @@ fn parse_directive_has_syntax_hint() {
         line: 3,
         message: "unexpected token".into(),
         caret_col: Some(8),
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -324,6 +325,47 @@ fn file_reference_shows_hint() {
         ],
     );
     insta::assert_snapshot!("file_reference", out);
+}
+
+/// A target failure at an inclusion site leads its own block with the
+/// site's `File:` row, and no `Line:` row when the position is not proven.
+#[test]
+fn located_file_reference_leads_with_its_file() {
+    use darkmatter::markdown::compose::InclusionSite;
+    let err = TransclusionError::Located {
+        site: Box::new(InclusionSite::new(PathBuf::from("docs/child.md"), None)),
+        source: Box::new(TransclusionError::FileReference(biscuit_file::FileReferenceError::InvalidSyntax(
+            "unclosed brace".into(),
+        ))),
+    };
+    let out = render(&err);
+    assert_contains_all(&out, &["file reference failure", "File: docs/child.md", "unclosed brace"]);
+    assert!(!out.contains("Line:"), "an unproven position has no line row:\n{out}");
+    insta::assert_snapshot!("located_file_reference", out);
+}
+
+/// A composed `::file @` fails at its directive: the block names the file
+/// that wrote it and the directive's authored line, each on its own row.
+#[test]
+fn located_composition_failure_names_the_file_and_line() {
+    use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+    use darkmatter::markdown::{Markdown, MarkdownError};
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    let file = root.join("doc.md");
+    std::fs::write(&file, "---\ntitle: x\n---\n# Doc\n\n::file @\n").unwrap();
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&root, ""))
+        .with_source_file(&file)
+        .with_fail_fast(true);
+    let error = Markdown::try_from(file.as_path())
+        .unwrap()
+        .compose_with(&crate::request_support::request_at(&root, options))
+        .expect_err("`@` is no file reference");
+    let MarkdownError::Transclusion(located) = &error else { panic!("{error:?}") };
+    assert!(located.inclusion_site().is_some(), "{located:?}");
+    let out = render(located.as_ref());
+    assert_rows_on_own_lines(&out, &["File:", "Line: 6", "file reference syntax is invalid"]);
+    assert!(out.contains(&file.display().to_string()), "{out}");
 }
 
 #[test]

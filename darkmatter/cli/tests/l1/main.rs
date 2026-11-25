@@ -56,6 +56,7 @@ mod compose_lifecycle;
 mod compose_loader_wiring;
 mod compose_lazy_roots;
 mod compose_literal_only;
+mod compose_missing_target_recovery;
 mod compose_nested_markdown;
 mod compose_page_blocks;
 mod compose_perf;

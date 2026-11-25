@@ -640,6 +640,7 @@ fn locate_warning(warning: ComposeWarning, origin: &ShellCommandOrigin) -> Compo
         ShellCommandOrigin::Body { line } => warning.at_line(*line),
         ShellCommandOrigin::Frontmatter { .. } => warning,
         ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(*command_line),
+        ShellCommandOrigin::Authored { site, .. } => locate_warning(warning, site),
     }
 }
 

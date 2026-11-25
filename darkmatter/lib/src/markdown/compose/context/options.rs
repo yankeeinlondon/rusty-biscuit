@@ -563,11 +563,25 @@ pub struct ComposeOptions {
 
     /// When `true`, a body or mixed-text frontmatter expression that cannot be
     /// parsed or evaluated warns and keeps its span instead of failing the
-    /// document. Used only by the shell-command discovery pass, which composes
-    /// without page blocks and so evaluates content a false `::block` removes;
-    /// the terminal pass owns the verdict and is always strict. Default:
-    /// `false`.
+    /// document, and a reference graph skips a directive whose `when=`
+    /// condition fails instead of failing. Used by the shell-command discovery
+    /// pass, which composes without page blocks and so evaluates content a
+    /// false `::block` removes, and by
+    /// [`for_reference_check`](Self::for_reference_check); the terminal pass
+    /// owns the verdict and is always strict. Default: `false`.
     pub(crate) defer_expression_failures: bool,
+
+    /// When `true`, a reference graph leaves out an inclusion whose parser
+    /// fails (a body `::file`/`::code`/`::url`, `::toc-linking`,
+    /// `::file-links`, or `prologue`/`epilogue`) or whose existing target
+    /// cannot be loaded (unreadable, or frontmatter that does not parse),
+    /// instead of failing. Set only by
+    /// [`for_reference_check`](Self::for_reference_check): composition owns
+    /// that verdict, rejecting a parse failure in the root and tolerating a
+    /// child's, and an unloadable target, as a warning. Default: `false`, so
+    /// `md validate refs` and `md graph` refuse a document they could not
+    /// read.
+    pub(crate) defer_inclusion_parse_failures: bool,
 
     /// The operations whose surfaces the passive call check covers, when they
     /// differ from [`Self::enabled_operations`]. Set only by the shell-command
@@ -1141,6 +1155,7 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
+            defer_inclusion_parse_failures: false,
             call_check_operations: None,
             preflight_failure_warnings: Default::default(),
             suppress_shell_probes: false,
@@ -1228,15 +1243,19 @@ impl ComposeOptions {
     /// Body `::shell` directives stay unexpanded. Like the shell-approval
     /// walk, the check does not hold the values a later stage produces, so a
     /// value still waiting on a command and an expression it cannot finish are
-    /// left to the composition that owns their verdict. A failure the check
-    /// can prove on its own (a rejected call, a schema violation, an invalid
-    /// file reference) still fails it.
+    /// left to the composition that owns their verdict. So are a `when=`
+    /// condition that fails, an inclusion whose parser fails (composition
+    /// rejects it in the root and tolerates it in a child), and an included
+    /// file that exists but cannot be loaded (composition tolerates it). A
+    /// failure the check can prove on its own (a rejected call, a schema
+    /// violation, an invalid file reference) still fails it.
     #[must_use]
     pub fn for_reference_check(mut self) -> Self {
         self.enabled_operations.remove(ComposeOperation::ShellExpansion);
         self.defer_shell_pending_schema_problems = true;
         self.defer_missing_runtime_context = true;
         self.defer_expression_failures = true;
+        self.defer_inclusion_parse_failures = true;
         self
     }
 
@@ -3476,6 +3495,7 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
+            defer_inclusion_parse_failures,
             call_check_operations,
             // A warning sink: it changes the report, never a composed result.
             preflight_failure_warnings: _,
@@ -3893,6 +3913,8 @@ impl ComposeOptions {
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
         enc.bool(*defer_expression_failures);
+        enc.field("defer_inclusion_parse_failures");
+        enc.bool(*defer_inclusion_parse_failures);
         enc.field("call_check_operations");
         match call_check_operations {
             Some(operations) => {

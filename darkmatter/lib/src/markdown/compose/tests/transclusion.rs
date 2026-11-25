@@ -199,7 +199,7 @@ fn frontmatter_file_reference_error(
     error: &MarkdownError,
 ) -> &biscuit_file::FileReferenceError {
     match error {
-        MarkdownError::Transclusion(inner) => match inner.as_ref() {
+        MarkdownError::Transclusion(inner) => match inner.without_site() {
             transclusion::TransclusionError::FileReference(source) => source,
             other => panic!("expected a file-reference transclusion error, got: {other:?}"),
         },

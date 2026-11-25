@@ -23,10 +23,16 @@ use biscuit_terminal::output::OutputTarget;
 use darkmatter::markdown::output::command::ReferenceSummary;
 use renderable::Width;
 
-/// Whether `policy` recovers a missing target of `kind`.
-fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
+/// Whether `policy` recovers `issue`: only a missing target
+/// ([`is_missing_target`](darkmatter::markdown::reference::validate::ReferenceIssue::is_missing_target)),
+/// and only under its kind's allowance. An invalid, unreadable, or malformed
+/// target refuses whatever is allowed.
+fn recovers_missing(policy: &ResolvedPolicy, issue: &darkmatter::markdown::reference::validate::ReferenceIssue) -> bool {
     use darkmatter::markdown::reference::types::ReferenceKind;
-    match kind {
+    if !issue.is_missing_target() {
+        return false;
+    }
+    match issue.kind {
         ReferenceKind::Hyperlink => policy.recovers("missing-hyperlinks"),
         ReferenceKind::Image => policy.recovers("missing-image-refs"),
         ReferenceKind::Transclusion => policy.recovers("missing-transclusions"),
@@ -425,8 +431,7 @@ pub fn run_compose(
                 Some(report)
             }
             ReferenceCheck::Refused(report) => {
-                pending_triggers.hold(&report.trigger_warnings);
-                pending_triggers.deliver(sink, None, &term_cell);
+                deliver_refused_check_warnings(&report, &mut pending_triggers, sink, &term_cell);
                 if let Some(sink) = sink {
                     sink.references(&report);
                     perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
@@ -804,8 +809,10 @@ pub(crate) enum ReferenceCheck {
 /// Validates references with the same request composition will use, so
 /// interpolation inside transclusion targets resolves as it will compose.
 ///
-/// An error `policy` does not recover refuses the document, and so does a
-/// reported issue its blocking policy selects.
+/// An error `policy` does not recover refuses the document (an allowance
+/// recovers a missing target only, never an invalid or unreadable one), and
+/// so does a reported issue its blocking policy selects. The direct and the
+/// lifecycle route both decide here.
 ///
 /// The check is passive: body `::shell` directives stay unexpanded, because
 /// running one here would be an effect ahead of the shell-approval walk and
@@ -831,7 +838,7 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
     if report
         .issues
         .iter()
-        .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i.kind))
+        .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i))
     {
         return Ok(ReferenceCheck::Refused(report));
     }
@@ -858,6 +865,24 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         return Ok(ReferenceCheck::Report(report));
     }
     Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
+}
+
+/// Delivers the warnings of a reference check that refused the document:
+/// those held so far, its skipped triggers, and those its preparation found,
+/// which composition would have reported had it run.
+pub(crate) fn deliver_refused_check_warnings(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&ReportSink>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    let mut warnings = report.earlier_warnings.clone();
+    pending_triggers.hold(&report.trigger_warnings);
+    pending_triggers.merge_into(&mut warnings);
+    match sink {
+        Some(sink) => sink.warnings(&warnings),
+        None => report_failure_trigger_warnings(&warnings, None, term_cell),
+    }
 }
 
 /// Delivers what the failed reference check `error` had found before it

@@ -61,7 +61,11 @@ Other useful methods:
   (`NoChange` … `Rewritten`), section changes, and frontmatter changes.
 - `links()`, `image_references()`, `inline_html_links()`
 - `validate_references(ReferenceValidationOptions)` returns a report with
-  `is_valid()` and `issues`.
+  `is_valid()` and `issues`. A malformed inclusion that composition rejects
+  (`::file` with no target, `prologue: 3`, …), an included file that cannot
+  be loaded, or a `when=` that fails to evaluate is an `Err`, never a clean
+  report. The reference graph fails the same way, and
+  `transclusions_with_options` on a malformed inclusion.
 - `cleanup()` and `cleanup_with(&MarkdownRuleOverrides)` format the body. To
   get `md clean` behavior exactly (frontmatter repair and diagnostics), use
   `markdown::cleanup::clean_document`.

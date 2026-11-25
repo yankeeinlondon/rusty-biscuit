@@ -375,7 +375,11 @@ passes); a nested `as_markdown` child's stop is restored on the caller
 (`NestedComposeSlot::take_blocked`), even when `||` absorbed the call;
 the last stages' warnings are checked by the CLI before writing. A new coded warning adds its
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
-naming the codes it governs.
+naming the codes it governs. The reference check (`compose.rs::check_references`, shared by the
+direct and lifecycle routes) lets a `missing-*` allowance recover an issue
+only when `ReferenceIssue::is_missing_target` (failure class `NoMatch`) holds;
+an invalid, unreadable, or malformed link, image, or inclusion target always
+refuses, whatever the kind's allowance.
 
 Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
 `CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
@@ -480,7 +484,25 @@ found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
 `::shell` (`prepare_content` never re-enables an operation the request
 disabled), and `ComposeOptions::for_reference_check` defers what only
 composition can judge (values waiting on a frontmatter command, an expression
-it cannot finish). A check that still fails (`check_references` returns
+it cannot finish, a failing `when=`, an inclusion whose parser fails, an
+included file that exists but cannot be loaded: composition rejects or
+tolerates them). Every other graph build (`md validate refs`, `md graph`, the
+library's graph, local query, and validation APIs) fails with composition's
+typed error on an inclusion parse error (`reference/graph.rs::parsed_inclusions`),
+an unloadable included file (`ReferenceAnalysisRuntime::load_inclusion`; a
+`::toc-linking` target's headings are read raw, as composition reads them, and a selected file that cannot be read is `transclusion::read_failure_at` at the directive's `InclusionSite` in both, as a child load is),
+and a failing `when=` (evaluated through `conditions::ConditionSite`, as the
+transclusion stage does), and on a target its directive's admission rule
+refuses: `transclusion::admit_local_target`/`admit_url_target`, the
+resolver's own passive checks, applied to a `::file`/`prologue`/`epilogue`
+child before it is opened (`graph.rs::admits_markdown_child`) and to `::code`
+and `::url` records in `validate.rs` before the kind branches and the remote
+batch (a `::url` record is always `RemoteUrl`; the local query is a lookup
+and admits nothing); never let a reference reader turn a failure into an
+absent inclusion. A `path#fragment` link into a file that cannot be loaded is
+the `UnreadableTarget` issue, and a link or image target that is no valid
+file reference (`[x](@)`) the `InvalidReference` issue at the link, never a
+`ReferenceError`. A check that still fails (`check_references` returns
 `Result`) is a composition failure with status 1, reported through
 `error_diagnostics`; its graph build leaves its warnings for
 `take_preflight_failure_warnings`. A `Diagnostic`'s `source.line`/`column` are

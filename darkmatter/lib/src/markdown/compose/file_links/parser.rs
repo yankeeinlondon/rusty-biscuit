@@ -175,6 +175,7 @@ fn parse_directive_line(
             line,
             message: "Directive requires a glob pattern or '--dir <path>'".to_string(),
             document: None,
+            authored: None,
         });
     }
 
@@ -191,6 +192,7 @@ fn parse_directive_line(
             line,
             message: "Glob pattern cannot be empty".to_string(),
             document: None,
+            authored: None,
         });
     }
     reject_trailing_tokens(&mut cursor, line)?;
@@ -231,6 +233,7 @@ fn parse_dir_form(
                         line,
                         message: "'--dir' specified more than once".to_string(),
                         document: None,
+                        authored: None,
                     });
                 }
                 seen_dir = true;
@@ -242,6 +245,7 @@ fn parse_dir_form(
                         line,
                         message: "'--dir' requires a path".to_string(),
                         document: None,
+                        authored: None,
                     });
                 }
                 path = Some(value.to_string());
@@ -252,17 +256,17 @@ fn parse_dir_form(
                         line,
                         message: "'--depth' specified more than once".to_string(),
                         document: None,
+                        authored: None,
                     });
                 }
                 cursor.skip_ws();
                 let value = cursor.read_value(line)?;
                 let value = value.trim();
-                let parsed: u32 = value.parse().map_err(|_| {
-                    FileLinksError::ParseDirective {
-                        line,
-                        message: format!("'--depth' expects a non-negative integer, got '{value}'"),
-                        document: None,
-                    }
+                let parsed: u32 = value.parse().map_err(|_| FileLinksError::InvalidDepth {
+                    value: value.to_string(),
+                    line,
+                    document: None,
+                    authored: None,
                 })?;
                 depth = Some(parsed);
             }
@@ -271,6 +275,7 @@ fn parse_dir_form(
                     line,
                     message: format!("Unknown option '{other}'"),
                     document: None,
+                    authored: None,
                 });
             }
         }
@@ -281,6 +286,7 @@ fn parse_dir_form(
             line,
             message: "'--depth' can only be used with '--dir'".to_string(),
             document: None,
+            authored: None,
         });
     };
 
@@ -305,6 +311,7 @@ fn read_flag(cursor: &mut Cursor<'_>, line: usize) -> Result<String, FileLinksEr
             line,
             message: "Expected '--dir' or '--depth', found something else".to_string(),
             document: None,
+            authored: None,
         });
     }
     while let Some(ch) = cursor.current() {
@@ -328,12 +335,14 @@ fn reject_trailing_tokens(cursor: &mut Cursor<'_>, line: usize) -> Result<(), Fi
                 line,
                 message: "Glob form cannot be combined with '--dir' or '--depth'".to_string(),
                 document: None,
+                authored: None,
             });
         }
         return Err(FileLinksError::ParseDirective {
             line,
             message: format!("Unexpected trailing token '{remainder}'"),
             document: None,
+            authored: None,
         });
     }
     Ok(())
@@ -483,7 +492,7 @@ mod tests {
     fn rejects_invalid_depth() {
         let err =
             parse_file_links_directives("::file-links --dir a --depth abc\n").unwrap_err();
-        assert!(matches!(err, FileLinksError::ParseDirective { .. }));
+        assert!(matches!(err, FileLinksError::InvalidDepth { ref value, line: 1, .. } if value == "abc"), "{err:?}");
     }
 
     #[test]

@@ -915,6 +915,40 @@ impl ComposeRequest {
         }
     }
 
+    /// `document` carrying the file identity this request admits for it: its
+    /// own file source as [`Self::root_document`] admits it, or, when it
+    /// carries no source, the file this request was prepared with.
+    ///
+    /// This is the one rule a root entry point reads before deciding file
+    /// identity (schema roots and trigger eligibility, the reference graph's
+    /// root and origins, local link and inclusion targets), so a path given
+    /// on the request, on the `Markdown`, or on both names one file. A
+    /// document with its own source keeps it (each consumer keeps its
+    /// precedence when the two name different files). Only the path is
+    /// attached: the buffer is never re-read, so an unsaved editor buffer
+    /// stays the text that is judged.
+    ///
+    /// Only for a request's root document that is the file's text: content
+    /// composed against the root source without being that file
+    /// (`as_markdown`, or text a host generated and named with
+    /// [`Markdown::with_context_identity`](crate::markdown::Markdown::with_context_identity))
+    /// keeps having no source of its own.
+    pub(crate) fn admitted_document<'d>(
+        &self,
+        document: &'d crate::markdown::Markdown,
+    ) -> std::borrow::Cow<'d, crate::markdown::Markdown> {
+        match (document.source(), &self.options.source) {
+            (None | Some(super::options::ComposeSource::Unknown), super::options::ComposeSource::File(path))
+                if document.generated_identity().is_none() =>
+            {
+                std::borrow::Cow::Owned(document.clone().with_source(super::options::ComposeSource::File(
+                    self.context.request_cwd().join(path),
+                )))
+            }
+            _ => self.root_document(document),
+        }
+    }
+
     /// This request as the compose pass of `document` will see it: rooted at
     /// its source ([`Self::rooted_at`]), after
     /// [`ComposeOptions::extend_context_for`].

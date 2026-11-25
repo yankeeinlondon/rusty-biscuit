@@ -1,0 +1,13 @@
+---
+source: darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+expression: out
+---
+⤫ TransclusionError: file reference failure
+┃ 
+┃ File: docs/child.md
+┃ 
+┃ file reference syntax is invalid: unclosed brace
+┃ 
+┃ failure: invalid-reference
+┃ 
+┃ Check sigil usage: @ magic, & repository root, ^ repository-scoped.

@@ -581,7 +581,8 @@ fn compose_mixed_shell_directive_and_shell_block() {
 /// reported at, the other line its reason refers to: the region a crossed
 /// closer does not close, the shell block a `::map` is inside, and where the
 /// file ends for an unclosed block. Each stage that reports a pairing error
-/// (collection, page-block, shell-block) keeps it.
+/// (collection, page-block, shell-block) keeps it, counted in the file
+/// (R11-F2: the frontmatter header no longer shifts it to a body line).
 #[test]
 fn pairing_errors_keep_their_secondary_lines_for_an_ordinary_file() {
     let fm = "---\n$schema:\n  items: string[]\nitems: [a]\n---\n";
@@ -589,10 +590,10 @@ fn pairing_errors_keep_their_secondary_lines_for_an_ordinary_file() {
     let in_shell = format!("{fm}# T\n\n::shell-block\n::map items \"i => i\"\n::end-map\n::end-block\n");
     let unclosed = "# T\n\n::shell-block\necho hi\n";
     let cases: [(&str, &str, &[ComposeOperation], &str); 5] = [
-        ("crossed close", &crossed, &[], "opened at line 4"),
-        ("crossed close, page blocks", &crossed, &[ComposeOperation::CollectionBlocks], "opened at line 4"),
-        ("map in a shell block", &in_shell, &[], "opened at line 3"),
-        ("map in a shell block, shell stage", &in_shell, &[ComposeOperation::CollectionBlocks, ComposeOperation::PageBlocks], "opened at line 3"),
+        ("crossed close", &crossed, &[], "opened at line 9"),
+        ("crossed close, page blocks", &crossed, &[ComposeOperation::CollectionBlocks], "opened at line 9"),
+        ("map in a shell block", &in_shell, &[], "opened at line 8"),
+        ("map in a shell block, shell stage", &in_shell, &[ComposeOperation::CollectionBlocks, ComposeOperation::PageBlocks], "opened at line 8"),
         ("unclosed shell block, shell stage", unclosed, &[ComposeOperation::CollectionBlocks, ComposeOperation::PageBlocks], "file ends at line 5"),
     ];
     for (case, content, disabled, secondary) in cases {

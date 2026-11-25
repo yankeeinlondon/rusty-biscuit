@@ -1518,7 +1518,9 @@ pub(super) fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<
         .and_then(|entry| entry.scalar.clone())
 }
 
-/// The document spans of top-level `prologue`/`epilogue` frontmatter values.
+/// The document spans of top-level `prologue`/`epilogue` frontmatter values
+/// that composition reads as file references; a value it emits as inline
+/// Markdown is never a link target.
 fn frontmatter_prologue_epilogue(ctx: &DocumentContext) -> Vec<SourceSpan> {
     let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) else {
         return Vec::new();
@@ -1526,7 +1528,12 @@ fn frontmatter_prologue_epilogue(ctx: &DocumentContext) -> Vec<SourceSpan> {
     ["prologue", "epilogue"]
         .into_iter()
         .filter_map(|key| ast.entry_by_dotted(key))
-        .filter(|entry| entry.scalar.is_some())
+        .filter(|entry| {
+            entry
+                .scalar
+                .as_deref()
+                .is_some_and(|value| !darkmatter::markdown::compose::transclusion::frontmatter_value_is_inline(value))
+        })
         .map(|entry| entry.value_span.clone())
         .collect()
 }

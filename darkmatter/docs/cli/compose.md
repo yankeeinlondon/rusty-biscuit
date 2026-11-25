@@ -168,6 +168,7 @@ md compose doc.md author=7 author.name=Bob
 - `--allow <ID|all>`: permit a recovery, or reads from an explicitly named host. Repeatable. `all` permits every recovery but never grants a host or authorizes a shell command. See [Policy Flags](./policy.md) for precedence and conflicts.
     - `missing-hyperlinks`, `missing-image-refs`: keep the content when a hyperlink or image target is missing; issues are still reported (on stderr, or in `diagnostics` in a data output) and the exit status is 0.
     - `missing-transclusions`: remove a transclusion directive whose target is missing; issues are still reported and the exit status is 0.
+    - these three cover an absent target only (`failure: no-match`). An invalid target such as `[Guide](@)`, an unreadable one (`failure: io`), or a malformed URL still fails with status 1; see [Policy Flags](./policy.md#recoveries---allow-md-compose).
     - `ctx-override`: replace a non-object `ctx` frontmatter value with the runtime context. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error; this allowance downgrades the error to a warning.
     - `invalid-frontmatter-assignment`, `reassigned-frontmatter-property`: recover from an invalid or duplicated `set` assignment on a `::file` directive (see [Block Transclusion](../transclusion/block-transclusion.md)).
     - `shell-timeout`: replace a timed-out shell command's output with an empty string and a warning.
@@ -296,7 +297,7 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
   hyperlink `[Expression Engine]()` has no target (line 49, column 42)
   ```
 
-- **`--allow` allowances** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit status is 0. If any errors remain in non-allowed categories, compose still blocks with exit status 1.
+- **`--allow` allowances** relax validation for specific categories. When every error is a missing target of an allowed kind, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit status is 0. If any other error remains (a target of a kind not allowed, or an invalid, unreadable, or malformed target of any kind), compose still blocks with exit status 1, writes no document, and runs no `composed` event.
 
   ```bash
   # Compose despite broken links — content to stdout, warnings to stderr

@@ -134,8 +134,12 @@ content:
 | File reference   | ` epilogue ` (inverse) + *references* + **./file.md** (blue) | `[epilogue] references ./file.md`     |
 | Literal content  | ` epilogue ` (inverse) + *includes static text*             | `[epilogue] includes static text`     |
 
-Literal content values (containing newlines or `---` delimiters) are not
-followable — they cannot be recursively expanded. However, any markdown links
+A value is literal content when composition inserts it as text rather than
+reading a file: empty, multiline, holding a Markdown link, or a plain phrase
+with no path separator or extension (see
+[Frontmatter Transclusion](../transclusion/fm-transclusion.md#text-or-file)).
+Literal content values are not followable — they cannot be recursively
+expanded, and `--validate` never reports them as a missing file. However, any markdown links
 within literal content (e.g., `[text](./file.md)`) are extracted and appear as
 synthesized references in the root's Zone 1 when `--follow` is used.
 
@@ -304,14 +308,30 @@ When `--validate` is enabled:
 
 - Exit status 1 is returned if any validation errors exist.
 
+With or without `--validate`, a malformed inclusion that `md compose` would
+reject (a body `::file` with no target, `::toc-linking ... level=h9`,
+`::file-links --dir . --depth two`, or a `prologue`/`epilogue` that is not a
+string or list of strings) stops the graph with that error and exit status 1,
+in the root or in any transcluded child. So does an included file that exists
+but cannot be loaded (unreadable, or frontmatter that does not parse), a
+chain of inclusions deeper than the transclusion depth limit, and a `when=`
+condition that fails to evaluate. A cycle of inclusions is drawn as a graph
+that names each document once. An omitted or empty (`[]`)
+`prologue`/`epilogue` includes nothing, and a false `when=` leaves its
+directive out. A `::toc-linking` fallback chain picks its first existing
+alternative, as composition does; when none exists, a chain ending in `false`
+(`::toc-linking "./a.md | ./b.md | false"`) is left out and never marked
+`[missing]`, while a chain without `false` reports its first alternative
+missing.
+
 ## Data Output
 
 A data output prints the graph to stdout as one value. Validation status is in
 `validation.valid`, and the exit status agrees: 0 without `--validate` or when the
 document is valid, and 1 when `--validate` finds errors. A failing run also has
 `outcome: "failure"` and one entry in `diagnostics` per problem, in the
-[diagnostic format](./data-contracts.md#diagnostics). A file that cannot be read has
-no graph to print, so it is
+[diagnostic format](./data-contracts.md#diagnostics). A file that cannot be read, or
+a document with a malformed inclusion, has no graph to print, so it is
 `{ "outcome": "failure", "diagnostics": [...], "value": null }`.
 
 ### Structure

@@ -780,7 +780,7 @@ fn rooted_magic_payload_is_rejected_across_file_sequence_and_transclusion_surfac
             transclusion_error,
             MarkdownError::Transclusion(inner)
                 if matches!(
-                    inner.as_ref(),
+                    inner.without_site(),
                     TransclusionError::FileReference(FileReferenceError::InvalidSyntax(_))
                 )
         ));

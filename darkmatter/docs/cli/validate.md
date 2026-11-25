@@ -31,6 +31,124 @@ Checked 4 references across 2 documents: 2 ok, 2 broken
 It exits with status 0 when nothing is broken and 1 when something is. Scripts
 should read the status, not the report's text.
 
+A malformed inclusion that `md compose` would reject also exits 1, with the
+same error composition reports, because a document that cannot be read
+completely cannot be called clean. That covers a body `::file`, `::code`, or
+`::url` with no target, a `::toc-linking` level outside `h1`–`h6`, a
+`::file-links --depth` that is not a number, and a `prologue` or `epilogue`
+that is not a string or a list of strings (for example `prologue:` left blank,
+`prologue: 3`, or `prologue: [./intro.md, 3]`; the error names the line of
+the `prologue:` key). Omitting the field, or writing `prologue: []`, includes
+nothing and is not an error. A `prologue` or `epilogue` that composition inserts as
+text (prose, a Markdown link, a multiline block, or an empty string; see
+[Frontmatter Transclusion](../transclusion/fm-transclusion.md#text-or-file))
+is not a file: only the links inside it are checked, as hyperlinks, so
+`prologue: "[Setup](./setup.md)"` passes when `setup.md` exists and reports
+`./setup.md` missing when it does not.
+
+An inclusion target is checked as the file composition opens, never as a
+link. A `#` in a `::file`, `::code`, `prologue`, or `epilogue` target is part
+of the filename, so `::file ./setup.md#install` is reported missing (`file
+not found`) unless a file named `setup.md#install` exists, even when
+`setup.md` has an `# Install` heading. Only an `http://` or `https://` target
+of those inclusions is a remote URL. Every alternative of a `::toc-linking`
+chain is a file: a chain is checked by the alternative composition selects.
+When composition finds none, a chain that ends in `false` is left out, as
+composition leaves it out, and is not reported, not even under `--fragments`
+or `--remote`. Without the final `false`, its first alternative is reported
+missing, whatever it looks like:
+
+```markdown
+# Here
+
+::toc-linking "#here"                          <!-- file not found: #here -->
+::toc-linking "https://example.com/guide.md"   <!-- file not found; never requested -->
+::toc-linking "https://example.com/guide.md | ./guide.md | false"  <!-- checks ./guide.md -->
+::toc-linking "https://example.com/guide.md | false"               <!-- nothing to check -->
+```
+
+An inclusion whose target composition cannot use at all, such as a bare
+`::file @` or `prologue: "@"`, also exits 1 with composition's error
+(`dm.reference.failure`), reported at the directive or `prologue`/`epilogue`
+value that wrote the target, in the file that wrote it. For a transcluded
+child that is the child's file and line, not the document you named.
+
+Each inclusion is also held to the rule of its own directive, the rule
+composition applies before it reads anything. A target the rule refuses
+exits 1 with composition's error, at the directive or key that wrote it, and
+the check never opens it as a document or sends a request for it:
+
+| Directive | Accepts | Refused example | Error |
+| --- | --- | --- | --- |
+| `::file`, `prologue`, `epilogue` | an existing Markdown file (`.md`, `.markdown`) | `::file ./notes.txt` | `dm.transclusion.failure` (unsupported file type) |
+| `::code` | any existing file | `::code ./src` (a directory: reported as `file not found`) | |
+| `::url` | an absolute URL | `::url ./guide.md`, `::url "#intro"`, `::url //cdn.example.com/a.md` | `dm.transclusion.failure` (URL does not parse) |
+| `::url` | | `::url mailto:team@example.com` | `dm.reference.failure` |
+
+```text
+$ md validate refs doc.md --output plain     # line 7 of doc.md is `::file ./notes.txt`
+⤫ TransclusionError: unsupported file type
+┃ File: /work/doc.md
+┃ Line: 7
+┃ File /work/notes.txt is not a supported markdown document.
+```
+
+An admissible `::url` is accepted without a request, and `--remote` checks
+it with one `HEAD` request as before. `md compose`'s own reference check
+leaves a refused target to composition, which reports the same error.
+
+Two more cases exit 1 with composition's error:
+an included file that exists but cannot be loaded (it cannot be read, code
+`dm.input.read_failure` at the directive that included it, or its
+frontmatter does not parse, code `dm.frontmatter.yaml_parse` naming that file;
+a `::toc-linking` target that cannot be read, such as a file saved as UTF-16,
+is the same read failure at the `::toc-linking` line, and the message names
+the file it selected),
+and a `when=` condition that fails to evaluate, such as `when="1 / 0"`
+(code `dm.expression.evaluation_failure`, at the directive's line). A
+condition that is false, or reads a value that is unset or missing, just
+leaves the directive out. A chain of inclusions deeper than the transclusion
+depth limit also exits 1 with composition's depth error, while a cycle of
+inclusions is checked once per document. The rule applies to every document the check
+visits, so a malformed inclusion in a transcluded child fails the parent's
+check:
+
+```text
+$ md validate refs doc.md --output plain     # line 3 of doc.md is a bare `::file`
+⤫ TransclusionError: directive parse failed
+┃ Directive parsing failed here:
+┃   2 │
+┃ > 3 │ ::file
+┃ Error: Expected value, found end of directive
+$ echo $?
+1
+```
+
+(The report is abridged here.)
+
+A link is not an inclusion: a link to a file whose frontmatter does not parse
+is checked only for the file's existence. With `--fragments`, a link that
+also names a heading in such a file, such as `[setup](./broken.md#setup)`,
+cannot be checked and is reported as an error with the reason
+`unreadable target` (issue code `UnreadableTarget`).
+
+A link or image whose target is not a valid file reference, such as
+`[setup](@)` (the `@` sigil needs a path after it), is a broken reference of
+its own, reported at the link's line and column with the reason
+`invalid file reference` (issue code `InvalidReference`). It is an error, so
+the command exits 1, but the rest of the document is still checked:
+
+```text
+doc.md
+  invalid file reference in hyperlink  `@`  doc.md:3:1
+  file reference syntax is invalid: the `@` sigil requires a relative payload: `@`
+```
+
+In `--output json` its diagnostic is `dm.reference.failure` with
+`"failure": "invalid-reference"` and the link's `source.line` and `column`. An
+inclusion's invalid target (`::file @`) still stops the run, as `md compose`
+stops on it.
+
 Each document is prepared with its own `$schema`, never with trigger schemas.
 A bare schema name such as `$schema: feature-review.yaml` is looked up in the
 document's [schema roots](../topics/schemas/definition.md#schema-roots), as
@@ -198,6 +316,7 @@ Each row has a reason, a construct, the reference as written, and a location.
 |---|---|
 | `file not found` | a local target does not exist |
 | `no target` | the target is empty, as in `[text]()`; the reference column quotes the link |
+| `invalid file reference` | a link or image target is not a file reference that can resolve, as in `[text](@)`; the parser's reason goes on the detail line |
 | `no matching heading` | a `#fragment` names no heading in its document |
 | `malformed URL` | the URL does not parse |
 | `unreachable` | a remote check failed |
@@ -295,8 +414,9 @@ and nothing else: no separate error count follows it.
 ```
 
 A success has no `outcome` or `diagnostics`. A failure adds one
-[diagnostic](./data-contracts.md#diagnostics) per problem. A file that cannot be read
-has no result to report, so it is
+[diagnostic](./data-contracts.md#diagnostics) per problem. A file that cannot be read,
+or a document with a malformed inclusion (code `dm.directive.parse_failure` for
+a body directive or frontmatter field), has no result to report, so it is
 `{ "outcome": "failure", "diagnostics": [...], "value": null }`. See
 [Data Contracts](./data-contracts.md#other-commands).
 

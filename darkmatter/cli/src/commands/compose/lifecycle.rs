@@ -51,7 +51,7 @@ use crate::args::policy::ResolvedPolicy;
 
 use super::{
     ComposedDocument, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
-    deliver_check_failure_warnings,
+    deliver_check_failure_warnings, deliver_refused_check_warnings,
     open_output_artifact, preflight_approval_error, render_reference_report, render_reference_warnings,
     report_compose_diagnostics,
 };
@@ -474,10 +474,9 @@ impl<'a> ComposeHost<'a> {
                     self.deferred_report = Some(report);
                 }
                 ReferenceCheck::Refused(report) => {
-                    self.pending_triggers.hold(&report.trigger_warnings);
                     let term_cell = OnceCell::new();
                     let _ = term_cell.set(self.effects.term.clone());
-                    self.pending_triggers.deliver(self.document.sink, None, &term_cell);
+                    deliver_refused_check_warnings(&report, &mut self.pending_triggers, self.document.sink, &term_cell);
                     match self.document.sink {
                         Some(sink) => sink.references(&report),
                         None => {

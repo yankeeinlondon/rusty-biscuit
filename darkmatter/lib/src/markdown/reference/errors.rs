@@ -166,14 +166,23 @@ fn source_display(source: &ComposeSource) -> String {
 /// Errors produced by reference analysis.
 #[derive(Debug, Error)]
 pub enum ReferenceError {
-    /// Failed to parse a directive.
-    #[error("Failed to parse directive in {} at line {line}: {message}", .ctx.display.display())]
+    /// Failed to parse a directive. `line` is one-based in `ctx`; `0` means
+    /// unknown, and the message then names no line.
+    #[error(
+        "Failed to parse directive in {}{}: {message}",
+        .ctx.display.display(),
+        crate::markdown::compose::transclusion::at_line(*.line)
+    )]
     ParseDirective {
         ctx: Box<SourceContext>,
         line: usize,
         message: String,
         directive_text: String,
         caret_col: Option<usize>,
+        /// A body directive's opener when `ctx` is its loaded file, which
+        /// makes `line` an authored line; `None` when `line` counts the body
+        /// or names a frontmatter key.
+        authored: Option<crate::markdown::types::AuthoredSpan>,
     },
 
     /// Reference requires source context that is not available.
@@ -249,6 +258,7 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 message,
                 directive_text,
                 caret_col,
+                ..
             } => {
                 let mut body = vec![Prose::new(format!(
                     "Directive parsing failed in {}:",
@@ -258,7 +268,9 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                     body.push(Prose::new("The Frontmatter of this document was:"));
                     body.push(fm);
                 }
-                body.push(ctx.excerpt_prose(*line, 1, "md"));
+                if *line != 0 {
+                    body.push(ctx.excerpt_prose(*line, 1, "md"));
+                }
 
                 if let Some(col) = caret_col {
                     body.push(Prose::new(format!(

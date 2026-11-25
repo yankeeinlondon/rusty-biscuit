@@ -34,8 +34,10 @@ pub enum CollectionError {
         site: CollectionSite,
         /// What is wrong, without a line.
         message: String,
-        /// Another line a pairing reason refers to, counted in the scanned
-        /// body (such as where a region a closer misses was opened).
+        /// Another line a pairing reason refers to (such as where a region
+        /// a closer misses was opened), counted in the scanned body; the
+        /// compose stage moves it to the loaded file's line, or drops it
+        /// when that line is not proven.
         note: Option<String>,
     },
 
@@ -113,6 +115,34 @@ pub enum CollectionError {
         /// The typed exhaustion, with the original items being processed.
         error: Box<IterationError>,
     },
+}
+
+impl CollectionError {
+    /// A pairing failure whose note's line, counted in `markdown`'s scanned
+    /// body (over `data`, its inserted bytes), is moved to the loaded file's
+    /// line where `origin` proves it and dropped where it does not; a
+    /// document with no file keeps the body's count. The same body and data
+    /// fail the same way, so the note is rescanned.
+    #[must_use]
+    pub(crate) fn with_file_note(
+        self,
+        markdown: &crate::markdown::Markdown,
+        origin: Option<&super::super::body_origin::BodyOrigin>,
+        data: Option<&super::super::body_origin::DataRanges>,
+    ) -> Self {
+        let Self::Malformed { site, message, note: Some(note) } = self else { return self };
+        if !matches!(markdown.source(), Some(super::super::ComposeSource::File(_))) {
+            return Self::Malformed { site, message, note: Some(note) };
+        }
+        let data = data.filter(|data| data.describes(markdown.content()));
+        let note = match super::super::block_pairs::scan_block_pairs_in(markdown.content(), data) {
+            Err(scan) if scan.to_string() == message => {
+                scan.note_with(|line| super::super::site_scope::DirectiveSite::file_line(markdown, origin, line))
+            }
+            _ => None,
+        };
+        Self::Malformed { site, message, note }
+    }
 }
 
 impl CollectionError {

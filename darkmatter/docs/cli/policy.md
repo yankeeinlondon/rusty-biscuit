@@ -63,6 +63,26 @@ A missing target of any other kind (a CSS, script, or font import, a `<video>`,
 `<audio>`, `<source>`, or `<iframe>`) has no recovery: `md compose` stops on it even
 with `--allow all`.
 
+The three `missing-*` recoveries cover a target that is **absent**: a
+well-formed path that names no file (`failure: no-match`). A target that is
+broken in any other way always fails the command, whatever is allowed:
+
+| Target | Reported as | With the matching `--allow` |
+|---|---|---|
+| `[Guide](./gone.md)`, `![Logo](./gone.png)`, `::file ./gone.md` | `dm.reference.missing_*`, `failure: no-match` | recovered |
+| `[Guide](@)`, `[Guide](<@>)`, `![Logo](@)`, the same in a `prologue` or `epilogue` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+| a path under a directory `md` cannot read | `dm.reference.failure`, `failure: io` | fails, status 1 |
+| `[Guide](http://[bad)` | `dm.reference.failure`, reason `malformed URL` | fails, status 1 |
+| `::file @`, `::code @`, `::url @` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+
+```sh
+md compose doc.md --allow missing-hyperlinks   # [Guide](./gone.md): composes, reports the miss
+md compose doc.md --allow missing-hyperlinks   # [Guide](@): fails, status 1, no document
+```
+
+A refused run writes no document, and in a document with lifecycle events
+it stops before `composed` runs.
+
 A recovered problem is still reported, carrying its code: on stderr in a Markdown
 run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
 allowance the problem fails the command.
@@ -147,6 +167,19 @@ expressions, shell commands, or transcluded children run. The warning keeps
 its `warning` severity and names the trigger, never the document.
 `md schema validate` and `md clean` report the same warning but take no
 `--deny`, so there it never blocks.
+
+The codes of a `::toc-linking` or `::file-links` failure that `md compose`
+tolerates as a warning (`dm.toc_linking.*`, `dm.file_links.*`, and
+`dm.reference.failure` or `dm.input.read_failure` for a `--dir` that is missing
+or cannot be read) are among them too: denying one makes that failure stop the
+run. See
+[Telling directive failures apart](../errors/composition-problems.md#telling-directive-failures-apart).
+
+So are `dm.transclusion.heading_overflow`, for a `::file` child's heading
+written as bold text because it would land past H6, and
+`dm.normalization.level_overflow`, for heading normalization skipped for the
+same reason. See
+[Headings pushed past H6](../errors/composition-problems.md#headings-pushed-past-h6).
 
 `--allow` never takes a diagnostic code, and some problems cannot be allowed
 at all: a call proven wrong, a parse error, or an unavailable global always

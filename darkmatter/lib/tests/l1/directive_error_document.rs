@@ -1,7 +1,7 @@
 //! `::toc-linking` and `::file-links` failures name the document whose body
 //! holds the directive: a file-backed document its file, a transcluded local
-//! child the child's file, and a file-less document its context identity (or
-//! nothing without one). Their `line` counts that body, so a host composing
+//! child the child's file, and a file-less document its context identity (or,
+//! without one, the request's source file it is admitted as). Their `line` counts that body, so a host composing
 //! generated text tells its own failures from a child's by this name alone.
 
 use std::path::{Path, PathBuf};
@@ -86,7 +86,11 @@ fn toc_linking_and_file_links_failures_name_a_context_identity() {
             let error = failure(&root, markdown, &source);
             let (document, reason) = named_document(&error);
             assert!(reason.contains(expected_reason), "{directive:?}: {reason}");
-            let expected = identified.then_some(identity.as_path());
+            // Without an identity the buffer is the request's source file's
+            // text (a library caller's request-only source), so it names that
+            // file; generated text names its identity instead.
+            let expected = if identified { identity.as_path() } else { source.as_path() };
+            let expected = Some(expected);
             assert_eq!(document.as_deref(), expected, "{directive:?} (identified: {identified}): {error:?}");
         }
     }

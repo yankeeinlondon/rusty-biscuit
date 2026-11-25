@@ -13,6 +13,19 @@ Validation covers all reference types discovered by the reference analysis subsy
 
 References are extracted via graph traversal, so validation naturally covers the full transclusion tree when the document uses `::file`, `::code`, `::toc-linking`, or frontmatter prologue/epilogue directives.
 
+Fragments belong to links. An inclusion target is checked as the file composition opens: a `#` in a `::file`, `::code`, `prologue`, or `epilogue` target is part of the filename, and only an `http(s)` target of those is a remote URL. A `::toc-linking` chain is checked by the outcome of composition's selection, decided before anything looks at the target's shape: the selected file, a required failure (`MissingLocalTarget`), or, for a chain ending in `false`, nothing at all, so a suppressed URL is never requested.
+
+| Reference (with `side.md` holding `# Side`) | Result |
+|---|---|
+| `[Side](./side.md#side)` | valid (with fragment checking, `#side` is a heading of `side.md`) |
+| `::file ./side.md#side` | `MissingLocalTarget`: no file is named `side.md#side` |
+| `::toc-linking "#side"` | `MissingLocalTarget`: a TOC target is always a file |
+| `::toc-linking "https://example.com/a.md \| false"` | nothing checked, nothing requested |
+| `::file ./side.txt` (an existing text file) | composition's unsupported-file-type error: `::file` opens only Markdown |
+| `::url ./side.md`, `::url "#side"`, `::url //example.com/a.md` | composition's URL error, before any request: `::url` opens only an absolute URL |
+
+Each inclusion is admitted by its directive's rule, shared with composition, before validation looks at its target as a path or URL: `::file`, `prologue`, and `epilogue` accept only a Markdown file, `::code` any file, and `::url` only an absolute URL. A refused target stops validation with composition's error at the directive, so it is never opened, resolved as a hyperlink, or sent to the remote check.
+
 Each document is checked as composition prepares it. A `::block when=` keeps only the content its condition selects, and a [`::map`](./map.md) or [`::filter`](./filter.md) body is checked once for every item composition keeps. Inside each copy, a directive's target, its `set` and `replace=` values, its `when=` condition, and the links the copy contains read that item's value:
 
 ```md
@@ -98,7 +111,9 @@ prepared body, for code that walks the graph; authored positions are in
 | `RemoteDisallowed` | Info | Remote validation disabled, cannot verify |
 | `MissingSourceContext` | Warning | No source path available to resolve relative target |
 | `UnsupportedScheme` | Info | Non-HTTP/HTTPS scheme (e.g., `ftp://`) |
+| `InvalidReference` | Error | A link or image target is not a file reference that can resolve: its syntax is invalid (`[x](@)`) or a context it needs, such as a repository, is absent; the parser's reason is the issue's detail |
 | `MissingFragmentTarget` | Error | `#slug` not found in document headings |
+| `UnreadableTarget` | Error | `path#slug` names a file that exists but cannot be read as Markdown (unreadable, or its frontmatter does not parse), so the fragment cannot be checked; also a link or image target whose resolution hit a permission or other I/O failure |
 | `MalformedHtmlTag` | -- | Reserved for future structured HTML validation |
 | `MalformedCssImport` | -- | Reserved for future CSS parsing upgrade |
 | `MalformedMetaTag` | -- | Reserved for future meta tag validation |

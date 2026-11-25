@@ -472,3 +472,32 @@ async fn a_null_network_fetches_every_surface_for_an_exact_host_as_if_omitted() 
 async fn null_permissions_fetch_every_surface_for_an_exact_host_as_if_omitted() {
     assert_fetches("permissions: null\n").await;
 }
+
+/// Under fail-fast, a fetched child whose frontmatter does not parse fails
+/// under the frontmatter parse code, naming the URL, not as a generic composition
+/// failure; the same child with valid frontmatter composes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_remote_child_with_malformed_frontmatter_keeps_its_parse_code() {
+    let server = MockServer::start().await;
+    for (route, body) in [("/bad.md", "---\nkey: [unclosed\n---\nBad child.\n"), ("/good.md", "---\nkey: ok\n---\nGood child.\n")] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    let case = Case::new();
+    case.user("allow");
+
+    let good = composed(compose(&case, "good.md", &format!("::file {}/good.md\n", server.uri()), ComposeOptions::new()).await);
+    assert!(good.contains("Good child."), "{good}");
+
+    // Without fail-fast, composition tolerates a failed child as a placeholder.
+    let failure = compose(&case, "bad.md", &format!("::file {}/bad.md\n", server.uri()), ComposeOptions::new().with_fail_fast(true))
+        .await
+        .expect_err("malformed remote frontmatter fails");
+    let records = error_diagnostics(&failure.error);
+    let codes: Vec<&str> = records.iter().map(|record| record.code.as_str()).collect();
+    assert_eq!(codes, ["dm.frontmatter.yaml_parse"], "{}", chain(&failure));
+    assert!(chain(&failure).contains("/bad.md"), "the error names the URL: {}", chain(&failure));
+}

@@ -5,8 +5,9 @@
 //! preparation.
 
 use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::preflight::collect::{collect_shell_commands, collect_shell_commands_with_graph};
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, ComposeSource};
-use darkmatter::markdown::reference::types::ReferenceGraphOptions;
+use darkmatter::markdown::reference::types::{ReferenceGraphOptions, TransclusionRefKind};
 use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceValidationOptions};
 use darkmatter::markdown::{Markdown, MarkdownError};
 use std::path::Path;
@@ -1251,9 +1252,10 @@ nested_checkout_trigger_tests! {
 // from how a library caller supplied it. The component note `app/vendor/
 // review.md` is given four ways to a request prepared in `app` (an absolute
 // path on the request and the document, a relative path on both, an absolute
-// document with a relative request path, and only the loaded document), and
-// every entry point must resolve its schema roots and `&marker.md` in the
-// component.
+// document with a relative request path, and only the loaded document; R10-F1
+// adds the path only on the request, relative or absolute, beside an editor
+// buffer with no source), and every entry point must resolve its schema roots
+// and `&marker.md` in the component.
 
 /// How a caller supplies the root document's source.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1262,6 +1264,11 @@ enum SourceForm {
     Relative,
     AbsoluteDocumentRelativeRequest,
     LoadedDocumentOnly,
+    /// R10-F1: the path only on the request (relative to `app`), the
+    /// buffer a `Markdown::from(text)` with no source.
+    RequestOnlyRelative,
+    /// R10-F1: the absolute path only on the request.
+    RequestOnlyAbsolute,
 }
 
 /// The component note relative to `app`, the request directory.
@@ -1272,16 +1279,18 @@ fn relative_note() -> std::path::PathBuf {
 impl SourceForm {
     fn request_source(self, note: &Path) -> Option<std::path::PathBuf> {
         match self {
-            Self::Absolute => Some(note.to_path_buf()),
-            Self::Relative | Self::AbsoluteDocumentRelativeRequest => Some(relative_note()),
+            Self::Absolute | Self::RequestOnlyAbsolute => Some(note.to_path_buf()),
+            Self::Relative | Self::AbsoluteDocumentRelativeRequest | Self::RequestOnlyRelative => Some(relative_note()),
             Self::LoadedDocumentOnly => None,
         }
     }
 
-    fn document_source(self, note: &Path) -> std::path::PathBuf {
+    /// The source the document carries; `None` for a request-only form.
+    fn document_source(self, note: &Path) -> Option<std::path::PathBuf> {
         match self {
-            Self::Relative => relative_note(),
-            _ => note.to_path_buf(),
+            Self::Relative => Some(relative_note()),
+            Self::RequestOnlyRelative | Self::RequestOnlyAbsolute => None,
+            _ => Some(note.to_path_buf()),
         }
     }
 }
@@ -1350,9 +1359,13 @@ impl SourceForms {
         ComposeRequest::prepare(self.options(form, triggers), &self.snapshot_at(&self.checkouts.app())).unwrap()
     }
 
-    /// The note as `form` loads it: read from disk, with `form`'s source.
+    /// The note as `form` loads it: read from disk with `form`'s source, or
+    /// for a request-only form an editor buffer with no source.
     fn document(&self, form: SourceForm) -> Markdown {
-        Markdown::try_from(self.note().as_path()).unwrap().with_source(ComposeSource::File(form.document_source(&self.note())))
+        match form.document_source(&self.note()) {
+            Some(source) => Markdown::try_from(self.note().as_path()).unwrap().with_source(ComposeSource::File(source)),
+            None => Markdown::from(std::fs::read_to_string(self.note()).unwrap()),
+        }
     }
 
     fn graph_options(&self, form: SourceForm) -> ReferenceGraphOptions {
@@ -1381,8 +1394,19 @@ impl SourceForms {
         plain
     }
 
+    /// Command discovery through `compose_preflight`, the approval entry
+    /// point and both public command collectors, which must agree.
     fn preflight(&self, form: SourceForm) -> Result<(), String> {
-        shown(self.document(form).compose_preflight(&self.request(form, true)).map(drop))
+        let (document, request) = (self.document(form), self.request(form, true));
+        let preflight = shown(document.compose_preflight(&request).map(drop));
+        let approvals =
+            document.compose_preflight_approvals(&request, None).map(drop).map_err(|error| format!("{error} {error:?}"));
+        let commands = shown(collect_shell_commands(&document, &request).map(drop));
+        let graph = shown(collect_shell_commands_with_graph(&document, &request).map(drop));
+        for (api, result) in [("approvals", &approvals), ("collect_shell_commands", &commands), ("with_graph", &graph)] {
+            assert_eq!(preflight.is_ok(), result.is_ok(), "{form:?} {api}: {preflight:?} {result:?}");
+        }
+        preflight
     }
 
     /// The marker file every graph form reaches from the note.
@@ -1401,6 +1425,9 @@ impl SourceForms {
             })
             .collect();
         assert_eq!(markers[0], markers[1], "{form:?}: both graphs reach one marker");
+        for graph in [&transclusion, &full] {
+            assert_eq!(graph.root().source, ComposeSource::File(self.note()), "{form:?}: the root is the admitted note");
+        }
         let flattened = shown(document.composed_references(self.graph_options(form)))?;
         let urls: Vec<_> = flattened.records.iter().filter_map(|record| record.target.raw()).collect();
         assert!(urls.contains(&"https://component.example/"), "{form:?} flattened: {urls:?}");
@@ -1547,6 +1574,20 @@ source_form_tests! {
     relative_source_effective_schema_is_the_component_schema: SourceForm::Relative, EntryPoint::EffectiveSchema;
     relative_request_source_effective_schema_is_the_component_schema: SourceForm::AbsoluteDocumentRelativeRequest, EntryPoint::EffectiveSchema;
     loaded_document_source_effective_schema_is_the_component_schema: SourceForm::LoadedDocumentOnly, EntryPoint::EffectiveSchema;
+    request_only_relative_source_composes_in_the_component: SourceForm::RequestOnlyRelative, EntryPoint::Compose;
+    request_only_absolute_source_composes_in_the_component: SourceForm::RequestOnlyAbsolute, EntryPoint::Compose;
+    request_only_relative_source_preflight_uses_the_component: SourceForm::RequestOnlyRelative, EntryPoint::Preflight;
+    request_only_absolute_source_preflight_uses_the_component: SourceForm::RequestOnlyAbsolute, EntryPoint::Preflight;
+    request_only_relative_source_graphs_reach_the_component_marker: SourceForm::RequestOnlyRelative, EntryPoint::Graph;
+    request_only_absolute_source_graphs_reach_the_component_marker: SourceForm::RequestOnlyAbsolute, EntryPoint::Graph;
+    request_only_relative_source_validates_in_the_component: SourceForm::RequestOnlyRelative, EntryPoint::Validate;
+    request_only_absolute_source_validates_in_the_component: SourceForm::RequestOnlyAbsolute, EntryPoint::Validate;
+    request_only_relative_source_validates_a_prebuilt_graph: SourceForm::RequestOnlyRelative, EntryPoint::ValidatePrebuilt;
+    request_only_absolute_source_validates_a_prebuilt_graph: SourceForm::RequestOnlyAbsolute, EntryPoint::ValidatePrebuilt;
+    request_only_relative_source_transclusions_query_the_component_marker: SourceForm::RequestOnlyRelative, EntryPoint::Transclusions;
+    request_only_absolute_source_transclusions_query_the_component_marker: SourceForm::RequestOnlyAbsolute, EntryPoint::Transclusions;
+    request_only_relative_source_effective_schema_is_the_component_schema: SourceForm::RequestOnlyRelative, EntryPoint::EffectiveSchema;
+    request_only_absolute_source_effective_schema_is_the_component_schema: SourceForm::RequestOnlyAbsolute, EntryPoint::EffectiveSchema;
 }
 
 /// R9-F1.2: with checkout-specific triggers (the component requires
@@ -1559,7 +1600,11 @@ fn assert_source_form_trigger(form: SourceForm) {
     };
     std::fs::write(fixture.component().join("schemas/gate.trigger.yaml"), trigger("version")).unwrap();
     std::fs::write(fixture.checkouts.app().join("schemas/gate.trigger.yaml"), trigger("parent_only")).unwrap();
-    for (extra, refused) in [("topic: review\n", true), ("topic: review\nversion: '1'\n", false)] {
+    for (extra, matched, refused) in [
+        ("topic: review\n", true, true),
+        ("topic: review\nversion: '1'\n", true, false),
+        ("topic: other\n", false, false),
+    ] {
         fixture.write_note(&format!("$schema: ./schemas/review.yaml\ndescription: Review heading\n{extra}"));
         let composed = fixture.compose(form, true);
         assert_eq!(composed.is_err(), refused, "{form:?} {extra:?}: {composed:?}");
@@ -1567,6 +1612,16 @@ fn assert_source_form_trigger(form: SourceForm) {
             let error = composed.unwrap_err();
             assert!(error.contains("version") && !error.contains("parent_only"), "{form:?}: {error}");
         }
+        let preflight = fixture.preflight(form);
+        assert_eq!(preflight.is_err(), refused, "{form:?} {extra:?} preflight: {preflight:?}");
+        // The host's pre-run schema carries the component trigger exactly
+        // when the note matches it, and never the launch checkout's.
+        let (schema, _) =
+            darkmatter::markdown::compose::effective_schema_for(&fixture.document(form), &fixture.request(form, true))
+                .unwrap_or_else(|error| panic!("{form:?} {extra:?}: {error}"));
+        let schema = schema.unwrap_or_else(|| panic!("{form:?} {extra:?}: no effective schema"));
+        assert_eq!(schema.declares_top_level_property("version"), matched, "{form:?} {extra:?}");
+        assert!(!schema.declares_top_level_property("parent_only"), "{form:?} {extra:?}");
     }
 }
 
@@ -1586,6 +1641,156 @@ source_form_trigger_tests! {
     relative_source_takes_the_component_trigger: SourceForm::Relative;
     relative_request_source_takes_the_component_trigger: SourceForm::AbsoluteDocumentRelativeRequest;
     loaded_document_source_takes_the_component_trigger: SourceForm::LoadedDocumentOnly;
+    request_only_relative_source_takes_the_component_trigger: SourceForm::RequestOnlyRelative;
+    request_only_absolute_source_takes_the_component_trigger: SourceForm::RequestOnlyAbsolute;
+}
+
+/// R10-F1.4, .5: the graph root and its own references are identified by the
+/// admitted note, and validation resolves the note's links from it (fresh and
+/// over a prebuilt graph): the link to `side.md` and its rendered heading are
+/// verified, and the missing heading is the only issue. A bare and an
+/// explicit schema give the same result.
+fn assert_source_form_roots_links(form: SourceForm) {
+    let fixture = SourceForms::new();
+    std::fs::write(fixture.component().join("side.md"), "# Side heading\n").unwrap();
+    let note = fixture.note();
+    for schema in ["review.yaml", "./schemas/review.yaml"] {
+        std::fs::write(
+            &note,
+            format!(
+                "---\n$schema: '{schema}'\ndescription: Review heading\n---\n\n# {{{{ fm.description }}}}\n\n\
+                 ::file &marker.md\n\n[side](./side.md#side-heading) [gone](./side.md#gone)\n"
+            ),
+        )
+        .unwrap();
+        let shape = format!("{form:?} {schema}");
+        let document = fixture.document(form);
+        for graph in [
+            shown(document.transclusion_graph(fixture.graph_options(form))),
+            shown(document.reference_graph(fixture.graph_options(form))),
+        ] {
+            let graph = graph.unwrap_or_else(|error| panic!("{shape}: {error}"));
+            assert_eq!(graph.root().source, ComposeSource::File(note.clone()), "{shape}: graph root");
+        }
+        let flattened = shown(document.composed_references(fixture.graph_options(form)))
+            .unwrap_or_else(|error| panic!("{shape}: {error}"));
+        let own: Vec<_> = flattened
+            .records
+            .iter()
+            .filter(|record| record.target.raw().is_some_and(|raw| raw.starts_with("./side.md")))
+            .map(|record| &record.origin.source)
+            .collect();
+        assert_eq!(own.len(), 2, "{shape}: {:?}", flattened.records);
+        assert!(own.iter().all(|source| **source == ComposeSource::File(note.clone())), "{shape}: {own:?}");
+        for prebuilt in [false, true] {
+            let options = ReferenceValidationOptions {
+                validate_fragments: true,
+                ..ReferenceValidationOptions::with_graph(fixture.graph_options(form))
+            };
+            let report = if prebuilt {
+                let graph = shown(document.reference_graph(options.graph.clone())).unwrap();
+                shown(document.validate_references_with_graph(&graph, options))
+            } else {
+                shown(document.validate_references(options))
+            }
+            .unwrap_or_else(|error| panic!("{shape} prebuilt={prebuilt}: {error}"));
+            let issues: Vec<_> = report.issues.iter().map(|issue| (issue.code, issue.reference_display.clone())).collect();
+            assert_eq!(
+                issues,
+                [(ReferenceIssueCode::MissingFragmentTarget, "./side.md#gone".to_owned())],
+                "{shape} prebuilt={prebuilt}"
+            );
+        }
+    }
+}
+
+macro_rules! source_form_root_link_tests {
+    ($($name:ident: $form:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_source_form_roots_links($form);
+            }
+        )*
+    };
+}
+
+source_form_root_link_tests! {
+    absolute_source_roots_the_graph_and_its_links_at_the_note: SourceForm::Absolute;
+    relative_source_roots_the_graph_and_its_links_at_the_note: SourceForm::Relative;
+    loaded_document_source_roots_the_graph_and_its_links_at_the_note: SourceForm::LoadedDocumentOnly;
+    request_only_relative_source_roots_the_graph_and_its_links_at_the_note: SourceForm::RequestOnlyRelative;
+    request_only_absolute_source_roots_the_graph_and_its_links_at_the_note: SourceForm::RequestOnlyAbsolute;
+}
+
+/// R10-F1.6: the local query resolves body `::file` and `::code`,
+/// `prologue` and `epilogue` from the admitted note, in the component
+/// checkout and in the request checkout's `docs/` folder, whether the path is
+/// on the request, on the Markdown, or both, relative or absolute: `&marker.md`
+/// is the note's own checkout marker, `./side.md` the note's sibling, a
+/// missing file a no-match, and every origin the note.
+fn assert_local_query(in_component: bool) {
+    let fixture = SourceForms::new();
+    let app = fixture.checkouts.app();
+    let folder = if in_component { Path::new("vendor") } else { Path::new("docs") };
+    let dir = app.join(folder);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("side.md"), "# Side\n").unwrap();
+    let (relative, note) = (folder.join("query.md"), dir.join("query.md"));
+    let targets = "['&marker.md', './side.md', './missing.md']";
+    let text = format!(
+        "---\nprologue: {targets}\nepilogue: {targets}\n---\n\n::file &marker.md\n\n::file ./side.md\n\n\
+         ::file ./missing.md\n\n::code &marker.md\n\n::code ./side.md\n\n::code ./missing.md\n"
+    );
+    std::fs::write(&note, &text).unwrap();
+    let canonical = |path: &Path| biscuit_file::canonicalize_simplified(path).unwrap();
+    let expected = |raw: &str| match raw {
+        "&marker.md" => Some(canonical(&dir.parent().filter(|_| !in_component).unwrap_or(&dir).join("marker.md"))),
+        "./side.md" => Some(canonical(&dir.join("side.md"))),
+        _ => None,
+    };
+    let forms: [(&str, Option<&Path>, Option<&Path>); 5] = [
+        ("request-only relative", Some(&relative), None),
+        ("request-only absolute", Some(&note), None),
+        ("Markdown relative", None, Some(&relative)),
+        ("Markdown absolute", None, Some(&note)),
+        ("both relative", Some(&relative), Some(&relative)),
+    ];
+    let snapshot = fixture.snapshot_at(&app);
+    for (form, request_source, document_source) in forms {
+        let mut options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&app, ""))
+            .with_trigger_schemas(false);
+        if let Some(source) = request_source {
+            options = options.with_source_file(source);
+        }
+        let request = ComposeRequest::prepare(options, &snapshot).unwrap();
+        let document = match document_source {
+            Some(source) => Markdown::from(text.as_str()).with_source(ComposeSource::File(source.to_path_buf())),
+            None => Markdown::from(text.as_str()),
+        };
+        let refs = document.transclusions_with_options(&request).unwrap_or_else(|error| panic!("{form}: {error}"));
+        let kinds: Vec<_> = refs.iter().map(|reference| reference.kind).collect();
+        assert_eq!(kinds.len(), 12, "{form}: {kinds:?}");
+        for kind in [TransclusionRefKind::File, TransclusionRefKind::Code, TransclusionRefKind::Prologue, TransclusionRefKind::Epilogue] {
+            assert_eq!(kinds.iter().filter(|seen| **seen == kind).count(), 3, "{form}: {kind:?}");
+        }
+        for reference in &refs {
+            let shape = format!("{form} {:?} {}", reference.kind, reference.raw_target);
+            let resolved = reference.resolved_target.as_deref().map(|target| canonical(Path::new(target)));
+            assert_eq!(resolved, expected(&reference.raw_target), "{shape}");
+            assert_eq!(reference.origin.source, ComposeSource::File(note.clone()), "{shape}: origin");
+        }
+    }
+}
+
+#[test]
+fn component_local_query_resolves_every_inclusion_form_from_the_admitted_note() {
+    assert_local_query(true);
+}
+
+#[test]
+fn request_checkout_local_query_resolves_every_inclusion_form_from_the_admitted_note() {
+    assert_local_query(false);
 }
 
 /// R9-F1.6: the local expression context of an embedder's request has the

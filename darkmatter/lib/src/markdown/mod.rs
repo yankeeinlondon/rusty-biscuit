@@ -353,6 +353,13 @@ impl Markdown {
         ))
     }
 
+    /// The context a frontmatter error is reported in: the file as written
+    /// when it was loaded from one, so a key's line is authored, otherwise
+    /// [`source_context_for_errors`](Self::source_context_for_errors).
+    pub(crate) fn frontmatter_error_context(&self) -> biscuit_terminal::errors::SourceContext {
+        self.loaded_source_context_for_errors().unwrap_or_else(|| self.source_context_for_errors())
+    }
+
     /// Number of source lines occupied by the frontmatter block, including
     /// both `---` delimiters.
     ///
@@ -456,10 +463,17 @@ impl Markdown {
     /// leading `---` markers fails to parse. Documents without frontmatter
     /// are still accepted and returned with an empty [`Frontmatter`].
     pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
+        Self::try_from_named_content(content, "unknown")
+    }
+
+    /// [`Self::try_from_content`] for text read from somewhere that is not a
+    /// file (a fetched URL): a frontmatter error names `name` and keeps its
+    /// own code, and publishes no file, since `name` is not an absolute path.
+    pub(crate) fn try_from_named_content(content: impl Into<String>, name: &str) -> MarkdownResult<Self> {
         let content = content.into();
         let ctx = biscuit_terminal::errors::SourceContext::new(
-            std::path::PathBuf::from("unknown"),
-            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from(name),
+            std::path::PathBuf::from(name),
             content.as_str(),
         );
         let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;

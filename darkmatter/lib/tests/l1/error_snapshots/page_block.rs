@@ -16,6 +16,7 @@ fn parse_directive_shows_line_and_hint() {
         line: 12,
         message: "unexpected token".into(),
         note: None,
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -37,6 +38,7 @@ fn unmatched_end_hints_at_block() {
     let err = PageBlockError::UnmatchedEnd {
         ctx: Box::new(test_ctx_lines(25, "test.md")),
         line: 20,
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -58,6 +60,7 @@ fn unterminated_block_shows_opening_line() {
         ctx: Box::new(ctx),
         opening_line: 8,
         opening_text: "::block when=\"condition\"".to_string(),
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -95,6 +98,7 @@ fn unterminated_block_emits_ansi_styling() {
         ctx: Box::new(ctx),
         opening_line: 8,
         opening_text: "::block when=\"condition\"".to_string(),
+        authored: None,
     };
     let out = render_with_ansi(&err);
 

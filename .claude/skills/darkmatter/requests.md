@@ -41,7 +41,17 @@ own admitted derivation for an equal absolute path; `rooted_at(document)`
 gives a source-less request the `Markdown`'s source (pipeline root entry,
 `extended_for` so pre-flight sees it, `effective_schema_for`); and
 `root_document` makes a relative `Markdown` source absolute, because schema
-preparation reads the document's own path. A request directory reuses the
+preparation reads the document's own path. Every public root entry point
+(the three compose APIs, `collect_effects` behind `compose_preflight` and both
+command collectors, the approval and slot-approval entries,
+`effective_schema_for`, both graph builders, fresh and prebuilt validation,
+`transclusions_with_options`) first calls `admitted_document(document)`: that
+plus, for a source-less `Markdown` (not one with `with_context_identity`),
+the request's admitted file path, attached without re-reading the buffer.
+Never decide file identity from the raw `Markdown` source at a root; never
+call `admitted_document` for `as_markdown` content or inside the pipeline
+(nested content composes against the root source without being that file).
+A request directory reuses the
 options' repository observation (`request_repository_for`) only when it is
 that directory's nearest checkout, never by containment. A source whose nearest Git checkout
 (`compose::nearest_repository_root`, `biscuit_file::find_git_root`: the

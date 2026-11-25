@@ -177,7 +177,9 @@ impl ReferenceSyntax {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReferenceTarget {
-    /// A local filesystem path.
+    /// A local filesystem path. A link's path may end in a `#fragment`; an
+    /// inclusion's (a [`ReferenceKind::Transclusion`] record) is the whole
+    /// filename composition opens, `#` included.
     LocalPath { raw: PathBuf },
     /// A remote HTTP/HTTPS URL.
     RemoteUrl { raw: String },

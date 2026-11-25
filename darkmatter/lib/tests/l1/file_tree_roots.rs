@@ -102,12 +102,13 @@ fn tree_escape(work: &Path, snapshot: FileResolutionContext, body: &str) -> (Pat
         report.warnings
     );
     match compose_parent(work, snapshot, body, true) {
-        Err(MarkdownError::Transclusion(error)) => match *error {
+        // The child's failure names the directive that wrote the target.
+        Err(MarkdownError::Transclusion(error)) => match error.without_site() {
             TransclusionError::FileReference(FileReferenceError::RelativeTreeEscape {
                 base_dir,
                 reference,
                 ..
-            }) => (base_dir, reference),
+            }) if error.inclusion_site().is_some() => (base_dir.clone(), reference.clone()),
             other => panic!("expected RelativeTreeEscape, got {other:?}"),
         },
         Err(other) => panic!("expected a transclusion error, got {other:?}"),
