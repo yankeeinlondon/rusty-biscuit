@@ -19,16 +19,12 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented-by: string -> the agent who implemented the plan
-reviewed: true
+reviewed: false
 reviewed-by: codex/gpt-6.2-sol
 reviewed-on: "2026-11-25"
 review-iterations: 0
-status: human-in-the-loop
-needs-rulings: true
-required-rulings:
-    - Choose the spelling for repository values that need an explicit anchor.
-    - Decide what evidence is required before emitting an implicit relative path.
-    - Decide which base a missing implicit relative path is planned under.
+status: draft-spec
+needs-rulings: false
 ---
 
 # File values are relative by default
@@ -55,8 +51,9 @@ and `review-2.md` beside the spec, expressions produce these values.
 
 ## Decisions
 
-The author set the direction on 2026-11-25. The remaining choices are under
-[Open Questions](#open-questions).
+The author ruled on every decision below on 2026-11-25, including the three
+the review raised (see
+[Rulings from the review](#rulings-from-the-review)).
 
 ### Use one portable spelling in expressions and output
 
@@ -70,10 +67,9 @@ nulls, and HTTP(S) values keep their current behavior.
   `feat/x/spec.md`, when it can select the same file. A file beside a prompt
   follows the same rule. The launch repository remains the base when the
   prompt is stored elsewhere. The same preference applies to directories.
-  Emit `.` for the repository root only when it can denote that root in the
-  receiving context, including when followed by a filename. The grammar
-  treats `.` and `./name.md` as explicit relative, so they can otherwise
-  name the prompt's directory and its files.
+  The repository root directory itself has no implicit spelling: the grammar
+  treats `.` and `./name.md` as explicit relative, which would name the
+  prompt's directory and its files. It uses the fallback below.
 - For a target outside the launch repository, try a declared portable
   environment root, then `~/`, then a faithful absolute spelling. Apply
   this fallback when the run starts outside every repository, even if the
@@ -182,11 +178,13 @@ only be reported as definite when that directory is known.
 ### Preserve target selection and access
 
 Select or plan local targets through biscuit-file's file-reference resolver.
-An eager file must exist and satisfy its schema constraints. A caller's
-lazy local file keeps the first planned target without a probe, even if
-the file is missing and a later base has a file with the same name. Apply
-that planning rule to document-authored and defaulted lazy files when
-binding them. Preserve the existing refusal for recursive lazy inputs,
+An eager file must exist and satisfy its schema constraints. A lazy local
+file is planned by the lookup rule: the first base where it exists, and
+when it exists nowhere, the base chosen under
+[Rulings from the review](#rulings-from-the-review). Binding it without
+any check, as today, would let its printed spelling name a different file
+when read back. Apply the rule to caller, document-authored, and defaulted
+lazy files alike. Passive validation makes no checks and binds nothing. Preserve the existing refusal for recursive lazy inputs,
 which have no single planned file. A recursive reference in a context that
 allows searching uses the matched file or its existing typed miss.
 
@@ -316,7 +314,7 @@ document's base, because a link is read from its document and a value is not.
   caller skills using their package-area recipes.
 - Claudine completion and its chooser may list files under any launch base,
   including the repository root. A sibling package area's file uses its
-  usable repository-relative spelling or the agreed pinned spelling. The
+  usable repository-relative spelling or the fallback spelling. The
   completion insertion, chooser label and submission, and prepared value
   agree for a given target. Accepting a candidate must still select the file
   that satisfied the input schema.
@@ -359,93 +357,66 @@ document's base, because a link is read from its document and a value is not.
   verify it names the original target.
   Cover Windows native absolute output and a Unix file with a literal
   backslash. Confirm that `find_files` keeps its ordering and skip warnings,
-  and that reusable results open the listed files using the approved
-  shadow rule.
+  and that reusable results open the listed files, including one that is
+  shadowed under a nearer base.
 - Check both link labels, Markdown punctuation, URL behavior, terminal
   hyperlink targets, and sibling-relative Markdown destinations. Test a
   root-based shell handoff and a subdirectory handoff using `absolute_path`.
   Verify the new names and retired-name diagnostic in composition and DMLS.
-- Verify the chosen spelling strategy does not make passive validation
-  effectful. Use a focused probe-count regression to enforce the approved
-  I/O rule for file listings. A separate timing spike is unnecessary for
-  the probe-free recommendation.
+- Verify that passive validation makes no checks. Use a probe-count
+  regression for file listings: one check per distinct first path component
+  under each nearer base, however many results the listing has.
+- From a package area, build the path of a file that does not exist with
+  `+`, write it with a lifecycle step, and check where it was created.
+  Cover a path typed relative to the package area, and one whose folder
+  exists under no base.
 
-## Open Questions
+## Rulings from the review
 
-### Which spelling should pin a repository target?
+The review raised three questions. The author ruled on each on 2026-11-25.
 
-From `/work/repo/tools`, suppose `/work/repo/tools/feat/x.md` shadows
-`/work/repo/feat/x.md`. The draft calls for using `&/feat/x.md` for the
-repository file, but authored `&` follows the source document's repository.
-A prompt in `/work/templates` can therefore look for
-`/work/templates/feat/x.md` when it consumes or builds on the emitted
-string. Holding the target when forwarding an intact value helps, but
-concatenation and serialized output can only use the spelling they receive.
-The same issue applies when a root directory would otherwise print as `.`.
+### One cached check before a short path is printed
 
-1. **Use the existing anchored fallbacks (recommended).** When an implicit
-   spelling cannot be used, emit `{{WORKSPACE}}/feat/x.md` if a declared
-   variable names the workspace, then try `~/`, then an absolute path.
-   Apply the same rule to directories and retain the meaning of authored
-   `&`. This works across sources with the captured environment and needs
-   no new syntax. A file inside the repository can print an absolute path
-   if it is shadowed and no portable anchor applies.
-2. **Add an explicit launch-repository reference form.** A new prefix could
-   express “the checkout this run started in,” including for a directory
-   and for a string built by concatenation. The result stays portable even
-   when nearer files shadow it. The new form needs a grammar decision,
-   completion and diagnostic support, and a documented missing-root error.
-   Processes outside Darkmatter would still need `absolute_path`.
+From `darkmatter/`, the value `darkmatter/features/x/spec.md` is looked up
+under `darkmatter/` first, so `darkmatter/darkmatter/features/x/spec.md`
+would win if it existed. Before printing an implicit relative path, check
+whether its first path component exists under each nearer base, once per
+run. If `darkmatter/darkmatter` does not exist, neither a file nor a
+directory can shadow anything spelled `darkmatter/…`, and a listing of 500
+such files costs one check. Only when the first component does exist under
+a nearer base is the full path checked, and the fallback spelling used on a
+real shadow. The checks respect read approvals and tree boundaries and join
+the read set. Passive validation makes no checks.
 
-The existing fallbacks address the wrong-checkout case without changing
-authored references or expanding the language.
+Rejected: printing the short path only when the candidate plan already
+proves it. That needs no I/O, but from any launch below the repository root
+nearly every value would print absolute although nothing shadows it.
 
-### How should formatting establish that a nearer base will not win?
+### A missing path is planned where its directory exists
 
-From `/work/repo/tools`, a listing can already know that it found
-`/work/repo/feat/x.md` without knowing whether
-`/work/repo/tools/feat/x.md` exists. A file probe also cannot establish
-whether the corresponding directory would win in a directory lookup. The
-draft requires both a reliably reusable spelling and no extra probes per
-listing result.
+A prompt launched from `darkmatter/` that builds
+`dirname(spec) + '/review-3.md'` gets `darkmatter/features/x/review-3.md`,
+which exists under no base. Plan it under the first base where the path's
+containing directory exists: `darkmatter/darkmatter/features/x/` does not
+exist, so the launch directory is skipped, and the file is planned at the
+repository root. `features/new.md` typed from `darkmatter/` is still planned
+in `darkmatter/features/`. When no base has the directory, use the launch
+directory. This costs one directory check per base, only on a miss.
 
-1. **Check the first path component under each nearer base, once per run
-   (recommended).** For `darkmatter/features/x/spec.md` launched from
-   `darkmatter/`, ask whether `darkmatter/darkmatter` exists. If it does
-   not, neither a file nor a directory can shadow anything spelled
-   `darkmatter/…`, so every such value prints short, and a listing of 500
-   files costs one check. Only when that first component does exist under
-   a nearer base is the full path checked, and the pinned form used on a
-   real shadow. The checks respect the same read approvals and tree
-   boundaries and join the read set. Passive validation makes no checks.
-2. **Use only the candidate plan and observations already made.** Emit
-   `feat/x.md` when its only candidate is the selected target, or existing
-   observations show the target wins. This adds no I/O. From any launch
-   below the repository root there is more than one candidate and nothing
-   has observed the nearer ones, so nearly every value prints in the pinned
-   form (in practice an absolute path) even though no shadow exists.
+Rejected: always the first base, which would create
+`darkmatter/darkmatter/features/x/review-3.md` without an error.
 
-The reviewer recommended the second option to keep formatting free of I/O.
-The author's stated case is a session launched from a package area, where
-the second option gives back the absolute paths this fix exists to remove.
+### A value that cannot be short uses the existing fallbacks
 
-### Where is a missing implicit relative path planned?
+After the two rulings above, an implicit spelling is unusable only for a
+real shadow (from `tools/`, both `tools/feat/x.md` and `feat/x.md` exist and
+the value means the repository one) and for the repository root directory.
+These use the same fallback as a file outside the repository: a declared
+environment root that names the workspace (`{{WORKSPACE}}/feat/x.md`), then
+`~/`, then the absolute path.
 
-Today a missing lazy file is planned under the first base without a probe.
-With the launch directory first, a prompt launched from `darkmatter/` that
-builds `dirname(spec) + '/review-3.md'` gets
-`darkmatter/features/x/review-3.md`, which exists under no base. Planned
-under the launch directory, a lifecycle step would create
-`darkmatter/darkmatter/features/x/review-3.md`.
-
-1. **Plan under the first base where the path's containing directory exists
-   (recommended).** `darkmatter/darkmatter/features/x/` does not exist, so
-   the launch directory is skipped; `darkmatter/features/x/` exists at the
-   repository root, so the file is planned there. `features/new.md` typed
-   from `darkmatter/` is still planned in `darkmatter/features/`. When no
-   base has the directory, the launch directory is used as today. This
-   costs one directory check per base, only on a miss.
-2. **Keep the first base.** No checks. A new file's path must be built with
-   `join` on a resolved directory or pinned with `absolute_path`; a path
-   built with `+` from a launch below the repository root is written to the
-   wrong place without an error.
+Rejected: `&/feat/x.md`, because `&` means the repository of the document
+that reads it, so a prompt stored elsewhere would look in the wrong
+checkout. Also rejected: a new reference form for "the repository this run
+started in", which would add grammar, completion, and diagnostics for a
+rare case.
