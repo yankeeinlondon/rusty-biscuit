@@ -380,296 +380,649 @@ skills_files_updated_during_phase_5:
 - claudine/docs/use-skills/use-claudine/composition.md
 - claudine/docs/use-skills/use-claudine/sequences.md
 source-code:
-- claudine/lib/src/doctor/registration_tests.rs
-- darkmatter/lib/src/findings/mod.rs
-- darkmatter/lib/src/findings/trail.rs
-- darkmatter/lib/src/findings/sink.rs
-- darkmatter/lib/src/findings/report.rs
-- darkmatter/lib/src/findings/reference.rs
-- darkmatter/lib/src/lib.rs
-- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
-- darkmatter/lib/src/markdown/compose/context/options.rs
-- darkmatter/lib/src/markdown/compose/context/report.rs
-- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
-- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
-- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
-- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
-- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
-- darkmatter/cli/src/output/mod.rs
-- darkmatter/lib/tests/l1/findings.rs
-- darkmatter/lib/tests/l1/main.rs
-- darkmatter/lib/tests/l1/diagnostic_projection.rs
-- darkmatter/lib/tests/l1/report_diagnostics.rs
-- darkmatter/lib/tests/l1/shared_diagnostics.rs
-- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
-- claudine/lib/src/composition/sequence/model.rs
-- claudine/cli/src/main.rs
-- claudine/cli/src/commands/mod.rs
-- claudine/cli/src/commands/sequence.rs
-- claudine/cli/src/commands/document_check/mod.rs
-- claudine/cli/src/commands/document_check/outcome.rs
-- claudine/cli/src/commands/document_check/selection.rs
-- claudine/cli/src/commands/document_check/preview.rs
-- claudine/cli/src/commands/document_check/tests.rs
-- claudine/cli/tests/l1/dry_run_check.rs
-- claudine/cli/tests/l1/main.rs
-- claudine/cli/tests/l1/composition_seams.rs
-- claudine/cli/tests/l1/context_construction_guard.rs
-- claudine/cli/tests/l1/switch_catalog_guard.rs
-- claudine/cli/tests/l1/error_guards/transport-allow.toml
-- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_fleet.yaml
-- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_find.md
-- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_fleet.yaml
-- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_find.md
-- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run1_reports_every_problem_and_previews_the_composable_task.snap
-- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_human.snap
-- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_json.snap
-- claudine/cli/tests/l1/sequence_groups.rs
-- claudine/lib/generated/shipped.json
-- claudine/lib/src/composition/sequence/formal.rs
-- claudine/lib/src/composition/sequence/grammar.rs
-- claudine/lib/src/composition/sequence/mod.rs
-- claudine/lib/src/composition/sequence/preflight/mod.rs
-- claudine/lib/src/composition/sequence/removed.rs
-- claudine/lib/src/composition/sequence/source.rs
-- claudine/lib/tests/fixtures/schema_keys/expected.json
-- claudine/lib/tests/fixtures/schema_keys/sequence.md
-- claudine/lib/tests/l1/claudine_schemas.rs
-- claudine/lib/tests/l1/claudine_schemas_embedded.rs
-- claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
-- claudine/lib/tests/l1/main.rs
-- claudine/lib/tests/l1/registration_inventory.rs
-- claudine/lib/tests/l1/schema_key_parity.rs
-- claudine/lib/tests/l1/sequence_schema.rs
-- claudine/registration/formal-sequence-file.yaml
-- claudine/registration/group-catalog-file.yaml
-- claudine/registration/group-file.yaml
-- claudine/registration/sequence-document.yaml
-- claudine/registration/sequence.yaml
-- claudine/registration/task-file.yaml
-- darkmatter/cli/src/commands/schema/validate.rs
-- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
-- darkmatter/cli/tests/l1/main.rs
-- darkmatter/cli/tests/l1/schema_key_hints.rs
-- darkmatter/dmls/src/diagnostics/codes.rs
-- darkmatter/dmls/src/diagnostics/frontmatter.rs
-- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
-- darkmatter/dmls/src/diagnostics/observed.rs
-- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
-- darkmatter/dmls/tests/l1/claudine_schema_key_parity.rs
-- darkmatter/dmls/tests/l1/main.rs
-- darkmatter/dmls/tests/l1/schema_key_diagnostics.rs
-- darkmatter/lib/src/markdown/compose/expression/call_check.rs
-- darkmatter/lib/src/markdown/compose/schema_validation.rs
-- darkmatter/lib/src/markdown/errors/blocks.rs
-- darkmatter/lib/src/markdown/schemas/bound_operands.rs
-- darkmatter/lib/src/markdown/schemas/clean.rs
-- darkmatter/lib/src/markdown/schemas/mod.rs
-- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
-- darkmatter/lib/tests/l1/schema_key_findings.rs
-- darkmatter/lib/tests/l1/schema_phase_validation.rs
-- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
-- simplified-schema/lib/src/lib.rs
-- simplified-schema/lib/src/outcome.rs
-- simplified-schema/lib/src/prepared.rs
-- simplified-schema/lib/src/resolve.rs
-- simplified-schema/lib/src/resolve/composition.rs
-- simplified-schema/lib/src/schema/export.rs
-- simplified-schema/lib/src/schema/mod.rs
-- simplified-schema/lib/src/simplified/convert.rs
-- simplified-schema/lib/src/simplified/mod.rs
-- simplified-schema/lib/src/simplified/source.rs
-- simplified-schema/lib/src/simplified/types.rs
-- simplified-schema/lib/src/validate.rs
-- simplified-schema/lib/src/validation.rs
-- simplified-schema/lib/src/validation/suggest.rs
-- simplified-schema/lib/src/yaml_documents/load.rs
-- simplified-schema/lib/tests/l1/key_declarations.rs
-- simplified-schema/lib/tests/l1/main.rs
-- claudine/lib/src/composition/mod.rs
-- claudine/lib/src/composition/sequence/normalize.rs
-- claudine/lib/src/composition/sequence/declarations.rs
-- claudine/lib/src/composition/sequence/preflight/check.rs
-- claudine/lib/src/composition/sequence/preflight/inputs.rs
-- claudine/lib/src/composition/sequence/preflight/tests/check_tree.rs
-- claudine/cli/src/commands/document_check/tasks.rs
-- claudine/cli/src/commands/wrap/sequence/providers.rs
-- claudine/cli/tests/l1/sequence_preflight_baselines.rs
-- darkmatter/lib/src/markdown/compose/passive.rs
-- darkmatter/lib/src/markdown/compose/mod.rs
-- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
-- darkmatter/lib/src/markdown/compose/expression/error.rs
-- darkmatter/lib/src/markdown/compose/expression/mod.rs
-- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
-- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
-- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
-- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
-- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
-- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
-- darkmatter/lib/src/markdown/compose/conditions.rs
-- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
-- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
-- darkmatter/lib/src/markdown/schemas/slots/session.rs
-- darkmatter/lib/tests/l1/passive_compose.rs
-- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
-- claudine/lib/src/composition/prepare.rs
-- claudine/lib/src/composition/prepare/tests.rs
-- claudine/lib/src/composition/guardrails.rs
-- claudine/lib/src/composition/error/mod.rs
-- claudine/lib/src/composition/error/render/provider.rs
-- claudine/lib/src/composition/error/tests.rs
-- claudine/cli/src/commands/compose/prep.rs
-- claudine/cli/src/commands/compose/mod.rs
-- claudine/cli/src/commands/compose/prep/tests.rs
-- claudine/cli/src/commands/wrap/composition/dry_run.rs
-- claudine/cli/src/commands/wrap/composition/dry_run/tests.rs
-- claudine/cli/src/commands/wrap/composition/mod.rs
-- claudine/cli/src/commands/wrap/composition/pipeline.rs
-- claudine/cli/src/commands/wrap/composition/preflight.rs
-- claudine/cli/src/commands/wrap/composition/runner.rs
-- claudine/cli/src/commands/wrap/composition/target.rs
-- claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
-- claudine/cli/src/commands/wrap/mod.rs
-- claudine/cli/src/commands/wrap/selection_trace.rs
-- claudine/cli/src/commands/wrap/sequence/iterate.rs
-- claudine/cli/src/commands/wrap/sequence/jit.rs
-- claudine/cli/src/commands/wrap/sequence/mod.rs
-- claudine/cli/src/commands/wrap/sequence/phase1c.rs
-- claudine/cli/src/commands/wrap/sequence/report.rs
-- claudine/cli/src/commands/wrap/sequence/review/tests.rs
-- claudine/cli/src/commands/wrap/sequence/task_run.rs
-- claudine/cli/src/perf/report.rs
-- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/doc.md
-- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/doc.md
-- claudine/cli/tests/fixtures/check/codes/model_required/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/model_required/control/doc.md
-- claudine/cli/tests/fixtures/check/codes/model_required/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/model_required/finding/doc.md
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/ask.md
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/ask.md
-- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/no_executable/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/no_executable/control/metadata.md
-- claudine/cli/tests/fixtures/check/codes/no_executable/control/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/no_executable/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/no_executable/finding/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/doc.md
-- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/doc.md
-- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/doc.md
-- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/doc.md
-- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/doc.md
-- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/doc.md
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/ask.md
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/ask.md
-- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/args.txt
-- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/ask.md
-- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/seq.yaml
-- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/args.txt
-- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/seq.yaml
-- claudine/cli/tests/l1/argv_normalization.rs
-- claudine/cli/tests/l1/authored_text_rendering.rs
-- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
-- claudine/cli/tests/l1/completion_resolution_round_trip.rs
-- claudine/cli/tests/l1/compose_cli.rs
-- claudine/cli/tests/l1/compose_frontmatter_model.rs
-- claudine/cli/tests/l1/compose_prompt_tiers.rs
-- claudine/cli/tests/l1/compose_repository_context.rs
-- claudine/cli/tests/l1/ctx_launch_anchor.rs
-- claudine/cli/tests/l1/ctx_per_run.rs
-- claudine/cli/tests/l1/entry_point_parity.rs
-- claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
-- claudine/cli/tests/l1/launch_trigger_schemas.rs
-- claudine/cli/tests/l1/level1_dry_run_pty.rs
-- claudine/cli/tests/l1/lifecycle_renamed_events.rs
-- claudine/cli/tests/l1/literal_glob_hint.rs
-- claudine/cli/tests/l1/provider_tail_launch.rs
-- claudine/cli/tests/l1/provider_tail_notice.rs
-- claudine/cli/tests/l1/registrations_command.rs
-- claudine/cli/tests/l1/research_sequence_artifacts.rs
-- claudine/cli/tests/l1/sequence_cli.rs
-- claudine/cli/tests/l1/sequence_dry_run.rs
-- claudine/cli/tests/l1/sequence_errors_cli.rs
-- claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
-- claudine/cli/tests/l1/sequence_jit.rs
-- claudine/cli/tests/l1/sequence_overlay_pty.rs
-- claudine/cli/tests/l1/sequence_referenced_state.rs
-- claudine/cli/tests/l1/sequence_sources_cli.rs
-- claudine/cli/tests/l1/sequence_task_providers.rs
-- claudine/cli/tests/l1/setter_after_switch.rs
-- claudine/cli/tests/l1/wrap_compose_agent.rs
-- claudine/cli/tests/l1/wrap_compose_preflight.rs
-- claudine/cli/tests/l1/wrap_compose_validation.rs
-- claudine/cli/tests/l1/wrap_inline_compose.rs
-- claudine/cli/tests/l1/wrap_perf.rs
-- claudine/cli/tests/l1/wrap_sequence_composition.rs
-- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
-- claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
-- claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
-- claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
-- claudine/cli/tests/level2/level2_perf_capture.rs
-- claudine/cli/tests/level2/main.rs
-- claudine/lib/src/composition/agent_message.rs
-- claudine/lib/src/composition/coordinator/invocation.rs
-- claudine/lib/src/composition/coordinator/tests.rs
-- claudine/lib/src/composition/error/render/selection.rs
-- claudine/lib/src/composition/looping/frame.rs
-- claudine/lib/src/composition/preflight.rs
-- claudine/lib/src/composition/preflight/tests.rs
-- claudine/lib/src/composition/prepare/bootstrap.rs
-- claudine/lib/src/composition/prepare/bootstrap/tests.rs
-- claudine/lib/src/composition/prepare/service/tests.rs
-- claudine/lib/src/composition/schema/tests.rs
-- claudine/lib/src/composition/select.rs
-- claudine/lib/src/composition/select/tests.rs
-- claudine/lib/src/composition/sequence/preflight/providers.rs
-- claudine/lib/src/composition/sequence/task/group.rs
-- claudine/lib/src/composition/sequence/task/mod.rs
-- claudine/lib/src/composition/sequence/task/sequence.rs
-- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
-- claudine/lib/src/composition/types.rs
-- claudine/lib/src/config/json_conversion.rs
-- claudine/lib/src/diagnostics/registry.rs
-- claudine/lib/src/dispatch/loader.rs
-- claudine/lib/src/dispatch/loader/tests.rs
-- claudine/lib/src/harness/shell.rs
-- claudine/lib/tests/l1/path_lookup_guard.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - darkmatter/lib/src/findings/mod.rs
+    - darkmatter/lib/src/findings/trail.rs
+    - darkmatter/lib/src/findings/sink.rs
+    - darkmatter/lib/src/findings/report.rs
+    - darkmatter/lib/src/findings/reference.rs
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/cli/src/output/mod.rs
+    - darkmatter/lib/tests/l1/findings.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/diagnostic_projection.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/document_check/mod.rs
+    - claudine/cli/src/commands/document_check/outcome.rs
+    - claudine/cli/src/commands/document_check/selection.rs
+    - claudine/cli/src/commands/document_check/preview.rs
+    - claudine/cli/src/commands/document_check/tests.rs
+    - claudine/cli/tests/l1/dry_run_check.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/context_construction_guard.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/fixtures/check/fleet-run1/renderers/_fleet.yaml
+    - claudine/cli/tests/fixtures/check/fleet-run1/renderers/_find.md
+    - claudine/cli/tests/fixtures/check/fleet-run2/renderers/_fleet.yaml
+    - claudine/cli/tests/fixtures/check/fleet-run2/renderers/_find.md
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run1_reports_every_problem_and_previews_the_composable_task.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_json.snap
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/lib/generated/shipped.json
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/removed.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/tests/fixtures/schema_keys/expected.json
+    - claudine/lib/tests/fixtures/schema_keys/sequence.md
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/registration_inventory.rs
+    - claudine/lib/tests/l1/schema_key_parity.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/registration/formal-sequence-file.yaml
+    - claudine/registration/group-catalog-file.yaml
+    - claudine/registration/group-file.yaml
+    - claudine/registration/sequence-document.yaml
+    - claudine/registration/sequence.yaml
+    - claudine/registration/task-file.yaml
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_key_hints.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+    - darkmatter/dmls/src/diagnostics/observed.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_key_parity.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/schema_key_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/schema_key_findings.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/outcome.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/resolve/composition.rs
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/schema/mod.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/src/validation/suggest.rs
+    - simplified-schema/lib/src/yaml_documents/load.rs
+    - simplified-schema/lib/tests/l1/key_declarations.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/declarations.rs
+    - claudine/lib/src/composition/sequence/preflight/check.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/check_tree.rs
+    - claudine/cli/src/commands/document_check/tasks.rs
+    - claudine/cli/src/commands/wrap/sequence/providers.rs
+    - claudine/cli/tests/l1/sequence_preflight_baselines.rs
+    - darkmatter/lib/src/markdown/compose/passive.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/schemas/slots/session.rs
+    - darkmatter/lib/tests/l1/passive_compose.rs
+    - darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/guardrails.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/provider.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run/tests.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/target.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/selection_trace.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/report.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/perf/report.rs
+    - claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/doc.md
+    - claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/doc.md
+    - claudine/cli/tests/fixtures/check/codes/model_required/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/model_required/control/doc.md
+    - claudine/cli/tests/fixtures/check/codes/model_required/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/model_required/finding/doc.md
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/control/ask.md
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/control/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/ask.md
+    - claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/no_executable/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/no_executable/control/metadata.md
+    - claudine/cli/tests/fixtures/check/codes/no_executable/control/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/no_executable/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/no_executable/finding/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/doc.md
+    - claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/doc.md
+    - claudine/cli/tests/fixtures/check/codes/provider_unknown/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_unknown/control/doc.md
+    - claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/doc.md
+    - claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/doc.md
+    - claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/doc.md
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/ask.md
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/ask.md
+    - claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/sequence_shape/control/args.txt
+    - claudine/cli/tests/fixtures/check/codes/sequence_shape/control/ask.md
+    - claudine/cli/tests/fixtures/check/codes/sequence_shape/control/seq.yaml
+    - claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/args.txt
+    - claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/seq.yaml
+    - claudine/cli/tests/l1/argv_normalization.rs
+    - claudine/cli/tests/l1/authored_text_rendering.rs
+    - claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+    - claudine/cli/tests/l1/compose_cli.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/compose_repository_context.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/level1_dry_run_pty.rs
+    - claudine/cli/tests/l1/lifecycle_renamed_events.rs
+    - claudine/cli/tests/l1/literal_glob_hint.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/registrations_command.rs
+    - claudine/cli/tests/l1/research_sequence_artifacts.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_referenced_state.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/sequence_task_providers.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/wrap_compose_agent.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_inline_compose.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+    - claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+    - claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/lib/src/composition/agent_message.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/lib/src/composition/looping/frame.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare/bootstrap.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/select.rs
+    - claudine/lib/src/composition/select/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/config/json_conversion.rs
+    - claudine/lib/src/diagnostics/registry.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/src/dispatch/loader/tests.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/tests/l1/path_lookup_guard.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - Cargo.lock
+    - claudine/cli/src/completion/operation_file.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/src/completion/walker.rs
+    - claudine/lib/src/composition/resolve.rs
+    - darkmatter/cli/schemas/output/clean.yaml
+    - darkmatter/cli/schemas/output/code-block.yaml
+    - darkmatter/cli/schemas/output/compose.yaml
+    - darkmatter/cli/schemas/output/delta.yaml
+    - darkmatter/cli/schemas/output/edit.yaml
+    - darkmatter/cli/schemas/output/get.yaml
+    - darkmatter/cli/schemas/output/graph.yaml
+    - darkmatter/cli/schemas/output/hash.yaml
+    - darkmatter/cli/schemas/output/init.yaml
+    - darkmatter/cli/schemas/output/list-themes.yaml
+    - darkmatter/cli/schemas/output/render.yaml
+    - darkmatter/cli/schemas/output/rm.yaml
+    - darkmatter/cli/schemas/output/schema-about.yaml
+    - darkmatter/cli/schemas/output/schema-detect.yaml
+    - darkmatter/cli/schemas/output/schema-triggers.yaml
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/schemas/output/set.yaml
+    - darkmatter/cli/schemas/output/toc.yaml
+    - darkmatter/cli/schemas/output/validate-refs.yaml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/combined.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/fixtures/findings/notes_json.json
+    - darkmatter/cli/tests/fixtures/findings/notes_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_markdown.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_clean_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_markdown.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_missing_input_json.txt
+    - darkmatter/cli/tests/l1/compose_combined_report.rs
+    - darkmatter/cli/tests/l1/compose_data_output.rs
+    - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/reference_report_baselines.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/findings/presentation/generic.rs
+    - darkmatter/lib/src/findings/presentation/mod.rs
+    - darkmatter/lib/src/findings/presentation/reference.rs
+    - darkmatter/lib/src/findings/reference/basename.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/reference/report.rs
+    - darkmatter/lib/tests/l1/collection_blocks/budget.rs
+    - darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+    - darkmatter/lib/tests/l1/collection_discovery.rs
+    - darkmatter/lib/tests/l1/collection_execution.rs
+    - darkmatter/lib/tests/l1/directive_authored_lines.rs
+    - darkmatter/lib/tests/l1/expression_recovery.rs
+    - darkmatter/lib/tests/l1/glob_implementation_guard.rs
+    - darkmatter/lib/tests/l1/load_data_diagnostics.rs
+    - darkmatter/lib/tests/l1/reference_report.rs
+    - darkmatter/lib/tests/l1/reference_suggestions.rs
+    - darkmatter/cli/tests/fixtures/findings/notes.md
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/cli/src/output/error_walker.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/sequence_scope.rs
+    - claudine/cli/tests/l1/error_guards/sequence-scope-allow.toml
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_json.snap
+    - claudine/cli/tests/l1/compose_removed_grammar.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/with_file_provenance.rs
+    - claudine/catalog-types/src/acp_server_mode.rs
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/signal_table.rs
+    - claudine/cli/src/commands/signals.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/tests.rs
+    - claudine/cli/src/commands/wrap/profile/codex.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/dry_run_portable_paths.rs
+    - claudine/cli/tests/l1/sequence_error_blocks.rs
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_exclusive_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_exclusive_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_missing_prompt_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_missing_prompt_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_unknown_field_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_unknown_field_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_yaml_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_empty.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_exclusive_executable.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_external_wrong_type.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_invalid.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_null_item.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_reference_not_found.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_reference_not_found_unlocated.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_parse_unknown_field_noun.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_parse_yaml.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_read.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_step_name_missing.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_unknown_task_field_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_unknown_task_field_no_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_empty.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_exclusive_executable.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_external_wrong_type.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_invalid.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_null_item.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_reference_not_found.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_reference_not_found_unlocated.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_parse_unknown_field_noun.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_parse_yaml.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_read.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_step_name_missing.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_unknown_task_field_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_unknown_task_field_no_near_miss.snap
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/providers/facts/antigravity.yaml
+    - claudine/docs/providers/facts/claude.yaml
+    - claudine/docs/providers/facts/pi.yaml
+    - claudine/docs/providers/steering-activation.yaml
+    - claudine/docs/research/providers/agent-cli/_schema.yaml
+    - claudine/docs/research/providers/agent-cli/_types.yaml
+    - claudine/docs/research/providers/reasoning-level/_schema.yaml
+    - claudine/docs/research/providers/sandboxing/providers/_schema.yaml
+    - claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml
+    - claudine/docs/research/providers/signals/_schema.yaml
+    - claudine/gen/src/agent_errors_check.rs
+    - claudine/gen/src/agent_errors_check/review6_tests.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/signals.rs
+    - claudine/gen/src/signals/emit.rs
+    - claudine/gen/src/steering_catalog.rs
+    - claudine/gen/src/steering_check.rs
+    - claudine/gen/src/vocabulary.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/fixtures_provenance.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/model_config_research.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/signals_sidecar_mirror.rs
+    - claudine/gen/tests/l1/signals_validation.rs
+    - claudine/gen/tests/l1/steering_activation.rs
+    - claudine/gen/tests/l1/steering_check.rs
+    - claudine/lib/src/composition/error/render/sequence.rs
+    - claudine/lib/src/composition/error/render/sequence_loop.rs
+    - claudine/lib/src/composition/error/site.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/declarations/tests.rs
+    - claudine/lib/src/composition/sequence/document.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/mcp/inject.rs
+    - claudine/lib/src/mcp/inject/tests.rs
+    - claudine/lib/src/opencode_config.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/bespoke/tests.rs
+    - claudine/lib/src/signals/generated.rs
+    - claudine/lib/src/signals/harvest.rs
+    - claudine/lib/src/signals/hub.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/lib/src/signals/projection_equivalence_tests.rs
+    - claudine/lib/src/signals/semantics_tests.rs
+    - claudine/lib/src/steering/generated.rs
+    - claudine/lib/src/steering/native/claude_registry.rs
+    - claudine/lib/src/stream/logs/opencode/bridge/tests/signal_projection.rs
+    - claudine/lib/src/stream/protocol/kimi/tests.rs
+    - claudine/lib/src/stream/protocol/pi/rpc.rs
+    - claudine/lib/src/stream/protocol/qwen.rs
+    - claudine/lib/src/stream/providers/kimi/tests.rs
+    - claudine/lib/src/stream/providers/qwen.rs
+    - claudine/lib/src/stream/providers/vocabulary.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - darkmatter/cli/tests/l1/compose_inclusion_failure_findings.rs
+    - darkmatter/cli/tests/l1/compose_portable_paths.rs
+    - darkmatter/cli/tests/l1/config_notices.rs
+    - darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+    - darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+    - darkmatter/cli/tests/l1/load_data.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+    - darkmatter/lib/src/markdown/reference/mod.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/tests/l1/findings_portable_paths.rs
+    - darkmatter/lib/tests/l1/missing_inclusion_findings.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/shipped_corpus_invocation.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
 documentation:
-- claudine/docs/cli/sequence.md
-- darkmatter/docs/cli/data-contracts.md
-- darkmatter/docs/inline/preflight-checks.md
-- claudine/docs/topics/schemas.md
-- darkmatter/dmls/docs/diagnostics.md
-- darkmatter/docs/cli/schema.md
-- darkmatter/docs/topics/schemas/dmls-schema-support.md
-- simplified-schema/docs/topics/diagnostics.md
-- simplified-schema/docs/topics/language/objects-and-named-types.md
-- darkmatter/docs/topics/caching.md
-- claudine/cli/README.md
-- claudine/docs/cli/index.md
-- claudine/docs/providers/dispatch-inventory.json
-- claudine/docs/topics/composition.md
-- claudine/docs/topics/execution-flow.md
-- claudine/docs/topics/flow-control/flow-control-reference.md
-- claudine/docs/topics/flow-control/flow-control.md
-- claudine/docs/topics/flow-control/sequences.md
-- claudine/docs/topics/frontmatter-properties.md
-- claudine/docs/topics/output.md
-completed-phase: 5
+    - claudine/docs/cli/sequence.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/cli/schema.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - darkmatter/docs/topics/caching.md
+    - claudine/cli/README.md
+    - claudine/docs/cli/index.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/output.md
+    - .claude/skills/claudine/SKILL.md
+    - darkmatter/docs/use-skills/use-darkmatter/library.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/simplified-schema/SKILL.md
+    - claudine/docs/use-skills/use-claudine/sequences.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/cli-reference.md
+    - claudine/docs/use-skills/use-claudine/SKILL.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+    - claudine/docs/use-skills/use-claudine/composition.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/validate.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/errors/composition-problems.md
+    - docs/dependencies.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/README.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/rendezvous/current-state.md
+    - claudine/docs/research/README.md
+    - claudine/docs/research/local-ai/local_runners/_fleet.md
+    - claudine/docs/research/local-ai/local_runners/_research.md
+    - claudine/docs/research/providers/acp/_fleet.md
+    - claudine/docs/research/providers/acp/_research.md
+    - claudine/docs/research/providers/acp/qwen.md
+    - claudine/docs/research/providers/agent-cli/_fleet.md
+    - claudine/docs/research/providers/agent-cli/_research.md
+    - claudine/docs/research/providers/agent-errors/_fleet.md
+    - claudine/docs/research/providers/agent-errors/_pilot-codex.md
+    - claudine/docs/research/providers/agent-errors/_research.md
+    - claudine/docs/research/providers/agent-logging/_fleet.md
+    - claudine/docs/research/providers/agent-logging/_research.md
+    - claudine/docs/research/providers/agent-logging/codex.md
+    - claudine/docs/research/providers/agent-models/_fleet.md
+    - claudine/docs/research/providers/agent-models/_research.md
+    - claudine/docs/research/providers/agent-permissions/_fleet.md
+    - claudine/docs/research/providers/agent-permissions/_research.md
+    - claudine/docs/research/providers/mcp/_fleet.md
+    - claudine/docs/research/providers/mcp/_research.md
+    - claudine/docs/research/providers/memory/_fleet.md
+    - claudine/docs/research/providers/memory/_research.md
+    - claudine/docs/research/providers/model-config/_fleet.md
+    - claudine/docs/research/providers/model-config/_research.md
+    - claudine/docs/research/providers/model-config/antigravity.md
+    - claudine/docs/research/providers/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/providers/non-interactive-sessions/_research.md
+    - claudine/docs/research/providers/plugins/_fleet.md
+    - claudine/docs/research/providers/plugins/_research.md
+    - claudine/docs/research/providers/reasoning-level/_fleet.md
+    - claudine/docs/research/providers/reasoning-level/_research.md
+    - claudine/docs/research/providers/reasoning-level/kilo.md
+    - claudine/docs/research/providers/reasoning-level/qwen.md
+    - claudine/docs/research/providers/resume/_fleet.md
+    - claudine/docs/research/providers/resume/_research.md
+    - claudine/docs/research/providers/sandboxing/providers/_fleet.md
+    - claudine/docs/research/providers/sandboxing/providers/antigravity.md
+    - claudine/docs/research/providers/sandboxing/providers/kimi.md
+    - claudine/docs/research/providers/sandboxing/providers/pi.md
+    - claudine/docs/research/providers/signals/_fleet.md
+    - claudine/docs/research/providers/signals/_research.md
+    - claudine/docs/research/providers/signals/opencode.md
+    - claudine/docs/research/providers/skills/_fleet.md
+    - claudine/docs/research/providers/skills/_research.md
+    - claudine/docs/research/providers/slash-commands/_fleet.md
+    - claudine/docs/research/providers/slash-commands/_research.md
+    - claudine/docs/research/providers/steering/_fleet.md
+    - claudine/docs/research/providers/steering/_research.md
+    - claudine/docs/research/providers/steering/antigravity.md
+    - claudine/docs/research/providers/steering/pi.md
+    - claudine/docs/research/providers/subagents/_fleet.md
+    - claudine/docs/research/providers/subagents/_research.md
+    - claudine/docs/research/providers/subagents/kilo.md
+    - claudine/docs/research/providers/subagents/opencode.md
+    - claudine/docs/research/providers/system-prompt/_fleet.md
+    - claudine/docs/research/providers/system-prompt/_research.md
+    - claudine/docs/research/providers/usage/_fleet.md
+    - claudine/docs/research/providers/usage/_research.md
+    - claudine/docs/research/summary/acp.md
+    - claudine/docs/research/summary/agent-cli.md
+    - claudine/docs/research/summary/agent-logging.md
+    - claudine/docs/research/summary/agent-models.md
+    - claudine/docs/research/summary/agent-permissions.md
+    - claudine/docs/research/summary/agent-plugins.md
+    - claudine/docs/research/summary/agent-skills.md
+    - claudine/docs/research/summary/local-runners.md
+    - claudine/docs/research/summary/mcp.md
+    - claudine/docs/research/summary/model-config.md
+    - claudine/docs/research/summary/non-interactive-sessions.md
+    - claudine/docs/research/summary/plugins.md
+    - claudine/docs/research/summary/session-resumption.md
+    - claudine/docs/research/summary/slash-commands.md
+    - claudine/docs/research/summary/steering.md
+    - claudine/docs/research/summary/subagents.md
+    - claudine/docs/research/summary/system-prompt.md
+    - claudine/docs/shared-resources/agent-skills/skills-properties-extended.md
+    - claudine/docs/topics/codex-app-server.md
+    - claudine/docs/topics/how-to-create-a-new-provider.md
+    - claudine/docs/topics/pi-rpc.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/steering-activation.md
+    - claudine/docs/topics/steering-routing.md
+    - claudine/docs/topics/stream-parsing.md
+    - claudine/rendezvous/README.md
+    - darkmatter/README.md
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/topics/schemas/schema-slots.md
+    - docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md
+    - darkmatter/docs/errors/message-standard.md
+    - .claude/skills/claudine/opencode-event-sources.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/summaries/subagents.md
+    - .claude/skills/darkmatter/errors.md
+    - .claude/skills/local-llm-runners/SKILL.md
+    - .claude/skills/local-llm-runners/llamacpp.md
+    - .claude/skills/local-llm-runners/lmstudio.md
+    - .claude/skills/local-llm-runners/ollama.md
+    - .claude/skills/local-llm-runners/omlx.md
+    - .claude/skills/local-llm-runners/vllm.md
+    - .claude/skills/model-config/SKILL.md
+    - .claude/skills/model-config/providers.md
+completed-phase: 8
 packages:
     - darkmatter
     - darkmatter-cli
@@ -677,6 +1030,8 @@ packages:
     - claudine
     - claudine-cli
     - simplified-schema
+    - claudine-gen
+    - claudine-catalog-types
 decisions-for-review:
     - |-
       The passive check is built but NOT yet `--dry-run`. Switching the dispatch made 285 existing L1 tests fail, 208 of them
@@ -976,9 +1331,10 @@ decisions-for-review:
       (5.6 s in the package run, 3.8 s alone; four spawns in a loop) was split into four macro-generated tests
       (about 1 s each). No assertion changed.
     - |-
-      Phase 6: a dry run no longer expands shell aliases: `ComposeOptions::with_passive_session` installs a
-      passive alias record that starts no login shell and reads every name as not an alias, so the built-in blacklist
-      judges a dry run's commands as authored. Found on Windows, where alias lookup started PowerShell during a
+      Phase 6: canonical prompt preparation in a dry run does not expand shell aliases:
+      `ComposeOptions::with_passive_session` installs a passive alias record that starts no login shell and reads
+      every name as not an alias, so the built-in blacklist judges the authored commands on that route. Sequence
+      source expressions and templates use a separate lookup that can still start a shell. Found on Windows, where alias lookup started PowerShell during a
       `claudine --dry-run` and wrote its profile cache into the fixture home (`dry_run_check::a_dry_run_writes_nothing_anywhere`,
       `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it`). The dry-run docs already promised no login-shell
       probe. Alternative: resolve aliases from a static profile read, which would keep blacklist parity for aliased
@@ -1033,21 +1389,55 @@ decisions-for-review:
       Phase 7 split the three `with_file_provenance::*_on_every_route` tests (each 5–6.4 s before this phase, since they
       ran three routes in turn) into one test per route; the names gained `::direct`, `::named_by_a_root`, and
       `::nested_as_a_task`.
-message-to-agent: |-
-    Phase 7 (Real-run report and guards) is implementation complete; its two tasks and Phase 1's Prove Passive
-    Reports and Enforce Phase Scope are ticked, so every Phase 1 checkbox is ticked. Phase 2's Integrate Schema
-    Checks is still unticked (not a Phase 1 box); it is where the duplicate `agent: []` rows (selection failure plus
-    schema verdict) belong. For Phase 8: `cli/tests/l1/error_guards/sequence-scope-allow.toml` lists, under the
-    `sequence-error-standard` tag, the 52 `Sequence…` variants without a site, the 2 with a hard-coded noun, and the
-    54 sequence variants that reach the generic block; empty them as sequence sites land (a fixed variant's entry
-    then fails as stale). Report rows replace the error block for a sequence stopped at preflight, so a new sequence
-    error's author-facing detail must reach its passive-check row, not only its `status_block`.
-    Blocker: the committed research move (`b74da8c2a`) left 140 `include_str!` paths into the old
-    `claudine/docs/research/` layout, so claudine, darkmatter, and simplified-schema tests do not compile here; this
-    phase verified in a scratch clone (`/home/build/.cache/rb-p7/repo`, `sync.sh` beside it). Windows: rerun
-    `just cross-check claudine-cli --os windows a_dry_run_writes_nothing_anywhere
-    a_preview_leaves_what_needs_an_effect_as_written_and_marks_it` once the paths compile, and clear `os-failing` on
-    the spec when it passes.
+    - |-
+      Phase 8: sequence errors carry a new `SequenceSite` (optional file, property, task) rather than the boxed
+      `TaskSite` the plan named. `TaskSite` needs a graph identity and enclosing frames that only the passive check
+      computes, so a real run's loader and a root-file error could not supply one. Alternative: make `TaskSite`'s
+      identity optional and use it everywhere, which ties the error type to the preflight graph. Redo: replace
+      `SequenceSite` in `lib/src/composition/error/site.rs` and its constructors.
+    - |-
+      Phase 8: a site is filled on the way up: a loader raises an unlocated site and the first caller that knows the
+      file calls `CompositionError::locate_sequence` (the innermost location wins), instead of passing a site down
+      into every loader. Runtime variants keep their existing `task`/`task_path` fields beside `site`, so some data
+      is held twice. Alternative: thread the site through every loader signature and drop the old fields, which
+      touches far more call sites and the lifecycle `err.detail` shape.
+    - |-
+      Phase 8: the reshaped sequence errors keep their old facets: code `composition.failed`, the same category,
+      disposition and origin, and a `detail` without the new site. Only `err.msg` wording changed (one-based step
+      numbers, construct nouns, causes). Alternative: give each variant its own code and put file/property in
+      `detail`, which helps `when:` handlers but changes what existing handlers match. The sequence hints are
+      capitalized sentences while the dry run's own hints are lowercase.
+    - |-
+      Phase 8: an unknown key in a `kind: task` file is still two rows in a dry run: the schema's unknown-key row
+      and the parser's `SequenceUnknownTaskField` row (now with the near-miss hint). They come from different
+      layers. Alternative: drop the parser's row when the schema check already reported that key at the same site,
+      as was done for `agent: []`.
+    - |-
+      Phase 8: the dry-run preview now reports the preparation's warnings (a `::file` target that does not parse or
+      cannot be read, which the real run tolerates with a `_Could not transclude_` notice and a printed warning).
+      Like every warning, it makes a dry run exit 2. Alternative: report them as `info`, which keeps the exit status
+      0 but hides a problem the real run warns about.
+    - |-
+      Phase 8: `DiagnosticSource::file` now serializes with `/` separators on native Windows (`C:/work/doc.md`), as
+      the spec asks for JSON `file` values; on Unix it is written unchanged so a `\` in a file name survives. This
+      changes Windows JSON output of `md --output json` and Claudine's dry-run envelope. Alternative: keep the
+      native spelling and exempt `source.file` in the spec. Redo: remove `serialize_portable_file` in
+      `darkmatter/lib/src/markdown/compose/expression/diagnostics.rs` and revert the four test files and
+      `data-contracts.md`.
+    - |-
+      Phase 8 (Darkmatter): a missing transclusion target's record and status block were reworded and given a hint
+      and resolved path, but the plain reference tables of `md validate refs`, `md graph`, and `md compose`'s
+      reference stop are unchanged (their JSON gained `hint`, `base`, `resolved`, `searched`, `suggestions`), and
+      the reference-check record keeps its old message (`Missing local target: …`). The hint's path is relative to
+      the directory the reference resolved against, because the library does not know the launch directory.
+      Alternative: add a hint row to the plain tables, which changes every plain baseline.
+    - |-
+      Phase 8: this phase repaired the committed research move (`b74da8c2a`), which another session started: 158
+      files of `docs/research/<topic>` path literals, 60 relative references inside moved files, the sandboxing
+      schema's `load_data` path, and an `EnvelopeRejected` exception for the draft
+      `claudine/schemas/provider-research.yaml`. Without it nothing compiled. Alternative: verify in a scratch clone
+      as Phase 7 did and leave the repair to that session. Redo: if that session finishes the draft schema, its
+      exception in `shipped_schema_corpus.rs` fails as stale and must be removed.
 source_files_during_phase_6:
     - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
     - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
@@ -1204,6 +1594,316 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_8:
+    - claudine/catalog-types/src/acp_server_mode.rs
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/signal_table.rs
+    - claudine/cli/src/commands/document_check/mod.rs
+    - claudine/cli/src/commands/document_check/preview.rs
+    - claudine/cli/src/commands/document_check/selection.rs
+    - claudine/cli/src/commands/document_check/tasks.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/signals.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/tests.rs
+    - claudine/cli/src/commands/wrap/profile/codex.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/providers.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/dry_run_check.rs
+    - claudine/cli/tests/l1/dry_run_portable_paths.rs
+    - claudine/cli/tests/l1/error_guards/sequence-scope-allow.toml
+    - claudine/cli/tests/l1/error_guards/sequence_scope.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/research_sequence_artifacts.rs
+    - claudine/cli/tests/l1/sequence_error_blocks.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_preflight_baselines.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_exclusive_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_exclusive_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_missing_prompt_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_missing_prompt_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_unknown_field_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_unknown_field_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__seq_site_yaml_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_empty.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_exclusive_executable.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_external_wrong_type.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_invalid.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_null_item.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_reference_not_found.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_reference_not_found_unlocated.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_parse_unknown_field_noun.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_parse_yaml.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_source_read.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_step_name_missing.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_unknown_task_field_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_block_unknown_task_field_no_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_empty.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_exclusive_executable.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_external_wrong_type.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_invalid.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_null_item.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_reference_not_found.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_reference_not_found_unlocated.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_parse_unknown_field_noun.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_parse_yaml.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_source_read.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_step_name_missing.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_unknown_task_field_near_miss.snap
+    - claudine/cli/tests/l1/snapshots/l1__sequence_error_blocks__sequence_projection_unknown_task_field_no_near_miss.snap
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/providers/facts/antigravity.yaml
+    - claudine/docs/providers/facts/claude.yaml
+    - claudine/docs/providers/facts/pi.yaml
+    - claudine/docs/providers/steering-activation.yaml
+    - claudine/docs/research/providers/agent-cli/_schema.yaml
+    - claudine/docs/research/providers/agent-cli/_types.yaml
+    - claudine/docs/research/providers/reasoning-level/_schema.yaml
+    - claudine/docs/research/providers/sandboxing/providers/_schema.yaml
+    - claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml
+    - claudine/docs/research/providers/signals/_schema.yaml
+    - claudine/gen/src/agent_errors_check.rs
+    - claudine/gen/src/agent_errors_check/review6_tests.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/signals.rs
+    - claudine/gen/src/signals/emit.rs
+    - claudine/gen/src/steering_catalog.rs
+    - claudine/gen/src/steering_check.rs
+    - claudine/gen/src/vocabulary.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/fixtures_provenance.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/model_config_research.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/signals_sidecar_mirror.rs
+    - claudine/gen/tests/l1/signals_validation.rs
+    - claudine/gen/tests/l1/steering_activation.rs
+    - claudine/gen/tests/l1/steering_check.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/lib/src/composition/error/render/sequence.rs
+    - claudine/lib/src/composition/error/render/sequence_loop.rs
+    - claudine/lib/src/composition/error/site.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/declarations.rs
+    - claudine/lib/src/composition/sequence/declarations/tests.rs
+    - claudine/lib/src/composition/sequence/document.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/check.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/check_tree.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/mcp/inject.rs
+    - claudine/lib/src/mcp/inject/tests.rs
+    - claudine/lib/src/opencode_config.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/bespoke/tests.rs
+    - claudine/lib/src/signals/generated.rs
+    - claudine/lib/src/signals/harvest.rs
+    - claudine/lib/src/signals/hub.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/lib/src/signals/projection_equivalence_tests.rs
+    - claudine/lib/src/signals/semantics_tests.rs
+    - claudine/lib/src/steering/generated.rs
+    - claudine/lib/src/steering/native/claude_registry.rs
+    - claudine/lib/src/stream/logs/opencode/bridge/tests/signal_projection.rs
+    - claudine/lib/src/stream/protocol/kimi/tests.rs
+    - claudine/lib/src/stream/protocol/pi/rpc.rs
+    - claudine/lib/src/stream/protocol/qwen.rs
+    - claudine/lib/src/stream/providers/kimi/tests.rs
+    - claudine/lib/src/stream/providers/qwen.rs
+    - claudine/lib/src/stream/providers/vocabulary.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - darkmatter/cli/src/commands/compose/combined.rs
+    - darkmatter/cli/tests/fixtures/findings/notes_json.json
+    - darkmatter/cli/tests/fixtures/findings/notes_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_json.txt
+    - darkmatter/cli/tests/l1/compose_data_output.rs
+    - darkmatter/cli/tests/l1/compose_inclusion_failure_findings.rs
+    - darkmatter/cli/tests/l1/compose_portable_paths.rs
+    - darkmatter/cli/tests/l1/config_notices.rs
+    - darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+    - darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+    - darkmatter/cli/tests/l1/load_data.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/lib/src/findings/reference.rs
+    - darkmatter/lib/src/findings/report.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+    - darkmatter/lib/src/markdown/reference/mod.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/tests/l1/findings_portable_paths.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/missing_inclusion_findings.rs
+    - darkmatter/lib/tests/l1/reference_report.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/shipped_corpus_invocation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+docs_updated_during_phase_8:
+    - claudine/README.md
+    - claudine/cli/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/rendezvous/current-state.md
+    - claudine/docs/research/README.md
+    - claudine/docs/research/local-ai/local_runners/_fleet.md
+    - claudine/docs/research/local-ai/local_runners/_research.md
+    - claudine/docs/research/providers/acp/_fleet.md
+    - claudine/docs/research/providers/acp/_research.md
+    - claudine/docs/research/providers/acp/qwen.md
+    - claudine/docs/research/providers/agent-cli/_fleet.md
+    - claudine/docs/research/providers/agent-cli/_research.md
+    - claudine/docs/research/providers/agent-errors/_fleet.md
+    - claudine/docs/research/providers/agent-errors/_pilot-codex.md
+    - claudine/docs/research/providers/agent-errors/_research.md
+    - claudine/docs/research/providers/agent-logging/_fleet.md
+    - claudine/docs/research/providers/agent-logging/_research.md
+    - claudine/docs/research/providers/agent-logging/codex.md
+    - claudine/docs/research/providers/agent-models/_fleet.md
+    - claudine/docs/research/providers/agent-models/_research.md
+    - claudine/docs/research/providers/agent-permissions/_fleet.md
+    - claudine/docs/research/providers/agent-permissions/_research.md
+    - claudine/docs/research/providers/mcp/_fleet.md
+    - claudine/docs/research/providers/mcp/_research.md
+    - claudine/docs/research/providers/memory/_fleet.md
+    - claudine/docs/research/providers/memory/_research.md
+    - claudine/docs/research/providers/model-config/_fleet.md
+    - claudine/docs/research/providers/model-config/_research.md
+    - claudine/docs/research/providers/model-config/antigravity.md
+    - claudine/docs/research/providers/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/providers/non-interactive-sessions/_research.md
+    - claudine/docs/research/providers/plugins/_fleet.md
+    - claudine/docs/research/providers/plugins/_research.md
+    - claudine/docs/research/providers/reasoning-level/_fleet.md
+    - claudine/docs/research/providers/reasoning-level/_research.md
+    - claudine/docs/research/providers/reasoning-level/kilo.md
+    - claudine/docs/research/providers/reasoning-level/qwen.md
+    - claudine/docs/research/providers/resume/_fleet.md
+    - claudine/docs/research/providers/resume/_research.md
+    - claudine/docs/research/providers/sandboxing/providers/_fleet.md
+    - claudine/docs/research/providers/sandboxing/providers/antigravity.md
+    - claudine/docs/research/providers/sandboxing/providers/kimi.md
+    - claudine/docs/research/providers/sandboxing/providers/pi.md
+    - claudine/docs/research/providers/signals/_fleet.md
+    - claudine/docs/research/providers/signals/_research.md
+    - claudine/docs/research/providers/signals/opencode.md
+    - claudine/docs/research/providers/skills/_fleet.md
+    - claudine/docs/research/providers/skills/_research.md
+    - claudine/docs/research/providers/slash-commands/_fleet.md
+    - claudine/docs/research/providers/slash-commands/_research.md
+    - claudine/docs/research/providers/steering/_fleet.md
+    - claudine/docs/research/providers/steering/_research.md
+    - claudine/docs/research/providers/steering/antigravity.md
+    - claudine/docs/research/providers/steering/pi.md
+    - claudine/docs/research/providers/subagents/_fleet.md
+    - claudine/docs/research/providers/subagents/_research.md
+    - claudine/docs/research/providers/subagents/kilo.md
+    - claudine/docs/research/providers/subagents/opencode.md
+    - claudine/docs/research/providers/system-prompt/_fleet.md
+    - claudine/docs/research/providers/system-prompt/_research.md
+    - claudine/docs/research/providers/usage/_fleet.md
+    - claudine/docs/research/providers/usage/_research.md
+    - claudine/docs/research/summary/acp.md
+    - claudine/docs/research/summary/agent-cli.md
+    - claudine/docs/research/summary/agent-logging.md
+    - claudine/docs/research/summary/agent-models.md
+    - claudine/docs/research/summary/agent-permissions.md
+    - claudine/docs/research/summary/agent-plugins.md
+    - claudine/docs/research/summary/agent-skills.md
+    - claudine/docs/research/summary/local-runners.md
+    - claudine/docs/research/summary/mcp.md
+    - claudine/docs/research/summary/model-config.md
+    - claudine/docs/research/summary/non-interactive-sessions.md
+    - claudine/docs/research/summary/plugins.md
+    - claudine/docs/research/summary/session-resumption.md
+    - claudine/docs/research/summary/slash-commands.md
+    - claudine/docs/research/summary/steering.md
+    - claudine/docs/research/summary/subagents.md
+    - claudine/docs/research/summary/system-prompt.md
+    - claudine/docs/shared-resources/agent-skills/skills-properties-extended.md
+    - claudine/docs/topics/codex-app-server.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/how-to-create-a-new-provider.md
+    - claudine/docs/topics/output.md
+    - claudine/docs/topics/pi-rpc.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/steering-activation.md
+    - claudine/docs/topics/steering-routing.md
+    - claudine/docs/topics/stream-parsing.md
+    - claudine/rendezvous/README.md
+    - darkmatter/README.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/topics/schemas/schema-slots.md
+    - docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md
+docs_created_during_phase_8:
+    - darkmatter/docs/errors/message-standard.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/opencode-event-sources.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/summaries/subagents.md
+    - .claude/skills/darkmatter/errors.md
+    - .claude/skills/local-llm-runners/SKILL.md
+    - .claude/skills/local-llm-runners/llamacpp.md
+    - .claude/skills/local-llm-runners/lmstudio.md
+    - .claude/skills/local-llm-runners/ollama.md
+    - .claude/skills/local-llm-runners/omlx.md
+    - .claude/skills/local-llm-runners/vllm.md
+    - .claude/skills/model-config/SKILL.md
+    - .claude/skills/model-config/providers.md
+    - claudine/docs/use-skills/use-claudine/sequences.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - darkmatter/docs/use-skills/use-darkmatter/library.md
+implemented: true
 ---
 
 # Implementation Log for 2026-11-22-better-errors-and-dry-run (3 phases)
@@ -1999,7 +2699,7 @@ has no fixture: no input reaches it on purpose.
 | `md compose` combined report, recovery/stdin/warning policy unchanged, lifecycle route | `darkmatter-cli` `compose_combined_report::*` (13), `combined.rs` unit tests (5) |
 | passive schema never judges a deferred value | `passive_compose::a_deferred_value_is_never_judged_by_its_schema` |
 | unterminated-block excerpt in the file's frame | `directive_authored_lines::an_unterminated_block_excerpt_numbers_file_lines` |
-| a dry run starts no login shell | `alias::tests::a_dry_run_starts_no_shell_for_an_alias` |
+| canonical passive prompt preparation skips shell alias lookup | `alias::tests::a_dry_run_starts_no_shell_for_an_alias` |
 
 ## Phase 7
 
@@ -2158,3 +2858,189 @@ Started 2026-11-26.
   whose directory mirrors the old layout on purpose and is read through `dynamic_slots_fixtures/mod.rs`.
   After the rewrite `cargo nextest list` compiles all six packages. Phase 8 therefore verifies in this worktree, not a
   scratch clone.
+- Relative references inside the moved research files were also one level too shallow. A second pass computed each
+  relative path (`./`, `../`, including `Name@../_types.yaml` imports) from the file's old location, mapped the target
+  through the rename list, and rewrote it from the new location only where the old target exists and the written path
+  no longer resolves: 60 references in 10 files (`../_types.yaml` → `../../_types.yaml` in the agent-cli and
+  reasoning-level contracts, the research README's fleet links, code links in three provider notes, the content-policy
+  schema import). The sandboxing schema's `load_data("../../../os.yaml")` was fixed by hand to `../../../../os.yaml`,
+  with `shipped_schema_corpus::the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving`.
+- The move also added `claudine/schemas/provider-research.yaml`, a draft whose `$provider` header the `kind: schema`
+  envelope refuses; three Darkmatter shipped-corpus tests failed on it. It is classified `EnvelopeRejected` in
+  `darkmatter/lib/tests/l1/shipped_schema_corpus.rs::EXCEPTIONS` with that reason, so finishing the draft (or deleting
+  it) makes the exception stale and the test says so.
+- The author's tooling committed during this phase (`b00a4c9f3`, `5f752048a`, `6c12ba21d`): part of this phase's work
+  is in those commits, the rest is uncommitted.
+
+### Work split
+
+Four subagents ran in parallel (Claudine sequence sites; Darkmatter document sites; caller docs; portable-path tests),
+then the orchestrator integrated, fixed what they flagged, and ran the gates alone.
+
+### Complete Sequence Sites (Claudine)
+
+- `site: Box<SequenceSite>` (`lib/src/composition/error/site.rs`: optional `file`, `property`, `task`) on every
+  `Sequence…` variant without `source_path` + `property`. A layer that does not know its file raises an unlocated
+  site; the first caller that knows it calls `CompositionError::locate_sequence` (innermost wins), and
+  `referenced_as` names the construct when the reading layer did not know it.
+- `SequenceExternalLoad` → `SequenceReferenceResolution` / `SequenceSourceRead` / `SequenceSourceParse` (parse stage:
+  frontmatter, YAML, YAML conversion, JSON5, duplicate key, JSON line). `SequenceInvalid { message, site }`;
+  `SequenceExternalWrongType`, `SequenceReservedTemplateKey`, `SequenceUnknownOperator`, `SequenceInteractiveRejected`
+  became named structs; new `SequenceUnknownTaskField` with a near-miss hint from the shared ranker; deleted
+  `SequenceSelectionFailed`/`SequenceSelectionFailure`. `SequenceExclusiveExecutable` lists `EXECUTABLE_KEYS`
+  (including `sequence`). Prose step numbers are one-based; property paths stay zero-based.
+- Every `Sequence…` variant has its own arm in `render/sequence.rs`. The scope allowlist has no
+  `sequence-error-standard` entries left (64 `outside-scope` catch-all entries remain), the guard refuses any
+  `Sequence…` or `render/` entry, and a new guard (`every_routed_sequence_variant_has_its_own_arm`) fails on a routed
+  variant with no arm or a stale arm.
+- Identity: code stays `composition.failed` with the same category, disposition, origin and detail; only `err.msg`
+  wording changed (`sequence_error_blocks.rs::reshaped_sequence_variants_keep_their_identity`).
+- Leftover from Phase 2's checkpoint: a document `agent: []` is now one row (the selection failure), in a dry run and in
+  the real-run report (`dry_run_check::an_empty_agent_list_is_reported_once`, with a `with.agent` case and a control).
+- Tests: `cli/tests/l1/sequence_error_blocks.rs` (13 cases × plain block + JSON projection snapshots, site control,
+  identity), `dry_run_check::{a_missing_prompt_file_is_named_by_its_noun_and_cause,
+  a_task_file_yaml_error_names_the_file_and_the_parse_stage, an_exclusive_executable_names_the_one_based_step_and_the_choices,
+  an_unknown_task_field_offers_its_near_miss}` with controls, lib `locate_sequence_fills_only_what_the_site_does_not_know`,
+  `referenced_as_names_an_unknown_construct_only`, `a_load_failure_names_the_operation_that_failed`.
+- The four dry-run cases spawned the binary five times each; two measured 5.8 s and 6.3 s in the package run. Each
+  control is now its own test that runs only the JSON pass (`a_present_prompt_file_is_not_reported`,
+  `a_valid_task_file_is_not_reported`, `a_single_executable_is_not_reported`,
+  `an_unknown_task_field_near_nothing_lists_the_fields`); the module then ran 55 tests with none slow.
+
+### Complete Document Sites (Darkmatter)
+
+- A missing `::file`/`prologue`/`epilogue` target is built by the new `findings::reference::missing_target`: message
+  ``file not found in `::file` ``, construct, reference, base, resolved path, suggestions, and the hint
+  `create <path>, or correct the reference`; the status block's header is `file not found in ::file` with a
+  `Resolved:` row. Code `dm.reference.missing_transclusion` and the `failure` class are unchanged. A permission failure
+  keeps `I/O failure` and the permissions hint (`dm.input.read_failure`).
+- Reference-check records (`md compose` reference stop, `md validate refs`, `md graph` JSON) gained `hint`, `base`,
+  `resolved`, `searched`, `suggestions`; codes, messages and plain tables are unchanged. `ReferenceIssue` gained a public
+  `resolution` field (Darkmatter sites updated; Claudine builds none).
+- Already compliant, pinned with a new case: `UnterminatedBlock` excerpts (file frame, CRLF case added) and the schema
+  unknown-key near-miss hint.
+- Tests: `darkmatter/lib/tests/l1/missing_inclusion_findings.rs` (9), `darkmatter/cli/tests/l1/compose_inclusion_failure_findings.rs`
+  (5, end to end through `md compose`); three reference baselines re-blessed.
+- Claudine tests that pinned the old wording were updated: `sequence_initialize_include_preflight::a_dry_run_reports_the_same_preflight_failure_without_side_effects`
+  (now asserts the message and `reference`), and the L2 expectations in `level2_typed_error_render_capture.rs`,
+  `level2_lifecycle_control.rs` (identity header) and `level2_initialize_generated_transclusion.rs` (comment).
+- Found by the Darkmatter audit and fixed in Claudine: a dry run printed "0 errors and 0 warnings" for a document whose
+  `::file` target did not parse or could not be read, because the preview dropped the preparation's warnings (the real
+  run prints them and composes the `_Could not transclude_` notice). `document_check/preview.rs` now reports each
+  preparation warning (skipped triggers excepted, which are reported once elsewhere) as a warning row with the task's
+  trail, located in the including document. Test: `dry_run_check::a_tolerated_transclusion_failure_is_a_warning_row`
+  (control, human, JSON). The tolerated parse-failure warning itself still has no code (`dm.compose.warning`) and no
+  line; that is Darkmatter's tolerated-failure projection and was left as is.
+
+### Verify Portable Paths
+
+- `DiagnosticSource::file` now serializes with `/` separators on Windows (`serialize_portable_file`, through
+  `biscuit_file::to_forward_slash_string`); elsewhere it is written as is, so a `\` in a Unix file name survives. The
+  spec requires portable JSON `file` values; before this, Windows wrote `C:\…` in `source.file` while every other path
+  of the record used `/`. Darkmatter tests that compared `source.file` with a native string now compare with the
+  forward-slash form (`config_notices.rs`, `dynamic_schema_slots.rs`, `dynamic_schema_slot_template_types.rs`,
+  `load_data.rs`); `data-contracts.md` says so.
+- New tests: `claudine/cli/tests/l1/dry_run_portable_paths.rs` (human report relative `/` paths; JSON paths with no
+  `\`, `@` search roots in resolver order, CRLF = LF positions), `darkmatter/lib/tests/l1/findings_portable_paths.rs`
+  (in-process: nested miss, `@` roots order, CRLF; `windows::*` drive absolute, authored `.\sub\x.md`, UNC base, native
+  Windows only), `darkmatter/cli/tests/l1/compose_portable_paths.rs` (`md compose` human and CRLF JSON). The
+  `source.file` exemption the tests first carried was removed with the serializer change.
+- `biscuit_file::to_portable_string`, named by the spec, does not exist; the helper is `to_forward_slash_string`.
+- macOS case-insensitive volumes: covered by the existing
+  `reference_suggestions::a_case_only_name_is_suggested_only_when_it_is_a_different_file`, which detects the volume's
+  case sensitivity at run time.
+
+### Update Caller Docs
+
+- Claudine: `docs/cli/sequence.md` (real-run stop report, advisories, two-stage diagram, fleet example, exit/output
+  table), `docs/topics/flow-control/sequences.md`, `composition.md`, `output.md`, `error-architecture.md` (findings
+  section, the corrected example report, and a new "Sequence errors: a site and a block of their own" section; its
+  links to feature directories were replaced with the code locations), `pre-flight-checks.md`, `README.md`, and stale
+  effectful-preview text in `docs/getting-started/index.md`, `docs/pipeline.md`, `docs/topics/execution-flow.md`;
+  caller skill `docs/use-skills/use-claudine/sequences.md`.
+- Darkmatter: new `docs/errors/message-standard.md` (linked from `README.md` and `docs/errors/README.md`),
+  `docs/cli/data-contracts.md` (`source.file`), caller skill `use-darkmatter/{cli,library}.md`, repo skill
+  `.claude/skills/darkmatter/errors.md`. `compose`/`validate`/`composition-problems.md` and Simplified Schema's docs
+  already documented the shared records, empty-body causes, `removed(...)` and `$advise-unknown-keys`.
+- No planned markers belonged to this feature (earlier phases removed them).
+
+### Further fallout of the research move, found by the gates
+
+- Format-string paths (`docs/research/{TOPIC}/…`) in `claudine/gen` escaped the literal rewrite; they now read
+  `docs/research/providers/{…}` (every generator topic is a provider topic). The generated-artifact byte baseline
+  (`gen/tests/fixtures/generated-artifact-baseline.json`) was re-pinned for the six artifacts whose embedded research
+  paths changed (catalog, signals, vocabulary, steering, antigravity and pi data); the regeneration drift tests pass, so
+  the bytes are what the generator writes.
+- Three tests walked only the first level of `docs/research/` for topics and now also walk each subject area:
+  `claudine_schema_shipped_corpus::every_shipped_document_has_one_test`,
+  `research_sequence_artifacts::shipped_fleet_graphs_resolve_per_row_prompt_lifecycles` (stages each fleet at its own
+  path) and the artifact-coverage loop in the same file, which had silently checked nothing after the move and now
+  asserts it found at least one artifact.
+- Darkmatter fixtures that stage research files mirror the new depth: `shipped_corpus_invocation.rs`,
+  `schema_validate_shipped_artifacts.rs`.
+- `compose_initialize_staged_boot::a_dry_run_never_runs_initialize_and_still_reports_the_missing_include` pinned the old
+  `File not found` row text; it now reads ``file not found in `::file` ``.
+- `dry_run_check::an_empty_agent_list_is_reported_once` measured 5.5 s in the package run (five spawns); it is four tests
+  now (dry run, real run, `with:` form, control).
+
+### Gates
+
+- `claudine`: `just test` 13170 passed, 16 skipped, none at or above 5 s; `just lint` clean;
+  `just check-tier-coverage claudine`: Stranded (0). After the last test split, `dry_run_check::` (60 tests) and
+  `just lint` were rerun green.
+- `darkmatter` (darkmatter, darkmatter-cli, darkmatter-lsp, zed-dmls-cli): `just test` 18471 passed, 10 skipped, none at
+  or above 5 s; `just lint` clean.
+- `simplified-schema`: `just test` 2221 + 2645 passed (its `shipped_corpus.rs` paths changed this phase).
+- Root `just shipped-schemas`: "every shipped artifact is current", no generated file changed.
+- Dependents of Darkmatter outside the two areas: no test pins the changed messages or builds `ReferenceIssue`;
+  `cargo check --tests` of `research`, `messenger`, `messenger-cli` is clean.
+- `just publish-skills` in `claudine` and `darkmatter`: `use-claudine`, `use-darkmatter`, `use-dmls` published; the
+  composed `use-claudine/sequences.md` and `use-darkmatter/{cli,library}.md` carry the new sections and only intended
+  literal `{{ }}` examples. Simplified Schema has no caller publication.
+- `git diff --check`: clean.
+- Scope calculator not used to skip gates (packages changed).
+
+### Cross-OS evidence (`just cross-check --os windows`, build-win)
+
+- `darkmatter-cli` (`config_notices`, `dynamic_schema_slot`, `load_data`, `compose_portable_paths`,
+  `compose_inclusion_failure_findings`): 85 passed. This covers the portable `source.file` change on native Windows.
+- `darkmatter` (`findings_portable_paths` incl. the three `windows::*` cases, `missing_inclusion_findings`,
+  `shipped_schema_corpus`, `shipped_corpus_invocation`): 43 passed.
+- `claudine-cli` (`dry_run_check`, `dry_run_portable_paths`, `sequence_error_blocks`,
+  `sequence_initialize_include_preflight`, `research_sequence_artifacts`): nextest recorded 70 passing assertion
+  results, including the two tests Phase 6 left failing on Windows (`a_dry_run_writes_nothing_anywhere`,
+  `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it`). The Level 1 speed gate failed.
+- Windows timings: four tests recorded durations above 5 s (`a_dry_run_writes_nothing_anywhere` 6.1 s, a pre-existing test;
+  `a_missing_prompt_file_is_named_by_its_noun_and_cause` 5.9 s and `a_task_file_yaml_error_names_the_file_and_the_parse_stage`
+  5.3 s, whose real-run pass is now its own test; `shipped_fleet_graphs_resolve_per_row_prompt_lifecycles` 11.0 s, which
+  prepares 22 fleet graphs in one test, as before the move). The last is a Windows-only slow test left for a per-fleet
+  split; on Linux all four are under 5 s.
+- Pending, from CI: macOS and WSL2 (no assertion added here is macOS-specific; the case-insensitive branch is the existing
+  `reference_suggestions` test), and the rest of each package's suite on Windows.
+
+### Requirement-to-test map
+
+| Requirement | Tests |
+|---|---|
+| Every `Sequence…` variant has a site and its own block; no catch-all | `error_guards::sequence_scope::*` (site, noun, catch-all, own arm, stale entries) |
+| Messages: construct noun, proven cause, one-based prose, hint | `sequence_error_blocks::every_sequence_case_renders_its_block_and_projection` (13 cases, plain + JSON) |
+| Old facets preserved | `sequence_error_blocks::reshaped_sequence_variants_keep_their_identity`, `sequence_preflight_baselines::boundaries::*` |
+| Passive rows carry the detail (CLI wiring) | `dry_run_check::{a_missing_prompt_file_is_named_by_its_noun_and_cause, a_task_file_yaml_error_names_the_file_and_the_parse_stage, an_exclusive_executable_names_the_one_based_step_and_the_choices, an_unknown_task_field_offers_its_near_miss}` + controls + real-run tests |
+| `agent: []` one row | `dry_run_check::an_empty_agent_list_is_reported_once_{in_a_dry_run,when_a_real_run_stops}`, `…_from_with_…`, control |
+| Missing transclusion record/block | `missing_inclusion_findings::*`, `compose_inclusion_failure_findings::*` |
+| Tolerated transclusion failure in a dry run | `dry_run_check::a_tolerated_transclusion_failure_is_a_warning_row` |
+| Portable paths, CRLF, `@` order, Windows lexical cases | `dry_run_portable_paths::*`, `findings_portable_paths::*`, `compose_portable_paths::*` |
+| Research-move repairs | `shipped_schema_corpus::*`, `claudine_schema_shipped_corpus::*`, `research_sequence_artifacts::*`, claudine-gen `drift::*` |
+
+Phase 8 is implementation complete; every plan checkbox is ticked.
+
+
+### 2026-11-26 review corrections
+
+- The Phase 6 decision and evidence table described shell passivity for the whole dry run. The alias guard covers
+  canonical prompt preparation. The shipping CLI started a shell when a root sequence expression, a source
+  `::template` operator, or a formal template used `has_alias('ll')`. A disposable `SHELL` stub recorded those
+  launches. The same call in a prompt body recorded a deferral and never reached the stub.
+- The final Windows paragraph counted passing assertions without stating the Level 1 gate result. Its recorded
+  11.0 s fleet-graph test exceeds even the loaded-host limit, so the test gate failed. The assertion count and the
+  timings above remain the original observations.
