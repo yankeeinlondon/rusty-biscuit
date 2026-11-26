@@ -1,0 +1,33 @@
+kind: sequence
+description: the areas of research that we cover to build up the metadata for Claudine's providers, agent runners, and companion apps.
+$state:
+    name: string(required)
+    description: string(required)
+    relevance: string(required)
+    scope: enum(provider,local-ai,models,rendezvous
+template:
+    slug: "{{ kebab-case(name) }}"
+    index-file: "claudine/docs/research/{{scope}}/{{ slug }}/index.md"
+    sequence-file: "claudine/docs/research/{{scope}}/{{ slug }}/_fleet.yaml"
+
+sequence:
+    - name: ACP
+      description: The **Agent Client Protocol** (ACP) standardizes a communication between code editors/IDE's/etc and AI Coding Agents.
+      relevance: Today Claudine does _not_ use ACP but it's functionality is relevant to the space Claudine occupies so we are doing research simply to understand how this standard is evolving as well as which Agents support an ACP mode of interaction.
+      scope: provider
+    - name: Agent CLI
+      description: Each agentic CLI provides an API surface for calling into the agent
+      relevance: All of Claudine's Agentic _wrapping_ functionality requires a solid understanding of this.
+      scope: provider
+    - name: Agent Errors
+      description: Each agentic CLI has their own set of errors, with error names, descriptions, exit codes, log structure, etc.
+      relevance: Claudine needs to know intimately what the possible errors are and map it into a canonical error set that is consistent across providers so that Markdown authors can "handle" errors in a provider-neutral way
+    - name: Agent Logging
+      description: All agentic CLI's log their sessions on the local host with rich and useful information about the sessions they have run
+      relevance: |-
+          Claudine needs to know each provider's logging format and technology for two primary reasons:
+
+          1. Claudine provides a centralized/canonical log that allows a user to see all sessions across their installed agent platforms
+          2. While today Claudine typically starts it's wrapped non-interactive sessions in a structured response mode so that it can report on progress, we will likely start to move away from that toward having the wrapping layer use the log stream itself.
+      scope: provider
+    -
