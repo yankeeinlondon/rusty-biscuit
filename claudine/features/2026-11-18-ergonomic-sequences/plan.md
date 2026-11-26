@@ -2,6 +2,8 @@
 kind: plan
 area: claudine
 total-phases: 7
+# Hold: Phase 4 must not start; see "Hold before Phase 4" below.
+stop-before-phase: 4
 created: 2026-11-23
 status: planned
 phase: 1
@@ -10,6 +12,9 @@ yolo: true
 ---
 
 # Ergonomic sequences implementation plan
+
+> **⛔ HARD STOP: Phases 1–3 only.** Do not start Phase 4 or any later
+> phase. See [Hold before Phase 4](#hold-before-phase-4).
 
 ## Summary and Definition of Done
 
@@ -497,6 +502,36 @@ control which keys cross implicit inheritance edges in Claudine and Darkmatter.
     fresh lookup per sample, plus the audit's four-level Kilo case. Use 20
     calls per case, one process, and record medians and cached reuse in the
     implementation log. Apply Rule 23 before proceeding.
+
+## Hold before Phase 4
+
+> **⛔ HARD STOP.** Implement Phases 1–3, close the Phase 3 integration, and
+> stop. Do not start Phase 4, 5, 6, or 7, in whole or in part, even if Phase 3
+> leaves time. If you are asked to continue, stop and report this hold
+> instead. `stop-before-phase: 4` in this plan's frontmatter makes the
+> `implement-plan` prompt refuse to launch Phase 4.
+
+**Why.** On 2026-11-26 the author ruled that a Markdown sequence document is
+an action run once per row and has no children: its rows are states only, and
+a Markdown root `sequence:` naming a file supplies states, never a child
+sequence. Phase 4 builds the opposite: "Wire Source Routes" routes whole
+Markdown and formal child sources named by a Markdown root as child
+sequences, and "Fold Caller Values" tests that model. Building it would also
+break the research and terminal fleets, whose rosters are state lists. The
+new model is specified in `2026-11-26-list-documents` (Darkmatter: list
+documents and their rendering) and `2026-11-26-markdown-sequence-states`
+(Claudine: Markdown rows are states).
+
+**Lifting the hold.** The author lifts it after those two specs are
+implemented and this spec and plan are amended as
+`2026-11-26-markdown-sequence-states` lists under "Required corrections to
+`2026-11-18-ergonomic-sequences`". Remove `stop-before-phase` and this section
+in the same change.
+
+**Phases 1–3 under the new model.** Phase 1's "Define Task Grammar" adds
+`compose:` and `inline-compose:` to the shared task properties. Add them as
+planned; do not add tests or docs that show them, or any other action, on a
+Markdown row, since those rows lose their actions under the new model.
 
 ## Phase 4 — Sequence planning and execution
 

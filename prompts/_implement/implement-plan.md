@@ -11,6 +11,7 @@ $schema:
     pass-icon: string
     commit-message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
+    stop-before-phase: number -> read from the plan; the first phase that must not start (a hold placed on the plan)
 yolo: true
 commit-message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
@@ -31,6 +32,7 @@ spec: |-
                 :  null
             : null
     }}
+stop-before-phase: "{{ file_exists(plan) ? frontmatter(plan, 'stop-before-phase') : null }}"
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 # `depends-on` entries are `{date}-{name}` directories beside the spec or under
@@ -82,6 +84,12 @@ initialize:
           - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total-phases}})"
 
 start:
+    # Checked in `start` so every loop pass, not only the first, honors the
+    # hold before an agent launches.
+    - when: "stop-before-phase && phase >= stop-before-phase"
+      then:
+          - message: "⛔  `{{parent_dir(plan)}}` is on hold before phase **#{{stop-before-phase}}**; see the hold in {{link(plan)}}"
+          - error: "the plan {{plan}} sets `stop-before-phase: {{stop-before-phase}}`; phase {{phase}} must not start until the hold is lifted"
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**repo**: {{ctx.repo}},{{area}} **agent:** {{ctx.agent}}/{{ctx.model}}, **branch:** {{ctx.branch}}, **host:** {{ctx.hostname}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
     # body renders the same message for the agent itself.
