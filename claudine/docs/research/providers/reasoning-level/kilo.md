@@ -13,21 +13,21 @@ evidence:
 - claim: Installed kilo run --help exposes --variant <string> and --thinking, described as showing thinking blocks.
   id: cli-help
   limitations: Help does not establish precedence, a default level, or whether an upstream model honored a selected variant.
-  location: claudine/docs/research/reasoning-level/_artifacts/kilo-run-help-7.3.45.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/kilo-run-help-7.3.45.txt
   method: local_inspection
   observed_on: 2026-09-29
   version: 7.3.45
 - claim: ~/.kilo was absent and ~/.config/kilo/kilo.jsonc contained only the schema URL, with no reasoning setting.
   id: config-inspection
   limitations: This describes the inspected account on this host only.
-  location: claudine/docs/research/reasoning-level/_artifacts/kilo-config-inspection.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/kilo-config-inspection.txt
   method: local_inspection
   observed_on: 2026-09-29
   version: 7.3.45
 - claim: kilo models --verbose listed 606 model entries with their variant keys; the catalog's distinct native keys are instant, none, minimal, low, medium, high, thinking, xhigh, and max.
   id: model-catalog
   limitations: Catalog presence records Kilo's declared variants, not successful upstream requests. The list can change as providers update.
-  location: claudine/docs/research/reasoning-level/_artifacts/kilo-7.3.45-model-variants.json
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/kilo-7.3.45-model-variants.json
   method: local_inspection
   observed_on: 2026-09-29
   version: 7.3.45
@@ -97,14 +97,14 @@ evidence:
 - claim: A run with --variant definitely-not-a-variant stopped at an API authentication error (401) before invalid-variant handling could be observed.
   id: invalid-variant-attempt
   limitations: Authentication prevented the test from establishing invalid-variant behavior.
-  location: claudine/docs/research/reasoning-level/_artifacts/kilo-invalid-variant-session.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/kilo-invalid-variant-session.txt
   method: disposable_test
   observed_on: 2026-09-29
   version: 7.3.45
 - claim: Kilo's exported assistant message record includes the selected value at /info/variant.
   id: session-export
   limitations: This records Kilo's selected variant and does not prove that the upstream model accepted or used it.
-  location: claudine/docs/research/reasoning-level/_artifacts/kilo-invalid-variant-session.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/kilo-invalid-variant-session.txt
   method: local_inspection
   observed_on: 2026-09-29
   version: 7.3.45

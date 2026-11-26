@@ -6,7 +6,7 @@ use biscuit_test_harness::bin_exe;
 #[test]
 fn generation_stops_before_writes_when_steering_gate_fails() {
     let area = tempfile::tempdir().expect("temporary area");
-    let research = area.path().join("docs/research/steering");
+    let research = area.path().join("docs/research/providers/steering");
     fs::create_dir_all(&research).expect("steering directory");
     fs::write(
         area.path().join("docs/providers.yaml"),
@@ -14,7 +14,7 @@ fn generation_stops_before_writes_when_steering_gate_fails() {
     )
     .expect("roster");
     fs::copy(
-        biscuit_test_harness::manifest_dir!().join("../docs/research/steering/_schema.yaml"),
+        biscuit_test_harness::manifest_dir!().join("../docs/research/providers/steering/_schema.yaml"),
         research.join("_schema.yaml"),
     )
     .expect("schema");

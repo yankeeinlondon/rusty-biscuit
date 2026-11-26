@@ -1,7 +1,7 @@
 # Per-Provider Model Configuration Reference
 
 Distilled from the schema-validated frontmatter of
-`claudine/docs/research/model-config/<provider>.md` (2026-07-02). Ports and endpoint
+`claudine/docs/research/providers/model-config/<provider>.md` (2026-07-02). Ports and endpoint
 shapes follow the local-runners ground truth — see the **local-llm-runners** skill.
 
 ## Claude Code

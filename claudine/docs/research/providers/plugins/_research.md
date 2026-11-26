@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/plugins/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/plugins/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local plugin folders under {{seq.user_dir}} when they exist.
 grant:

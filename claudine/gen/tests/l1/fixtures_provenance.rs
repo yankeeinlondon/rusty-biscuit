@@ -1,6 +1,6 @@
 //! Provenance-manifest enforcement for the signals fixture corpus.
 //!
-//! `docs/research/signals/fixtures/provenance.yaml` is the machine-readable
+//! `docs/research/providers/signals/fixtures/provenance.yaml` is the machine-readable
 //! provenance record (ruling 2026-07-06): every fixture file must carry
 //! exactly one manifest entry with a `class` from the four allowed provenance
 //! classes and a non-empty `source`. This test closes the bijection in both
@@ -78,7 +78,7 @@ fn fixture_files(root: &Path) -> BTreeSet<String> {
 
 #[test]
 fn provenance_manifest_matches_fixture_corpus() {
-    let fixtures_root = area().join("docs/research/signals/fixtures");
+    let fixtures_root = area().join("docs/research/providers/signals/fixtures");
     let manifest_path = fixtures_root.join("provenance.yaml");
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", manifest_path.display()));

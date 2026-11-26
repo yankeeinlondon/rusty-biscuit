@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/steering/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/steering/{{seq.file}}"
 agent: codex
 model: gpt-5.6-sol
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"

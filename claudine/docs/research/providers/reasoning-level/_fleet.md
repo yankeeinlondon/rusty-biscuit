@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/reasoning-level/_research.md"
+          research_prompt: "@claudine/docs/research/providers/reasoning-level/_research.md"
 ---
 
 # Reasoning Level Research Fleet

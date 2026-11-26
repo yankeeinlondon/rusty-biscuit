@@ -131,7 +131,7 @@ resource_support:
       - description
       - argument-hint
       required: []
-      source_doc: claudine/docs/research/slash-commands/pi.md
+      source_doc: claudine/docs/research/providers/slash-commands/pi.md
     repo_path: .pi/prompts
     user_path: .pi/agent/prompts
   provider: pi
@@ -166,7 +166,7 @@ resource_support:
       required:
       - name
       - description
-      source_doc: claudine/docs/research/skills/pi.md
+      source_doc: claudine/docs/research/providers/skills/pi.md
     repo_path: .pi/skills
     user_path: .pi/agent/skills
 memory_files:
@@ -183,7 +183,7 @@ output_formats:
 # `--mode json` is a streaming NDJSON event stream (one object per line) -> the
 # Stream format. `--mode rpc` is a bidirectional control protocol, not an
 # output format, so it is not an OutputFormat record: the research execution
-# selection (docs/research/non-interactive-sessions/pi.md, generated into
+# selection (docs/research/providers/non-interactive-sessions/pi.md, generated into
 # lib/src/steering/generated.rs) prefers it, and the Pi wrapper profile
 # launches it by rewriting this record's selector value (`--mode rpc`).
 - cli_flag: null

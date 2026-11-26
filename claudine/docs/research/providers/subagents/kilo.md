@@ -99,7 +99,7 @@ locations:
   - os: macos
     scope: system
     path: "/Library/Application Support/kilo/opencode.json"
-    notes: "macOS managed-config directory. Admin-controlled `opencode.json` or `.jsonc` dropped here (the path was forked from OpenCode's `/Library/Application Support/opencode/`); the `kilo` directory name is the new prefix. Highest file-based precedence for the `agent.<name>` block; not user-overridable. Sources: `packages/opencode/src/config/managed.ts` and the MCP research `claudine/docs/research/mcp/kilo.md`."
+    notes: "macOS managed-config directory. Admin-controlled `opencode.json` or `.jsonc` dropped here (the path was forked from OpenCode's `/Library/Application Support/opencode/`); the `kilo` directory name is the new prefix. Highest file-based precedence for the `agent.<name>` block; not user-overridable. Sources: `packages/opencode/src/config/managed.ts` and the MCP research `claudine/docs/research/providers/mcp/kilo.md`."
   - os: linux
     scope: system
     path: "/etc/kilo/opencode.json"
@@ -300,7 +300,7 @@ portability:
 
     Body text that references Kilo tool names (`bash`/`edit`/`read`/`webfetch`/`task`/`todowrite`/`websearch`/`skill`/`lsp`) must be rewritten to the target provider's vocabulary — note that Claude Code's tool names are PascalCase (`Bash`, `Read`, `Edit`, `WebFetch`, `WebSearch`) and require case remapping.
 
-    The Kilo JSON schema (`https://app.kilo.ai/config.json`) is the authoritative source for the `AgentConfig` shape and is what every editor's `$schema` reference points to (per the agent research at `claudine/docs/research/mcp/kilo.md` and the model research at `claudine/docs/research/agent-models/kilo.md`).
+    The Kilo JSON schema (`https://app.kilo.ai/config.json`) is the authoritative source for the `AgentConfig` shape and is what every editor's `$schema` reference points to (per the agent research at `claudine/docs/research/providers/mcp/kilo.md` and the model research at `claudine/docs/research/providers/agent-models/kilo.md`).
 
 cli_params:
   - flag: --agent <name>
@@ -347,7 +347,7 @@ env_vars:
   - name: KILO_CONFIG
     effect: "Path to a custom `kilo.json[c]` file loaded between global and project configs (config precedence step 3). Carries `agent.<name>` blocks and can override agents from disk. Also accepts `KILO_CONFIG_DIR` (the directory form)."
   - name: KILO_CONFIG_CONTENT
-    effect: "Raw JSON config applied session-wide, including to child/subagent sessions (highest non-managed precedence). Carries `agent.<name>` blocks; ideal surface for wrappers that want to inject an agent without writing a file. Source is tagged as `local` precedence. (Verified: see `claudine/docs/research/mcp/kilo.md` runtime_injection section.)"
+    effect: "Raw JSON config applied session-wide, including to child/subagent sessions (highest non-managed precedence). Carries `agent.<name>` blocks; ideal surface for wrappers that want to inject an agent without writing a file. Source is tagged as `local` precedence. (Verified: see `claudine/docs/research/providers/mcp/kilo.md` runtime_injection section.)"
   - name: KILO_CONFIG_DIR
     effect: "Custom directory searched for `agents/`, `commands/`, `modes/`, `skills/`, and `plugins/`. Loaded after global and `.kilo` directories, so it can override their settings. (Mirrors OpenCode's `OPENCODE_CONFIG_DIR`.)"
   - name: KILO_DISABLE_PROJECT_CONFIG
@@ -571,7 +571,7 @@ Three other invocation paths reach a subagent:
 
 Selection is gated by `permission.task` on the calling agent. A glob rule like `permission.task: { "*": "deny", "code-reviewer": "allow" }` removes the denied agents from the task-tool description entirely (the model can't even attempt them) and surfaces an `ask` prompt for the others. Last matching rule wins. Kilo also adds a hard nesting block via `KiloTask.nestedTask()` in `kilocode/tool/task.ts`: a subagent that tries to call the `task` tool itself gets the `task: false` flag stripped from its tool map, so subagents cannot spawn further subagents regardless of their `permission.task` configuration.
 
-Each child runs in its own session with its own message history, permission resolver, and tool allowlist. The child does **not** reload `agents.md` or re-walk the project `.kilo` discovery tree; the system-prompt research (`claudine/docs/research/system-prompt/opencode.md`) confirms that only `KILO_CONFIG_CONTENT` propagates into child sessions. The child's resolved permission is built by `deriveSubagentSessionPermission` from the parent session's `deny` rules and `external_directory` rules plus the parent agent's `edit`-class deny rules, then merged with the child's own `permission` block. `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=1` lets the parent fire multiple subagent calls in parallel without waiting for each one; the `background: true` parameter on the `task` tool creates a `BackgroundJob` that runs detached from the parent's tool-loop step.
+Each child runs in its own session with its own message history, permission resolver, and tool allowlist. The child does **not** reload `agents.md` or re-walk the project `.kilo` discovery tree; the system-prompt research (`claudine/docs/research/providers/system-prompt/opencode.md`) confirms that only `KILO_CONFIG_CONTENT` propagates into child sessions. The child's resolved permission is built by `deriveSubagentSessionPermission` from the parent session's `deny` rules and `external_directory` rules plus the parent agent's `edit`-class deny rules, then merged with the child's own `permission` block. `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=1` lets the parent fire multiple subagent calls in parallel without waiting for each one; the `background: true` parameter on the `task` tool creates a `BackgroundJob` that runs detached from the parent's tool-loop step.
 
 A child session's `parentID` is the parent's `SessionID`; the child's `agent` field carries the child's agent name; the parent's `agent` field carries the parent's. The child session's `SessionID` is the `task_id` parameter used to resume the subagent in a later call — the resume re-uses the same child session ID, message thread, and any background processes. The `resumeHint` text appended to failed task outputs is a machine-readable signal that the wrapper can parse: `This subagent session can be resumed: call the task tool again with task_id="<id>" and a prompt describing how to continue or recover.`
 
@@ -674,5 +674,5 @@ For Claudine's `linking` module and the planned lifecycle `proxy`/`resume` actio
 - [OpenCode Agents (parent project)](https://opencode.ai/docs/agents/)
 - [OpenCode Permissions (parent project)](https://opencode.ai/docs/permissions/)
 - [OpenCode Server / HTTP API (parent project)](https://opencode.ai/docs/server/)
-- [Kilo MCP research in claudine — companion document on Kilo's MCP system](claudine/docs/research/mcp/kilo.md)
-- [Kilo Model research in claudine — companion document on Kilo's model catalog](claudine/docs/research/agent-models/kilo.md)
+- [Kilo MCP research in claudine — companion document on Kilo's MCP system](claudine/docs/research/providers/mcp/kilo.md)
+- [Kilo Model research in claudine — companion document on Kilo's model catalog](claudine/docs/research/providers/agent-models/kilo.md)

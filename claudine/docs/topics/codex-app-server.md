@@ -44,7 +44,7 @@ claudine codex -- --skip-git-repo-check --ignore-rules "summarize the repo"
 
 Codex's research selects the app-server as the preferred interface and
 `codex exec --json` as its fallback
-(`docs/research/non-interactive-sessions/codex.md`); the wrapper reads that
+(`docs/research/providers/non-interactive-sessions/codex.md`); the wrapper reads that
 selection from the generated steering catalog.
 
 ## A run, start to finish

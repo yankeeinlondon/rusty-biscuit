@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/mcp/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/mcp/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local MCP config examples under {{seq.user_dir}} when they exist.
 grant:

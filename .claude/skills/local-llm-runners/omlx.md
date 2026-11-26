@@ -101,4 +101,4 @@ Claude Code: `ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=<oml
 
 ## Source
 
-`claudine/docs/research/local_runners/omlx.md`
+`claudine/docs/research/local-ai/local_runners/omlx.md`

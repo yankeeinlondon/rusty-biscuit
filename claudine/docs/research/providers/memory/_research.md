@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/memory/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/memory/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local memory stores under {{seq.user_dir}} when they exist.
 grant:

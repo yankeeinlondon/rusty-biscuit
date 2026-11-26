@@ -149,27 +149,27 @@ flowchart TB
 
 ### Tech Stack
 
-- **CRDT Engine:** [`loro`](../docs/research/rendezvous/loro.md) 
+- **CRDT Engine:** [`loro`](../docs/research/external-crates/rendezvous/loro.md) 
   - chosen for its high-performance Movable Tree capabilities and efficient version tracking
-  - research found at @claudine/docs/research/rendezvous/loro.md
-- **Mesh Networking:** [`web-transport`](../docs/research/rendezvous/web-transport.md)
+  - research found at @claudine/docs/research/external-crates/rendezvous/loro.md
+- **Mesh Networking:** [`web-transport`](../docs/research/external-crates/rendezvous/web-transport.md)
   - backed natively by `quinn` for QUIC/UDP, 
   - providing a future-proof path to WebAssembly/Browser clients
-  - research found at @claudine/docs/research/rendezvous/web-transport.md
+  - research found at @claudine/docs/research/external-crates/rendezvous/web-transport.md
 - **Inter-Process Communication (IPC):** 
   - **gRPC** via `tonic` over Unix domain sockets (macOS, Linux, WSL) or Windows named pipes
   - per stable OS user; modeled by the typed `LocalEndpoint`, never a bare path
   - contract: [`local-ipc.md`](../docs/rendezvous/local-ipc.md)
-  - research found at @claudine/docs/research/rendezvous/tonic.md
+  - research found at @claudine/docs/research/external-crates/rendezvous/tonic.md
 - **Transactional Storage (OLTP):** `redb` 
   - Embedded, high-performance Key-Value store for CRDT binary snapshots and deltas).
-  - research found at @claudine/docs/research/rendezvous/redb.md
+  - research found at @claudine/docs/research/external-crates/rendezvous/redb.md
 - **Analytical Storage (OLAP):** `duckdb` 
   - embedded columnar database for fast SQL queries on resolved document state
-  - research found at @claudine/docs/research/rendezvous/duckdb.md
+  - research found at @claudine/docs/research/external-crates/rendezvous/duckdb.md
 - **Async Runtime:** `tokio`
   - we will use the `tokio` runtime
   - research found at @claudine/docs/researchrendezvous//tokio.md
 - **Signaling / Bootstrap:** `axum`
   - HTTPS/WebSocket for initial peer discovery
-  - research found at @claudine/docs/research/rendezvous/axum.md
+  - research found at @claudine/docs/research/external-crates/rendezvous/axum.md

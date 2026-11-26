@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: definition format and metadata, user/repo scopes, model and tool restriction support, invocation mechanics, and what a wrapper can observe while a subagent runs
   - close with a point of view on the implications for Claudine's linking strategy and for wrapped-run observability
 
-  As background material we have subagents research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/subagents/*.md`.
+  As background material we have subagents research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/subagents/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 
@@ -60,7 +60,7 @@ The provider pattern is clear: several CLIs expose first-class subagent definiti
 | Kilo Code            | research only               | first-class                                                    | Markdown frontmatter files or `agent.<name>` JSON config; body or `prompt` is system prompt        | built-in, user, repo, custom config dir, managed/system, plugin, organization, inline env config | primary agent via `--agent`; subagent via `task` tool, `@` mention, `task_id` resume, optional background tasks | no dedicated subagent hook pair; child `session.created parentID`, `session.idle`, raw bus events via `kilo run --format json`, resumable `task_id` |
 | Pi                   | research only               | convention-only via extensions; not built in                   | extension-read `agents/*.md`; `presets.json`; TypeScript extensions                                | user, repo when trusted, extension directories                                                   | custom `subagent` tool spawns child `pi --mode json -p --no-session`; presets reconfigure current session       | parent sees one custom tool execution; child JSON is captured inside the tool result; no child session ID or transcript                             |
 
-Roo Code is in Claudine's compiled provider set, but it is not represented in the current `docs/research/subagents/` fleet, so this summary does not assert Roo subagent-definition behavior.
+Roo Code is in Claudine's compiled provider set, but it is not represented in the current `docs/research/providers/subagents/` fleet, so this summary does not assert Roo subagent-definition behavior.
 
 ## Definition Format and Metadata
 

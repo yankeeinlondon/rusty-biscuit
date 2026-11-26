@@ -79,7 +79,7 @@ evidence:
     limitations: Prevents a source audit of native backend enforcement.
   - id: local-help
     method: local_inspection
-    location: claudine/docs/research/sandboxing/providers/antigravity.md#local-observation-record
+    location: claudine/docs/research/providers/sandboxing/providers/antigravity.md#local-observation-record
     version: 1.4.10
     observed_on: 2026-11-04
     claim: Local macOS version and help expose sandbox, mode, settings, add-dir, and dangerous permission skipping; remote-agent is absent.

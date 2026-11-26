@@ -271,7 +271,7 @@ evidence:
   -
     id: "local-cli"
     method: "local_inspection"
-    location: "claudine/docs/research/sandboxing/providers/pi.md#scope-and-evidence"
+    location: "claudine/docs/research/providers/sandboxing/providers/pi.md#scope-and-evidence"
     version: "1.4.0"
     observed_on: "2026-11-04"
     claim: "sniff software agents found /Users/ken/.bun/bin/pi; pi --version returned 1.4.0 and help corroborated trust, tool, extension, offline, and MCP flags."

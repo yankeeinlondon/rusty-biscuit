@@ -21,20 +21,20 @@ use crate::stream::summary::RateLimitInfo;
 use crate::stream::{ParserConfig, create_semantic_parser};
 
 const THROTTLED: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-throttled-message.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-throttled-message.jsonl"
 );
 const NOT_THROTTLED: &str =
-    include_str!("../../../docs/research/signals/fixtures/claude/rate-limit-not-throttled.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/claude/rate-limit-not-throttled.jsonl");
 const APPROACHING: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-info-approaching.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-info-approaching.jsonl"
 );
 const ALLOWED_WARNING: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl"
 );
 const ERROR_BILLING: &str =
-    include_str!("../../../docs/research/signals/fixtures/claude/error-billing.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/claude/error-billing.jsonl");
 const BILLING_SYNTHETIC: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
 );
 
 /// The legacy path: claude semantic parser → `summary.rate_limit`.

@@ -356,7 +356,7 @@ fn emit_file_ends_in_exactly_one_trailing_newline() {
     assert!(file.contains("Provider::Goose => &GOOSE_VOCABULARY,"));
     // Goose is research-only and therefore carries no executable input line.
     assert!(file.contains(
-        "docs/research/agent-errors/codex.md (ordered vocabulary projection)"
+        "docs/research/providers/agent-errors/codex.md (ordered vocabulary projection)"
     ));
-    assert!(!file.contains("docs/research/agent-errors/goose.md"));
+    assert!(!file.contains("docs/research/providers/agent-errors/goose.md"));
 }

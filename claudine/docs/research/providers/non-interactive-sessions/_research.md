@@ -1,6 +1,6 @@
 ---
 operation: "research"
-file: "{{ctx.repo_root}}/claudine/docs/research/non-interactive-sessions/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/non-interactive-sessions/{{seq.file}}"
 agent: codex
 model: gpt-5.6-sol
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"

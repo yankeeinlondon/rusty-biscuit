@@ -46,12 +46,12 @@ fn context_at(area: &Path) -> biscuit_file::FileResolutionContext {
 /// Builds a synthetic area with the real sidecar, an immutable seed baseline, and a research
 /// document, returning `(area_root, findings_path)`.
 fn scaffold_area(dir: &Path, slug: &str, seed: &str, research_doc: &str) -> PathBuf {
-    let topic = dir.join("docs/research/agent-errors");
+    let topic = dir.join("docs/research/providers/agent-errors");
     fs::create_dir_all(&topic).unwrap();
     let seed_dir = topic.join("_seeds");
     fs::create_dir_all(&seed_dir).unwrap();
 
-    let sidecar = real_area().join("docs/research/agent-errors/_schema.yaml");
+    let sidecar = real_area().join("docs/research/providers/agent-errors/_schema.yaml");
     fs::copy(&sidecar, topic.join("_schema.yaml")).expect("copy real sidecar");
 
     fs::write(seed_dir.join(format!("{slug}.yaml")), seed).unwrap();
@@ -286,7 +286,7 @@ fn corrected_document_replaces_findings_with_explicit_clean() {
 
     // The model "corrects" the document (simulated by overwriting it); the next
     // run must replace the stale findings report so success is explicit.
-    let doc = dir.path().join("docs/research/agent-errors/codex.md");
+    let doc = dir.path().join("docs/research/providers/agent-errors/codex.md");
     fs::write(&doc, CLEAN_DOC).unwrap();
     let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate reruns");
     assert!(report.is_clean(), "corrected doc should be clean: {:?}", report.findings);
@@ -380,7 +380,7 @@ fn fleet_clean_action_requires_explicit_clean_status() {
     let report = dir.path().join("outcome.md");
     let data = serde_json::json!({"findings": report.display().to_string()});
     let condition_context = context_at(dir.path());
-    let fleet_text = fs::read_to_string(real_area().join("docs/research/agent-errors/_research.md"))
+    let fleet_text = fs::read_to_string(real_area().join("docs/research/providers/agent-errors/_research.md"))
         .expect("read fleet lifecycle");
     assert!(
         !fleet_text.contains("no_error: true"),

@@ -16,7 +16,7 @@ prompt: |-
 
   Standing correction (keep it satisfied on every regeneration): research outcomes are evidence, not activation. A provider is steerable through Claudine only where a reviewed grant exists in `claudine/docs/providers/steering-activation.yaml`, for an exact provider version, operating system, and launch profile, with a reviewed adapter revision. As of 2026-09-28 the only grants are Codex 0.157.1 on macOS, for Claudine-managed non-interactive runs through `codex app-server` (steer the active turn; start a turn when idle). Pi's managed RPC profile is implemented but blocked by a reviewed policy block, because extensions can switch the session without coordination. Every other provider is unavailable. Treat `claudine/docs/topics/steering-activation.md` and `claudine/docs/topics/steering-routing.md` as authoritative over anything the per-provider research documents imply about what Claudine can do today, and never describe a research `outcome: passed` record as a grant.
 
-  As background material we have steering research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/steering/*.md` (skip `_fleet.md` and `_schema.yaml`).
+  As background material we have steering research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/steering/*.md` (skip `_fleet.md` and `_schema.yaml`).
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

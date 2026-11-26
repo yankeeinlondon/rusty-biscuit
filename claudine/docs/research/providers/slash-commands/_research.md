@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/slash-commands/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/slash-commands/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local command folders under {{seq.user_dir}} when they exist.
 grant:

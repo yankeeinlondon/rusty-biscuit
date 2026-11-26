@@ -7,7 +7,7 @@ $schema:
     research_dir: "string(required; not-empty) -> Directory where provider research reports are written and checked"
     reports: "string[] -> Report paths collected by the success lifecycle event"
     invalid_reports: "string[] -> Report paths that failed validation against the research report schema"
-research_dir: "{{ctx.repo_root}}/claudine/docs/research/sandboxing/providers"
+research_dir: "{{ctx.repo_root}}/claudine/docs/research/providers/sandboxing/providers"
 initialize:
     - info: "Preparing provider sandboxing research"
 start:
@@ -22,7 +22,7 @@ success:
       then:
           - error: "a sandboxing report has no prose research"
     - set:
-          invalid_reports: "{{ filter(reports, report => !validate_schema(report, {'$schema': ctx.repo_root + '/claudine/docs/research/sandboxing/providers/_schema.yaml'})) }}"
+          invalid_reports: "{{ filter(reports, report => !validate_schema(report, {'$schema': ctx.repo_root + '/claudine/docs/research/providers/sandboxing/providers/_schema.yaml'})) }}"
     - when: "length(invalid_reports) > 0"
       then:
           - stderr: "Invalid sandboxing reports: {{ invalid_reports }}"
@@ -102,7 +102,7 @@ dated changelog entry explaining substantive changes discovered in the research.
 ## Capture Structured Data from the Research
 
 After writing the prose, read
-`{{ctx.repo_root}}/claudine/docs/research/sandboxing/providers/_schema.yaml` and
+`{{ctx.repo_root}}/claudine/docs/research/providers/sandboxing/providers/_schema.yaml` and
 populate the report's frontmatter from the findings already established. The
 structured data is a summary of the research, not a substitute for it. Every
 mechanism, control, default, and limitation must agree with the prose and cite

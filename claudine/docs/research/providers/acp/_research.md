@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/acp/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/acp/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local ACP/auth/config examples under {{seq.user_dir}} when they exist.
 grant:

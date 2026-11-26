@@ -233,4 +233,4 @@ available models."
 - [Perplexity with Google Antigravity](https://docs.perplexity.ai/docs/getting-started/integrations/antigravity)
 - [Google AI Developers Forum: custom OpenAI-compatible models in Antigravity IDE](https://discuss.ai.google.dev/t/how-to-properly-configure-custom-openai-compatible-models-in-antigravity-ide/168654)
 - Local Antigravity CLI 1.1.0 inspection: `agy --help`, `agy models`, `/Users/ken/.gemini/antigravity-cli/settings.json`, `/Users/ken/.gemini/config/config.json`, and `/Users/ken/.antigravity/argv.json`.
-- Local runner ground truth: `claudine/docs/research/local_runners/ollama.md`, `omlx.md`, `lmstudio.md`, `llamacpp.md`, and `vllm.md`.
+- Local runner ground truth: `claudine/docs/research/local-ai/local_runners/ollama.md`, `omlx.md`, `lmstudio.md`, `llamacpp.md`, and `vllm.md`.

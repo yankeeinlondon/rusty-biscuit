@@ -1,7 +1,7 @@
 //! `&'static` row types for the generated signal-detection tables.
 //!
 //! `claudine-gen` compiles the declarative detection records in
-//! `docs/research/signals/` into `lib/src/signals/generated.rs`, whose
+//! `docs/research/providers/signals/` into `lib/src/signals/generated.rs`, whose
 //! tables are built from these rows. Only runtime-relevant matching data is
 //! carried here — evidence paths, `distinguish` prose, and other
 //! documentation fields stay in the research docs, which `signals check`

@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: resume flags and commands, session-ID discovery and injection, continuation semantics, and limitations (non-interactive resume, cross-machine, expiry)
   - close with a point of view on how each provider's mechanism fits Claudine's resume recovery action and planned ResumeSpec metadata
 
-  As background material we have resume research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/resume/*.md`.
+  As background material we have resume research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/resume/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

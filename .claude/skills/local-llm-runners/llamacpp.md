@@ -98,4 +98,4 @@ Claude Code: `ANTHROPIC_BASE_URL=http://localhost:8080 ANTHROPIC_AUTH_TOKEN=<LLA
 
 ## Source
 
-`claudine/docs/research/local_runners/llamacpp.md`
+`claudine/docs/research/local-ai/local_runners/llamacpp.md`

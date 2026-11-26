@@ -1,9 +1,9 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/agent-errors/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/agent-errors/{{seq.file}}"
 # Transient explicit outcome report written by the deterministic gate (spec
 # D10). Its frontmatter status is clean, findings, or gate_error; absence never
 # means clean. Never committed (lives under `.findings/`).
-findings: "{{ctx.repo_root}}/claudine/docs/research/agent-errors/.findings/{{seq.slug}}.md"
+findings: "{{ctx.repo_root}}/claudine/docs/research/providers/agent-errors/.findings/{{seq.slug}}.md"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local source repositories and error corpora when researching.
 grant:
@@ -117,7 +117,7 @@ The consumer is `lib/src/stream/providers/common.rs::classify_error_by_keywords`
 
 **Boundary against `signals/` (spec D9).** This topic owns the *rendering/summary* vocabulary — the `SemanticErrorKind` classification of error kind/message text. It does **not** own *detection*: wire-level records that fire `SignalKind` events (usage caps, rate-limit extraction, exit-code mapping) are the `signals/` topic's territory. If your research surfaces a detection record (a payload shape that should fire a signal), note it in the prose and cite the `signals/` document — do not encode it in this frontmatter. Where the two topics cover the same provider surface, cite each other rather than duplicating.
 
-**Seeds are the starting point, not a ceiling.** Each parser-backed provider has an immutable Phase-A baseline in `docs/research/agent-errors/_seeds/{{seq.slug}}.yaml`. Read it first. Every seeded needle and code **must** reappear in your output with `evidence: seed` unless you upgrade it to a stronger evidence class with a citation. Seeds are sticky — research proposes additions and orderings, it never silently removes, re-kinds, or reorders an observed row.
+**Seeds are the starting point, not a ceiling.** Each parser-backed provider has an immutable Phase-A baseline in `docs/research/providers/agent-errors/_seeds/{{seq.slug}}.yaml`. Read it first. Every seeded needle and code **must** reappear in your output with `evidence: seed` unless you upgrade it to a stronger evidence class with a citation. Seeds are sticky — research proposes additions and orderings, it never silently removes, re-kinds, or reorders an observed row.
 
 ## Document Structure
 
@@ -150,7 +150,7 @@ Follow these steps exactly:
     > **Note:** Agentic CLIs change rapidly, so assume the prior research is out of date. Read it to report changes into the `## Changelog` section — never substitute old research for doing your own up-to-date research.
 
 ::end-block
-- Read the immutable seeded vocabulary in `docs/research/agent-errors/_seeds/{{seq.slug}}.yaml`. This is your starting point: every seeded needle and code must retain its branch, bucket, semantic kind, and item position in your output unless a change is explicitly adjudicated.
+- Read the immutable seeded vocabulary in `docs/research/providers/agent-errors/_seeds/{{seq.slug}}.yaml`. This is your starting point: every seeded needle and code must retain its branch, bucket, semantic kind, and item position in your output unless a change is explicitly adjudicated.
 - Perform research on how the provider reports errors
 
     > **Evidence requirement:** for open-source providers, inspect the source code (error enums, stream error frames, message constants, numeric-code definitions) and cite file permalinks pinned to a version tag. For closed providers, inspect SDK type definitions and official docs. Negative probes are evidence too. Unanswered is not omitted: record a `gaps` entry rather than dropping a family.

@@ -1,7 +1,7 @@
 //! Typed CLI switch metadata for the provider catalog.
 //!
 //! Projected by `claudine-gen` from the `agent-cli` research topic
-//! (`docs/research/agent-cli/_types.yaml`, `cli_switch`). The serde form of
+//! (`docs/research/providers/agent-cli/_types.yaml`, `cli_switch`). The serde form of
 //! each type is the catalog shape: what `catalog.json` carries and what a
 //! field-keyed override authors.
 

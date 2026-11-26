@@ -130,7 +130,7 @@ evidence:
     limitations: Inference supported by direct local bindings and Linux installation documentation, not a WSL2 runtime observation.
   - id: e12
     method: local_inspection
-    location: claudine/docs/research/sandboxing/providers/kimi.md#e12-local-observation
+    location: claudine/docs/research/providers/sandboxing/providers/kimi.md#e12-local-observation
     version: '2.1.1'
     observed_on: '2026-11-04'
     claim: Local macOS kimi reports 2.1.1 and its help exposes approval, prompt, plan, and add-dir flags without a sandbox option.

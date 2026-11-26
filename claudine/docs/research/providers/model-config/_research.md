@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/model-config/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/model-config/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet — until it is, run this sequence with
 # `--yolo` so the provider can Read files under {{seq.user_dir}}; without it
 # OpenCode's external_directory permission is auto-rejected in non-interactive
@@ -92,7 +92,7 @@ that research here. Focus on:
       base URL redirected to a local endpoint?"
     - **Runner-side ground truth:** the runner-side facts (default ports, endpoint
       paths, which API standards each runner speaks) are already researched. READ the
-      frontmatter of `{{ctx.repo_root}}/claudine/docs/research/local_runners/*.md`
+      frontmatter of `{{ctx.repo_root}}/claudine/docs/research/local-ai/local_runners/*.md`
       (especially each runner's `api_standards` records) as ground truth instead of
       re-researching runners; your examples must be consistent with it
     - For each runner (Ollama, oMLX, LM Studio, llama.cpp, vLLM): classify the

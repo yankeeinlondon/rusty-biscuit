@@ -102,7 +102,7 @@ evidence:
     limitations: Historical files do not prove process attachment, liveness, working/idle state, or a writable endpoint; no credential or conversation content was read.
   - id: prior-resume
     method: local_inspection
-    location: claudine/docs/research/resume/antigravity.md, rechecked against 1.1.27 help and state filenames
+    location: claudine/docs/research/providers/resume/antigravity.md, rechecked against 1.1.27 help and state filenames
     version: prior observations at 1.1.0; selectors rechecked at 1.1.27
     observed_on: 2026-09-08
     claim: Conversation UUIDs can be consumed by --conversation and persisted history can be resumed by a new process, while --continue is a latest-session selector unsuitable for deduplicated automation.

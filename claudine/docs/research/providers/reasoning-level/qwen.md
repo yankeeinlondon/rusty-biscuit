@@ -13,14 +13,14 @@ evidence:
 - claim: The installed Qwen CLI reports version 0.19.8.
   id: qwen-version
   limitations: Version string only; describes the Homebrew install on this host.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-cli-version.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-cli-version.txt
   method: local_inspection
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: Neither `qwen --help` nor the full global-options list behind `qwen sessions --help` contains any effort, thinking, or reasoning launch flag or environment variable.
   id: qwen-help
   limitations: Help text can omit undocumented flags; source was also searched for QWEN_*THINK*/REASON*/EFFORT* variable names and none exist.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-help.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-help.txt
   method: local_inspection
   observed_on: 2026-09-29
   version: 0.19.8
@@ -111,42 +111,42 @@ evidence:
 - claim: 'Run non-interactively, `/effort` reports the effective configured tier: `Reasoning effort: not set (using the model/provider default).` when nothing is set and `Current reasoning effort: low` when model.reasoningEffort is low in project settings; `/effort maximum` is accepted as an alias for max and persists the tier to settings (the write was observed and reverted).'
   id: effort-noninteractive-test
   limitations: Single host, single model (qwen3.5-plus through DashScope compatible-mode); project-scope settings, user settings untouched.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-effort-command.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-effort-command.txt
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: '`qwen -p "/effort bogus"` fails with `Unknown reasoning effort "bogus". Choose one of: low, medium, high, xhigh, max.` and exit code 1; no model request is made.'
   id: effort-invalid-test
   limitations: One invalid token tested; the message template is shared for all unknown tokens.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-effort-command.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-effort-command.txt
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: 'An invalid model.reasoningEffort in settings prints `Ignoring invalid model.reasoningEffort "bogus"; expected one of: low, medium, high, xhigh, max.` and the run proceeds on the model/provider default with exit code 0.'
   id: effort-settings-invalid-test
   limitations: Project-scope settings; behavior of the same invalid value in user scope was not separately exercised.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-effort-command.txt
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-effort-command.txt
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: With --output-format stream-json the assistant events carry the model's full reasoning as a content part of type thinking, and neither the init nor the result event contains any reasoning-effort field.
   id: stream-json-run
   limitations: One prompt against qwen3.5-plus with no effort set.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-stream-json-run.jsonl
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-stream-json-run.jsonl
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: With -o json the final result event reports thought tokens under stats.models.<model>.tokens.thoughts alongside the thinking content parts, evidencing that thinking ran without stating a tier.
   id: json-stats-run
   limitations: One prompt; token accounting shape only.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-json-result-stats.json
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-json-result-stats.json
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8
 - claim: With model.reasoningEffort low in project settings and --openai-logging, the logged request for qwen3.5-plus carries enable_thinking true and preserve_thinking true and no reasoning or reasoning_effort key, proving the tier collapse on qwen-family wire models.
   id: openai-logging-run
   limitations: One model and one tier; the collapse is asserted by code for every tier.
-  location: claudine/docs/research/reasoning-level/_artifacts/qwen-openai-logging-request.json
+  location: claudine/docs/research/providers/reasoning-level/_artifacts/qwen-openai-logging-request.json
   method: disposable_test
   observed_on: 2026-09-29
   version: 0.19.8

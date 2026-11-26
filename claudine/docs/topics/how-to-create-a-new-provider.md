@@ -26,9 +26,9 @@ Before writing any code, gather metadata about the new provider. The research pr
 | **Basics** | `docs/research/basics/{file}.md` | Binary name, install methods, config paths, model selection, version flag behavior |
 | **Agent Definitions** | `docs/research/agent-definitions/{file}.md` | Skills, commands, agents, slash commands, memory files, system prompt delivery |
 | **Hooks** | `docs/research/hooks/{file}.md` | Hook event names, config file format, hook registration mechanism |
-| **CLI Information** | `docs/research/usage/{file}.md` | Entrypoints, output formats, YOLO/auto-approve, reasoning controls, ACP support |
-| **Usage Metrics** | `docs/research/usage/{file}.md` | Billing model, usage dashboard, stream protocol, session log paths |
-| **Agent Errors** | `docs/research/agent-errors/{file}.md` | Ordered structured-stream error kinds/messages/codes with per-item provenance |
+| **CLI Information** | `docs/research/providers/usage/{file}.md` | Entrypoints, output formats, YOLO/auto-approve, reasoning controls, ACP support |
+| **Usage Metrics** | `docs/research/providers/usage/{file}.md` | Billing model, usage dashboard, stream protocol, session log paths |
+| **Agent Errors** | `docs/research/providers/agent-errors/{file}.md` | Ordered structured-stream error kinds/messages/codes with per-item provenance |
 
 Each research file writes its structured findings into **Markdown frontmatter**. The frontmatter schema is the single source of truth for the next phase.
 

@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/reasoning-level/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/reasoning-level/{{seq.file}}"
 topic: Reasoning Level
 # Research rotates over three researchers by roster position. The order is
 # chosen so that no agent researches its own provider. This is the only place
@@ -70,7 +70,7 @@ success:
           - stderr: "{{{ contract.stdout }}}"
           - error: "the research document does not satisfy its contract"
     - set:
-          relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}')::result"
+          relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/providers/reasoning-level/_relations.py' '{{file}}')::result"
     - when: "!relations.ok"
       then:
           - warn: "{{topic}} research for **{{seq.name}}** breaks a relation its contract requires"
@@ -149,7 +149,7 @@ either. Run both yourself before you finish:
 
 ```sh
 md schema validate '{{file}}' --disable schema-triggers
-python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}'
+python3 '{{ctx.repo_root}}/claudine/docs/research/providers/reasoning-level/_relations.py' '{{file}}'
 ```
 
 - Set `$schema: ./_schema.yaml` and `schema_revision: 2`.

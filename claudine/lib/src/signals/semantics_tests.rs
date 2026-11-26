@@ -1,5 +1,5 @@
 //! Fixture-driven semantics tests for the detection engine and event
-//! builder. The corpus fixtures under `docs/research/signals/fixtures/` are
+//! builder. The corpus fixtures under `docs/research/providers/signals/fixtures/` are
 //! the ground truth for payload shapes.
 
 use chrono::DateTime;
@@ -11,28 +11,28 @@ use super::engine::SignalEngine;
 use super::event_builder::{ResolvedValue, resolve_extractions};
 
 const CLAUDE_INIT: &str =
-    include_str!("../../../docs/research/signals/fixtures/claude/init-model.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/claude/init-model.jsonl");
 const CLAUDE_RESULT_COSTS: &str =
-    include_str!("../../../docs/research/signals/fixtures/claude/result-usage-cost-fields.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/claude/result-usage-cost-fields.jsonl");
 const CLAUDE_THROTTLED: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-throttled-message.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-throttled-message.jsonl"
 );
 const CLAUDE_APPROACHING: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-info-approaching.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-info-approaching.jsonl"
 );
 const CLAUDE_WARNING_SEVEN_DAY: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl"
 );
 const CLAUDE_SEVEN_DAY_OPUS: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/rate-limit-info-seven-day-opus.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/rate-limit-info-seven-day-opus.jsonl"
 );
 const CLAUDE_BILLING_SYNTHETIC: &str = include_str!(
-    "../../../docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
+    "../../../docs/research/providers/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
 );
 const KIMI_AUTH_EXPIRED: &str =
-    include_str!("../../../docs/research/signals/fixtures/kimi/wire-auth-expired.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/kimi/wire-auth-expired.jsonl");
 const KIMI_STEP_RETRY: &str =
-    include_str!("../../../docs/research/signals/fixtures/kimi/step-retry-rate-limit.jsonl");
+    include_str!("../../../docs/research/providers/signals/fixtures/kimi/step-retry-rate-limit.jsonl");
 
 fn engine(slug: &str) -> SignalEngine {
     SignalEngine::new(detection_table(slug).expect("provider table"))

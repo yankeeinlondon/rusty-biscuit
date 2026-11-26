@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/system-prompt/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/system-prompt/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local prompt/config examples under {{seq.user_dir}} when they exist.
 grant:

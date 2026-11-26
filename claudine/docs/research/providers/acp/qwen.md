@@ -216,7 +216,7 @@ rust_client:
     - terminal/kill
     - terminal/release
   desktop_streaming_pattern: "tokio::sync::mpsc from the `session/update` notification handler to the UI thread; the connection is `Send`/`Sync` in agent-client-protocol 1.0+ so `tokio::spawn` (not LocalSet) is fine."
-  notes: "The official `agent-client-protocol` Rust crate (currently 1.0.x, schema 1.1.0) is the canonical SDK and matches the methods Qwen Code exposes. For HTTP transport, the `qwen serve` daemon exposes ACP-over-HTTP — see `claudine/docs/research/acp/...` for details. For headless contexts (one-shot batches), the `agent-client-protocol` `AcpAgent::qwen_code()` preset is not yet available; build the agent string explicitly with `AcpAgent::from_str(\"qwen --acp\")` (or with `qwen serve` URL for HTTP)."
+  notes: "The official `agent-client-protocol` Rust crate (currently 1.0.x, schema 1.1.0) is the canonical SDK and matches the methods Qwen Code exposes. For HTTP transport, the `qwen serve` daemon exposes ACP-over-HTTP — see `claudine/docs/research/providers/acp/...` for details. For headless contexts (one-shot batches), the `agent-client-protocol` `AcpAgent::qwen_code()` preset is not yet available; build the agent string explicitly with `AcpAgent::from_str(\"qwen --acp\")` (or with `qwen serve` URL for HTTP)."
 compatibility:
   - client: Zed Editor
     status: works
@@ -317,7 +317,7 @@ quirks:
   - "The `AcpFileSystemService` writes a BOM (`\\uFEFF`) if the request carries `_meta.bom: true`. Clients that pass binary content should set this explicitly to avoid mojibake on Windows tools."
   - "The CLI's STDIN/STDERR redirection happens before `runAcpAgent` returns. Closing the client's stdin pipe triggers `fireSessionEndOnce(SessionEndReason.PromptInputExit)`; sending SIGTERM/SIGINT triggers `fireSessionEndOnce(SessionEndReason.Other)` and an `exitCleanup()` pass that runs `process.exit(0)` after the cleanup promise resolves."
   - "ACP mode auto-spawns a Qwen Code `SessionStart` hook if the host config has one. The hook fires BEFORE `session/update` notifications stream, so clients can hook into it to perform tool filtering or prompt rewriting."
-  - "ACP over HTTP (the `qwen serve` daemon's `/acp` route, per `claudine/docs/research/acp/...` daemon 03 doc) uses the same JSON-RPC messages over a streamable HTTP transport. The official ACP SDK crate supports HTTP via `agent-client-protocol-http`. The bridged layer multiplexes N HTTP sessions onto one ACP child, with per-session event rings and a four-policy permission mediator."
+  - "ACP over HTTP (the `qwen serve` daemon's `/acp` route, per `claudine/docs/research/providers/acp/...` daemon 03 doc) uses the same JSON-RPC messages over a streamable HTTP transport. The official ACP SDK crate supports HTTP via `agent-client-protocol-http`. The bridged layer multiplexes N HTTP sessions onto one ACP child, with per-session event rings and a four-policy permission mediator."
 gaps:
   - "Mode and config-option methods: `QwenAgent` implements `setSessionMode` and `setSessionConfigOption`, but neither is enumerated in `0.15.6`'s `agentCapabilities` block. Empirical testing required to confirm wire compatibility."
   - "Resume/list/delete session support: `unstable_*` methods exist; whether `0.15.6` answers `session/list`, `session/resume`, and `session/delete` requests is not verified — only `session/new`, `session/prompt`, `session/cancel`, `session/load` were exercised."
@@ -549,7 +549,7 @@ The `getAccountInfo` extMethod returns `{authType, model, baseUrl, apiKeyEnvKey}
 8. **OAuth free tier** — `qwen-oauth` free tier was discontinued 2026-04-15. Clients driving `authenticate` must accept `auth_required` errors and either guide the user through paid OAuth or fall back to `OPENAI_API_KEY`.
 9. **`AcpFileSystemService.writeTextFile` BOM** — passes a BOM (`\uFEFF`) if the request carries `_meta.bom: true`. Clients that pass binary content should set this explicitly to avoid mojibake on Windows tools.
 10. **`session/update` `plan` updates** — sent when `exit_plan_mode` is invoked. The agent can continue executing tools from a plan via subsequent `tool_call` updates.
-11. **ACP-over-HTTP bridge (`qwen serve`)** — `packages/acp-bridge/` (extracted from `serve/`) exposes a multiplexed HTTP bridge that speaks the same JSON-RPC messages over streamable HTTP. Per-session event rings, a four-policy permission mediator (`first-responder`/`designated`/`consensus`/`local-only`), and a per-session FIFO queue are part of the bridge. Not tested in this research; documented separately in `claudine/docs/research/acp/...` daemon 03 doc.
+11. **ACP-over-HTTP bridge (`qwen serve`)** — `packages/acp-bridge/` (extracted from `serve/`) exposes a multiplexed HTTP bridge that speaks the same JSON-RPC messages over streamable HTTP. Per-session event rings, a four-policy permission mediator (`first-responder`/`designated`/`consensus`/`local-only`), and a per-session FIFO queue are part of the bridge. Not tested in this research; documented separately in `claudine/docs/research/providers/acp/...` daemon 03 doc.
 12. **Skill reads previously returned `[object Object]`** — fixed in issue #6020 (June 30, 2026). Skill reads via the client-side `fs/read_text_file` now return readable text.
 13. **Long-session memory loss** — fixed in issue #5968 (June 29, 2026). Long ACP sessions no longer report empty auto-memory at the end.
 14. **Loop prevention on invalid tool params** — fixed in issue #6075 (June 30, 2026). The agent no longer loops indefinitely on repeated invalid tool parameters.
@@ -652,7 +652,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For HTTP transport (the `qwen serve` daemon's `/acp` route), use `agent-client-protocol-http` instead of stdio. See the `claudine/docs/research/acp/...` daemon 03 doc for the HTTP envelope.
+For HTTP transport (the `qwen serve` daemon's `/acp` route), use `agent-client-protocol-http` instead of stdio. See the `claudine/docs/research/providers/acp/...` daemon 03 doc for the HTTP envelope.
 
 ## Rust Reverse Request Handling
 

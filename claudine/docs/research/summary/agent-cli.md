@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: binary names and aliases per OS, install methods and whether they auto-update, version discovery, documentation surfaces, and notable differences in switch inventories
   - close with a point of view on which of these facts are stable enough to compile into Claudine's provider catalog versus which drift too fast
 
-  As background material we have agent-cli research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/agent-cli/*.md`.
+  As background material we have agent-cli research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/agent-cli/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

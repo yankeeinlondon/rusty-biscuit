@@ -9,7 +9,7 @@ use super::{PromptDelivery, WrapperProfile, has_flag, option_value};
 use crate::commands::wrap::exec::control::{FallbackLaunch, StdioControl};
 use crate::commands::wrap::exec::pi_rpc::PiRpcSession;
 
-/// Research execution-interface ids (`docs/research/non-interactive-sessions/pi.md`)
+/// Research execution-interface ids (`docs/research/providers/non-interactive-sessions/pi.md`)
 /// the wrapper implements, and the `--mode` value each launches.
 const RPC_INTERFACE: &str = "rpc";
 const JSON_INTERFACE: &str = "json";

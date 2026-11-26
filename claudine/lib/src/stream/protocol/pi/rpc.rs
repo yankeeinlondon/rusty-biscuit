@@ -9,7 +9,7 @@
 //! reader keeps the last value as `serde_json` does; Pi's `JSON.stringify`
 //! never repeats one.
 //!
-//! Protocol reference: `claudine/docs/research/non-interactive-sessions/pi.md`
+//! Protocol reference: `claudine/docs/research/providers/non-interactive-sessions/pi.md`
 //! and `claudine/docs/topics/pi-rpc.md`.
 
 use serde_json::{Map, Value};

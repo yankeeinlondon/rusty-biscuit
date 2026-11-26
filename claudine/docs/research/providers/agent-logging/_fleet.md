@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/agent-logging/_research.md"
+          research_prompt: "@claudine/docs/research/providers/agent-logging/_research.md"
 agent: opencode
 model: zai-coding-plan/glm-5.2
 ---

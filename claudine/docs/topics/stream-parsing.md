@@ -9,13 +9,13 @@ Each provider's wire format is modelled by a strongly typed, serde-derived event
 
 We have done deep research on the JSON streaming data that each of CLI Agents reports:
 
-- [claude](claudine/docs/research/non-interactive-sessions/claude.md)
-- [codex](claudine/docs/research/non-interactive-sessions/codex.md)
-- [gemini](claudine/docs/research/non-interactive-sessions/gemini.md)
-- [kimi](claudine/docs/research/non-interactive-sessions/kimi.md)
-- [opencode](claudine/docs/research/non-interactive-sessions/opencode.md)
-- [qwen](claudine/docs/research/non-interactive-sessions/qwen.md)
-- [goose](claudine/docs/research/non-interactive-sessions/goose.md)
+- [claude](claudine/docs/research/providers/non-interactive-sessions/claude.md)
+- [codex](claudine/docs/research/providers/non-interactive-sessions/codex.md)
+- [gemini](claudine/docs/research/providers/non-interactive-sessions/gemini.md)
+- [kimi](claudine/docs/research/providers/non-interactive-sessions/kimi.md)
+- [opencode](claudine/docs/research/providers/non-interactive-sessions/opencode.md)
+- [qwen](claudine/docs/research/providers/non-interactive-sessions/qwen.md)
+- [goose](claudine/docs/research/providers/non-interactive-sessions/goose.md)
 
 ## Streaming Schemas
 

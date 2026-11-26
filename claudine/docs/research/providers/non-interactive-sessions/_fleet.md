@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/non-interactive-sessions/_research.md"
+          research_prompt: "@claudine/docs/research/providers/non-interactive-sessions/_research.md"
 agent: codex
 model: gpt-5.6-sol
 ---

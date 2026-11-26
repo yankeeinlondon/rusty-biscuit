@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/steering/_research.md"
+          research_prompt: "@claudine/docs/research/providers/steering/_research.md"
 agent: codex
 model: gpt-5.6-sol
 ---

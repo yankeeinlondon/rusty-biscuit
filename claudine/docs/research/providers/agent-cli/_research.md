@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/agent-cli/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/agent-cli/{{seq.file}}"
 topic: Agent CLI
 # Research rotates over three researchers by roster position. The order is
 # chosen so that no agent researches its own provider. This is the only place
@@ -73,7 +73,7 @@ success:
     # The relations script also runs `claudine-gen validate`, which owns
     # the relations between switch records.
     - set:
-          relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/agent-cli/_relations.py' '{{file}}')::result"
+          relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/providers/agent-cli/_relations.py' '{{file}}')::result"
     - when: "!relations.ok"
       then:
           - warn: "{{topic}} research for **{{seq.name}}** breaks a relation its contract requires"
@@ -159,7 +159,7 @@ records. Run both yourself before you finish:
 
 ```sh
 md schema validate '{{file}}' --disable schema-triggers
-python3 '{{ctx.repo_root}}/claudine/docs/research/agent-cli/_relations.py' '{{file}}'
+python3 '{{ctx.repo_root}}/claudine/docs/research/providers/agent-cli/_relations.py' '{{file}}'
 ```
 
 - Set `$schema: ./_schema.yaml` and `schema_revision: 2`.

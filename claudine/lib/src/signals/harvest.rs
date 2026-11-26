@@ -11,9 +11,9 @@
 //! at end of run via [`flush_hub`].
 //!
 //! Harvested files are candidate evidence only. Promotion into
-//! `docs/research/signals/fixtures/` is a HUMAN-REVIEWED process step: a
+//! `docs/research/providers/signals/fixtures/` is a HUMAN-REVIEWED process step: a
 //! promoted fixture enters `provenance.yaml` as provenance class `capture`
-//! (see `docs/research/signals/fixtures/README.md`, curation rules 4-5).
+//! (see `docs/research/providers/signals/fixtures/README.md`, curation rules 4-5).
 //! The promotion is a documented process fact — never automated.
 
 use std::path::{Path, PathBuf};

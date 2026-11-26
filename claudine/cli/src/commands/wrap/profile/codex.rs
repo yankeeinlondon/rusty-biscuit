@@ -14,7 +14,7 @@ use crate::commands::wrap::exec::control::StdioControl;
 use std::io::Write;
 use std::sync::Arc;
 
-/// Research execution-interface id (`docs/research/non-interactive-sessions/codex.md`)
+/// Research execution-interface id (`docs/research/providers/non-interactive-sessions/codex.md`)
 /// of the managed launch the wrapper implements.
 const APP_SERVER_INTERFACE: &str = "app-server";
 

@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: default offerings and the exact strings they accept, selection mechanisms and their precedence, rolling aliases versus pinned ids, and dynamic listing behavior
   - close with a point of view on how these offerings map onto Claudine's model catalog and where the mapping is lossy or many-to-many
 
-  As background material we have agent-models research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/agent-models/*.md`.
+  As background material we have agent-models research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/agent-models/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

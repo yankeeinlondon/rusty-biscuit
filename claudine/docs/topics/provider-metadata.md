@@ -133,7 +133,7 @@ It comes from the `agent-cli` research topic and holds one of two things:
 A research record and what it generates:
 
 ```yaml
-# docs/research/agent-cli/codex.md (frontmatter, contract revision 2)
+# docs/research/providers/agent-cli/codex.md (frontmatter, contract revision 2)
 schema_revision: 2
 cli_switches:
   - flag: --config
@@ -159,7 +159,7 @@ CliSwitch {
 }
 ```
 
-The record type is `cli_switch` in `docs/research/agent-cli/_types.yaml`, which
+The record type is `cli_switch` in `docs/research/providers/agent-cli/_types.yaml`, which
 describes every field. Generation fails, rather than skipping a record, when:
 
 - a field the record needs is missing, `null`, or the wrong type, or one list
@@ -209,7 +209,7 @@ value's meaning; `—` means the shape cannot occur (a scalar has no elements).
 `aliases: ["-c"] x`; it and a repeated key fail when the file is read, before
 any rule runs.
 
-Research document (`docs/research/agent-cli/<slug>.md` frontmatter):
+Research document (`docs/research/providers/agent-cli/<slug>.md` frontmatter):
 
 | Field | Absent | `null` | Wrong type | One bad element | Every element bad | Empty | Repeated key | Trailing |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

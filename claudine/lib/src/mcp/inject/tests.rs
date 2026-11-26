@@ -48,7 +48,7 @@ fn opencode_injects_env_var() {
     assert_eq!(result.servers_injected, vec!["calendar"]);
 }
 
-/// Pins the researched Kilo shape (`docs/research/mcp/kilo.md` →
+/// Pins the researched Kilo shape (`docs/research/providers/mcp/kilo.md` →
 /// `server_shape`) and that per-server overrides come from the `kilo` slug
 /// only.
 #[test]

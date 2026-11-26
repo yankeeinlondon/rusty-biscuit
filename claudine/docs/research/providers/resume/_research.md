@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/resume/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/resume/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local session files under {{seq.user_dir}} when they exist.
 grant:

@@ -27,7 +27,7 @@ pi --no-approve --mode rpc [your model, system-prompt, and pass-through flags]
   Context files load either way.
 
 Pi's research selects RPC as its preferred interface and its JSON stream as
-the fallback (`docs/research/non-interactive-sessions/pi.md`); the wrapper
+the fallback (`docs/research/providers/non-interactive-sessions/pi.md`); the wrapper
 reads that selection from the generated steering catalog.
 
 ## A run, start to finish

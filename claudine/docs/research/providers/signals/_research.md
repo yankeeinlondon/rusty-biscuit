@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/signals/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/signals/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local stores and source repositories when researching signal surfaces.
 grant:
@@ -107,7 +107,7 @@ For each signal that the provider emits, produce:
 
 - One or more `records` rows (multiple rows when version drift splits the detection pattern)
 - Zero or more `extractions` rows (declarative records only; bespoke extraction stays in code)
-- An `evidence` fixture under `claudine/docs/research/signals/fixtures/<provider-slug>/` proving the record
+- An `evidence` fixture under `claudine/docs/research/providers/signals/fixtures/<provider-slug>/` proving the record
 
 ### Unanswered ≠ Omitted
 
@@ -115,7 +115,7 @@ If research cannot establish a unit, zone, or vocabulary member, it must emit `u
 
 ### Evidence Fixtures (Scrubbed Corpus)
 
-Every record MUST cite an `evidence` fixture under `claudine/docs/research/signals/fixtures/<provider-slug>/`. A seeded corpus already exists there (being added in a parallel change) — reuse seeded fixtures where they prove the record; capture NEW fixtures when a record has no seeded evidence.
+Every record MUST cite an `evidence` fixture under `claudine/docs/research/providers/signals/fixtures/<provider-slug>/`. A seeded corpus already exists there (being added in a parallel change) — reuse seeded fixtures where they prove the record; capture NEW fixtures when a record has no seeded evidence.
 
 **Evidence ladder (in strict preference order):**
 

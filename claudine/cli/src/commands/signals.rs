@@ -2,7 +2,7 @@
 //! replay the research corpus's evidence fixtures through the production
 //! engine (`signals check`).
 //!
-//! Check posture is dev/CI: it reads `docs/research/signals/` from a
+//! Check posture is dev/CI: it reads `docs/research/providers/signals/` from a
 //! rusty-biscuit checkout (mirroring `claudine-gen`'s area resolution) and
 //! fails when the corpus and the committed tables drift, when evidence is
 //! missing (the existence check the sidecar schema defers here), when a
@@ -165,7 +165,7 @@ struct OverlapExclusion {
 
 fn run_check(args: CheckArgs) -> Result<()> {
     let area = resolve_area()?;
-    let signals_dir = area.join("docs/research/signals");
+    let signals_dir = area.join("docs/research/providers/signals");
     let fixtures_dir = signals_dir.join("fixtures");
     let exclusions = load_exclusions(&signals_dir.join(OVERLAP_EXCLUSIONS_FILE))?;
 
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn fixture_key_normalizes_document_relative_evidence() {
-        let doc = Path::new("docs/research/signals/opencode.md");
+        let doc = Path::new("docs/research/providers/signals/opencode.md");
         assert_eq!(
             fixture_key(doc, "r", "./fixtures/opencode/stream-start-1178.txt").unwrap(),
             "opencode/stream-start-1178.txt"
@@ -821,7 +821,7 @@ mod tests {
         // failures). The two former app-log records were moved to `gaps`, so
         // the compiled table must carry no `app_log`-source record.
         let area = resolve_area().expect("rusty-biscuit checkout");
-        let signals_dir = area.join("docs/research/signals");
+        let signals_dir = area.join("docs/research/providers/signals");
         let fixtures_dir = signals_dir.join("fixtures");
         let table = all_detection_tables()
             .iter()

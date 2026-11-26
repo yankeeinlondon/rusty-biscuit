@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/agent-cli/_research.md"
+          research_prompt: "@claudine/docs/research/providers/agent-cli/_research.md"
 ---
 
 # Agent Cli Research Fleet

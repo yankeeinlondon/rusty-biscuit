@@ -528,7 +528,7 @@ fn unexpected_question_current_nested_shape_emits_warning() {
     // Wire >= 1.4 sample from the signals corpus (kimi.md record
     // `stream-human_input_requested-question_request`).
     const QUESTION_LINE: &str = include_str!(
-        "../../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        "../../../../../docs/research/providers/signals/fixtures/kimi/wire-question-request.jsonl"
     );
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
@@ -607,7 +607,7 @@ fn prompt_max_steps_response_surfaces_steps() {
     // Wire sample from the signals corpus (kimi.md record
     // `stream-turn_limit_reached-max_steps`).
     const MAX_STEPS_LINE: &str = include_str!(
-        "../../../../../docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
+        "../../../../../docs/research/providers/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
     );
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);

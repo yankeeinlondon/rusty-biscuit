@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/mcp/_research.md"
+          research_prompt: "@claudine/docs/research/providers/mcp/_research.md"
 agent: opencode
 model: kimi-for-coding/k2p7
 ---

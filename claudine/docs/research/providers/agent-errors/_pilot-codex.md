@@ -9,7 +9,7 @@ and Ken's accepted retrospective checkpoint.
 The live roster sequence ran on 2026-07-14 with:
 
 ```sh
-claudine sequence docs/research/agent-errors/_fleet.md -y --codex \
+claudine sequence docs/research/providers/agent-errors/_fleet.md -y --codex \
   -c 'model_reasoning_effort="low"'
 ```
 

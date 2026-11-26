@@ -16,7 +16,7 @@ prompt: |-
 
   Standing correction (added 2026-09-07 by the `2026-08-31-silent-success-and-startup-stall` fix; keep it satisfied on every regeneration): never state or imply that a provider's terminal event — Claude `result`, Codex `turn.completed`, Pi `agent_end`, and the rest — is by itself proof of a successful run. A terminal event ends a turn. Success additionally requires the event's own error verdict to be clean *and* every sub-agent task the stream started to have reached a terminal observation. Claude Code can force-stop a background task, report it with `status: "stopped"`, finish the parent turn, and still exit `0`; Claudine now classifies that as `AgentFailure`. The ratified contract is `claudine/docs/topics/non-interactive-sessions.md` → "Exit Code 0 Is Not Success" — treat it as authoritative over anything the per-provider research documents imply about exit semantics.
 
-  As background material we have non-interactive-sessions research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/non-interactive-sessions/*.md`.
+  As background material we have non-interactive-sessions research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/non-interactive-sessions/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

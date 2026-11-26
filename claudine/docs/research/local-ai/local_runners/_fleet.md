@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/research/_local-runner-tasks.yaml"
 initialize:
     - set:
-          research_prompt: "@claudine/docs/research/local_runners/_research.md"
+          research_prompt: "@claudine/docs/research/local-ai/local_runners/_research.md"
 agent: opencode
 model: kimi-for-coding/k2p7
 ---

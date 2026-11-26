@@ -28,7 +28,7 @@
 # member lists — amend the canonical Rust definitions and regenerate.
 #
 # Evidence corpus: every record MUST cite an `evidence` fixture under
-# `claudine/docs/research/signals/fixtures/<provider-slug>/`. A seeded corpus
+# `claudine/docs/research/providers/signals/fixtures/<provider-slug>/`. A seeded corpus
 # already exists there (being added in a parallel change) — reuse seeded
 # fixtures where they prove the record; capture NEW fixtures (scrubbed: no
 # session IDs, no real home paths, no user content beyond what the signal

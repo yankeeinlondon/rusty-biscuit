@@ -4,16 +4,16 @@ use super::super::{SignalEngine, SignalHub, detection_table};
 use super::*;
 
 const CLAUDE_BILLING: &str = include_str!(
-    "../../../../docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
+    "../../../../docs/research/providers/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
 );
 const GOOSE_ERROR_THEN_COMPLETE: &str = include_str!(
-    "../../../../docs/research/signals/fixtures/goose/stream-error-then-complete.jsonl"
+    "../../../../docs/research/providers/signals/fixtures/goose/stream-error-then-complete.jsonl"
 );
 const PI_RETRY_EXHAUSTED: &str = include_str!(
-    "../../../../docs/research/signals/fixtures/pi/stream-auto-retry-exhausted.jsonl"
+    "../../../../docs/research/providers/signals/fixtures/pi/stream-auto-retry-exhausted.jsonl"
 );
 const QWEN_LOOP: &str =
-    include_str!("../../../../docs/research/signals/fixtures/qwen/result-loop-detected.jsonl");
+    include_str!("../../../../docs/research/providers/signals/fixtures/qwen/result-loop-detected.jsonl");
 
 fn payloads(fixture: &str) -> Vec<Value> {
     fixture
@@ -133,7 +133,7 @@ fn qwen_loop_detected_fires_on_evidence_with_zeroed_counts() {
 /// enum (the single source) and the corpus cannot drift.
 #[test]
 fn qwen_loop_type_enum_mirrors_the_research_vocabulary() {
-    const QWEN_DOC: &str = include_str!("../../../../docs/research/signals/qwen.md");
+    const QWEN_DOC: &str = include_str!("../../../../docs/research/providers/signals/qwen.md");
     for token in QwenLoopType::iter().map(<&str>::from) {
         assert!(
             QWEN_DOC.contains(token),

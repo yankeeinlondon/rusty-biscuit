@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/skills/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/skills/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local skill folders under {{seq.user_dir}} when they exist.
 grant:

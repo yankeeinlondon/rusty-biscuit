@@ -85,7 +85,7 @@ impl McpInjector for OpenCodeInjector {
 }
 
 /// Kilo is an OpenCode fork whose `KILO_CONFIG_CONTENT` accepts the same
-/// `mcp` map (`docs/research/mcp/kilo.md` → `server_shape`,
+/// `mcp` map (`docs/research/providers/mcp/kilo.md` → `server_shape`,
 /// `runtime_injection`).
 pub struct KiloInjector;
 

@@ -96,4 +96,4 @@ Claude Code: `ANTHROPIC_BASE_URL=http://localhost:1234 ANTHROPIC_AUTH_TOKEN=lmst
 
 ## Source
 
-`claudine/docs/research/local_runners/lmstudio.md`
+`claudine/docs/research/local-ai/local_runners/lmstudio.md`

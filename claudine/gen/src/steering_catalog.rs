@@ -7,10 +7,10 @@
 //!
 //! ## Source ownership
 //!
-//! - `docs/research/steering/<slug>.md` owns discovery methods, mechanisms,
+//! - `docs/research/providers/steering/<slug>.md` owns discovery methods, mechanisms,
 //!   cases, access, receipts, and live verification (with typed assertions).
 //! - `docs/providers.yaml` owns the roster order listings sort by.
-//! - `docs/research/non-interactive-sessions/<slug>.md` owns execution
+//! - `docs/research/providers/non-interactive-sessions/<slug>.md` owns execution
 //!   interfaces and the preferred/fallback selection.
 //! - [`ACTIVATION_POLICY`] owns reviewed adapter bindings, activation grants,
 //!   and profile blocks. It is hand-reviewed policy, never derived from

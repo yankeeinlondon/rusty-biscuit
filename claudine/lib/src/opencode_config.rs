@@ -62,7 +62,7 @@ pub fn yolo_permission_block() -> Value {
 pub const OPENCODE_CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
 
 /// Kilo's inline config variable. Kilo is an OpenCode fork and reads the same
-/// JSON shape from it (`docs/research/mcp/kilo.md` → `runtime_injection`).
+/// JSON shape from it (`docs/research/providers/mcp/kilo.md` → `runtime_injection`).
 pub const KILO_CONFIG_CONTENT: &str = "KILO_CONFIG_CONTENT";
 
 /// The inline config variables a Claudine producer merges into rather than

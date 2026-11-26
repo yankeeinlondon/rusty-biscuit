@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: skill support level, on-disk format and required metadata keys, user/repo scopes and paths, and activation mechanics
   - close with a point of view on the implications for Claudine's linking strategy and portability classification
 
-  As background material we have skills research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/skills/*.md`.
+  As background material we have skills research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/skills/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

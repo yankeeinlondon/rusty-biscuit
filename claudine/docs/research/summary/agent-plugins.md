@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how providers differ: whether plugins exist at all, their format and manifest shape, what asset types a plugin can carry, install/discovery mechanisms, and scoping
   - close with a point of view on how plugins intersect Claudine's linking strategy and MCP catalog, and whether plugins are a distribution channel Claudine should exploit
 
-  As background material we have plugins research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/plugins/*.md`.
+  As background material we have plugins research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/plugins/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

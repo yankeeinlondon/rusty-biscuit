@@ -43,14 +43,14 @@ globally blacklisted `cargo` executable directly.
 
 Inspect the compiled signal-detection tables. Bare `claudine signals` prints a per-provider summary (record/extraction counts, bespoke count, per-source breakdown) for all nine corpora, including the dormant kilo/pi tables.
 
-`claudine signals check` is dev/CI-facing and requires a rusty-biscuit checkout: it replays every detection record's evidence fixture from `docs/research/signals/` through the production engine, verifying evidence existence, positive firing, extraction resolution, and per-source-group overlap (benign overlaps are declared in `docs/research/signals/_overlap-exclusions.yaml` and reported as INFO lines). Bespoke records report as skipped until their E5 emitters land.
+`claudine signals check` is dev/CI-facing and requires a rusty-biscuit checkout: it replays every detection record's evidence fixture from `docs/research/providers/signals/` through the production engine, verifying evidence existence, positive firing, extraction resolution, and per-source-group overlap (benign overlaps are declared in `docs/research/providers/signals/_overlap-exclusions.yaml` and reported as INFO lines). Bespoke records report as skipped until their E5 emitters land.
 
 | Flag | Description |
 |------|-------------|
 | `--provider <slug>` | Check a single provider corpus |
 | `--json` | Emit the machine-readable check report |
 
-**Unmatched-event harvest (opt-in).** With `harvest_unmatched: true` in `~/.claudine/config.json` (or `CLAUDINE_HARVEST=1`; `0`/`false` forces off, env wins over config), wrapped runs append error/warning-class payloads that fired no detection record to `~/.claudine/harvest/<provider>/<YYYY-MM-DD>.jsonl` as candidate detection evidence. Payloads are scrubbed (API-key/token shapes, key-named secrets, home paths, emails) before they are buffered, and the tree is retention-capped (30 days / 50 MiB, oldest first). Promotion into `docs/research/signals/fixtures/` remains human-reviewed (provenance class `capture`).
+**Unmatched-event harvest (opt-in).** With `harvest_unmatched: true` in `~/.claudine/config.json` (or `CLAUDINE_HARVEST=1`; `0`/`false` forces off, env wins over config), wrapped runs append error/warning-class payloads that fired no detection record to `~/.claudine/harvest/<provider>/<YYYY-MM-DD>.jsonl` as candidate detection evidence. Payloads are scrubbed (API-key/token shapes, key-named secrets, home paths, emails) before they are buffered, and the tree is retention-capped (30 days / 50 MiB, oldest first). Promotion into `docs/research/providers/signals/fixtures/` remains human-reviewed (provenance class `capture`).
 
 ### `claudine sync [flags]`
 

@@ -158,7 +158,7 @@ resource_support:
       required:
       - name
       - description
-      source_doc: claudine/docs/research/skills/antigravity.md
+      source_doc: claudine/docs/research/providers/skills/antigravity.md
     repo_path: .agents/skills
     user_path: ~/.gemini/config/skills
 memory_files:
@@ -234,10 +234,10 @@ known_gaps:
   tracker: claudine/docs/research/hooks/antigravity.md
 - area: other
   note: System-prompt append is only possible via workspace rule files (AGENTS.md / .agents/rules); agy has no system-prompt CLI flag, so Claudine reports it unsupported for now.
-  tracker: claudine/docs/research/system-prompt/antigravity.md
+  tracker: claudine/docs/research/providers/system-prompt/antigravity.md
 - area: mcp
   note: agy reads shared MCP config files but exposes no non-interactive add/list/remove command and no safe runtime-injection surface (changing HOME would break keyring auth); MCP is not wired.
-  tracker: claudine/docs/research/mcp/antigravity.md
+  tracker: claudine/docs/research/providers/mcp/antigravity.md
 acp:
   client_supported: false
   events_via_acp: []

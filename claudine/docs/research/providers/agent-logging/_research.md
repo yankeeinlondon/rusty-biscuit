@@ -1,5 +1,5 @@
 ---
-file: "{{ctx.repo_root}}/claudine/docs/research/agent-logging/{{seq.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/providers/agent-logging/{{seq.file}}"
 # NOTE: `grant:` is not implemented yet — until it is, run this sequence with
 # `--yolo` so the provider can Read files under {{seq.user_dir}}; without it
 # OpenCode's external_directory permission is auto-rejected in non-interactive

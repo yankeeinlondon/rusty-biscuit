@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how each provider supports (or doesn't support) system prompt customization: native mechanisms, append vs replace capability, delivery method, and notable risks or limitations
   - close with a point of view on how well Claudine's uniform append/replace interface maps onto each provider
 
-  As background material we have system-prompt research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/system-prompt/*.md`.
+  As background material we have system-prompt research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/system-prompt/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

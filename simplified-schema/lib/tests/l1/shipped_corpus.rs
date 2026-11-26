@@ -256,16 +256,16 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
 fn consumer_sidecars_resolve_from_supplied_sources() {
     const DOCUMENTS: &[EmbeddedDocument<'static>] = &[
         EmbeddedDocument {
-            path: "claudine/docs/research/model-config/_schema.yaml",
-            text: include_str!("../../../../claudine/docs/research/model-config/_schema.yaml"),
+            path: "claudine/docs/research/providers/model-config/_schema.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/model-config/_schema.yaml"),
         },
         EmbeddedDocument {
-            path: "claudine/docs/research/agent-cli/_schema.yaml",
-            text: include_str!("../../../../claudine/docs/research/agent-cli/_schema.yaml"),
+            path: "claudine/docs/research/providers/agent-cli/_schema.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/agent-cli/_schema.yaml"),
         },
         EmbeddedDocument {
-            path: "claudine/docs/research/agent-cli/_types.yaml",
-            text: include_str!("../../../../claudine/docs/research/agent-cli/_types.yaml"),
+            path: "claudine/docs/research/providers/agent-cli/_types.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/agent-cli/_types.yaml"),
         },
         EmbeddedDocument {
             path: "claudine/docs/research/_types.yaml",
@@ -287,8 +287,8 @@ fn consumer_sidecars_resolve_from_supplied_sources() {
     assert_parses_passively(DOCUMENTS);
 
     for path in [
-        "claudine/docs/research/model-config/_schema.yaml",
-        "claudine/docs/research/agent-cli/_schema.yaml",
+        "claudine/docs/research/providers/model-config/_schema.yaml",
+        "claudine/docs/research/providers/agent-cli/_schema.yaml",
         "messenger/docs/research/platforms/_schema.yaml",
         "messenger/docs/research/implementation/_schema.yaml",
     ] {

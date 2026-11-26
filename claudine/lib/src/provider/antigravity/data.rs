@@ -132,12 +132,12 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
         KnownGap {
             area: KnownGapArea::Other,
             note: "System-prompt append is only possible via workspace rule files (AGENTS.md / .agents/rules); agy has no system-prompt CLI flag, so Claudine reports it unsupported for now.",
-            tracker: Some("claudine/docs/research/system-prompt/antigravity.md"),
+            tracker: Some("claudine/docs/research/providers/system-prompt/antigravity.md"),
         },
         KnownGap {
             area: KnownGapArea::Mcp,
             note: "agy reads shared MCP config files but exposes no non-interactive add/list/remove command and no safe runtime-injection surface (changing HOME would break keyring auth); MCP is not wired.",
-            tracker: Some("claudine/docs/research/mcp/antigravity.md"),
+            tracker: Some("claudine/docs/research/providers/mcp/antigravity.md"),
         },
     ],
     acp: AcpSupport {
@@ -784,7 +784,7 @@ fn build_resource_support() -> ProviderCapabilities {
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],
                 &[],
-                "claudine/docs/research/skills/antigravity.md",
+                "claudine/docs/research/providers/skills/antigravity.md",
             )),
         },
         commands: ResourceSupport {
