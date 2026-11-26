@@ -58,6 +58,18 @@ schema, and a `schema_file` is added when a schema file declares the default: a
 referenced schema file, a trigger file, or the file a `Name@file` import read the
 type from); the key is absent when there are none. The file itself is never changed.
 
+A problem whose fix the schema proves also carries a `hint` (absent
+otherwise), and the formatted output shows it on a `hint:` line under the
+problem. A key the schema declares `removed(<replacement>)` is a `removed`
+problem whose hint is the replacement; an unknown key near one declared key
+gets `` did you mean `name`? ``:
+
+```json
+{ "kind": "removed", "property": "fail_fast", "path": "", "line": 3, "column": 1,
+  "message": "key `fail_fast` has been removed",
+  "hint": "set fail_fast on a group object", "arm_index": null, "description": null }
+```
+
 A default is still checked with the rest of the value. When it fails a check that
 needs the file system, such as `doc: file(required; eager; default(./note.md))` with
 no `note.md`, the problem is the default's, not the document's: its record carries

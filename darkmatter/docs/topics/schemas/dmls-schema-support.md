@@ -458,7 +458,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.constraint`                                         | a non-type constraint failed (range, length, pattern, enum, …)                                        |
 | `dm.schema.missing_required`                                   | a required key is absent — **strict mode only**                                                       |
 | `dm.schema.unknown_key`                                        | a key the schema does not declare is present                                                          |
-| `dm.schema.deprecated_key`                                     | a deprecated key is present                                                                           |
+| `dm.schema.removed_key`                                        | a key declared `removed(<replacement>)` is present; the message carries the replacement                |
+| `dm.schema.near_miss_key`                                      | **warning**: an undeclared key on an object that opts in with `$advise-unknown-keys` is near one declared key |
 | `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse or resolve (a well-formed reference to a file that does not exist is not reported in the editor; `md` still rejects a missing `file(eager)` target) |
 | `dm.schema.invalid_suggestion`                                 | a `suggest(...)` candidate is invalid metadata for its target schema                                  |
 | `dm.schema.missing_simplified_envelope`                        | reserved: a referenced bare property map lacking an envelope; the loader now rejects such a file instead |

@@ -16,6 +16,7 @@ mod host_fixtures;
 
 mod bench_index;
 mod claudine_editor_parity;
+mod claudine_schema_key_parity;
 mod claudine_host;
 mod collection_editor;
 mod config_contracts;
@@ -76,6 +77,7 @@ mod registry_preparation;
 mod repository_contexts;
 mod required_defaults;
 mod review_cycle_schema;
+mod schema_key_diagnostics;
 mod schema_reference_parity;
 mod schema_reference_sessions;
 mod schema_roots_parity;

@@ -85,7 +85,7 @@ fn verdict_diagnostics(
     let locations = data_locations(problems, &view.origins);
     for (problem, location) in problems.iter().zip(locations) {
         let (code_value, severity) = observed_code(problem.code, ctx.config.schema.strict);
-        let mut found = diagnostic(range, severity, source::SCHEMA, code_value, problem.message.clone());
+        let mut found = diagnostic(range, severity, source::SCHEMA, code_value, super::frontmatter::problem_message(problem));
         let mut related = schema_origin_related(ctx, bundle, problem).unwrap_or_default();
         let mut data = schema_problem_data(problem);
         if let Some(location) = location {
@@ -113,6 +113,8 @@ fn observed_code(problem: ValidationProblemCode, strict: bool) -> (&'static str,
         }
         ValidationProblemCode::InvalidFileReference => (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR),
         ValidationProblemCode::KindCheck => (code::SCHEMA_KIND_CHECK, DiagnosticSeverity::ERROR),
+        ValidationProblemCode::RemovedKey => (code::SCHEMA_REMOVED_KEY, DiagnosticSeverity::ERROR),
+        ValidationProblemCode::NearMissKey => (code::SCHEMA_NEAR_MISS_KEY, DiagnosticSeverity::WARNING),
     }
 }
 

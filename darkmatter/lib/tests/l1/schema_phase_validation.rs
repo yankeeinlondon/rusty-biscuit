@@ -594,9 +594,12 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
 
             for (name, value) in body {
                 let Some(name) = name.as_str() else { continue };
-                // Trigger envelopes and object-arity metadata are not property
-                // definitions.
-                if name == "$constraints" {
+                // Trigger envelopes, object-arity metadata, composition, and
+                // key declarations (advice opt-in, `removed(…)`) belong to the
+                // object, not to a property definition.
+                if matches!(name, "$constraints" | "$extends" | "$advise-unknown-keys")
+                    || value.as_str().is_some_and(|text| text.starts_with("removed("))
+                {
                     continue;
                 }
                 parse_property_definition(name, value).unwrap_or_else(|error| {

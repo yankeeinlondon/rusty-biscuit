@@ -277,8 +277,9 @@ fn sequence_documents_are_typed_by_the_sequence_trigger() {
     assert!(found[1].is_empty(), "step data: {:?}", found[1]);
 }
 
-/// A group's removed `execution` key is reported at the group, naming the
-/// key, and a sequence document's root `fail_fast` at its own path.
+/// A group's removed `execution` key is reported at the group, and a
+/// sequence document's root `fail_fast` at the root, each naming the key and
+/// its replacement.
 #[test]
 fn removed_sequence_keys_are_reported_at_their_paths() {
     let workspace = LspWorkspace::new();
@@ -294,7 +295,12 @@ fn removed_sequence_keys_are_reported_at_their_paths() {
         "expected a diagnostic at /sequence/0/group naming execution: {:?}",
         found[0]
     );
-    assert!(found[1].iter().any(|(path, _)| path == "/fail_fast"), "expected a diagnostic at /fail_fast: {:?}", found[1]);
+    assert!(
+        found[1].iter().any(|(path, message)| path.is_empty()
+            && message == "key `fail_fast` has been removed; set fail_fast on a group object"),
+        "expected the root's removed `fail_fast`: {:?}",
+        found[1]
+    );
 }
 
 /// A native number or boolean `sequence` is reported at `/sequence`, never

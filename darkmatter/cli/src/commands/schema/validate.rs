@@ -1129,6 +1129,12 @@ fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: 
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
         push_row(out, &Prose::new(sub_line).render(terminal));
     }
+    // What to do instead, when the schema proves it: a removed key's
+    // replacement, or the declared key an unknown key resembles.
+    if let Some(hint) = problem.hint.as_deref() {
+        let sub_line = format!("        <dim>hint:</dim> {}", Prose::escape_text_outside_code_spans(hint));
+        push_row(out, &Prose::new(sub_line).render(terminal));
+    }
     // The stable class of a failed `file` value (R5), on its own sub-line.
     if let Some(reference) = problem.file_reference.as_ref() {
         let sub_line = format!(
@@ -1218,6 +1224,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     });
                     if let Some(applied) = &p.default {
                         problem["default"] = applied_default_record(applied);
+                    }
+                    // Present only when the schema proves one, so a problem
+                    // without a hint keeps its existing record.
+                    if let Some(hint) = &p.hint {
+                        problem["hint"] = hint.as_str().into();
                     }
                     problem
                 })

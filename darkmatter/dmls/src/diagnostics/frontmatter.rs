@@ -617,8 +617,8 @@ pub(crate) fn schema_problem_diagnostics(
         out.push(specialized);
     }
 
-    for problem in &report.problems {
-        if specialized_paths.contains(&problem.path) {
+    for problem in report.problems.iter().chain(&report.key_advice) {
+        if specialized_paths.contains(&problem.path) && problem.code != ValidationProblemCode::NearMissKey {
             continue;
         }
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict, grading) else {
@@ -661,7 +661,7 @@ pub(crate) fn schema_problem_diagnostics(
             severity,
             source::SCHEMA,
             code_value,
-            problem.message.clone(),
+            problem_message(problem),
         );
         diagnostic.related_information = schema_origin_related(ctx, bundle, problem);
         diagnostic.data = Some(schema_problem_data(problem));
@@ -688,6 +688,9 @@ pub(crate) fn schema_problem_diagnostics(
 pub(super) fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(hint) = &problem.hint {
+        data.insert("hint".to_string(), hint.clone().into());
+    }
     if let Some(applied) = &problem.default {
         data.insert(
             "schema_default".to_string(),
@@ -970,7 +973,7 @@ fn problem_range(
         ValidationProblemCode::MissingRequired => ast.parent_mapping_range(&problem.path),
         // The offending key node, recovered from `offending_property` (the
         // failure's `path` points at the parent object).
-        ValidationProblemCode::UnknownKey => problem
+        ValidationProblemCode::UnknownKey | ValidationProblemCode::RemovedKey | ValidationProblemCode::NearMissKey => problem
             .offending_property
             .as_deref()
             .and_then(|key| ast.key_span_for(&problem.path, key))
@@ -1875,7 +1878,20 @@ fn classify(
             (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR)
         }
         ValidationProblemCode::KindCheck => (code::SCHEMA_KIND_CHECK, DiagnosticSeverity::ERROR),
+        // A removed key never works, in any mode or document kind.
+        ValidationProblemCode::RemovedKey => (code::SCHEMA_REMOVED_KEY, DiagnosticSeverity::ERROR),
+        // Advice on legal data: never an error, even in strict mode.
+        ValidationProblemCode::NearMissKey => (code::SCHEMA_NEAR_MISS_KEY, DiagnosticSeverity::WARNING),
     })
+}
+
+/// A schema problem's diagnostic text: its message, then its hint when the
+/// schema proves one (`key `promt` …; did you mean `prompt`?`).
+pub(crate) fn problem_message(problem: &ValidationProblem) -> String {
+    match &problem.hint {
+        Some(hint) => format!("{}; {hint}", problem.message),
+        None => problem.message.clone(),
+    }
 }
 
 /// Builds a diagnostic with a stable source + code.

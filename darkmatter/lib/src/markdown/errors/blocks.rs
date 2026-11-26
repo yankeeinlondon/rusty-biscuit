@@ -1331,6 +1331,7 @@ mod tests {
 
     fn problem_with_description(description: Option<&str>) -> ValidationProblem {
         ValidationProblem {
+            hint: None,
             path: "/title".to_string(),
             message: "expected string".to_string(),
             kind: ValidationProblemKind::Type,

@@ -242,6 +242,24 @@ const EXCEPTIONS: &[Exception] = &[
         Class::YamlSchemaDefinition,
         "the definition of a `kind: sequence` YAML file, applied by `kind`",
     ),
+    exception(
+        "claudine/registration",
+        "task-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: task` YAML file, applied by `kind`",
+    ),
+    exception(
+        "claudine/registration",
+        "group-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: group` YAML file, applied by `kind`",
+    ),
+    exception(
+        "claudine/registration",
+        "group-catalog-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: group-catalog` YAML file, applied by `kind`",
+    ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
         "claudine/docs/schemas",
@@ -332,8 +350,7 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     ("claudine/registration/group.yaml", &["unknown"]),
     ("claudine/registration/loop.yaml", &["unknown"]),
     ("claudine/registration/seq.yaml", &["unknown"]),
-    // Removed root `fail_fast`, and the parser-checked task and step fields.
-    ("claudine/registration/sequence-document.yaml", &["null"]),
+    // The parser-checked task and step fields.
     ("claudine/registration/sequence.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
@@ -541,7 +558,9 @@ fn parse_bodies(document: &YamlValue) -> Result<Vec<PropertyDef>, Vec<String>> {
         for map in mappings {
             for (name, value) in map {
                 let Some(name) = name.as_str() else { continue };
-                if name.starts_with('$') {
+                // A `removed(…)` key declaration belongs to its object, not
+                // to a property definition.
+                if name.starts_with('$') || value.as_str().is_some_and(|text| text.starts_with("removed(")) {
                     continue;
                 }
                 match parse_property_definition(name, value) {

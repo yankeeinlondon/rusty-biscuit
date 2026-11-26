@@ -269,9 +269,12 @@ fn skipped_in_dry_run(error: &MarkdownError) -> bool {
 /// A pre-approved command runs in an ordinary composition and never in a
 /// dry run, wherever it is written: a frontmatter `$( … )` value, a body
 /// `::shell` line, and a transcluded child's frontmatter.
+/// A case's label, its document, and an optional `(name, text)` child file.
+type DryRunCase<'a> = (&'a str, &'a str, Option<(&'a str, &'a str)>);
+
 #[test]
 fn a_dry_run_runs_no_pre_approved_command_in_frontmatter_body_or_a_transcluded_child() {
-    let cases: [(&str, &str, Option<(&str, &str)>); 3] = [
+    let cases: [DryRunCase<'_>; 3] = [
         ("frontmatter", "---\nvalue: $(touch marker-frontmatter)\n---\nbody\n", None),
         ("body", "body\n\n::shell touch marker-body\n", None),
         (

@@ -486,6 +486,7 @@ fn operand_problem(
 ) -> ValidationProblem {
     let instance_path = JsonPointer::parse(&path);
     ValidationProblem {
+        hint: None,
         path,
         message,
         kind,

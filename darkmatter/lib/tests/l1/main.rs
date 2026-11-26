@@ -327,6 +327,7 @@ mod recursive_schema_types;
 mod recursive_schema_validator_probe;
 mod recursive_schema_reporting;
 mod recursive_schema_clean;
+mod schema_key_findings;
 mod recursive_schema_conversion;
 mod recursive_schema_rewrite;
 mod recursive_schema_completion;

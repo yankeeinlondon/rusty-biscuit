@@ -185,6 +185,16 @@ duplicate, reserved, or broken claim is a `KindSelection` error only for a
 document whose `kind` it could affect. A YAML file is never Markdown: a
 fenced `---`…`---` file is two documents and fails to load.
 
+Schema key findings: a `ValidationProblem` may carry `hint` (a removed
+key's replacement or an unknown key's did-you-mean); `ValidationReport::key_advice`
+holds `dm.schema.near_miss_key` advice, located like problems and never part
+of the verdict. Compose reports it as a warning
+(`ComposeWarning::schema_key_advice`, subject `WarningSubject::SchemaKey`,
+record from `report_diagnostics::key_advice_diagnostic`); DMLS chains it
+after `problems` in `diagnostics/frontmatter.rs` and appends the hint to the
+message (`problem_message`); `md schema validate` writes `hint` and a
+`hint:` row. `md clean`'s suggestion uses `simplified_schema::validation::suggest`.
+
 Important contracts:
 
 - A missing key and `null` are the same value. `required` means only "the

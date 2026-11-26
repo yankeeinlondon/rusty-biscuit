@@ -259,8 +259,9 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
 | `dm.schema.constraint` | A non-type constraint failed (range, length, pattern, enum, …). |
 | `dm.schema.missing_required` | A required key is absent. **Strict mode only** in frontmatter; always in a whole YAML document — see [Severity](#severity). |
-| `dm.schema.unknown_key` | A key the schema does not declare is present. |
-| `dm.schema.deprecated_key` | A deprecated key is present. |
+| `dm.schema.unknown_key` | A key the schema does not declare is present. When one declared key is near it, the message ends ``; did you mean `name`?``. |
+| `dm.schema.removed_key` | A key the schema declares `removed(<replacement>)` is present, whatever its value. Ranged on the key; the message ends with the replacement (``key `fail_fast` has been removed; set fail_fast on a group object``). |
+| `dm.schema.near_miss_key` | **Warning**, on an open object that opts in with `$advise-unknown-keys`: an undeclared key is near exactly one declared key (`promt` beside `prompt`). The value is still accepted; ranged on the key. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
 | `dm.schema.callable_catalog` | A callable catalog (`kind: expression-schema` or `kind: mutation-schema`) fails the catalog reader `md schema validate` also runs. The error marks the failing declaration. An invalid type reference marks the reference or its enclosing expression, such as the signature of the failing overload. For an aliased YAML arm, the error marks the alias token. Conflicts and references to a callable used as a type link the other declaration when its source is available. For an embedded built-in without matching local source, the message gives the embedded file label, line, and column. |
 | `dm.schema.kind_check` | A YAML document of one of Darkmatter's kinds (`schema`, `schema-trigger`, `yaml-schema`) fails a check its definition cannot state, such as an invalid trigger `$path` glob. Ranged on the node the library located. |

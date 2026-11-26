@@ -417,6 +417,24 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
     }
 }
 
+/// The warning record of one near-miss key advice on `path`'s frontmatter,
+/// located at the key as a failure's problem is.
+pub(crate) fn key_advice_diagnostic(problem: &simplified_schema::ValidationProblem, path: &Path) -> Diagnostic {
+    let source = match problem.line {
+        Some(line) => Some(DiagnosticSource {
+            line: Some(line as usize),
+            column: problem.column.map(|column| column as usize),
+            ..DiagnosticSource::file_only(named(path))
+        }),
+        None => file_only(named(path)),
+    };
+    Diagnostic {
+        source,
+        hint: problem.hint.clone(),
+        ..unlocated(problem.code.diagnostic_code(), Severity::Warning, problem.message.clone())
+    }
+}
+
 /// The records of `leaf`, the deepest Darkmatter error of a failure.
 ///
 /// A schema problem on a property one whole-value `{{ … }}` produced is
@@ -457,7 +475,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                             .default
                             .as_ref()
                             .map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
-                        hint: None,
+                        hint: problem.hint.clone(),
                         notes: Vec::new(),
                         trail: crate::findings::Trail::default(),
                     }

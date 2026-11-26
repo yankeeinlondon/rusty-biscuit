@@ -2704,6 +2704,7 @@ impl EffectiveSchema {
                     advisories: self.advisories.clone(),
                     trigger_findings: Vec::new(),
                     defaults: Vec::new(),
+                    key_advice: Vec::new(),
                 };
             }
         };
@@ -2745,6 +2746,8 @@ impl EffectiveSchema {
         // After locating: a problem with an inserted value belongs to its
         // default, and an ancestor's position would invent an authored one.
         simplified_schema::defaults::attribute_problems(&mut problems, &simplified_schema::defaults::filling_missing(&defaults, authored));
+        let mut key_advice = validate::key_advice(&self.json_schema, authored);
+        positions.locate_all(&mut key_advice);
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -2753,6 +2756,7 @@ impl EffectiveSchema {
             advisories: self.advisories.clone(),
             trigger_findings: Vec::new(),
             defaults,
+            key_advice,
         }
     }
 
@@ -2931,6 +2935,11 @@ pub struct ValidationReport {
     /// applies. Validation never inserts them into the caller's value;
     /// composition writes them into the composed frontmatter.
     pub defaults: Vec<AppliedDefault>,
+    /// Near-miss key advice ([`ValidationProblemCode::NearMissKey`]): an
+    /// undeclared key of an object whose schema opts in with
+    /// `$advise-unknown-keys` that closely resembles exactly one declared
+    /// key. Advice never makes the report invalid; located like a problem.
+    pub key_advice: Vec<ValidationProblem>,
 }
 
 /// What preparing a document's effective schema found, returned beside the
@@ -3032,6 +3041,7 @@ impl ValidationReport {
     /// The valid report of a document no schema applies to.
     fn vacuous() -> Self {
         Self {
+            key_advice: Vec::new(),
             valid: true,
             problems: Vec::new(),
             pending: Vec::new(),
@@ -3085,6 +3095,7 @@ fn default_problem(error: &SchemaError) -> ValidationProblem {
         })
         .unwrap_or_default();
     ValidationProblem {
+        hint: None,
         instance_path: JsonPointer::parse(&pointer),
         path: pointer,
         message: error.to_string(),
@@ -3600,7 +3611,10 @@ pub fn awaits_rendering(
         }
     }
     if !node.is_string()
-        && matches!(problem.code, ValidationProblemCode::UnknownKey | ValidationProblemCode::MissingRequired)
+        && matches!(
+            problem.code,
+            ValidationProblemCode::UnknownKey | ValidationProblemCode::RemovedKey | ValidationProblemCode::MissingRequired
+        )
     {
         return false;
     }

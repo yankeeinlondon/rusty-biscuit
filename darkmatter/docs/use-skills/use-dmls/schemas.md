@@ -224,6 +224,34 @@ In the editor:
 - **Editing an imported target,** even in an unsaved buffer, refreshes the
   receiving schema's diagnostics and its property completions.
 
+### Retired keys and near-miss advice
+
+Declare a retired key `removed(<replacement>)` instead of deleting it, and
+opt an open object into typo advice with `$advise-unknown-keys` (the exact
+keys never to advise on, `[]` for none):
+
+```yaml
+$schema:
+    name: string
+    fail_fast: "removed(set fail_fast on a group object)"
+    step:
+        prompt: string
+        "<string>": unknown
+        $advise-unknown-keys: [agent]
+```
+
+- **A removed key** is an error wherever it is written, `null` included:
+  `dm.schema.removed_key`, underlined at the key, its message ending with
+  the replacement. It is never completed or suggested. Write it only as a
+  block-form property's whole value (not on a pattern key, a `$` key, a
+  `types` entry, or inside an inline `{ … }`).
+- **Near-miss advice** is a warning, `dm.schema.near_miss_key`, at a key
+  one edit from exactly one declared key (`promt` beside `prompt`); the
+  value stays valid. It applies to the object that declares
+  `$advise-unknown-keys`, not to objects that extend it.
+- **An unknown key** on a closed object ends its message with
+  ``did you mean `name`?`` when one declared key is near it.
+
 ## Schema triggers
 
 A trigger applies a schema to documents that match its conditions, so

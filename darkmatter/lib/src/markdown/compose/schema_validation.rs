@@ -685,6 +685,9 @@ pub(crate) fn run_with_registry(
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
     }
+    for advice in &report.key_advice {
+        compose_report.add_warning(crate::markdown::compose::ComposeWarning::schema_key_advice(advice, &path));
+    }
 
     // Defer only the problems on values a later stage resolves; `deferral`
     // names them for this pass (see [`PendingDeferral`]). Deferral is sound
@@ -2487,6 +2490,7 @@ fn caller_projection_failure(
     let pointer = format!("/{}", key.replace('~', "~0").replace('/', "~1"));
     CallerProjectionFailure {
         problem: Box::new(ValidationProblem {
+            hint: None,
             path: pointer.clone(),
             message,
             kind: ValidationProblemKind::Invalid,
@@ -3358,6 +3362,7 @@ mod tests {
 
         let defers = |path: &str, code: ValidationProblemCode| {
             let problem = ValidationProblem {
+                hint: None,
                 path: path.to_string(),
                 message: String::new(),
                 kind: ValidationProblemKind::Type,

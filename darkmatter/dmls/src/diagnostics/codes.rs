@@ -121,8 +121,12 @@ pub mod code {
     pub const SCHEMA_MISSING_REQUIRED: &str = simplified_schema::SCHEMA_MISSING_REQUIRED_CODE;
     /// A key the schema does not declare is present (strict mode).
     pub const SCHEMA_UNKNOWN_KEY: &str = simplified_schema::SCHEMA_UNKNOWN_KEY_CODE;
-    /// A deprecated key is present.
-    pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
+    /// A key the schema declares `removed(<replacement>)` is present; the
+    /// replacement is the diagnostic's hint.
+    pub const SCHEMA_REMOVED_KEY: &str = simplified_schema::SCHEMA_REMOVED_KEY_CODE;
+    /// Advice: an undeclared key of an opted-in open object closely
+    /// resembles one declared key.
+    pub const SCHEMA_NEAR_MISS_KEY: &str = simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE;
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
     pub const SCHEMA_INVALID_FILE_REFERENCE: &str = simplified_schema::SCHEMA_INVALID_FILE_REFERENCE_CODE;
     /// A `suggest(...)` candidate is invalid metadata: it fails its target

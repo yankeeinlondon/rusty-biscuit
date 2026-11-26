@@ -756,77 +756,28 @@ fn unknown_key_diagnostic(
 }
 
 /// The nearest declared key to `offending` at the object `problem` points
-/// at, using the same Damerau distance and thresholds as biscuit-file's
-/// similar-key lint.
+/// at, ranked by Simplified Schema's shared key ranker
+/// ([`simplified_schema::validation::suggest::nearest`]): declaration order
+/// breaks a tie.
 ///
 /// Declared keys are drawn from every schema [`schemas_at`] finds at that
-/// object, so a key declared by a `$ref` target is suggested. A union
-/// (property or `U[]` item) or an unresolvable reference yields no
-/// suggestion, so none is drawn from any one arm.
+/// object, so a key declared by a `$ref` target is suggested; a removed key
+/// (a `false` property schema) never is. A union (property or `U[]` item)
+/// or an unresolvable reference yields no suggestion, so none is drawn from
+/// any one arm.
 fn nearest_declared_key(
     effective: &EffectiveSchema,
     problem: &ValidationProblem,
     offending: &str,
 ) -> Option<String> {
-    if offending.is_empty() {
-        return None;
-    }
     let nodes = schemas_at(&effective.json_schema, problem)?;
-    nodes
+    let candidates = nodes
         .iter()
         .filter_map(|node| node.get("properties").and_then(Value::as_object))
-        .flat_map(|props| props.keys().map(String::as_str))
-        .filter(|candidate| near_key_match(candidate, offending))
-        .min_by_key(|candidate| edit_distance(candidate, offending))
-        .map(str::to_string)
-}
-
-/// Two distinct key spellings are suspiciously close: lengths under three
-/// never match, lengths three and four tolerate one edit, longer keys
-/// tolerate two; case and `-`/`_` separator variants always match. Mirrors
-/// biscuit-file's similar-key threshold so suggestion behavior agrees across
-/// the shared diagnostics.
-fn near_key_match(first: &str, second: &str) -> bool {
-    if first == second {
-        return false;
-    }
-    let length = first.chars().count().max(second.chars().count());
-    if length < 3 {
-        return false;
-    }
-    let normalize = |text: &str| text.to_lowercase().replace('_', "-");
-    if normalize(first) == normalize(second) {
-        return true;
-    }
-    let distance = edit_distance(first, second);
-    (length >= 5 && distance <= 2) || distance <= 1
-}
-
-/// Optimal string alignment (Damerau with unit costs): insertions,
-/// deletions, substitutions, and adjacent transpositions.
-fn edit_distance(first: &str, second: &str) -> usize {
-    let a: Vec<char> = first.chars().collect();
-    let b: Vec<char> = second.chars().collect();
-    let (rows, cols) = (a.len() + 1, b.len() + 1);
-    let mut distances = vec![vec![0usize; cols]; rows];
-    for (row, cell) in distances.iter_mut().enumerate().take(rows) {
-        cell[0] = row;
-    }
-    for (col, cell) in distances[0].iter_mut().enumerate().take(cols) {
-        *cell = col;
-    }
-    for row in 1..rows {
-        for col in 1..cols {
-            let cost = usize::from(a[row - 1] != b[col - 1]);
-            distances[row][col] = (distances[row - 1][col] + 1)
-                .min(distances[row][col - 1] + 1)
-                .min(distances[row - 1][col - 1] + cost);
-            if row > 1 && col > 1 && a[row - 1] == b[col - 2] && a[row - 2] == b[col - 1] {
-                distances[row][col] = distances[row][col].min(distances[row - 2][col - 2] + 1);
-            }
-        }
-    }
-    distances[rows - 1][cols - 1]
+        .flat_map(|props| props.iter())
+        .filter(|(_, schema)| **schema != Value::Bool(false))
+        .map(|(key, _)| key.as_str());
+    simplified_schema::validation::suggest::nearest(offending, candidates).map(str::to_string)
 }
 
 /// `message` naming the problem's instance path, `` (at `/content_policy/1`) ``,

@@ -730,6 +730,15 @@ pub(crate) enum WarningSubject {
         scope: Option<String>,
         origin: ExpressionOrigin,
     },
+    /// One near-miss key on one object, once per source document however
+    /// many verdicts a composition runs.
+    SchemaKey {
+        /// Source document; `None` until the document's pipeline attributes it.
+        document: Option<PathBuf>,
+        /// The owning object's JSON Pointer.
+        path: String,
+        key: String,
+    },
     /// One link's title, once per source document however many times a pass
     /// reaches it (a repeated `::map` copy, a second scan of the same body).
     LinkTitle {
@@ -755,7 +764,10 @@ impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
             Self::Path(_) | Self::Embedded { .. } => {}
-            Self::Root { document, .. } | Self::Expression { document, .. } | Self::LinkTitle { document, .. } => {
+            Self::Root { document, .. }
+            | Self::Expression { document, .. }
+            | Self::LinkTitle { document, .. }
+            | Self::SchemaKey { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
                 }
@@ -987,7 +999,10 @@ impl ComposeWarning {
                 bundle: bundle.clone(),
                 name: name.clone(),
             }),
-            WarningSubject::Root { .. } | WarningSubject::Expression { .. } | WarningSubject::LinkTitle { .. } => None,
+            WarningSubject::Root { .. }
+            | WarningSubject::Expression { .. }
+            | WarningSubject::LinkTitle { .. }
+            | WarningSubject::SchemaKey { .. } => None,
         }
     }
 
@@ -1036,6 +1051,39 @@ impl ComposeWarning {
             path: document,
             line_number: line,
             ..Self::new(stage, message)
+        }
+    }
+
+    /// Near-miss key advice ([`simplified_schema::ValidationProblemCode::NearMissKey`])
+    /// on `document`'s frontmatter: a warning that never fails the verdict,
+    /// with the same record DMLS reports.
+    pub(crate) fn schema_key_advice(problem: &simplified_schema::ValidationProblem, document: &std::path::Path) -> Self {
+        let diagnostic = crate::markdown::compose::report_diagnostics::key_advice_diagnostic(problem, document);
+        let message = match &problem.hint {
+            Some(hint) => format!("{}; {hint}", problem.message),
+            None => problem.message.clone(),
+        };
+        let location = problem.line.map(|line| WarningLocation {
+            line: line as usize,
+            column: problem.column.map(|column| column as usize),
+            span: None,
+        });
+        Self {
+            source: Some("darkmatter.schema".to_string()),
+            code: Some(diagnostic.code.clone()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::SchemaKey {
+                    document: None,
+                    path: problem.path.clone(),
+                    key: problem.offending_property.clone().unwrap_or_default(),
+                },
+            }),
+            line_number: location.as_ref().map(|location| location.line),
+            location,
+            document: diagnostic.source.as_ref().and_then(|source| source.file.clone()),
+            path: diagnostic.source.as_ref().and_then(|source| source.file.clone()),
+            diagnostic: Some(Box::new(diagnostic)),
+            ..Self::new("schema_validation", message)
         }
     }
 

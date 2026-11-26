@@ -509,8 +509,9 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
     assert_eq!(code, Some(1), "{records:?}");
     assert_record(&records, "example-containers-kinds", true, &[]);
     assert_record(&records, "level3-valid", true, &[]);
-    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "'execution' was unexpected")]);
-    assert_record(&records, "root-fail-fast", false, &[("/fail_fast", "null")]);
+    // A removed key's problem points at its owner and names the key.
+    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "key `execution` has been removed")]);
+    assert_record(&records, "root-fail-fast", false, &[("", "key `fail_fast` has been removed")]);
     assert_record(&records, "sequence-mapping", false, &[("/sequence", "tasks")]);
 }
 
