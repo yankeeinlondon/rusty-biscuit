@@ -123,7 +123,6 @@ fn a_warning_keeps_its_record_or_its_code() {
                 expected_type: None,
                 actual_type: None,
                 span: None,
-                iteration_path: Default::default(),
                 reference_details: None,
                 data_location: None,
                 grants_needed: None,

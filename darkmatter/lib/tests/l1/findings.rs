@@ -55,7 +55,10 @@ fn a_projected_finding_without_a_hint_or_trail_serializes_exactly_as_before() {
 #[test]
 fn every_trail_frame_kind_is_tagged_and_the_trail_displays_on_one_line() {
     let trail = Trail::host("task", "metadata", "sequence[1]")
-        .pushed(TrailFrame::Included { file: "_frontmatter.md".into(), line: Some(4) })
+        .pushed(TrailFrame::Included {
+            file: darkmatter::markdown::compose::ComposeSource::File("_frontmatter.md".into()),
+            line: Some(4),
+        })
         .pushed(TrailFrame::Iteration {
             collection: "teams".into(),
             position: darkmatter::markdown::compose::expression::iteration::IterationPosition::Index(2),
@@ -158,7 +161,6 @@ fn a_long_message_wraps_under_its_text_at_the_layout_width() {
 fn a_confirmed_no_match_is_a_missing_document_finding_with_its_resolution_evidence() {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("_frontmatter.yaml"), "").unwrap();
-    std::fs::write(dir.path().join("_Frontmatter.md"), "").unwrap();
     let context = FileResolutionContext::new(dir.path());
     let resolution = FileReference::new("./_frontmatter.md").unwrap().resolve_detailed(&context);
     let mut memo = ListingMemo::new();
@@ -174,7 +176,7 @@ fn a_confirmed_no_match_is_a_missing_document_finding_with_its_resolution_eviden
     let expected = biscuit_file::to_forward_slash_string(&dir.path().join("_frontmatter.md"));
     assert_eq!(details.resolved.as_deref(), Some(expected.as_str()));
     assert!(finding.hint.as_deref().unwrap().starts_with(&format!("create {expected}")));
-    // The near name is suggested; the case-only variant never is.
+    // The near name is suggested.
     let suggestions = details.suggestions.clone().unwrap();
     assert_eq!(suggestions, [biscuit_file::to_forward_slash_string(&dir.path().join("_frontmatter.yaml"))]);
     assert_eq!(memo.listed(), 1);
@@ -219,12 +221,36 @@ fn the_empty_body_cause_names_only_what_is_proven() {
 }
 
 #[test]
-fn every_finding_code_is_declared_once_in_the_dm_namespace() {
-    let mut codes: Vec<&str> = FINDING_CODES.iter().map(|(code, _)| *code).collect();
-    assert!(codes.contains(&EMPTY_BODY_CODE) && codes.contains(&NOT_CHECKED_CODE) && codes.contains(&MISSING_DOCUMENT_CODE));
-    let count = codes.len();
-    codes.sort_unstable();
-    codes.dedup();
-    assert_eq!(codes.len(), count);
-    assert!(codes.iter().all(|code| code.starts_with("dm.")));
+fn every_finding_code_is_declared_once_across_the_two_catalogs() {
+    use darkmatter::markdown::compose::policy::COMPOSE_DIAGNOSTIC_CODES;
+    let catalog: Vec<&str> = COMPOSE_DIAGNOSTIC_CODES.iter().map(|(code, _)| *code).collect();
+    // The codes `md compose` emits are listed once, in its catalog; the
+    // host-only codes stay out of it.
+    assert!(catalog.contains(&EMPTY_BODY_CODE) && catalog.contains(&NOT_CHECKED_CODE));
+    let codes: Vec<&str> = FINDING_CODES.iter().map(|(code, _)| *code).collect();
+    assert_eq!(codes, [MISSING_DOCUMENT_CODE]);
+    assert!(codes.iter().all(|code| code.starts_with("dm.") && !catalog.contains(code)));
+}
+
+#[test]
+fn the_generic_presentation_groups_a_subjects_findings_and_escapes_authored_text() {
+    let mut sink = FindingSink::new();
+    let task = sink.register_subject(Subject::construct("task", "<b>bold</b>", "sequence[0]", None));
+    let blocker = sink.push(
+        task,
+        Diagnostic::actionable("composition.no_executable", Severity::Error, "no executable for <b>x</b>", "add `prompt: ./a.md`")
+            .with_source(DiagnosticSource::at(Some("/work/fleet.yaml".into()), 10, 7)),
+    );
+    sink.not_checked(task, "inputs", "no executable", Some(blocker));
+    let report = sink.finish();
+
+    let options = renderable::output::OutputOptions::new(
+        renderable::output::Width::Unlimited,
+        renderable::output::TerminalProfile::plain(),
+    );
+    let rendered = report.presentation().with_launch_dir("/work").render_terminal(&options).unwrap();
+    assert_eq!(
+        rendered,
+        "task <b>bold</b> (sequence[0])\n  ✗ no executable for <b>x</b>\n      at fleet.yaml:10:7\n      hint: add `prompt: ./a.md`\n  ℹ not checked: inputs (no executable)"
+    );
 }

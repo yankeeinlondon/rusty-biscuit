@@ -737,6 +737,18 @@ pub(crate) fn run_with_registry(
             {
                 return false;
             }
+            // A dry run keeps a value it deferred as written (and as data,
+            // so the deferral below cannot see its syntax); nothing judges
+            // that text, since no run resolved it.
+            if let Some(session) = options.passive_session()
+                && let Some(name) = top_level_pointer_segment(&p.path)
+                && fm_map
+                    .get(&name)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|text| session.deferred_value(text).is_some())
+            {
+                return false;
+            }
             if !defer_shell_pending {
                 return true;
             }

@@ -76,7 +76,6 @@ fn a_record_with_no_reference_details_omits_those_fields() {
         expected_type: None,
         actual_type: None,
         span: None,
-        iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
         grants_needed: None,
@@ -100,4 +99,129 @@ fn a_record_with_no_reference_details_omits_those_fields() {
             "iteration_path": [],
         })
     );
+}
+
+/// The trail is the one stored copy of iteration and inclusion context;
+/// `iteration_path` and `included_via` are serialized from it.
+mod trail_projections {
+    use darkmatter::findings::{ReferenceDetails, Trail, TrailFrame};
+    use darkmatter::markdown::compose::ComposeSource;
+    use darkmatter::markdown::compose::expression::iteration::{IterationFrame, IterationPath, IterationPosition};
+    use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+    use darkmatter::markdown::reference::ReferenceTrailStep;
+    use serde_json::json;
+
+    fn record() -> Diagnostic {
+        Diagnostic::projected("dm.test.code", Severity::Error, "message", None)
+    }
+
+    fn teams_then_lead() -> IterationPath {
+        IterationPath::empty()
+            .pushed(IterationFrame { collection: "teams".into(), position: IterationPosition::Index(2) })
+            .pushed(IterationFrame { collection: "members".into(), position: IterationPosition::Key("lead".into()) })
+    }
+
+    fn two_steps() -> Vec<ReferenceTrailStep> {
+        vec![
+            ReferenceTrailStep { file: ComposeSource::File("/w/root.md".into()), line: Some(3) },
+            ReferenceTrailStep { file: ComposeSource::File("/w/child.md".into()), line: None },
+        ]
+    }
+
+    fn reference(reports_inclusion: bool) -> ReferenceDetails {
+        ReferenceDetails { reference: Some("./gone.md".into()), reports_inclusion, ..ReferenceDetails::default() }
+    }
+
+    const PREFIX: &str = r#"{"code":"dm.test.code","severity":"error","message":"message","source":null,"expected_type":null,"actual_type":null,"span":null,"#;
+
+    #[test]
+    fn iteration_frames_serialize_as_the_iteration_path_and_publish_no_trail() {
+        let found = record().with_iteration_path(&teams_then_lead());
+
+        assert_eq!(
+            serde_json::to_string(&found).unwrap(),
+            format!(
+                r#"{PREFIX}"iteration_path":[{{"collection":"teams","position":2}},{{"collection":"members","position":"lead"}}]}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_reference_record_with_no_included_frames_writes_an_empty_inclusion_path() {
+        let found = record().with_reference_details(reference(true));
+
+        assert_eq!(
+            serde_json::to_string(&found).unwrap(),
+            format!(r#"{PREFIX}"iteration_path":[],"reference":"./gone.md","included_via":[]}}"#)
+        );
+    }
+
+    #[test]
+    fn a_record_that_reports_no_inclusion_path_omits_it() {
+        let found = record().with_reference_details(reference(false));
+
+        assert_eq!(
+            serde_json::to_string(&found).unwrap(),
+            format!(r#"{PREFIX}"iteration_path":[],"reference":"./gone.md"}}"#)
+        );
+    }
+
+    #[test]
+    fn included_frames_serialize_in_order_as_file_and_line_steps() {
+        let found = record().with_reference_details(reference(true)).with_trail(Trail::included(&two_steps()));
+
+        assert_eq!(
+            serde_json::to_string(&found).unwrap(),
+            format!(
+                r#"{PREFIX}"iteration_path":[],"reference":"./gone.md","included_via":[{{"file":"/w/root.md","line":3}},{{"file":"/w/child.md","line":null}}]}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_trail_with_a_host_frame_is_published_whole_beside_the_projections() {
+        let found = record()
+            .with_reference_details(reference(true))
+            .with_trail(Trail::included(&two_steps()[..1]))
+            .with_iteration_path(&teams_then_lead())
+            .with_trail(Trail::host("task", "metadata", "sequence[1].prompt"));
+
+        let value = serde_json::to_value(&found).unwrap();
+
+        assert_eq!(
+            value["trail"],
+            json!([
+                { "kind": "host", "host": "task", "label": "metadata", "property": "sequence[1].prompt" },
+                { "kind": "included", "file": "/w/root.md", "line": 3 },
+                { "kind": "iteration", "collection": "teams", "position": 2 },
+                { "kind": "iteration", "collection": "members", "position": "lead" },
+            ]),
+            "{value:#}"
+        );
+        assert_eq!(value["included_via"], json!([{ "file": "/w/root.md", "line": 3 }]), "{value:#}");
+        assert_eq!(
+            value["iteration_path"],
+            json!([{ "collection": "teams", "position": 2 }, { "collection": "members", "position": "lead" }]),
+            "{value:#}"
+        );
+    }
+
+    #[test]
+    fn the_accessors_project_the_trail_and_respect_inclusion_applicability() {
+        let found = record()
+            .with_trail(Trail::included(&two_steps()))
+            .with_iteration_path(&teams_then_lead())
+            .with_trail(Trail::host("task", "find", "sequence[0]"));
+
+        assert_eq!(found.iteration_path(), teams_then_lead());
+        assert_eq!(found.included_via(), None, "not a reference record");
+        let found = found.with_reference_details(reference(true));
+        assert_eq!(found.included_via(), Some(two_steps()));
+        assert!(matches!(found.trail.frames()[0], TrailFrame::Host { .. }));
+        // Replacing the iteration path keeps every other frame.
+        let found = found.with_iteration_path(&IterationPath::empty());
+        assert!(found.iteration_path().is_empty());
+        assert_eq!(found.included_via(), Some(two_steps()));
+        assert_eq!(found.trail.frames().len(), 3);
+    }
 }

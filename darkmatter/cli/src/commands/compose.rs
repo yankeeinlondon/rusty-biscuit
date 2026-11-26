@@ -15,6 +15,7 @@ use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
+mod combined;
 mod lifecycle;
 
 use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
@@ -411,11 +412,24 @@ pub fn run_compose(
     let mut pending_triggers = PendingTriggerWarnings::default();
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
-    let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
-        let check_request = prepare_request(options.clone())?;
-        let check = check_references(&md, &check_request, policy).inspect_err(|error| {
-            deliver_check_failure_warnings(error, &check_request, &mut pending_triggers, sink, &term_cell);
-        })?;
+    // The request of the reference check, kept for the passive checks a
+    // later reference stop (the pre-flight walk's) runs.
+    let check_request =
+        if resolved_input.is_some() && lifecycle.is_none() { Some(prepare_request(options.clone())?) } else { None };
+    let deferred_report = if let Some(check_request) = &check_request {
+        let check = match check_references(&md, check_request, policy) {
+            Ok(check) => check,
+            Err(error) => {
+                deliver_check_failure_warnings(&error, check_request, &mut pending_triggers, sink, &term_cell);
+                return Err(match combined::after_check_failure(&md, check_request, policy, &error, &launch_dir) {
+                    Some(combined) => {
+                        combined.deliver(sink, &launch_dir);
+                        ReportedExit(1).into()
+                    }
+                    None => error,
+                });
+            }
+        };
         match check {
             ReferenceCheck::Clean(summary) => {
                 if let Some(sink) = sink {
@@ -432,14 +446,26 @@ pub fn run_compose(
             }
             ReferenceCheck::Refused(report) => {
                 deliver_refused_check_warnings(&report, &mut pending_triggers, sink, &term_cell);
+                let combined = combined::after_refusal(&md, check_request, &report, &launch_dir);
                 if let Some(sink) = sink {
-                    sink.references(&report);
+                    match &combined {
+                        Some(combined) => {
+                            sink.summary(ReferenceSummary::from_report(&report));
+                            combined.deliver(Some(sink), &launch_dir);
+                        }
+                        None => sink.references(&report),
+                    }
                     perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
                     return Err(ReportedExit(1).into());
                 }
-                let term = term_cell.get_or_init(stderr_terminal);
-                eprint!("{}", render_reference_report(&report, &launch_dir));
-                eprint!("{}", render_reference_warnings(&report, term));
+                match combined {
+                    Some(combined) => combined.deliver(None, &launch_dir),
+                    None => {
+                        let term = term_cell.get_or_init(stderr_terminal);
+                        eprint!("{}", render_reference_report(&report, &launch_dir));
+                        eprint!("{}", render_reference_warnings(&report, term));
+                    }
+                }
                 return Err(ReportedExit(1).into());
             }
         }
@@ -589,7 +615,20 @@ pub fn run_compose(
             Some(sink) => sink.warnings(&warnings),
             None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
         }
-        preflight_approval_error(e)
+        let error = preflight_approval_error(e);
+        // The walk is condition-blind, so it can stop at an inclusion the
+        // reference check left out with its block; the passive checks then
+        // join the stop's report.
+        match check_request
+            .as_ref()
+            .and_then(|check_request| combined::after_inclusion_stop(&md, check_request, policy, &error, &launch_dir))
+        {
+            Some(combined) => {
+                combined.deliver(sink, &launch_dir);
+                ReportedExit(1).into()
+            }
+            None => error,
+        }
     };
     let slot_grants = if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
@@ -639,6 +678,9 @@ pub fn run_compose(
         compose_error(failure.error)
     })?;
     pending_triggers.merge_into(&mut report.warnings);
+    if let Some(warning) = combined::empty_body_warning(&md, composed.content(), &report) {
+        report.add_warning(warning);
+    }
     if let Some(checked) = &deferred_report {
         report.warnings.retain(|warning| !reference_check_reported(warning, checked));
     }
@@ -826,14 +868,9 @@ pub(crate) enum ReferenceCheck {
 pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> Result<ReferenceCheck> {
     use darkmatter::markdown::compose::expression::Severity;
     use darkmatter::markdown::compose::policy::missing_reference_code;
-    use darkmatter::markdown::reference::ReferenceGraphOptions;
-    use darkmatter::markdown::reference::validate::{
-        ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
-    };
+    use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
 
-    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
-    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
-    let report = md.validate_references(val_options).map_err(compose_error)?;
+    let report = reference_report(md, request)?;
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
     if report
         .issues
@@ -865,6 +902,28 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         return Ok(ReferenceCheck::Report(report));
     }
     Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
+}
+
+/// The passive reference report of `md` under `request`
+/// ([`ComposeOptions::for_reference_check`]).
+///
+/// ## Errors
+///
+/// As [`check_references`].
+fn reference_report(
+    md: &Markdown,
+    request: &ComposeRequest,
+) -> Result<darkmatter::markdown::reference::validate::ReferenceValidationReport> {
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
+    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
+    md.validate_references(val_options).map_err(compose_error)
+}
+
+/// [`reference_report`], or `None` when the check could not run.
+fn validate(md: &Markdown, request: &ComposeRequest) -> Option<darkmatter::markdown::reference::validate::ReferenceValidationReport> {
+    reference_report(md, request).ok()
 }
 
 /// Delivers the warnings of a reference check that refused the document:

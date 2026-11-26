@@ -290,3 +290,18 @@ mod remote {
         assert!(session.deferrals().iter().any(|deferral| deferral.key.as_deref() == Some("stamp")));
     }
 }
+
+/// A value a dry run deferred keeps its command text, which no schema type
+/// admits; the verdict leaves it unjudged, since no run resolved it, while
+/// an independent value is still judged.
+#[test]
+fn a_deferred_value_is_never_judged_by_its_schema() {
+    let dir = TempDir::new().unwrap();
+    let run = dry_run(dir.path(), "---\n$schema:\n  count: number\ncount: $(echo 3)\n---\nbody\n");
+    assert_eq!(run.frontmatter["count"], "$(echo 3)");
+    assert_eq!(constructs(&run), [DeferredConstruct::FrontmatterValue]);
+
+    let path = write(dir.path(), "wrong.md", "---\n$schema:\n  count: number\nother: $(echo 3)\ncount: abc\n---\nbody\n");
+    let error = compose(&path, options_in(dir.path(), &path).with_dry_run()).expect_err("an independent value is judged");
+    assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }), "{error:?}");
+}

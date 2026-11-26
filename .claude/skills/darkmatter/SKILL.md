@@ -427,10 +427,17 @@ A new leaf adds a row to `args/output.rs::COMMAND_LEAVES`, a schema file under
 that spell the schema path inside each `#[test]`;
 `every_leaf_has_a_schema_file_and_a_conformance_test` fails otherwise. A schema's
 named types are closed, unlike its root object, so a type must list every field.
-One Rust `Diagnostic` serializes into all 17 output schemas, so their
-`diagnostic` and `data-location` types are identical
-(`output_commands::every_schema_file_shares_one_diagnostic_type`); a new
-diagnostic field goes into every file. `DocumentEnvelope.read_set` is always an
+One Rust `Diagnostic` serializes into every output schema, so the
+`diagnostic` type and every named type it reaches are textually identical in
+each file (`output_commands::every_schema_file_shares_one_diagnostic_type`); a
+new diagnostic field goes into every file. `Diagnostic::trail` is the only
+stored iteration and inclusion context: a hand-written `Serialize` projects
+`iteration_path` and `included_via` from it (`Diagnostic::iteration_path()`,
+`included_via()`; a producer calls `set_iteration_path`/`with_iteration_path`
+or `Trail::included`), `ReferenceDetails::reports_inclusion` decides whether
+`included_via` is written, and `trail` itself is written only when it holds a
+host frame, so `md` output never carries it. `with_trail` puts a host's frames
+outside the ones a record already has. `DocumentEnvelope.read_set` is always an
 array; `ReportSink::reads_from(&DataRuntime)` reads the command's runtime when
 the envelope is written, so every exit carries it without per-path pushes.
 A schema root is an object: a scalar result is judged under `value`.
@@ -450,8 +457,27 @@ after the inline stages (a link a stage wrote). `md render`, which does not
 compose, reads `Markdown::link_title_warnings` before cleanup and names the
 same codes through `RENDER_DIAGNOSTIC_CODES`.
 
-The reference report is `reference/validate.rs::ValidationReportView`, built in
-`reference/report.rs`, implementing `CommandOutput`. `ReferenceValidationReport`
+When a reference stop has company, `md compose` prints a combined
+`FindingReport` instead (`cli/src/commands/compose/combined.rs`): after a
+`ReferenceCheck::Refused` (`after_refusal`), a pre-flight inclusion stop
+(`after_inclusion_stop`), or a call/schema `Err` from the check itself
+(`after_check_failure`, retried with `ComposeOptions::without_call_check`), it
+runs one passive dry-run composition for the call, schema, and empty-body
+checks, and uses the combined report only when one of them contributes a
+finding or a not-checked row; otherwise the reference report prints unchanged.
+A body that composes empty adds `dm.compose.empty_body` (`empty_body_warning`).
+In a passive dry run the schema never judges a value the session deferred
+(`schema_validation.rs`, `PassiveSession::deferred_value`).
+
+The reference report is `reference/validate.rs::ValidationReportView`
+(`reference/report.rs`), a `CommandOutput` adapter that keeps the data form
+(`ValidationReportData`) and delegates every rendering to
+`findings::ReferencePresentation` (`findings/presentation/reference.rs`). The
+render tree and its layout helpers (`LinkStyle`, `rows_table`, `PathDisplay`,
+`markup`/`dim`) live in `findings/presentation/`, shared with
+`FindingReport::presentation()` (`FindingPresentation`, the generic subject →
+glyph-row tree); `FindingReport::render_human` stays string-built and shares
+its glyphs, details, and not-checked rows with it. `ReferenceValidationReport`
 keeps `documents` (one entry per inclusion, depth-first, empty documents
 included) so grouping by `(source, included_via)` and the document count never
 infer scope from issues; neither `documents` nor `references` is serialized, and
@@ -536,7 +562,8 @@ the composed document (`report_diagnostics::with_document_fallback`, applied by
 only `ComposeWarning::location` (never `line_number`, a current-body count) is
 published; `source.inserted` marks a construct that wrote the text; only a reference
 record has `reference_details`, flattened into `reason`, `construct`,
-`reference`, `failure`, and `included_via`. Skipped-trigger
+`reference`, `failure`, `included_via` (projected from the trail), `base`,
+`resolved`, `searched`, and `suggestions`. Skipped-trigger
 warnings found by a pass that runs ahead of the delivering report (reference
 validation via `ReferenceValidationReport::trigger_warnings`, which prepares
 each transcluded child in its own context; the lifecycle call check via

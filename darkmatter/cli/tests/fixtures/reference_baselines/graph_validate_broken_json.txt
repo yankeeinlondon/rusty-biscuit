@@ -1,0 +1,204 @@
+exit: 1
+--- stdout
+{
+  "file": "root.md",
+  "source": "<WS>/cwd/docs/root.md",
+  "references": [
+    {
+      "id": "<HASH>:3:8",
+      "kind": "hyperlink",
+      "target": {
+        "type": "local_path",
+        "raw": "./gone.md"
+      },
+      "syntax": "markdown_link",
+      "line": 3,
+      "attributes": {
+        "display": "gone"
+      }
+    },
+    {
+      "id": "<HASH>:7:44",
+      "kind": "image",
+      "target": {
+        "type": "local_path",
+        "raw": "./image.png"
+      },
+      "syntax": "markdown_image",
+      "line": 7,
+      "attributes": {
+        "alt": "image"
+      }
+    },
+    {
+      "id": "<HASH>:8:66",
+      "kind": "hyperlink",
+      "target": {
+        "type": "other_scheme",
+        "raw": "mailto:a@example.com",
+        "scheme": "mailto"
+      },
+      "syntax": "markdown_link",
+      "line": 8,
+      "attributes": {
+        "display": "mail"
+      }
+    }
+  ],
+  "transclusions": [
+    {
+      "kind": "file",
+      "target": "<WS>/cwd/docs/child.md",
+      "line": 5,
+      "followable": true,
+      "section": "Root",
+      "section_level": 1
+    }
+  ],
+  "validation": {
+    "valid": false,
+    "references_scanned": 5,
+    "references_valid": 2,
+    "issues": [
+      {
+        "code": "MissingLocalTarget",
+        "message": "Missing local target: ./gone.md",
+        "severity": "error",
+        "kind": "hyperlink",
+        "reference": "./gone.md",
+        "line": 3,
+        "column": 1,
+        "section": "root",
+        "inserted": false,
+        "source": "<WS>/cwd/docs/root.md",
+        "included_via": []
+      },
+      {
+        "code": "MissingLocalTarget",
+        "message": "Missing local target: ./child-gone.md",
+        "severity": "error",
+        "kind": "hyperlink",
+        "reference": "./child-gone.md",
+        "line": 3,
+        "column": 1,
+        "section": "child",
+        "inserted": false,
+        "source": "<WS>/cwd/docs/child.md",
+        "included_via": [
+          {
+            "file": "<WS>/cwd/docs/root.md",
+            "line": 5
+          }
+        ]
+      },
+      {
+        "code": "MissingLocalTarget",
+        "message": "Missing local target: ./image.png",
+        "severity": "error",
+        "kind": "image",
+        "reference": "./image.png",
+        "line": 7,
+        "column": 1,
+        "section": "root",
+        "inserted": false,
+        "source": "<WS>/cwd/docs/root.md",
+        "included_via": []
+      },
+      {
+        "code": "UnsupportedScheme",
+        "message": "Unsupported scheme: mailto",
+        "severity": "info",
+        "kind": "hyperlink",
+        "reference": "mailto:a@example.com",
+        "line": 8,
+        "column": 1,
+        "section": "root",
+        "inserted": false,
+        "source": "<WS>/cwd/docs/root.md",
+        "included_via": []
+      }
+    ],
+    "warnings": []
+  },
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./gone.md",
+      "source": {
+        "file": "<WS>/cwd/docs/root.md",
+        "line": 3,
+        "column": 1,
+        "section": "root",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 8,
+        "end": 25
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./gone.md",
+      "failure": "no-match",
+      "included_via": []
+    },
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./child-gone.md",
+      "source": {
+        "file": "<WS>/cwd/docs/child.md",
+        "line": 3,
+        "column": 1,
+        "section": "child",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 9,
+        "end": 32
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./child-gone.md",
+      "failure": "no-match",
+      "included_via": [
+        {
+          "file": "<WS>/cwd/docs/root.md",
+          "line": 5
+        }
+      ]
+    },
+    {
+      "code": "dm.reference.missing_image",
+      "severity": "error",
+      "message": "Missing local target: ./image.png",
+      "source": {
+        "file": "<WS>/cwd/docs/root.md",
+        "line": 7,
+        "column": 1,
+        "section": "root",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 44,
+        "end": 65
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "image",
+      "reference": "./image.png",
+      "failure": "no-match",
+      "included_via": []
+    }
+  ]
+}
+--- stderr

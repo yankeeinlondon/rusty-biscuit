@@ -193,7 +193,9 @@ fn warnings_and_a_typeless_failure_name_the_document() {
             })
             .collect()
     };
-    assert_eq!(sources(&warned), [(7, Some(1)), (5, None)], "{warned:#}");
+    // The body composes to nothing, so the empty-body warning names the
+    // excluded block that accounts for it.
+    assert_eq!(sources(&warned), [(7, Some(1)), (5, None), (7, Some(1))], "{warned:#}");
 
     let output = fixture
         .command()

@@ -19,7 +19,7 @@ is the whole list, while an expression error may have another behind it.
 | Family | Stopping rule | What you see |
 | --- | --- | --- |
 | Setters | The run stops at the first setter that cannot be applied | One `dm.setter.invalid` error, before that document's stages run |
-| References | Every problem is collected, then reported together | One grouped report, before anything is composed |
+| References | Every problem is collected, then reported together; the checks that do not depend on a reference still run, without running anything | One grouped report, before anything is composed; one [combined report](#a-reference-stop-with-other-findings) when another check also finds something |
 | Schema | Every problem in one document is collected, then the run stops | Every problem in that document, none from later documents |
 | Transclusion | A fatal failure, such as a cycle, stops the run; a tolerated failure is reported and composition continues | A fatal error, or a notice in the document and a warning |
 | Expression | The run stops at the first error it meets, which is not always the earliest in the document | One error |
@@ -53,7 +53,60 @@ Checked 2 references across 1 document: 0 ok, 2 broken
 ```
 
 Only the reference report groups its problems. Every other family keeps its own
-error block in a terminal.
+error block in a terminal, except where a reference stop combines them, as
+described next.
+
+### A reference stop with other findings
+
+When a broken reference stops `md compose`, three checks that do not need the
+reference still run, passively: nothing is executed, fetched, or written. They
+are the call check (a call that can never succeed), the schema verdict on the
+frontmatter, and whether the composed body would be empty. If none of them
+finds anything, the run prints the reference report above, unchanged. If one
+does, the run prints one report for the document instead, with every finding
+in it, and exits 1:
+
+```md
+---
+title: Release notes
+draft: false
+---
+::block when="draft"
+::file ./missing.md
+::end-block
+```
+
+```text
+$ md compose notes.md
+notes.md
+  ✗ file not found in `::file`
+      ::file ./missing.md
+      at notes.md:6:1
+      hint: create missing.md, or correct the reference
+  ⚠ the body would be empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)
+      at notes.md:5:1
+      hint: pass the values those conditions read, or add body content outside the conditional blocks
+
+Checked notes.md: 1 error, 1 warning
+```
+
+A check that could not be decided is listed as `not checked` with its reason,
+and counted in the closing line. For example, a condition that reads a
+command's output (`draft: $(echo false)`) is not known until the document runs,
+so the empty-body check is not run. A call refusal stops the schema and
+empty-body checks; both are listed as not checked. An expression that fails
+only when it is evaluated, such as `{{ 1 / 0 }}`, belongs to none of these
+checks, so the example at the top of this section still prints the reference
+report alone.
+
+The full output, and the same report in `--output json`, are in
+[`md compose`](../cli/compose.md#the-combined-report).
+
+### An empty body warns
+
+A document that composes to an empty body is reported with the warning
+`dm.compose.empty_body`, located at the first block that excluded content. The
+run still succeeds; add `--deny dm.compose.empty_body` to make it fail.
 
 `md validate refs --fail-fast` and the library's `fail_fast` option stop reference
 checking at the first error. `md compose` always collects them.

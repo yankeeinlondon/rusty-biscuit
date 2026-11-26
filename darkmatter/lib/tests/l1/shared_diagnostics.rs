@@ -67,7 +67,6 @@ fn a_category_3_call_composes_with_a_located_warning() {
         expected_type: Some("number".to_string()),
         actual_type: Some("string | null".to_string()),
         span: None,
-        iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
         grants_needed: None,

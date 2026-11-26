@@ -1272,6 +1272,22 @@ impl ComposeOptions {
         self
     }
 
+    /// Leaves out the passive call check on every surface, for a reference
+    /// check that must still list a document's references after the call
+    /// check refused it.
+    ///
+    /// Only `md compose` sets it, beside
+    /// [`for_reference_check`](Self::for_reference_check), which leaves a
+    /// call that then fails to evaluate to the composition that owns its
+    /// verdict, and a dry run ([`Self::with_dry_run`]); the call check's own
+    /// rejection is reported from the first, unchanged check. Never set it on
+    /// a composition that delivers a document.
+    #[must_use]
+    pub fn without_call_check(mut self) -> Self {
+        self.call_check_operations = Some(ComposeOperationSet::empty());
+        self
+    }
+
     /// Restricts composition to the effective frontmatter surface: frontmatter
     /// interpolation and frontmatter `$(...)` expansion, and nothing that reads
     /// the body.

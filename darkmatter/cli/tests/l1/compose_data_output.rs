@@ -34,7 +34,7 @@ fn report_of(output: &std::process::Output) -> Value {
             "{diagnostic:#}"
         );
         assert!(
-            details.iter().all(|key| ["reason", "construct", "reference", "failure", "included_via", "data_location"].contains(key)),
+            details.iter().all(|key| ["reason", "construct", "reference", "failure", "included_via", "data_location", "hint"].contains(key)),
             "{diagnostic:#}"
         );
         if let Some(source) = diagnostic["source"].as_object() {

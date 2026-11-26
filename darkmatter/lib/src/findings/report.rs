@@ -9,6 +9,7 @@ use biscuit_terminal::utils::word_wrap::word_wrap;
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use serde::Serialize;
 
+use super::presentation::glyph_markup;
 use super::sink::{Subject, SubjectId};
 use super::{Diagnostic, DiagnosticSource, Severity};
 
@@ -107,86 +108,107 @@ impl FindingReport {
         counts.errors + counts.warnings > 0
     }
 
+    /// Each subject that holds findings, in registration order, with its
+    /// findings in push order and its skipped checks grouped by reason.
+    pub(super) fn subject_findings(&self) -> Vec<SubjectFindings<'_>> {
+        let mut shown = Vec::new();
+        for (index, subject) in self.subjects.iter().enumerate() {
+            let id = SubjectId::from_index(index);
+            let mut group = SubjectFindings { subject, findings: Vec::new(), not_checked: Vec::new() };
+            for entry in self.entries.iter().filter(|entry| entry.subject == id) {
+                match &entry.check {
+                    Some((check, reason)) => match group.not_checked.iter_mut().find(|(held, _)| held == reason) {
+                        Some((_, checks)) => checks.push(check.clone()),
+                        None => group.not_checked.push((reason.clone(), vec![check.clone()])),
+                    },
+                    None => group.findings.push(&entry.diagnostic),
+                }
+            }
+            if !group.findings.is_empty() || !group.not_checked.is_empty() {
+                shown.push(group);
+            }
+        }
+        shown
+    }
+
     /// The report's rows for a person: each subject with findings under its
     /// heading, one blank line between subjects. Authored tokens are written
     /// as plain text; only the severity glyphs and labels are styled, for
     /// `term`.
     pub fn render_human(&self, term: &Terminal, layout: &HumanLayout) -> String {
+        let launch_dir = layout.launch_dir.as_deref();
         let mut blocks: Vec<String> = Vec::new();
-        for (index, subject) in self.subjects.iter().enumerate() {
-            let id = SubjectId::from_index(index);
-            let entries: Vec<&ReportEntry> = self.entries.iter().filter(|entry| entry.subject == id).collect();
-            if entries.is_empty() {
-                continue;
-            }
-            let mut lines = vec![styled(term, &format!("<b>{}</b>", Prose::escape_text(&subject.heading())))];
-            let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
-            for entry in &entries {
-                if let Some((check, reason)) = &entry.check {
-                    match grouped.iter_mut().find(|(held, _)| held == reason) {
-                        Some((_, checks)) => checks.push(check.clone()),
-                        None => grouped.push((reason.clone(), vec![check.clone()])),
-                    }
-                    continue;
+        for group in self.subject_findings() {
+            let mut lines = vec![styled(term, &format!("<b>{}</b>", Prose::escape_text(&group.subject.heading())))];
+            for diagnostic in &group.findings {
+                lines.extend(row(term, layout, diagnostic.severity, &diagnostic.message));
+                for detail in finding_details(launch_dir, diagnostic) {
+                    lines.extend(wrapped(layout, 6, 6, &detail));
                 }
-                lines.extend(self.finding_lines(term, layout, &entry.diagnostic));
+                if let Some(hint) = &diagnostic.hint {
+                    let mut hint_lines = wrapped(layout, 6, 12, &format!("hint: {hint}"));
+                    if let Some(first) = hint_lines.first_mut() {
+                        *first = first.replacen("hint:", &styled(term, "<dim>hint:</dim>"), 1);
+                    }
+                    lines.extend(hint_lines);
+                }
             }
-            for (reason, checks) in grouped {
-                let text = format!("not checked: {} ({reason})", checks.join(", "));
-                lines.extend(row(term, layout, Severity::Info, &text));
+            for (reason, checks) in &group.not_checked {
+                lines.extend(row(term, layout, Severity::Info, &not_checked_text(reason, checks)));
             }
             blocks.push(lines.join("\n"));
         }
         blocks.join("\n\n")
     }
+}
 
-    fn finding_lines(&self, term: &Terminal, layout: &HumanLayout, diagnostic: &Diagnostic) -> Vec<String> {
-        let mut lines = row(term, layout, diagnostic.severity, &diagnostic.message);
-        let mut details: Vec<String> = diagnostic.notes.clone();
-        if let Some(reference) = &diagnostic.reference_details {
-            if let (Some(construct), Some(written)) = (&reference.construct, &reference.reference) {
-                details.push(format!("{construct} {written}"));
-            }
-            if let Some(resolved) = &reference.resolved {
-                match &reference.base {
-                    Some(base) => details.push(format!(
-                        "resolved to {} (relative to {})",
-                        display_path(layout, resolved),
-                        display_path(layout, base)
-                    )),
-                    None => details.push(format!("resolved to {}", display_path(layout, resolved))),
-                }
-            }
-            if let Some(suggestions) = reference.suggestions.as_ref().filter(|found| !found.is_empty()) {
-                details.push(format!("did you mean: {}", suggestions.join(", ")));
+/// One subject's part of a report: its findings, then its skipped checks as
+/// `(reason, checks)`, in first-occurrence order.
+pub(super) struct SubjectFindings<'a> {
+    pub(super) subject: &'a Subject,
+    pub(super) findings: Vec<&'a Diagnostic>,
+    pub(super) not_checked: Vec<(String, Vec<String>)>,
+}
+
+/// The row text of the checks skipped for one reason.
+pub(super) fn not_checked_text(reason: &str, checks: &[String]) -> String {
+    format!("not checked: {} ({reason})", checks.join(", "))
+}
+
+/// The lines under a finding's message, before its hint: its notes, what
+/// its reference resolved to, and where it was written, with paths under
+/// `launch_dir` shown relative to it.
+pub(super) fn finding_details(launch_dir: Option<&Path>, diagnostic: &Diagnostic) -> Vec<String> {
+    let mut details: Vec<String> = diagnostic.notes.clone();
+    if let Some(reference) = &diagnostic.reference_details {
+        if let (Some(construct), Some(written)) = (&reference.construct, &reference.reference) {
+            details.push(format!("{construct} {written}"));
+        }
+        if let Some(resolved) = &reference.resolved {
+            match &reference.base {
+                Some(base) => details.push(format!(
+                    "resolved to {} (relative to {})",
+                    display_path(launch_dir, resolved),
+                    display_path(launch_dir, base)
+                )),
+                None => details.push(format!("resolved to {}", display_path(launch_dir, resolved))),
             }
         }
-        if let Some(source) = &diagnostic.source
-            && let Some(location) = location_text(layout, source)
-        {
-            details.push(location);
+        if let Some(suggestions) = reference.suggestions.as_ref().filter(|found| !found.is_empty()) {
+            details.push(format!("did you mean: {}", suggestions.join(", ")));
         }
-        for detail in details {
-            lines.extend(wrapped(layout, 6, 6, &detail));
-        }
-        if let Some(hint) = &diagnostic.hint {
-            let mut hint_lines = wrapped(layout, 6, 12, &format!("hint: {hint}"));
-            if let Some(first) = hint_lines.first_mut() {
-                *first = first.replacen("hint:", &styled(term, "<dim>hint:</dim>"), 1);
-            }
-            lines.extend(hint_lines);
-        }
-        lines
     }
+    if let Some(source) = &diagnostic.source
+        && let Some(location) = location_text(launch_dir, source)
+    {
+        details.push(location);
+    }
+    details
 }
 
 /// The glyph line of one finding: `  ✗ message`, wrapped under its text.
 fn row(term: &Terminal, layout: &HumanLayout, severity: Severity, text: &str) -> Vec<String> {
-    let glyph = match severity {
-        Severity::Error => styled(term, "<red>✗</red>"),
-        Severity::Warning => styled(term, "<yellow>⚠</yellow>"),
-        Severity::Info => styled(term, "<blue>ℹ</blue>"),
-    };
+    let glyph = styled(term, glyph_markup(severity));
     let mut lines = wrapped(layout, 4, 4, text);
     if let Some(first) = lines.first_mut() {
         *first = format!("  {glyph} {}", first.trim_start());
@@ -213,9 +235,9 @@ fn styled(term: &Terminal, markup: &str) -> String {
     Prose::new(markup).render(term).trim_end_matches('\n').to_string()
 }
 
-fn location_text(layout: &HumanLayout, source: &DiagnosticSource) -> Option<String> {
+fn location_text(launch_dir: Option<&Path>, source: &DiagnosticSource) -> Option<String> {
     let file = source.file.as_ref()?;
-    let shown = display_path(layout, &biscuit_file::to_forward_slash_string(file));
+    let shown = display_path(launch_dir, &biscuit_file::to_forward_slash_string(file));
     Some(match (source.line, source.column) {
         (Some(line), Some(column)) => format!("at {shown}:{line}:{column}"),
         (Some(line), None) => format!("at {shown}:{line}"),
@@ -225,8 +247,8 @@ fn location_text(layout: &HumanLayout, source: &DiagnosticSource) -> Option<Stri
 
 /// `path` relative to the launch directory, with `/`, when it lies under it;
 /// otherwise as given.
-fn display_path(layout: &HumanLayout, path: &str) -> String {
-    let Some(base) = &layout.launch_dir else {
+fn display_path(launch_dir: Option<&Path>, path: &str) -> String {
+    let Some(base) = launch_dir else {
         return path.to_string();
     };
     match Path::new(path).strip_prefix(base) {

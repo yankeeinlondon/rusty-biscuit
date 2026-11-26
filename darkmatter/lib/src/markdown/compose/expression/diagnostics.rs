@@ -108,7 +108,6 @@ impl ExpressionDiagnostic {
             expected_type: self.expected_type.clone(),
             actual_type: self.actual_type.clone(),
             span: None,
-            iteration_path: IterationPath::empty(),
             reference_details: None,
             data_location: None,
             grants_needed: None,
@@ -128,7 +127,10 @@ impl ExpressionDiagnostic {
 }
 
 /// A finding located in its authored source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// Serializes with `iteration_path` and `included_via` projected from
+/// [`Self::trail`], which is the only stored copy of that context.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub code: String,
     pub severity: Severity,
@@ -140,47 +142,41 @@ pub struct Diagnostic {
     /// The byte range of the authored construct in `source.file`, when the
     /// producer proved one; `None` otherwise.
     pub span: Option<std::ops::Range<usize>>,
-    /// The original positions of the items being processed when a composition
-    /// failed, outermost first. Empty for a static finding, a warning, or a
-    /// failure outside every `::map` / `::filter` body.
-    pub iteration_path: IterationPath,
     /// What a reference finding adds, written beside the fields above; `None`
     /// for every other family.
-    #[serde(flatten)]
     pub reference_details: Option<ReferenceDetails>,
     /// Where in a loaded data source the problem is, for a
     /// `dm.data.malformed` or `dm.data.contract_mismatch` record; `None`
     /// (and not serialized) for every other record.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub data_location: Option<DataLocation>,
     /// The approvals any one of which would allow the read a
     /// `dm.schema.slot_approval_required` record is about, in the order an
     /// approval prompt offers them; `None` (and not serialized) for every
     /// other record.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub grants_needed: Option<Vec<GrantNeeded>>,
     /// The schema default that supplied the value a schema problem is
     /// about: no authored text holds that value, so `source` names the
     /// document without a line or column. `None` (and not serialized) for
     /// every other record.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_default: Option<SchemaDefaultOrigin>,
-    /// The other declarations involved in a conflict, or the finding that
-    /// blocked a check (`dm.check.not_checked`).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Other locations involved in the finding: the other declarations of a
+    /// conflict, or the finding that blocked a check (`dm.check.not_checked`).
     pub related: Vec<DiagnosticRelated>,
     /// The next step that fixes the problem; required for a new actionable
     /// finding ([`Diagnostic::actionable`]) and optional for a projection of
     /// an older one.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
     /// Facts the producer established that support the message, one per
-    /// line (such as each link of a provider chain), shown under it.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// line (such as each link of a provider chain), shown under it. Unlike
+    /// [`Self::related`], a note has no location of its own.
     pub notes: Vec<String>,
     /// How the problem was reached, outermost first: host constructs (a
     /// Claudine task), transclusions, and `::map` / `::filter` items.
-    #[serde(skip_serializing_if = "crate::findings::Trail::is_empty")]
+    ///
+    /// Serialized as `trail` (every frame) only when it holds a host frame;
+    /// its iteration and included frames are always serialized as
+    /// `iteration_path` and `included_via`, so a trail of Darkmatter frames
+    /// alone adds no field.
     pub trail: crate::findings::Trail,
 }
 
@@ -212,7 +208,6 @@ impl Diagnostic {
             expected_type: None,
             actual_type: None,
             span: None,
-            iteration_path: IterationPath::empty(),
             reference_details: None,
             data_location: None,
             grants_needed: None,
@@ -238,11 +233,44 @@ impl Diagnostic {
         self
     }
 
-    /// This finding reached through `trail`.
+    /// This finding reached through `trail`: its frames go outside the ones
+    /// the finding already carries (a host's construct encloses the
+    /// transclusions and `::map` / `::filter` items Darkmatter recorded).
     #[must_use]
     pub fn with_trail(mut self, trail: crate::findings::Trail) -> Self {
-        self.trail = trail;
+        self.trail = std::mem::take(&mut self.trail).within(trail);
         self
+    }
+
+    /// The iteration frames of [`Self::trail`]: the original positions of the
+    /// items being processed when a composition failed, outermost first.
+    /// Empty for a static finding, a warning, or a failure outside every
+    /// `::map` / `::filter` body.
+    pub fn iteration_path(&self) -> IterationPath {
+        self.trail.iteration_path()
+    }
+
+    /// Replaces the iteration frames of [`Self::trail`] with `path`'s.
+    pub fn set_iteration_path(&mut self, path: &IterationPath) {
+        self.trail = std::mem::take(&mut self.trail).with_iteration(path);
+    }
+
+    /// This finding with its iteration frames replaced by `path`'s.
+    #[must_use]
+    pub fn with_iteration_path(mut self, path: &IterationPath) -> Self {
+        self.set_iteration_path(path);
+        self
+    }
+
+    /// The inclusion path to a reference finding's document, outermost
+    /// first, from the included frames of [`Self::trail`]: empty for the
+    /// root document, `None` for a record that reports no inclusion path
+    /// ([`ReferenceDetails::reports_inclusion`]).
+    pub fn included_via(&self) -> Option<Vec<ReferenceTrailStep>> {
+        self.reference_details
+            .as_ref()
+            .filter(|details| details.reports_inclusion)
+            .map(|_| self.trail.included_steps())
     }
 
     /// This finding with one more related location.
@@ -389,39 +417,121 @@ impl DiagnosticSource {
 }
 
 /// The reference a [`Diagnostic`] is about. Each field is omitted when absent.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReferenceDetails {
     /// The reason phrase, such as `file not found`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// The construct phrase, such as `hyperlink` or `::code`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub construct: Option<String>,
     /// The reference as written.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     /// The file-reference failure class, such as `no-match`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
-    /// The inclusion path to the reference's document, outermost first; empty
-    /// for the root document, `None` for a failure with no one reference.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub included_via: Option<Vec<ReferenceTrailStep>>,
+    /// Whether the record reports the inclusion path to its reference's
+    /// document as `included_via` (the diagnostic's included trail frames,
+    /// `[]` for the root document); `false` for a failure with no one
+    /// reference, which omits the field.
+    pub reports_inclusion: bool,
     /// The directory a relative reference was resolved against, as a
     /// portable path.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     /// The candidate the reference resolved to when resolution proposed one
     /// (an explicit relative reference's joined path), as a portable path.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved: Option<String>,
     /// Every location the resolver actually checked, in its search order.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub searched: Option<Vec<String>>,
     /// Nearby files that might be the intended target, at most three; never
     /// selected automatically.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestions: Option<Vec<String>>,
+}
+
+
+/// The serialized form of a [`Diagnostic`]: the stored fields in their
+/// published order, with `iteration_path` and `included_via` projected from
+/// the trail.
+#[derive(Serialize)]
+struct DiagnosticWire<'a> {
+    code: &'a str,
+    severity: Severity,
+    message: &'a str,
+    source: Option<&'a DiagnosticSource>,
+    expected_type: Option<&'a str>,
+    actual_type: Option<&'a str>,
+    span: Option<&'a std::ops::Range<usize>>,
+    iteration_path: IterationPath,
+    #[serde(flatten)]
+    reference_details: Option<ReferenceWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_location: Option<&'a DataLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grants_needed: Option<&'a [GrantNeeded]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_default: Option<&'a SchemaDefaultOrigin>,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    related: &'a [DiagnosticRelated],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<&'a str>,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    notes: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trail: Option<&'a crate::findings::Trail>,
+}
+
+/// The reference fields of a [`DiagnosticWire`], each omitted when absent.
+#[derive(Serialize)]
+struct ReferenceWire<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    construct: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reference: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    included_via: Option<Vec<ReferenceTrailStep>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    searched: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestions: Option<&'a [String]>,
+}
+
+impl Serialize for Diagnostic {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        DiagnosticWire {
+            code: &self.code,
+            severity: self.severity,
+            message: &self.message,
+            source: self.source.as_ref(),
+            expected_type: self.expected_type.as_deref(),
+            actual_type: self.actual_type.as_deref(),
+            span: self.span.as_ref(),
+            iteration_path: self.iteration_path(),
+            reference_details: self.reference_details.as_ref().map(|details| ReferenceWire {
+                reason: details.reason.as_deref(),
+                construct: details.construct.as_deref(),
+                reference: details.reference.as_deref(),
+                failure: details.failure.as_deref(),
+                included_via: self.included_via(),
+                base: details.base.as_deref(),
+                resolved: details.resolved.as_deref(),
+                searched: details.searched.as_deref(),
+                suggestions: details.suggestions.as_deref(),
+            }),
+            data_location: self.data_location.as_ref(),
+            grants_needed: self.grants_needed.as_deref(),
+            schema_default: self.schema_default.as_ref(),
+            related: &self.related,
+            hint: self.hint.as_deref(),
+            notes: &self.notes,
+            trail: self.trail.has_host_frame().then_some(&self.trail),
+        }
+        .serialize(serializer)
+    }
 }
 
 /// The one-based line and character column of byte `offset` in `text`;

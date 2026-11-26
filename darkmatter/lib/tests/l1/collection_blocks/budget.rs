@@ -56,7 +56,7 @@ fn assert_boundary(document: &str, visits: Option<(u64, u64)>, bytes: Option<(u6
 fn assert_located(error: &darkmatter::markdown::MarkdownError, what: &str) {
     let [record] = error_diagnostics(error).try_into().unwrap_or_else(|records| panic!("{what}: {records:#?}"));
     assert!(record.source.is_some(), "{what}: {record:?}");
-    assert!(!record.iteration_path.is_empty(), "{what}: {record:?}");
+    assert!(!record.iteration_path().is_empty(), "{what}: {record:?}");
 }
 
 #[test]

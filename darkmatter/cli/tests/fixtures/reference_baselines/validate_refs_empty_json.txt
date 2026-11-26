@@ -1,0 +1,10 @@
+exit: 0
+--- stdout
+{
+  "valid": true,
+  "references_scanned": 0,
+  "references_valid": 0,
+  "issues": [],
+  "warnings": []
+}
+--- stderr

@@ -725,3 +725,26 @@ fn a_location_is_portable_through_spaces_unicode_and_crlf() {
     let lf = fixture.write("my docs/Café/lf.md", "# Intro\n\nCafé — [gone](./nope.md)\n");
     assert!(plain(&fixture.view(&lf)).contains("lf.md:3:8"));
 }
+
+#[test]
+fn the_view_delegates_to_the_findings_reference_presentation() {
+    let fixture = Fixture::new();
+    fixture.write("child.md", "[x](./x.md)\n\n![y](./y.png)\n");
+    let path = fixture.write("root.md", "# Root\n\n[gone](./gone.md)\n\n::file child.md\n");
+    let report = fixture.report(&path);
+    let view = ValidationReportView::new(report.clone())
+        .with_launch_dir(&fixture.root)
+        .with_visibility(ReferenceReportVisibility::All)
+        .with_reference_listing();
+    let presentation = darkmatter::findings::ReferencePresentation::new(report)
+        .with_launch_dir(&fixture.root)
+        .with_visibility(ReferenceReportVisibility::All)
+        .with_reference_listing();
+
+    let options = OutputOptions::new(Width::Unlimited, TerminalProfile::plain());
+    let terminal = presentation.render_terminal(&options).unwrap();
+    assert_eq!(view.render_terminal(&options).unwrap(), terminal);
+    assert!(terminal.contains("child.md (transcluded at root.md:5)"), "{terminal}");
+    assert_eq!(fold(&view, OutputTarget::Plain, 0), terminal);
+    assert_eq!(view.as_prose(), presentation.as_prose());
+}

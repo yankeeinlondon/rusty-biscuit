@@ -37,7 +37,6 @@ use super::ShellExpansionError;
 use super::TransclusionError;
 use super::conditions::ConditionError;
 use super::context::report::ComposeWarning;
-use super::expression::iteration::IterationPath;
 use super::expression::data::locate::SourceLocator;
 use super::expression::data::{DataError, DataSourceLocation, TabularSource};
 use super::expression::{
@@ -175,13 +174,12 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         expected_type: None,
         actual_type: None,
         span: authored.map(|location| location.span.clone()),
-        iteration_path: IterationPath::empty(),
         reference_details: Some(ReferenceDetails {
             reason: Some(issue.code.reason_phrase().to_string()),
             construct: Some(issue.origin.syntax.construct_phrase().trim_start_matches("in ").to_string()),
             reference: Some(issue.reference_display.clone()),
             failure: issue.resolution_failure().map(|failure| resolution_failure_name(failure).to_string()),
-            included_via: Some(issue.included_via.clone()),
+            reports_inclusion: true,
             base: None,
             resolved: None,
             searched: None,
@@ -193,7 +191,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         related: Vec::new(),
         hint: None,
         notes: Vec::new(),
-        trail: crate::findings::Trail::default(),
+        trail: crate::findings::Trail::included(&issue.included_via),
     }
 }
 
@@ -413,7 +411,7 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
             if !diagnostic.message.contains(&rendered) {
                 diagnostic.message = format!("{} at {rendered}", diagnostic.message);
             }
-            diagnostic.iteration_path = path.clone();
+            diagnostic.set_iteration_path(&path);
         }
     }
 }
@@ -467,8 +465,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                         expected_type: None,
                         actual_type: None,
                         span: authored.map(crate::markdown::AuthoredSpan::range),
-                        iteration_path: IterationPath::empty(),
-                        reference_details: schema_file_reference_details(problem),
+                                        reference_details: schema_file_reference_details(problem),
                         data_location: expression.and_then(|expression| expression.data),
                         grants_needed: None,
                         related: Vec::new(),
@@ -602,12 +599,9 @@ fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) ->
 fn contract_template_records(record: Diagnostic, failure: &simplified_schema::SlotResolutionFailure) -> Vec<Diagnostic> {
     slot_resolution_records(&failure.error, &|slot| failure_text(failure, slot))
         .into_iter()
-        .map(|(_, inner)| Diagnostic {
-            message: record.message.clone(),
-            source: record.source.clone(),
-            span: record.span.clone(),
-            iteration_path: record.iteration_path.clone(),
-            ..inner
+        .map(|(_, inner)| {
+            Diagnostic { message: record.message.clone(), source: record.source.clone(), span: record.span.clone(), ..inner }
+                .with_iteration_path(&record.iteration_path())
         })
         .collect()
 }
@@ -627,7 +621,7 @@ fn with_failed_fetch(record: Diagnostic, function: &str, reference: &str) -> Dia
         construct: Some(format!("{function}()")),
         reference: Some(reference.to_string()),
         failure: Some(resolution_failure_name(biscuit_file::ResolutionFailure::Io).to_string()),
-        included_via: None,
+        reports_inclusion: false,
         base: None,
         resolved: None,
         searched: None,
@@ -656,7 +650,7 @@ fn file_reference_details(diagnostic: &FileReferenceDiagnostic) -> ReferenceDeta
         construct: Some(format!("{}()", diagnostic.function)),
         reference: Some(diagnostic.reference.clone()),
         failure: Some(resolution_failure_name(failure).to_string()),
-        included_via: None,
+        reports_inclusion: false,
         base: None,
         resolved: None,
         searched: None,
@@ -1019,7 +1013,6 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         expected_type: None,
         actual_type: None,
         span,
-        iteration_path: IterationPath::empty(),
         reference_details: match error {
             MarkdownError::Reference(inner) => reference_error_details(inner),
             // A target's file-reference failure is a reference check that
@@ -1583,7 +1576,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         expected_type: None,
         actual_type: None,
         span: None,
-        iteration_path: IterationPath::empty(),
         reference_details: None,
         data_location: None,
         grants_needed: None,

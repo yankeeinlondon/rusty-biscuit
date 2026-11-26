@@ -423,3 +423,18 @@ fn preflight_refuses_a_malformed_shell_block_with_its_code_and_file_line() {
     let approvals = document(&repo, &content).compose_preflight_approvals(&request, handler()).expect("a valid block");
     assert!(approvals.pre_approved_commands.contains_exact("echo hi"), "{:?}", approvals.pre_approved_commands);
 }
+
+/// An unterminated `::block`'s excerpt numbers its gutter in the file's
+/// frame: with a frontmatter header above it, the opener on file line 4 is
+/// marked `> 4`, never the body's `> 1`.
+#[test]
+fn an_unterminated_block_excerpt_numbers_file_lines() {
+    let repo = repository();
+    let md = document(&repo, "---\ntitle: x\n---\n::block when=\"title\"\nbody\n");
+    let error = md.compose_with(&request(repo.path())).expect_err("an unterminated block is refused");
+    let block = darkmatter::markdown::errors::as_block_error(&error).expect("a block error");
+    let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(block.report_block_error_optimistic(Some(80)));
+    assert!(rendered.contains("> 4 │ ::block when=\"title\""), "{rendered}");
+    assert!(rendered.contains("  3 │ ---"), "{rendered}");
+    assert!(!rendered.contains("> 1 │"), "{rendered}");
+}

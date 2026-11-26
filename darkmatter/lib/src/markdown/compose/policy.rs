@@ -122,6 +122,8 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::collection_blocks::diagnostics::CALLBACK_FAILED_CODE, "a `::map` / `::filter` callback that failed"),
     (super::collection_blocks::diagnostics::VISIT_LIMIT_CODE, "a collection iteration that exceeded the visit limit"),
     (super::collection_blocks::diagnostics::EXPANSION_LIMIT_CODE, "a collection expansion that exceeded the byte limit"),
+    (crate::findings::EMPTY_BODY_CODE, "a composed body that is proven empty"),
+    (crate::findings::NOT_CHECKED_CODE, "a check that could not run, with the finding that blocked it (always info)"),
 ];
 
 /// Which reported diagnostics block a composition.

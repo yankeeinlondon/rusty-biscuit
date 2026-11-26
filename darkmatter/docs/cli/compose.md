@@ -291,6 +291,22 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
   A data output reports the same problems in `diagnostics`, with the document as `null`.
 
+  When the broken reference is not the only problem, compose prints one
+  combined report instead; see [The combined report](#the-combined-report).
+
+- **An empty body** warns. When the composed body has nothing visible (the
+  document has no body, the body is only whitespace, every block was left out
+  by a false `when=` condition, or the body rendered to nothing), stderr
+  carries a `dm.compose.empty_body` warning after the document, saying which:
+
+  ```text
+  ⚠ the composed body is empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)
+  ```
+
+  The document is still written and the exit status is 0.
+  `--deny dm.compose.empty_body` (or `--deny all`) makes the warning fail the
+  run with status 1 and no document.
+
 - **An empty link target** (`[text]()` or `![alt]()`) only warns: the document composes, the link keeps its text, and stderr names the link and where it is. `--deny missing-hyperlinks` (or `--deny missing-image-refs` for an image, or `--deny all`) makes the warning fail the run with status 1. In a data output it is a `warning` diagnostic with code `dm.reference.missing_hyperlink` (or `dm.reference.missing_image`) and reason `no target`.
 
   ```text
@@ -320,6 +336,110 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
   `--allow host=HOST` or the configuration says `network: allow` (see
   [Remote URL References](../topics/remote-url-references.md#allowed-hosts)).
   Denied hosts are rejected before any network request is attempted.
+
+### The combined report
+
+A broken reference stops `md compose` before anything runs. So that one run
+shows every problem it can prove, compose then evaluates, passively, the
+checks that do not depend on the broken reference:
+
+- the **call check** (a function called with arguments no signature takes);
+- the **schema verdict** (frontmatter that does not satisfy its `$schema`);
+- the **empty body**: whether the body would compose to nothing.
+
+These run as a dry run: no command, `::shell`, effect, or approval runs, and
+every inclusion whose reference is broken is left out. When they find
+nothing, compose prints the reference report it always printed. When one of
+them adds a finding, compose prints one report for the document instead,
+with the reference findings first, then the others, then the checks that
+could not run, and a closing tally. The exit status is 1 either way.
+
+Given `notes.md`, whose only block is excluded and includes a file that does
+not exist:
+
+```markdown
+---
+title: Release notes
+draft: false
+---
+::block when="draft"
+::file ./missing.md
+::end-block
+```
+
+`md compose notes.md` prints, on stderr:
+
+```text
+notes.md
+  ✗ file not found in `::file`
+      ::file ./missing.md
+      at notes.md:6:1
+      hint: create missing.md, or correct the reference
+  ⚠ the body would be empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)
+      at notes.md:5:1
+      hint: pass the values those conditions read, or add body content outside the conditional blocks
+
+Checked notes.md: 1 error, 1 warning
+```
+
+The missing file is found by the walk that prepares shell approval, which
+reads every block whatever its `when=` condition. The condition still decides
+what the body holds: a block whose condition is known to be false is left
+out, even when its own reference is broken, and that is what proves the body
+empty here. With `draft: true` the block, and so the broken inclusion, would
+be the body; nothing but the reference is wrong, and compose prints the
+reference report alone.
+
+How each check is decided:
+
+```mermaid
+flowchart TD
+    stop[A broken reference stops the run] --> dry[Dry-run composition, broken inclusions left out]
+    dry -->|a call is proven wrong| call[call finding; schema and empty body not checked]
+    dry -->|the frontmatter fails its schema| schema[schema findings; empty body not checked]
+    dry -->|composes| body{Is anything visible?}
+    body -->|yes| none[no finding]
+    body -->|only what the dry run left as written| unchecked[empty body not checked]
+    body -->|nothing, but a broken inclusion was left out| none
+    body -->|nothing| empty[dm.compose.empty_body warning]
+```
+
+- A value or condition that waits on a command (`draft: $(…)`) is never
+  decided in a dry run, so it never proves the body empty. The report says
+  so instead:
+
+  ```text
+    ℹ not checked: empty body (reads `draft`, which is not known until the document runs)
+  ```
+- A call the check proves wrong, or a schema violation, can stop the
+  reference check itself before it lists the document's references. Compose
+  then repeats the reference check without that verdict, and reports both;
+  the checks the refusal stops are listed as not checked:
+
+  ```text
+  call.md
+    ✗ file not found in `::file`
+        ::file ./missing.md
+        at call.md:6:1
+        hint: create missing.md, or correct the reference
+    ✗ upper: no signature takes 3 arguments; expected upper(x: string | null): string | null
+        at call.md:4:4
+    ℹ not checked: schema, empty body (a call the check proves wrong stops the document first)
+
+  Checked call.md: 2 errors, 0 warnings, 2 checks not run
+  ```
+
+- An `--allow missing-*` recovery is applied first, as always: a document
+  whose broken references are all recovered composes, and no combined report
+  is printed.
+- Standard input has no reference check, so none of this applies to it.
+- A [lifecycle](#lifecycle-events) run checks references after
+  `initialize`, and prints the combined report there, before its `failed`
+  stack runs.
+- `--output json` carries every finding of the report in `diagnostics`, in
+  the same order, with `dm.compose.empty_body` and `dm.check.not_checked`
+  records beside the reference ones (see
+  [Data Contracts](./data-contracts.md#finding-codes-for-checks-that-keep-going)).
 
 ### Lifecycle Events
 

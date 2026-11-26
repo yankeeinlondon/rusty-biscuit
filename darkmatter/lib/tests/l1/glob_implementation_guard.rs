@@ -19,7 +19,8 @@
 //!   `file_reference::glob` module, so the source check cannot search for it.
 //!
 //! The `ignore` crate is admitted as a directory walker (`WalkBuilder`, used by
-//! DMLS's workspace discovery and Claudine's completion walks); its glob
+//! DMLS's workspace discovery, Claudine's completion walks, and Darkmatter's
+//! missing-reference basename search); its glob
 //! matchers (`OverrideBuilder`, `GitignoreBuilder`, `TypesBuilder`) are not.
 //! Other packages' allowlisted files are declared in this package's
 //! `[package.metadata.ci.tests] source-inputs`, so changing one runs this test.
@@ -44,7 +45,7 @@ struct ScannedPackage {
 
 const SCANNED: &[ScannedPackage] = &[
     ScannedPackage { src: "biscuit-file/lib/src", manifest: "biscuit-file/lib/Cargo.toml", glob_dependencies: &["globset"] },
-    ScannedPackage { src: "darkmatter/lib/src", manifest: "darkmatter/lib/Cargo.toml", glob_dependencies: &["globset"] },
+    ScannedPackage { src: "darkmatter/lib/src", manifest: "darkmatter/lib/Cargo.toml", glob_dependencies: &["globset", "ignore"] },
     // The schema language Darkmatter's `match(...)` and file-format checks
     // moved into; it matches through `GlobReference` only.
     ScannedPackage {

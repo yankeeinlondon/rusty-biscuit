@@ -97,6 +97,9 @@ aho-corasick = "1.1"
 base64 = "0.22"
 tempfile = "3.8"
 globset = "0.4"
+# The bounded, gitignore-aware repository walk behind a missing reference's
+# basename suggestions (`findings::reference::basename_matches`).
+ignore = "0.4"
 # Blocking child-process wait that stays killable from another thread, so shell
 # directives wait on an OS event instead of a 10ms poll loop (Finding 17).
 # `default-features = false` drops the `timeout` feature: its `wait_timeout` is

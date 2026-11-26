@@ -211,14 +211,18 @@ record this output prints.
 | `expected_type` | for a call argument, the parameter's declared type; for a [contract mismatch](#data-errors), the type the offending value should have had; otherwise `null` |
 | `actual_type` | for a call argument, the argument's type; for a contract mismatch, the kind of value found; otherwise `null` |
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
-| `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
+| `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key), one per iteration frame of the [trail](#trail); otherwise `[]` |
 | `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, and for a `dm.schema.*` problem on a frontmatter property whose value one `load_data` call returned directly, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
 | `grants_needed` | for `dm.schema.slot_approval_required`, the approvals any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file` or `url`; `target` is the file's path or the exact URL; `scope` is `once`, allow for this run, or `persisted`, "always allow" a file by saving it to `permissions.file-read`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
 | `schema_default` | for a `dm.schema.*` problem with a value a schema default supplied (a required property the document left out, filled from its `default(...)`), where that default is declared, as `{ "path", "schema_location", "schema_file" }`: `path` is the dotted property path, `schema_location` the JSON Pointer of the `default` keyword (for example `/properties/doc/default`), and `schema_file` the schema file that declares the default (for a default inside a type imported with `Name@file`, that import's file, not the importing schema), omitted for the document's inline schema or a compiled-in one. No authored text holds such a value, so `source` names the document with a `null` line and column. Absent, not `null`, on every other diagnostic |
-| `related` | on a host registration conflict, an array of the other declarations as `{ "message", "source" }`. Each `source` carries its own file and coordinates. A `dm.check.not_checked` record names the finding that stopped its check here. The field is omitted when the diagnostic has no related location. |
+| `related` | other locations involved in the problem, as `{ "message", "source" }`: the other declarations of a host registration conflict, or the finding that stopped a `dm.check.not_checked` record's check. Each `source` carries its own file and coordinates. Omitted when the diagnostic has no related location |
 | `hint` | how to fix the problem, as one sentence, such as `"create renderers/_frontmatter.md before a real run, or correct the reference"`. Omitted when the producer has no fix to suggest |
-| `notes` | further lines a person reads under the message, in order, such as each link of a provider selection chain. Omitted when empty |
-| `trail` | how the problem was reached, outermost first. Each frame is tagged by `kind`: `{ "kind": "host", "host", "label", "property" }` for a host construct such as a Claudine task (`"host": "task"`, `"label": "metadata"`, `"property": "sequence[1].prompt"`), `{ "kind": "included", "file", "line" }` for a transclusion, and `{ "kind": "iteration", "collection", "position" }` for a `::map` or `::filter` item. Omitted when empty |
+| `notes` | supporting lines a person reads under the message, in order, such as each link of a provider selection chain. Unlike `related`, a note has no location of its own. Omitted when empty |
+| `trail` | how the problem was reached, outermost first, when a host such as Claudine reached it through one of its own constructs; see [Trail](#trail). Omitted otherwise |
+
+`related` is the field for any other location that explains a problem.
+`notes` is an addition to that record: it holds facts with no location of
+their own, so a reader who only wants locations can ignore it.
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
@@ -243,6 +247,41 @@ A problem inside transcluded content points at the transcluded file, not at the
 to the document the command named, with a `null` line and column. See
 [what each family reports](../errors/composition-problems.md#how-a-problem-is-located).
 
+### Trail
+
+A diagnostic records how its problem was reached as one trail of frames,
+outermost first. Three kinds of frame exist:
+
+| Frame | Fields | Written by |
+|---|---|---|
+| `{ "kind": "host", "host", "label", "property", "source" }` | the host's noun for the construct (`"task"`, `"group"`, `"sequence"`), its display label, the authored property path such as `"sequence[1].prompt"`, and, when proven, where the construct is authored | a host, such as Claudine's document check |
+| `{ "kind": "included", "file", "line" }` | the including document and the authored line of its `::file` or `::toc-linking` directive (absent when unknown) | Darkmatter, for a reference problem in a transcluded document |
+| `{ "kind": "iteration", "collection", "position" }` | the source reference as written and the item's original position (a number for an index, a string for a key) | Darkmatter, for a failure inside a `::map` or `::filter` item |
+
+Every diagnostic shows Darkmatter's own frames in two fixed fields:
+`iteration_path` lists the iteration frames (`[]` when there are none), and a
+reference problem's `included_via` lists the included frames (`[]` for a
+problem in the root document). The `trail` field is written only when the
+trail holds at least one host frame, and then holds every frame, in order. So
+`md`, which pushes no host frame, never writes `trail`.
+
+```json
+{
+  "code": "dm.collection.callback_failed",
+  "severity": "error",
+  "message": "… at teams[2]",
+  "iteration_path": [{ "collection": "teams", "position": 2 }],
+  "trail": [
+    { "kind": "host", "host": "task", "label": "metadata", "property": "sequence[1].prompt" },
+    { "kind": "iteration", "collection": "teams", "position": 2 }
+  ]
+}
+```
+
+The record above, reported by a Claudine dry run, carries the task that
+reached the failure. The same failure from `md compose` has the same
+`iteration_path` and no `trail`.
+
 ### Reference details
 
 A reference problem also carries what the [reference report](./validate.md#the-reference-report)
@@ -262,11 +301,11 @@ listed under [Data errors](#data-errors).
 | `construct` | the construct phrase, such as `"hyperlink"`, `"image"`, or `"::code"` |
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
-| `included_via` | the transclusion trail, outermost first, as `{ "file", "line" }` steps; each `line` is the authored line of the `::file` or `::toc-linking` directive |
+| `included_via` | the transclusion path, outermost first, as `{ "file", "line" }` steps, one per included frame of the [trail](#trail); each `line` is the authored line of the `::file` or `::toc-linking` directive, or `null`. `[]` for a problem in the root document. Written on a reference problem; a failure with no single reference (such as a read-side function's file) omits it |
 | `base` | for a missing document (`dm.reference.missing_document`), the file or directory the reference was resolved against |
 | `resolved` | for a missing document, the one path the reference resolved to |
-| `searched` | for a missing document whose reference was looked for in more than one place, every path checked, in search order |
-| `suggestions` | up to three existing files near the reference's file name, from the searched directories, in search order. A file that differs only by case is never offered. A suggestion is shown, never used |
+| `searched` | for a missing document whose reference was looked for in more than one place, or searched recursively (`%`), every path checked, and every directory a recursive search walked, in search order |
+| `suggestions` | up to three existing files near the reference's file name, from the searched directories, in search order. A directory the host's permissions refuse is never read. A name that differs only by case is offered when it is a different file (on a case-sensitive volume, `Notes.md` beside a missing `notes.md`) and never when it is the same directory entry. A suggestion is shown, never used |
 
 ## Which diagnostics, in which order
 
@@ -407,14 +446,25 @@ host's own command (see
 
 A check that reports every problem instead of stopping at the first, such as
 Claudine's passive document check, uses three more codes from the library's
-`darkmatter::findings` module. `md compose` does not emit them yet
-(**planned**: its pre-composition check will).
+`darkmatter::findings` module. `md compose` emits two of them:
+
+- `dm.compose.empty_body` as a `warning` whenever the composed body is empty,
+  and as a `warning` when a broken reference stopped the run and a passive
+  composition proves the body *would* be empty (see
+  [the combined report](./compose.md#the-combined-report));
+- `dm.check.not_checked` in that combined report, for a check the stop or an
+  undecided value kept from running.
+
+Both are in the codes [`--deny`](./policy.md) takes on `md compose`:
+`--deny dm.compose.empty_body` fails a run whose body composes to nothing.
+`dm.reference.missing_document` is reported only by a host, so `md` never
+takes it.
 
 | Code | Severity | Meaning |
 |---|---|---|
 | `dm.reference.missing_document` | `error` | a document-valued reference, such as a Claudine task's `prompt:`, names a file that does not exist; carries the [reference details](#reference-details) including `base`, `resolved`, `searched`, and `suggestions` |
-| `dm.compose.empty_body` | `error` or `warning` | a document composed to an empty body; `message` says why (an empty or whitespace-only body, or a body that rendered to nothing) |
-| `dm.check.not_checked` | `info` | a check could not run, and why, as `"not checked: provider (no executable)"`; `related` names the finding that stopped it, when it has a location |
+| `dm.compose.empty_body` | `warning` in `md`; `error` for a Claudine provider prompt | a document composed (or would compose) to an empty body; `message` says why (no body, a whitespace-only body, every block left out by a false condition, or a body that rendered to nothing), `hint` gives the next step, and `source` is the first excluded block when blocks account for it |
+| `dm.check.not_checked` | `info` | a check could not run, and why, as `"not checked: provider (no executable)"` or, in `md compose`, `"not checked: empty body (…)"` with the reason the body could not be judged; `related` names the finding that stopped it, when it has a location |
 
 ```json
 {

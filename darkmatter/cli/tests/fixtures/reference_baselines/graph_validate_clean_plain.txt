@@ -1,0 +1,10 @@
+exit: 0
+--- stdout
+    ╭── 🔗 https://example.com
+    │
+    ├── 📄 ./child.md
+    │
+📄 clean.md
+
+Checked 2 references across 1 document: all ok
+--- stderr

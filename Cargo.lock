@@ -3222,6 +3222,7 @@ dependencies = [
  "gix",
  "globset",
  "html-escape",
+ "ignore",
  "image",
  "indexmap 2.14.2",
  "insta",

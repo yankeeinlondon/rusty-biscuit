@@ -268,7 +268,6 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         expected_type: None,
         actual_type: None,
         span: None,
-        iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
         grants_needed: None,

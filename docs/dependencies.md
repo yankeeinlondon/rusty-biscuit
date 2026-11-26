@@ -659,7 +659,7 @@ This is a Rust workspace with the following modules:
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
 - `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
-- `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
+- `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting (ignore for missing-reference basename suggestions)
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
 - `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)

@@ -116,6 +116,15 @@ features their tier requires.
   `just deps-check` in `content-policy/` fails if it ever does. The
   `file-adapter` feature stays off.
 
+## Missing-reference Suggestions
+
+- `ignore` (`darkmatter`) walks a repository for files that share a missing
+  reference's file name (`findings::reference::basename_matches`). It honors
+  `.gitignore`, never follows a directory symlink, and lets the host prune
+  subtrees by name. Claudine uses it for an explicit prompt or sequence file
+  that matched nothing. The crate was already in the tree through `sniff`
+  and DMLS.
+
 ## Execution Identity and Network Context
 
 - `biscuit-hash` with the `blake3` feature computes `ctx.sid`, the full BLAKE3

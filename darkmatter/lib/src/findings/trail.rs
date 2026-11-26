@@ -4,8 +4,10 @@ use std::fmt;
 
 use serde::Serialize;
 
+use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::expression::diagnostics::DiagnosticSource;
-use crate::markdown::compose::expression::iteration::IterationPosition;
+use crate::markdown::compose::expression::iteration::{IterationFrame, IterationPath, IterationPosition};
+use crate::markdown::reference::types::ReferenceTrailStep;
 
 /// One step on the way to a finding.
 ///
@@ -15,8 +17,10 @@ use crate::markdown::compose::expression::iteration::IterationPosition;
 pub enum TrailFrame {
     /// Reached through a transclusion at this authored position.
     Included {
-        /// The including document, as a portable path or URL.
-        file: String,
+        /// The including document; serializes as its path or URL, or `null`
+        /// for input with no named origin.
+        file: ComposeSource,
+        /// The authored line of the including directive, when proven.
         #[serde(skip_serializing_if = "Option::is_none")]
         line: Option<usize>,
     },
@@ -41,11 +45,23 @@ pub enum TrailFrame {
     },
 }
 
+impl From<&ReferenceTrailStep> for TrailFrame {
+    fn from(step: &ReferenceTrailStep) -> Self {
+        Self::Included { file: step.file.clone(), line: step.line }
+    }
+}
+
+impl From<&IterationFrame> for TrailFrame {
+    fn from(frame: &IterationFrame) -> Self {
+        Self::Iteration { collection: frame.collection.clone(), position: frame.position.clone() }
+    }
+}
+
 impl fmt::Display for TrailFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Included { file, line: Some(line) } => write!(f, "{file}:{line}"),
-            Self::Included { file, line: None } => f.write_str(file),
+            Self::Included { file, line: Some(line) } => write!(f, "{}:{line}", file.display()),
+            Self::Included { file, line: None } => f.write_str(&file.display()),
             Self::Iteration { collection, position } => write!(f, "{collection}[{position}]"),
             Self::Host { host, label, property, .. } => write!(f, "{host} {label} ({property})"),
         }
@@ -77,6 +93,11 @@ impl Trail {
         self
     }
 
+    /// A trail of one included frame per step of `steps`, outermost first.
+    pub fn included<'a>(steps: impl IntoIterator<Item = &'a ReferenceTrailStep>) -> Self {
+        Self(steps.into_iter().map(TrailFrame::from).collect())
+    }
+
     #[allow(missing_docs)]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -85,6 +106,51 @@ impl Trail {
     #[allow(missing_docs)]
     pub fn frames(&self) -> &[TrailFrame] {
         &self.0
+    }
+
+    /// Whether a host pushed any frame. Only such a trail is published as
+    /// `trail`; Darkmatter's own frames are published through the
+    /// `iteration_path` and `included_via` projections.
+    pub fn has_host_frame(&self) -> bool {
+        self.0.iter().any(|frame| matches!(frame, TrailFrame::Host { .. }))
+    }
+
+    /// The iteration frames, outermost first, as the legacy path.
+    pub fn iteration_path(&self) -> IterationPath {
+        self.0.iter().fold(IterationPath::empty(), |path, frame| match frame {
+            TrailFrame::Iteration { collection, position } => {
+                path.pushed(IterationFrame { collection: collection.clone(), position: position.clone() })
+            }
+            _ => path,
+        })
+    }
+
+    /// The included frames, outermost first, as legacy inclusion steps.
+    pub fn included_steps(&self) -> Vec<ReferenceTrailStep> {
+        self.0
+            .iter()
+            .filter_map(|frame| match frame {
+                TrailFrame::Included { file, line } => Some(ReferenceTrailStep { file: file.clone(), line: *line }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// This trail with `outer`'s frames placed before its own.
+    #[must_use]
+    pub(crate) fn within(self, outer: Trail) -> Self {
+        let mut frames = outer.0;
+        frames.extend(self.0);
+        Self(frames)
+    }
+
+    /// This trail with its iteration frames replaced by `path`'s, appended
+    /// innermost.
+    #[must_use]
+    pub(crate) fn with_iteration(mut self, path: &IterationPath) -> Self {
+        self.0.retain(|frame| !matches!(frame, TrailFrame::Iteration { .. }));
+        self.0.extend(path.frames().iter().map(TrailFrame::from));
+        self
     }
 }
 

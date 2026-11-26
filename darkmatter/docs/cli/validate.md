@@ -303,7 +303,10 @@ and `url()` outside `@font-face` are not checked.
 
 This report is shared: `md validate refs` prints it to stdout, `md graph --validate`
 prints it after the tree, and `md compose` prints it on stderr when references stop
-it. It covers reference problems only.
+it. It covers reference problems only. When another of `md compose`'s passive
+checks also finds a problem in the document, `md compose` prints its
+[combined report](compose.md#the-combined-report) instead, which lists the
+reference problems with the others.
 
 Problems are grouped under the document that contains them, because that is where
 the fix goes: the named document first, then transcluded documents depth-first. A

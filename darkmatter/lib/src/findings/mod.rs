@@ -13,6 +13,8 @@
 //!   ([`NOT_CHECKED_CODE`]) instead of staying silent.
 //! - [`FindingReport`]: the finished, ordered report, with severity counts,
 //!   the data form, and the human rendering.
+//! - [`presentation`]: the render-tree presentations of a report, the
+//!   reference report's among them.
 //! - [`reference`]: the builder of a confirmed missing-document finding over
 //!   biscuit-file's detailed resolution.
 //!
@@ -20,6 +22,7 @@
 //! it and never changes it. See `darkmatter/docs/errors/message-standard.md`
 //! for the four-part message standard every new finding follows.
 
+pub mod presentation;
 pub mod reference;
 mod report;
 mod sink;
@@ -28,6 +31,7 @@ mod trail;
 pub use crate::markdown::compose::expression::diagnostics::{
     Diagnostic, DiagnosticRelated, DiagnosticSource, ReferenceDetails, Severity,
 };
+pub use presentation::{FindingPresentation, ReferencePresentation, ReferenceReportVisibility};
 pub use report::{FindingCounts, FindingReport, HumanLayout, ReportEntry};
 pub use sink::{FindingId, FindingSink, Subject, SubjectId};
 pub use trail::{Trail, TrailFrame};
@@ -42,12 +46,12 @@ pub const MISSING_DOCUMENT_CODE: &str = "dm.reference.missing_document";
 /// A composed body that is proven empty.
 pub const EMPTY_BODY_CODE: &str = "dm.compose.empty_body";
 
-/// Every code this module's builders produce, with what it reports.
-pub const FINDING_CODES: &[(&str, &str)] = &[
-    (NOT_CHECKED_CODE, "a check that could not run, with the finding that blocked it"),
-    (MISSING_DOCUMENT_CODE, "a document reference whose target does not exist"),
-    (EMPTY_BODY_CODE, "a composed body that is proven empty"),
-];
+/// The codes this module's builders produce that only a host emits, with
+/// what each reports. The others, which `md compose` emits too
+/// ([`NOT_CHECKED_CODE`], [`EMPTY_BODY_CODE`]), are listed once, in
+/// [`COMPOSE_DIAGNOSTIC_CODES`](crate::markdown::compose::policy::COMPOSE_DIAGNOSTIC_CODES).
+pub const FINDING_CODES: &[(&str, &str)] =
+    &[(MISSING_DOCUMENT_CODE, "a document reference whose target does not exist")];
 
 /// Why a composed body is empty, as far as the producer has proven.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
