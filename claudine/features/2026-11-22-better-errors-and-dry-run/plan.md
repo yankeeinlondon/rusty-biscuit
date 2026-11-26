@@ -4,9 +4,67 @@ area: claudine
 total-phases: 3
 created: 2026-11-23
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1:
+- darkmatter/lib/src/findings/mod.rs
+- darkmatter/lib/src/findings/trail.rs
+- darkmatter/lib/src/findings/sink.rs
+- darkmatter/lib/src/findings/report.rs
+- darkmatter/lib/src/findings/reference.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- claudine/lib/src/composition/sequence/model.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/commands/mod.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/outcome.rs
+- claudine/cli/src/commands/document_check/selection.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tests.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/cli/tests/l1/context_construction_guard.rs
+- claudine/cli/tests/l1/switch_catalog_guard.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_fleet.yaml
+- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_find.md
+- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_fleet.yaml
+- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_find.md
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run1_reports_every_problem_and_previews_the_composable_task.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_json.snap
+docs_updated_during_phase_1:
+- claudine/docs/cli/sequence.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/inline/preflight-checks.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/claudine/SKILL.md
+- darkmatter/docs/use-skills/use-darkmatter/library.md
+packages:
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+- claudine
+- claudine-cli
 ---
 
 # Better errors and a diagnostic dry run implementation plan
