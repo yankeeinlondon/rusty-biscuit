@@ -65,7 +65,8 @@ pub fn resolve_sequence_reference(
 
 /// The [`missing_document`] finding for `raw`, authored in `source_path`,
 /// when [`resolve_sequence_reference`] would fail because no candidate
-/// exists: what a check reports in place of the typed failure. Its hint
+/// exists: what a check reports in place of the typed failure. Any other
+/// failure is `None`; the walk keeps its typed error. Its hint
 /// names paths relative to `launch_dir`, and its base is `source_path`, the
 /// file the reference is written relative to.
 ///
@@ -77,9 +78,16 @@ pub(crate) fn reference_finding(
     construct: darkmatter::findings::reference::DocumentConstruct<'_>,
     memo: &mut darkmatter::findings::reference::ListingMemo,
 ) -> Option<darkmatter::findings::Diagnostic> {
+    use darkmatter::findings::reference::{DocumentCheck, check_document};
     let reference = FileReference::new(raw).ok()?;
-    let detailed = reference.resolve_detailed(&request_context.for_source(source_path));
-    let mut finding = darkmatter::findings::reference::missing_document(construct, &detailed, memo)?;
+    // Darkmatter's `file-read` permission governs schema slot reads, not
+    // the documents a sequence names, so every location is admitted.
+    let admit_all = |_: &Path| Ok::<(), std::convert::Infallible>(());
+    let mut finding = match check_document(&reference, &request_context.for_source(source_path), construct, memo, admit_all) {
+        DocumentCheck::Missing(finding) => *finding,
+        DocumentCheck::Refused(never) => match never {},
+        DocumentCheck::Found(_) | DocumentCheck::Failed(_) => return None,
+    };
     if let Some(details) = finding.reference_details.as_mut() {
         details.base = Some(biscuit_file::to_forward_slash_string(source_path));
     }

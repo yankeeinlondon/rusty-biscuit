@@ -158,24 +158,33 @@ fn a_task_field_meaningless_for_the_executable_is_rejected() {
 
 /// A prompt task's `with` shares every `with`'s shape errors, rendered at the
 /// task's own `with` in the sequence document before anything runs.
-#[test]
-fn a_malformed_task_with_is_the_with_family_error_at_the_task() {
+fn assert_malformed_task_with(name: &str, with: &str, says: &str) {
     let workspace = CliProcessFixture::named("sequence-errors-cli-with-shape");
-    for (name, with, says) in [
-        ("whole.md", "'{{ payload }}'", "whole-mapping"),
-        ("list.md", "[1]", "must be a mapping"),
-        ("null.md", "null", "must be a mapping"),
-        ("dynamic.md", "{ '{{ key }}': 1 }", "keys must be static"),
-    ] {
-        let doc = write(
-            &workspace,
-            name,
-            &format!("---\nsequence:\n  - name: beta\n    prompt: child.md\n    with: {with}\n---\nBody\n"),
-        );
-        let stderr = run_and_flatten(&workspace, &doc, &[]);
-        assert!(stderr.contains(says), "{name}: stderr:\n{stderr}");
-        assert!(stderr.contains("sequence[0].with"), "{name}: the error names the task's `with`; stderr:\n{stderr}");
-    }
+    let doc = write(
+        &workspace,
+        name,
+        &format!("---\nsequence:\n  - name: beta\n    prompt: child.md\n    with: {with}\n---\nBody\n"),
+    );
+    let stderr = run_and_flatten(&workspace, &doc, &[]);
+    assert!(stderr.contains(says), "{name}: stderr:\n{stderr}");
+    assert!(stderr.contains("sequence[0].with"), "{name}: the error names the task's `with`; stderr:\n{stderr}");
+}
+
+// One test per shape, so each spawn runs on its own core.
+macro_rules! malformed_task_with {
+    ($($test:ident: $name:literal, $with:literal => $says:literal;)+) => {$(
+        #[test]
+        fn $test() {
+            assert_malformed_task_with($name, $with, $says);
+        }
+    )+};
+}
+
+malformed_task_with! {
+    a_malformed_task_with_whole_value_is_the_with_family_error_at_the_task: "whole.md", "'{{ payload }}'" => "whole-mapping";
+    a_malformed_task_with_list_is_the_with_family_error_at_the_task: "list.md", "[1]" => "must be a mapping";
+    a_malformed_task_with_null_is_the_with_family_error_at_the_task: "null.md", "null" => "must be a mapping";
+    a_malformed_task_with_dynamic_key_is_the_with_family_error_at_the_task: "dynamic.md", "{ '{{ key }}': 1 }" => "keys must be static";
 }
 
 // ============================================================================

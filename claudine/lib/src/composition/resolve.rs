@@ -3,10 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{
-    DetailedOutcome, FileReference, FileResolutionContext, MagicPathTier, PathPosition,
-    ResolutionFailure,
-};
+use biscuit_file::{FileReference, FileResolutionContext, MagicPathTier, PathPosition};
+use darkmatter::findings::reference::DocumentResolution;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
@@ -177,14 +175,18 @@ pub fn resolve_composition_source_in_context(
         }
     })?;
 
-    let detailed = reference.resolve_detailed(context);
-    let resolved_path = match detailed.outcome() {
-        DetailedOutcome::Matched(path) => path.clone(),
-        DetailedOutcome::Failed(ResolutionFailure::NoMatch) => {
+    // A top-level document argument is the user's own request: no read
+    // permission governs it, so every location is admitted.
+    let resolved_path = match darkmatter::findings::reference::resolve_document(&reference, context, |_| {
+        Ok::<(), std::convert::Infallible>(())
+    }) {
+        DocumentResolution::Found(path) => path,
+        DocumentResolution::NoMatch(detailed) => {
             return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
-        DetailedOutcome::Failed(_) => {
-            let source = match detailed.into_convenience() {
+        DocumentResolution::Refused(never) => match never {},
+        DocumentResolution::Failed(detailed) => {
+            let source = match (*detailed).into_convenience() {
                 Err(source) => source,
                 Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
                     "resolver returned a failed outcome without a typed error for `{file_ref}`"

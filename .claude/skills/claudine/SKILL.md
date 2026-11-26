@@ -534,7 +534,12 @@ record instead of an early return; lists normalize through
 authored position); an inline group's legs are judged one by one with
 `grammar::validate_task_grammar_shallow`; `resolve_reference` takes the
 `ExecutableField` so a no-match becomes a `findings::reference` finding
-(`source::reference_finding`); discovery runs
+(`source::reference_finding`, through Darkmatter's `check_document` with an
+admit-all callback: `file-read` governs only schema slots; the real-run
+resolvers `resolve_composition_source_in_context` and
+`commands/sequence.rs::resolve_sequence_source` use its `resolve_document`,
+and `recover_operation_file`'s same-name suggestions are Darkmatter's
+`basename_matches` with `walker::name_passes_filters`); discovery runs
 `InputDiscoveryOptions::recovering()`, which skips what it cannot read. A
 check-mode root property is `sequence[i]` (the authored key), a real run's
 stays `tasks[i]`. `check.rs::check_root` makes the refusals

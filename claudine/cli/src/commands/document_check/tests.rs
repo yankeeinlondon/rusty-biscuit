@@ -22,7 +22,9 @@ fn check_codes_are_cataloged_unique_and_disjoint_from_darkmatter_findings() {
     codes.sort_unstable();
     codes.dedup();
     assert_eq!(codes.len(), CHECK_CODES.len());
-    assert!(CHECK_CODES.iter().all(|code| darkmatter::findings::FINDING_CODES.iter().all(|(held, _)| held != code)));
+    let mut darkmatter_codes =
+        darkmatter::findings::FINDING_CODES.iter().chain(darkmatter::markdown::compose::policy::COMPOSE_DIAGNOSTIC_CODES);
+    assert!(darkmatter_codes.all(|(held, _)| !CHECK_CODES.contains(held)));
 }
 
 #[test]

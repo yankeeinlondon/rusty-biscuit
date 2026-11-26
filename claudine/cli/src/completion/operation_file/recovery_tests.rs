@@ -3,9 +3,7 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use claudine::diagnostics::Diagnostic;
-use std::cell::Cell;
 use std::fs;
-use std::rc::Rc;
 use tempfile::TempDir;
 
 fn write(path: &Path, content: &str) {
@@ -93,127 +91,6 @@ fn repository_suggestions_match_exact_filename_and_sort() {
     assert_eq!(
         repository_basename_suggestions(Some(tmp.path()), Some(OsStr::new("access.md"))),
         vec!["a/access.md", "z/access.md"]
-    );
-}
-
-#[test]
-fn repository_suggestion_empty_iterator_returns_empty() {
-    assert!(
-        collect_repository_suggestions(
-            OsStr::new("access.md"),
-            std::iter::empty::<SuggestionWalkItem>(),
-        )
-        .is_empty()
-    );
-}
-
-#[test]
-fn repository_suggestions_are_deduplicated_and_capped_at_five() {
-    let entries = [
-        "a/access.md",
-        "a/access.md",
-        "b/access.md",
-        "c/access.md",
-        "d/access.md",
-        "e/access.md",
-        "f/access.md",
-        "z/access.md",
-    ]
-    .into_iter()
-    .map(|path| {
-        SuggestionWalkItem::Entry(SuggestionEntry {
-            relative_path: PathBuf::from(path),
-            file_name: OsString::from("access.md"),
-            is_file: true,
-        })
-    })
-    .chain(std::iter::once(SuggestionWalkItem::Error));
-
-    assert_eq!(
-        collect_repository_suggestions(OsStr::new("access.md"), entries),
-        vec![
-            "a/access.md",
-            "b/access.md",
-            "c/access.md",
-            "d/access.md",
-            "e/access.md"
-        ]
-    );
-}
-
-#[test]
-fn repository_suggestion_raw_walk_budget_includes_root_errors_and_entries() {
-    let visits = Rc::new(Cell::new(0));
-    let observed_visits = Rc::clone(&visits);
-    let entries = std::iter::from_fn(move || {
-        let index = visits.get();
-        visits.set(index + 1);
-        assert!(
-            index < SUGGESTION_ENTRY_BUDGET,
-            "collector polled item 20,001"
-        );
-
-        if index == 0 {
-            return Some(SuggestionWalkItem::Root);
-        }
-        if index == 1 {
-            return Some(SuggestionWalkItem::Error);
-        }
-        Some(SuggestionWalkItem::Entry(SuggestionEntry {
-            relative_path: PathBuf::from(format!("dir-{index}/access.md")),
-            file_name: OsString::from(if index + 1 == SUGGESTION_ENTRY_BUDGET {
-                "access.md"
-            } else {
-                "not-access.md"
-            }),
-            is_file: true,
-        }))
-    });
-
-    assert_eq!(
-        collect_repository_suggestions(OsStr::new("access.md"), entries),
-        vec![format!(
-            "dir-{}/access.md",
-            SUGGESTION_ENTRY_BUDGET - 1
-        )]
-    );
-    assert_eq!(observed_visits.get(), SUGGESTION_ENTRY_BUDGET);
-}
-
-#[test]
-fn repository_suggestion_first_error_keeps_later_match() {
-    let entries = [
-        SuggestionWalkItem::Error,
-        SuggestionWalkItem::Entry(SuggestionEntry {
-            relative_path: PathBuf::from("a/access.md"),
-            file_name: OsString::from("access.md"),
-            is_file: true,
-        }),
-    ];
-    assert_eq!(
-        collect_repository_suggestions(OsStr::new("access.md"), entries),
-        vec!["a/access.md"]
-    );
-}
-
-#[test]
-fn repository_suggestion_middle_error_keeps_later_match() {
-    let entries = [
-        SuggestionWalkItem::Entry(SuggestionEntry {
-            relative_path: PathBuf::from("a/other.md"),
-            file_name: OsString::from("other.md"),
-            is_file: true,
-        }),
-        SuggestionWalkItem::Error,
-        SuggestionWalkItem::Entry(SuggestionEntry {
-            relative_path: PathBuf::from("z/access.md"),
-            file_name: OsString::from("access.md"),
-            is_file: true,
-        }),
-    ];
-    assert_eq!(
-        collect_repository_suggestions(OsStr::new("access.md"), entries),
-        vec!["z/access.md"]
     );
 }
 

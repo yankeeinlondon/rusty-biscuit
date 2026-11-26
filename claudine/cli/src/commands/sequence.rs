@@ -8,6 +8,7 @@ use claudine::composition::{
     SequenceShellCause, parse_interactive_hint,
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use darkmatter::findings::reference::DocumentResolution;
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
@@ -113,14 +114,18 @@ pub(crate) fn resolve_sequence_source(
             source,
         }
     })?;
-    let detailed = reference.resolve_detailed(context);
-    let resolved_path = match detailed.outcome() {
-        biscuit_file::DetailedOutcome::Matched(path) => path.clone(),
-        biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch) => {
+    // As for a Markdown argument: the user's own request, so every location
+    // is admitted.
+    let resolved_path = match darkmatter::findings::reference::resolve_document(&reference, context, |_| {
+        Ok::<(), std::convert::Infallible>(())
+    }) {
+        DocumentResolution::Found(path) => path,
+        DocumentResolution::NoMatch(detailed) => {
             return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
-        biscuit_file::DetailedOutcome::Failed(_) => {
-            let source = match detailed.into_convenience() {
+        DocumentResolution::Refused(never) => match never {},
+        DocumentResolution::Failed(detailed) => {
+            let source = match (*detailed).into_convenience() {
                 Err(source) => source,
                 Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
                     "resolver returned a failed outcome without a typed error for `{file_ref}`"

@@ -23,7 +23,7 @@ use biscuit_file::{FileReference, FileResolutionContext, to_forward_slash_string
 use claudine::composition::{self, CompositionError, ExecutableField, ResolvedCompositionSource};
 use claudine::invocation_context::InvocationContext;
 use claudine::provider::{Provider, provider_info};
-use darkmatter::findings::reference::{DocumentConstruct, ListingMemo, missing_document};
+use darkmatter::findings::reference::{DocumentCheck, DocumentConstruct, ListingMemo, check_document};
 use darkmatter::findings::{
     Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, FindingId, FindingReport, FindingSink, HumanLayout,
     NOT_CHECKED_CODE, Severity, Subject, SubjectId, Trail,
@@ -337,15 +337,19 @@ impl Check {
     /// Reads the root document, recording why it could not be read.
     fn load_root(&mut self, file: &str, context: &FileResolutionContext) -> Option<ResolvedCompositionSource> {
         if let Ok(reference) = FileReference::new(file) {
-            let detailed = reference.resolve_detailed(context);
-            if let Some(finding) = missing_document(
-                DocumentConstruct { construct: "file", noun: "document", launch_dir: self.launch_dir.as_deref() },
-                &detailed,
-                &mut self.memo,
-            ) {
-                let subject = self.root_subject();
-                self.sink.push(subject, finding);
-                return None;
+            let construct =
+                DocumentConstruct { construct: "file", noun: "document", launch_dir: self.launch_dir.as_deref() };
+            // The root argument is the user's own request: no read permission
+            // governs it, so every location is admitted.
+            let admit_all = |_: &std::path::Path| Ok::<(), std::convert::Infallible>(());
+            match check_document(&reference, context, construct, &mut self.memo, admit_all) {
+                DocumentCheck::Missing(finding) => {
+                    let subject = self.root_subject();
+                    self.sink.push(subject, *finding);
+                    return None;
+                }
+                DocumentCheck::Refused(never) => match never {},
+                DocumentCheck::Found(_) | DocumentCheck::Failed(_) => {}
             }
         }
         let loaded = match self.mode {
