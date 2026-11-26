@@ -206,7 +206,8 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 ///   call record; a lifecycle rejection first reports the lifecycle warnings
 ///   found before it. (A document rejection's earlier warnings travel beside
 ///   the error, in [`ComposeFailure::warnings`](super::ComposeFailure).)
-/// - A schema failure reports one record per problem, and a `load_data`
+/// - A schema failure reports one record per problem (a `file` value's
+///   problem with its `reference` and `failure` class), and a `load_data`
 ///   contract mismatch one per violating location (see the module docs).
 /// - Any other Darkmatter error reports one record classified by its
 ///   innermost typed error, including a reference-analysis error carried
