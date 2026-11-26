@@ -3,8 +3,11 @@ kind: feature
 created: 2026-11-26
 status: draft-spec
 area: claudine
-needs-rulings: true
+needs-rulings: false
+depends-on:
+    - 2026-11-26-list-documents
 related:
+    - 2026-11-26-list-documents
     - 2026-11-18-ergonomic-sequences
 $schema:
     status: |-
@@ -22,7 +25,7 @@ $schema:
     needs-rulings: boolean -> indicates whether open questions still need the author's ruling
 ---
 
-# Markdown sequences are state lists, and `kind: list`
+# Markdown sequences are state lists
 
 ## The model
 
@@ -46,8 +49,8 @@ Where a Markdown document gets its states:
 - **informal file**: a bare array of strings (each becomes `seq.name`) or of
   objects (each must have `name`), or any selection reached with
   `-> offset` / `::operator`
-- **formal file**: a new `kind: list` document, with `template:`, `$state`,
-  and `$schema`
+- **formal file**: a `kind: list` document, with `template:`, `$state`,
+  and `$schema`, defined and rendered by Darkmatter (`2026-11-26-list-documents`)
 - **a `kind: sequence` file**: allowed, but its actions are ignored and only
   its states are used, with a warning
 
@@ -120,59 +123,35 @@ Document-level keys are untouched: the Markdown document keeps its
 `prompt` (inline-compose), its lifecycle events, its `loop:`, its `$schema`,
 `$state`, and `template:`.
 
-### A `kind: list` document
+### A Markdown document that uses a `kind: list`
 
-```yaml
-# providers.yaml
-kind: list
-$state:
-    slug: string(required) -> the canonical provider slug
-    binary: string(required)
-template:
-    desc: "{{ name }} ({{ site }})"
-list:
-    - name: Claude Code
-      slug: claude
-      binary: claude
-    - name: Codex CLI
-      slug: codex
-      binary: codex
-```
+`kind: list`, how a list is rendered into rows (shorthand, template as
+default values, generated fields, the passive `$state` check), what its
+templates read, and what its `$schema` means are defined by Darkmatter in
+`2026-11-26-list-documents`. Claudine renders a list through that one
+Darkmatter function, so a Markdown sequence over a list gets exactly the rows
+`load_data` returns for it. This spec adds only what is Claudine's:
 
 ```yaml
 ---
-# _fleet.md, the owner
+# _fleet.md
 agent: claude
 research_prompt: "@claudine/docs/research/hooks/_research.md"
-sequence: ./providers.yaml
+sequence: ./providers.yaml      # kind: list
 ---
 Research {{ seq.name }} ({{ seq.binary }}) using {{ research_prompt }}.
 ```
 
-`claudine sequence _fleet.md` composes the body twice, once per row.
-
-Rules:
-
-- **Root keys.** `kind: list` is required, and the rows live under `list:`
-  (see [The property that holds a list's rows](#the-property-that-holds-a-lists-rows)). The root is closed: `kind`, `list`, `template`, `$state`,
-  `$schema`, and the documentation keys every document may carry
-  (`description`, …). Any other key, such as a value (`rank: 1`), a
-  lifecycle event, or `loop:`, is a schema error naming the key. A list has
-  no values of its own and runs nothing.
-- **Rows** normalize exactly as an inline Markdown list does: scalar
-  shorthand (`- claude` becomes `{ name: claude }`), then `template:`, then
-  the generated fields (`id`, `index`, …), then `$state` judges the finished
-  state passively. A row with an action key is
-  `composition.markdown_row_action`, naming the list file and its owner.
-- **Values in scope.** The list is the owner's step data. Its `template:`
-  reads the **owner's** prepared values, then invocation setters, then the
-  owner's `initialize` writes, then the row's own fields, the same layers an
-  inline list in the owner reads. The `initialize: set research_prompt`
-  workaround is no longer needed.
-- **Relative paths** inside the list (a `$state` file, a template's file
-  read) resolve from the list's own folder, as declarations do today.
-- **A list has no meaning without an owner.** Anywhere other than a Markdown
-  document's root `sequence:` it is a typed error:
+- **The outer values** a list's templates and `$schema` read are the Markdown
+  document's prepared values, then invocation setters, then its `initialize`
+  writes, the same layers its inline list reads today. The
+  `initialize: set research_prompt` workaround is no longer needed.
+- **A rendered row with an action key** is `composition.markdown_row_action`,
+  naming the list file and the Markdown document. Rendering keeps such a key as
+  data (it knows nothing of actions); refusing it is the Markdown sequence's
+  rule.
+- **A list has no meaning without a Markdown document.** Anywhere else in
+  Claudine it is a typed error:
 
   | Site | Error |
   | --- | --- |
@@ -182,11 +161,10 @@ Rules:
   The message says that a list holds states for a Markdown document and shows
   the `sequence: ./list.yaml` line to write in one.
 - **Data selections are unchanged.** `providers.yaml -> list` or
-  `providers.yaml::name(slug)` reads the file as foreign data (lenient
-  rules; the list's `template:`, `$state`, and `$schema` are not applied).
-- **DMLS** validates `kind: list` files against their registered schema
-  (completion and hover for root keys, the closed root, `$state` row
-  diagnostics) with the codes the run reports.
+  `providers.yaml::name(slug)` reads the file as foreign data, so it is not
+  rendered as a list.
+- **Run values** (`seq.run_id`, `seq.previous`, `seq.next`, `seq.outputs`)
+  are added by the sequence run on top of the rendered rows, as today.
 
 ### A Markdown document that names a `kind: sequence` file
 
@@ -207,14 +185,17 @@ whether it came from a row or from `template:`, so an author can read it
 from `err.detail` in a `failure`/`finalize` handler and DMLS can show the same
 finding on the `sequence:` line.
 
-What is used and what is ignored:
+The file is rendered by Darkmatter exactly as `load_data` renders it
+(Claudine registers `kind: sequence` as a list kind whose rows are under
+`sequence:`). The Markdown sequence then removes the actions from the
+rendered rows. What is used and what is ignored:
 
 | Part of the `kind: sequence` file | Used? |
 | --- | --- |
 | row state fields | yes |
-| `template:` | yes, filled before stripping; an action key it supplies is stripped like an authored one |
-| `$state` | yes, judges the stripped state |
-| `$schema` | yes, read as a list's `$schema` (a requirements check against the owner) |
+| `template:` | yes, as rendering applies it; an action key it supplies is removed like an authored one |
+| `$state` | yes, as rendering applies it (action keys and task options are not state, so it never judges them) |
+| `$schema` | yes, as a list's `$schema`: a check of the Markdown document's values |
 | row action keys, including nested `sequence:` / `group:` rows | ignored: the key is removed, and the row stays a state |
 | task options (`with:`, `when:`, `timeout:`, …) | ignored with the action they belong to |
 | root lifecycle events, `loop:`, root values | ignored, listed in the warning |
@@ -266,69 +247,6 @@ document inline.
   (Darkmatter `ComposedBodyEmpty`); this new check is structural and does not
   replace it.
 
-### A list's `$schema` is a requirements check against its owner
-
-A list has no values of its own, so its `$schema` is not a document schema
-(nothing to prepare, default, or convert). It states what the list needs from
-the Markdown document that uses it, and is judged when the owner's rows are
-built, against the owner's prepared values, setters, and `initialize`
-writes. It is passive, like an inline container's `$schema`.
-
-```yaml
-kind: list
-$schema:
-    research_prompt: file(required) -> the prompt each provider row researches
-list: [claude, codex]
-```
-
-```text
-error[composition.list_requirement]: claudine/docs/providers.yaml requires
-`research_prompt` from _fleet.md: "research_prompt" is a required property
-```
-
-A list's required property is not a caller input that Claudine asks for on a
-terminal: the owner must declare or supply it, so the owner's `$schema` stays
-the complete list of what running it needs. No `$use`/`$with` form is added;
-the owner's state already reaches the list, and a parameterized form would be
-a second way to pass state. It can be added later without changing this rule.
-
-## Decision for the author
-
-### The property that holds a list's rows
-
-A YAML sequence file keeps its rows under the root property `sequence:`. A
-`kind: list` file needs some root property for its rows too, and it can be
-the same name or a new one:
-
-```yaml
-# Option A: `list:`                 # Option B: `sequence:`
-kind: list                          kind: list
-template:                           template:
-    desc: "{{ name }}"                  desc: "{{ name }}"
-list:                               sequence:
-    - claude                            - claude
-    - codex                             - codex
-```
-
-**Option A (recommended): `list:`.** The key matches the kind, and a reader
-can tell a list from a YAML sequence without looking at `kind:`. Claudine's
-sequence schema trigger (`sequence-document.yaml`) matches any document with
-a non-null `sequence`, so a list using another key never picks up the
-sequence contract (lifecycle events, `loop:`, row actions) in a run or in
-DMLS, with no trigger change.
-
-- Cost: `kind: sequence` with `list:` is the form retired on 2026-07-12, and
-  its error (`composition/sequence/source.rs`) tells authors to rename `list:`
-  to `sequence:`. That message is reworded to offer both fixes: rename to
-  `sequence:` for a YAML sequence, or set `kind: list` for a list of states.
-
-**Option B: `sequence:`.** One name for rows everywhere.
-
-- Cost: the sequence trigger and the formal-sequence classifier
-  (`is_formal_sequence`) must both learn to exclude `kind: list`, and DMLS
-  offers sequence-document completions inside a list until they do. A file
-  whose `kind:` is missing or misspelled silently becomes a YAML sequence.
-
 ## Required corrections to `2026-11-18-ergonomic-sequences`
 
 That spec is finalized but not built. It must change before its Phase 4
@@ -349,48 +267,53 @@ their actions:
 
 ## Scope of the work
 
-- `schemas/kind.yaml`: add `list` to the `kind` enum.
-- `claudine/registration/`: a `list-file.yaml` definition, registered like
-  `task-file.yaml`; Markdown frontmatter's `sequence` rows lose the action
-  keys; run the root `just shipped-schemas`.
-- Sequence source loading (`composition/sequence/source.rs`): classify a
-  whole file by `kind` as list, sequence, or informal; normalize a list or a
-  stripped sequence against its owner (the owner's values, the file's
-  declaring path).
+- Depends on `2026-11-26-list-documents` (Darkmatter): `kind: list`, the
+  shared rendering, and list-kind registration land first, or together.
+- `claudine/registration/`: register `kind: sequence` as a Darkmatter list
+  kind (rows under `sequence:`; action keys and task options are not state);
+  Markdown frontmatter's `sequence` rows lose the action keys; run the root
+  `just shipped-schemas`.
+- Sequence source loading (`composition/sequence/source.rs`): classify a whole
+  file by `kind` as list, sequence, or informal; render lists and sequence
+  files through Darkmatter with the Markdown document's values as the outer
+  values; remove `normalize`/`formal` code that the Darkmatter rendering
+  replaces.
 - Errors and warnings: register `composition.markdown_row_action`,
   `composition.markdown_sequence_without_action`,
-  `composition.list_not_runnable`, `composition.list_requirement`, and
-  `composition.sequence_actions_ignored` in `lib/src/diagnostics/registry.rs`
-  with typed detail; DMLS guardrails for each; a `docs/` example of reading
-  `composition.list_requirement` in a `failure` handler.
+  `composition.list_not_runnable`, and `composition.sequence_actions_ignored`
+  in `lib/src/diagnostics/registry.rs` with typed detail; DMLS guardrails for
+  each; a `docs/` example of reading `sequence_actions_ignored` detail in a
+  `finalize` handler. List rendering failures keep Darkmatter's `dm.list.*`
+  codes.
 - Dry run: the passive check reports all of them from the same walk.
 - Migration (no install base, so no deprecation period):
-    - the six rosters listed above become `kind: list` with `list:`; their
-      fleets declare `research_prompt` and similar values directly instead of
-      writing them in `initialize`
+    - the six rosters listed above become `kind: list`; their fleets declare
+      `research_prompt` and similar values directly instead of writing them in
+      `initialize`
     - `_provider-tasks.yaml` and `_local-runner-tasks.yaml` stay
-      `kind: sequence`; their fleets keep working through stripping (with the
-      warning) only if their bodies are the research prompt, so each fleet is
-      rewritten either to put the action in its body or document `prompt`, or
-      to become a YAML sequence that calls a prompt document
+      `kind: sequence`. Their fleets would lose the roster's `prompt` to
+      stripping, so each fleet is rewritten either to put the action in its
+      body or document `prompt`, or to become a YAML sequence that calls a
+      prompt document
     - Markdown sequences with row actions become YAML sequences:
       `claudine/docs/examples/sequence-containers.md`,
       `darkmatter/docs/research/parsing/_fleet_future.md`, about 34 test
       fixtures (`claudine/lib/tests/fixtures/sequence-schema/`,
       `claudine/cli/tests/fixtures/lifecycle_traces/`, …), and about 32 Rust
       test files that write such documents inline; the frozen prompt
-      `review-loop.md` is a frozen copy and is rewritten with its test
+      `review-loop.md` is rewritten with its test
 - Docs: `claudine/docs/topics/flow-control/sequences.md` ("Steps and tasks",
   "Container grammar", "What a referenced sequence reads", "Sequence
-  documents", a new "Lists" section), the `use-claudine` caller skill, and
-  the `claudine` repo skill.
+  documents", a "Lists" section that links to Darkmatter's lists page), the
+  `use-claudine` caller skill, and the `claudine` repo skill.
 
 ## Success criteria
 
 - A Markdown document gives the same steps, `seq` values, provider, outputs,
   and diagnostics whether its states are inline, in a `kind: list`, or in a
   `kind: sequence` file holding the same states (the last with its one
-  warning). One test runs all three and compares them.
+  warning). One test runs all three and compares them, and compares the rows
+  with `load_data` of the same file.
 - Every Markdown row action, from every source but `kind: sequence`, fails
   with `composition.markdown_row_action` before anything runs.
 - A frontmatter-only Markdown sequence runs when it defines `prompt` and
