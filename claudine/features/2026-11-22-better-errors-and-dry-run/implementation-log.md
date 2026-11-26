@@ -1002,7 +1002,7 @@ decisions-for-review:
       the same missing input. Found while pinning the inputs boundary; the input row itself is unchanged.
     - |-
       Phase 7: the scope allowlist tags every `Sequence…` entry `sequence-error-standard` (the Phase 8 burn-down) and
-      every other `outside-scope`, rather than `phase-8`, so `docs/` can name the tag without naming a feature phase. 60
+      every other `outside-scope`, rather than `phase-8`, so `docs/` can name the tag without naming a feature phase. 64
       of the 118 catch-all entries are non-sequence variants, listed so a new variant of any kind cannot silently reach
       the generic block. Alternative: guard only `Sequence…` variants.
     - |-
@@ -1010,20 +1010,44 @@ decisions-for-review:
       branch) because another session's half-finished move of `claudine/docs/research/` breaks `include_str!` paths and
       no claudine test compiles in this worktree. Every edit was made in the worktree and copied into the clone; the
       clone's results stand for this worktree's tree minus that move.
+    - |-
+      Phase 7: the report's closing `The run stopped at:` line is left out when a row's message already is the failure,
+      or its text after a wrapper's `…: ` prefix (a reference cycle printed its chain twice; a transclusion failure its
+      file twice). It stays whenever no row says it, as in the "first row differs" baseline. Alternative: always print
+      it, or print it only when the failure belongs to a different task than the first row.
+    - |-
+      Phase 7: report rows now carry what the replaced block said. A missing input's row adds its schema description (``
+      `topic` (string — what is reviewed) ``), in dry runs too, and a typed selection failure's row takes the block's
+      remedy, now `SequenceTaskProviderProblem::remedy()`. 27 existing tests that read the old block's text were
+      rewritten to the report's rows; none lost its subject. Still open: a document `agent: []` shows two rows, the
+      selection failure and the passive check's schema verdict (`/agent: [] is not valid …`) for the same value, in a
+      dry run and in the real-run report alike. Deduplicating them belongs with the schema-check integration (Phase 2's
+      unticked "Integrate Schema Checks").
+    - |-
+      Phase 7 ticked Phase 1's "Prove Passive Reports" and "Enforce Phase Scope" on the evidence of Phases 4–7 (fleet
+      fixtures and snapshots, the code catalog and its snapshots, the effect and no-write tests, Darkmatter's allow/deny
+      loopback counts, the real-preflight baselines, and the scope and mapping guards). Two sub-items have no dedicated
+      test that I found: an `ask` remote-read request count and an `md` equivalent of the fleet fixtures; Darkmatter's
+      finding fixtures live in `darkmatter/cli/tests/fixtures/findings/`, not the `lib/` path the plan names.
+    - |-
+      Phase 7 split the three `with_file_provenance::*_on_every_route` tests (each 5–6.4 s before this phase, since they
+      ran three routes in turn) into one test per route; the names gained `::direct`, `::named_by_a_root`, and
+      `::nested_as_a_task`.
 message-to-agent: |-
-    Phase 6 (Shared report) is closed; every Phase 6 task and the Phase 1 checkboxes it finished (Capture
-    Contracts, Build Findings, Build References, Combine Document Checks) are ticked. Phase 1's Guard Composition
-    (finished by Phase 4) and Recover Graph (finished by Phase 3) are still unticked in the Phase 1 list: tick them
-    when you confirm, since Phase 7's exit gate needs every Phase 1 checkbox ticked. Phase 6 left for Phase 8 the
-    wiring of `preflight::Loader::load_prompt` and `source.rs::resolve_sequence_reference` to Darkmatter's shared
-    reference builder (`darkmatter::findings::reference::{resolve_document, check_document}`). The real-run report
-    for Phase 7 can render through `FindingReport::presentation()` (node-built, `with_summary`, `CommandOutput`).
-    The author's tooling committed Phase 6 while it ran (`c0345c1c0`, `09bce2a9d`, `5008c0dcc`).
-    Windows: `os-failing: windows` is set on the spec. Two claudine-cli dry-run tests failed on Windows (alias lookup
-    started PowerShell); the fix (passive alias record) landed after the run, but re-verifying on build-win was
-    blocked because another session was restructuring `claudine/docs/research/` in this worktree (tests
-    `include_str!` files it deleted). Rerun `just cross-check claudine-cli --os windows a_dry_run_writes_nothing_anywhere
-    a_preview_leaves_what_needs_an_effect_as_written_and_marks_it` and clear `os-failing` when it passes.
+    Phase 7 (Real-run report and guards) is implementation complete; its two tasks and Phase 1's Prove Passive
+    Reports and Enforce Phase Scope are ticked, so every Phase 1 checkbox is ticked. Phase 2's Integrate Schema
+    Checks is still unticked (not a Phase 1 box); it is where the duplicate `agent: []` rows (selection failure plus
+    schema verdict) belong. For Phase 8: `cli/tests/l1/error_guards/sequence-scope-allow.toml` lists, under the
+    `sequence-error-standard` tag, the 52 `Sequence…` variants without a site, the 2 with a hard-coded noun, and the
+    54 sequence variants that reach the generic block; empty them as sequence sites land (a fixed variant's entry
+    then fails as stale). Report rows replace the error block for a sequence stopped at preflight, so a new sequence
+    error's author-facing detail must reach its passive-check row, not only its `status_block`.
+    Blocker: the committed research move (`b74da8c2a`) left 140 `include_str!` paths into the old
+    `claudine/docs/research/` layout, so claudine, darkmatter, and simplified-schema tests do not compile here; this
+    phase verified in a scratch clone (`/home/build/.cache/rb-p7/repo`, `sync.sh` beside it). Windows: rerun
+    `just cross-check claudine-cli --os windows a_dry_run_writes_nothing_anywhere
+    a_preview_leaves_what_needs_an_effect_as_written_and_marks_it` once the paths compile, and clear `os-failing` on
+    the spec when it passes.
 source_files_during_phase_6:
     - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
     - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
@@ -1162,6 +1186,18 @@ source_files_during_phase_7:
     - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_json.snap
     - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_human.snap
     - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_json.snap
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/cli/src/commands/document_check/selection.rs
+    - claudine/cli/tests/l1/compose_removed_grammar.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_referenced_state.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/sequence_task_providers.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/with_file_provenance.rs
 docs_updated_during_phase_7:
     - claudine/docs/topics/error-architecture.md
     - claudine/docs/topics/pre-flight-checks.md
@@ -2045,7 +2081,7 @@ again through `failure: retry` after a task fails: an earlier task appends broke
   every `Sequence…` variant (the Phase 8 burn-down) and `outside-scope` for any other; an entry test enforces the tag
   rule, a reason, and no duplicates. A sample test proves each scan sees its subject. Today's lists: 52 `Sequence…`
   variants without a site, 2 with a hard-coded noun (`SequenceExternalLoad`, `SequenceExternalWrongType`), and 118
-  variants (including 60 non-sequence ones) rendering through the generic block.
+  variants (64 of them non-sequence variants) rendering through the generic block.
 - Catalog snapshot guard: `dry_run_check::assert_code_fixture` pins each check code's finding report as
   `code_<code>_human` and `code_<code>_json` (18 new snapshots, paths made portable), and
   `codes::every_code_has_its_snapshots_and_every_snapshot_its_code` ties the snapshot set to `CODES` both ways.
@@ -2086,3 +2122,23 @@ The three `with_file_provenance::*_on_every_route` tests were slow before this p
 `doctor::a_changed_bundle_darkmatter_refuses_…` and `claudine_schemas::shared_payload_properties_have_identical_types`
 reach 5.0–5.2 s only under the full suite's load (3.5 s and 3.8 s alone), under the 10 s loaded limit, and are not
 this phase's code.
+
+### Gates
+
+All in the verification clone, sequentially, after the last code change (the final clippy fix, `push('\n')`, was
+linted after the test run; it changes no behavior):
+
+- Claudine `just test`: 13148 passed, 16 skipped, none at or above 5 s. `just lint`: clean.
+  `just check-tier-coverage claudine`: Stranded (0).
+- Darkmatter `just test`: 18453 passed, 10 skipped, none at or above 5 s. `just lint`: clean. No Darkmatter source
+  changed in this phase; no package outside the claudine area depends on `claudine`.
+- Skip-gate check (`affected_scope.py` over the changed files): exit 0, selecting claudine, darkmatter,
+  simplified-schema, and tools. The last two come from the research move and `codebook.toml`, not this phase.
+- Windows: not run. `just cross-check` ships the local tree, which carries the research move's broken
+  `include_str!` paths; run from the clone it would treat the clone as the `main` checkout, whose prune step
+  retires this host's clones for every worktree it does not know. `os-failing: windows` stays on the spec.
+
+While this phase ran, the author's tooling committed the worktree: this phase's changes are in `f7581ba2c` and the
+research move in `b74da8c2a`. At `HEAD`, 140 `include_str!` paths in claudine, darkmatter, and simplified-schema
+tests still point into the old `claudine/docs/research/` layout, so no test binary of those areas compiles from this
+worktree until the move is finished.

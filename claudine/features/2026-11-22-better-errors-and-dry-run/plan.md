@@ -4,7 +4,7 @@ area: claudine
 total-phases: 8
 created: 2026-11-23
 status: planned
-phase: 7
+phase: 8
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -819,6 +819,18 @@ source_files_during_phase_7:
 - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_json.snap
 - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_human.snap
 - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_json.snap
+- claudine/lib/src/composition/error/render/selection.rs
+- claudine/cli/src/commands/document_check/selection.rs
+- claudine/cli/tests/l1/compose_removed_grammar.rs
+- claudine/cli/tests/l1/sequence_cli.rs
+- claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_schema.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/cli/tests/l1/sequence_task_providers.rs
+- claudine/cli/tests/l1/wrap_compose_validation.rs
+- claudine/cli/tests/l1/wrap_sequence_composition.rs
+- claudine/cli/tests/l1/with_file_provenance.rs
 docs_updated_during_phase_7:
 - claudine/docs/topics/error-architecture.md
 - claudine/docs/topics/pre-flight-checks.md
@@ -1199,7 +1211,7 @@ the final implementation log for test evidence and any concrete departures. Revi
 
 ### Phase 1 checkpoint
 
-- [ ] **Prove Passive Reports**
+- [x] **Prove Passive Reports**
   - Add fixture directories and controls for every Phase 1 new or changed report code under
     `claudine/cli/tests/fixtures/check/` and `darkmatter/lib/tests/fixtures/findings/`. Include
     `fleet-run1/`, `fleet-run2/`, and the `md` equivalent. Use `insta` for width-80 plain and JSON and a
@@ -1222,7 +1234,7 @@ the final implementation log for test evidence and any concrete departures. Revi
     rechecks, retry with closed approvals, an initialize-created input, and an earlier task
     providing a file or value needed only at a later task's execution boundary. Assert displayed
     findings plus the complete legacy typed cause, persisted result and lifecycle routing.
-- [ ] **Enforce Phase Scope**
+- [x] **Enforce Phase Scope**
   - Add the site, noun, catch-all, snapshot and boundary-mapping guards beside
     `claudine/cli/tests/l1/error_guards.rs` and its `source_scan.rs`. Enumerate existing
     sequence omissions with a Phase 3 tag and reject new or stale allowlist entries. Cover all
@@ -1574,7 +1586,7 @@ Darkmatter and biscuit-file. The parts of Rules 2, 4, 5, and 13 that Phase 1 lef
 
 Claudine (Rule 8) and the Phase 1 guards.
 
-- [ ] **Report Real Preflight**
+- [x] **Report Real Preflight**
   - (Rule 8.) Add `CompositionError::CheckFailed { report, cause }`, delegating every lifecycle
     and persistence field to the original typed cause and rendering the report once. Where a
     real sequence already stops at preflight, collect the independent passive findings after
@@ -1586,7 +1598,7 @@ Claudine (Rule 8) and the Phase 1 guards.
     cause, persisted result, and lifecycle routing, including the case where the first
     displayed row differs from the primary failure, retry with closed approvals, an
     initialize-created input, and an earlier task providing a file a later task needs.
-- [ ] **Enforce Phase Scope**
+- [x] **Enforce Phase Scope**
   - (Phase 1 task of the same name, as written there.) Add the site, noun, catch-all, snapshot,
     and boundary-mapping guards, with existing sequence omissions listed under a Phase 8 tag.
   - **Exit gate.** Every Phase 1 checkbox is ticked. The mapping guard holds an explicit case
