@@ -236,7 +236,7 @@ result, so transclusion cannot shift it:
 
 | `source` field | Value |
 |---|---|
-| `file` | the resolved path of the file that holds the problem; `null` for stdin |
+| `file` | the resolved path of the file that holds the problem, with `/` separators on every OS (`C:/work/doc.md` on Windows), or the URL of a remote document; `null` for stdin |
 | `line` | the authored line, one-based; `null` when no authored position is proven, as for a document built in memory or a line counted in rewritten text |
 | `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line. One exception: a frontmatter property that fails schema validation (a `dm.schema.*` validation problem, not a slot record) keeps the validator's UTF-8 byte column (a `😀` before the node counts as 4), as described in [Problem Locations](../topics/schemas/definition.md#problem-locations) |
 | `section` | the composed anchor slug of the innermost heading at or before the problem; absent above the first heading, and on diagnostics that do not compute it |
@@ -1006,10 +1006,11 @@ object has `file` and whichever of the others were proven:
 "data_location": { "file": "/work/p.yaml", "pointer": "/items/0" }
 ```
 
-`source.file` and `data_location.file` can be spelled differently. `source.file`
-is a native path (`C:\work\doc.md` on Windows), while `data_location.file` is
-portable (`C:/work/ports.json`), so a script that compares a data file with its
-`read_set` entry can compare the strings directly.
+`source.file` and `data_location.file` both use `/` separators on every OS
+(`C:/work/ports.json` on Windows). `data_location.file` is also spelled exactly
+as its `read_set` entry, so a script that compares a data file with its
+`read_set` entry can compare the strings directly; `source.file` is the path
+the problem's file resolved to, which need not be canonical.
 
 ### Which value a record points at
 
