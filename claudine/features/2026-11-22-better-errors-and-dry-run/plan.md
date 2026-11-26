@@ -1,10 +1,10 @@
 ---
 kind: plan
 area: claudine
-total-phases: 3
+total-phases: 8
 created: 2026-11-23
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -59,12 +59,247 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
 - .claude/skills/claudine/SKILL.md
 - darkmatter/docs/use-skills/use-darkmatter/library.md
+source_files_during_phase_2:
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/sequence_groups.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/removed.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/tests/fixtures/schema_keys/expected.json
+- claudine/lib/tests/fixtures/schema_keys/sequence.md
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/registration_inventory.rs
+- claudine/lib/tests/l1/schema_key_parity.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- claudine/registration/formal-sequence-file.yaml
+- claudine/registration/group-catalog-file.yaml
+- claudine/registration/group-file.yaml
+- claudine/registration/sequence-document.yaml
+- claudine/registration/sequence.yaml
+- claudine/registration/task-file.yaml
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_key_hints.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/src/diagnostics/observed.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/dmls/tests/l1/claudine_schema_key_parity.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/schema_key_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schema_key_findings.rs
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/composition.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/src/validation/suggest.rs
+- simplified-schema/lib/src/yaml_documents/load.rs
+- simplified-schema/lib/tests/l1/key_declarations.rs
+- simplified-schema/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/schemas.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/simplified-schema/SKILL.md
+- claudine/docs/use-skills/use-claudine/sequences.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_3:
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/sequence/normalize.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/declarations.rs
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/src/composition/sequence/preflight/check.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/tests/check_tree.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tests.rs
+- claudine/cli/src/commands/wrap/sequence/providers.rs
+- claudine/cli/tests/l1/sequence_preflight_baselines.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+docs_updated_during_phase_3:
+- claudine/docs/cli/sequence.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+source-code:
+- darkmatter/lib/src/findings/mod.rs
+- darkmatter/lib/src/findings/trail.rs
+- darkmatter/lib/src/findings/sink.rs
+- darkmatter/lib/src/findings/report.rs
+- darkmatter/lib/src/findings/reference.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- claudine/lib/src/composition/sequence/model.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/commands/mod.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/outcome.rs
+- claudine/cli/src/commands/document_check/selection.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tests.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/cli/tests/l1/context_construction_guard.rs
+- claudine/cli/tests/l1/switch_catalog_guard.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_fleet.yaml
+- claudine/cli/tests/fixtures/check/fleet-run1/renderers/_find.md
+- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_fleet.yaml
+- claudine/cli/tests/fixtures/check/fleet-run2/renderers/_find.md
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run1_reports_every_problem_and_previews_the_composable_task.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__fleet_run2_json.snap
+- claudine/cli/tests/l1/sequence_groups.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/removed.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/tests/fixtures/schema_keys/expected.json
+- claudine/lib/tests/fixtures/schema_keys/sequence.md
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/lifecycle_one_implementation_guard.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/registration_inventory.rs
+- claudine/lib/tests/l1/schema_key_parity.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- claudine/registration/formal-sequence-file.yaml
+- claudine/registration/group-catalog-file.yaml
+- claudine/registration/group-file.yaml
+- claudine/registration/sequence-document.yaml
+- claudine/registration/sequence.yaml
+- claudine/registration/task-file.yaml
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_key_hints.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/src/diagnostics/observed.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/dmls/tests/l1/claudine_schema_key_parity.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/schema_key_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/schema_key_findings.rs
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/composition.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/src/validation/suggest.rs
+- simplified-schema/lib/src/yaml_documents/load.rs
+- simplified-schema/lib/tests/l1/key_declarations.rs
+- simplified-schema/lib/tests/l1/main.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/sequence/normalize.rs
+- claudine/lib/src/composition/sequence/declarations.rs
+- claudine/lib/src/composition/sequence/preflight/check.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/tests/check_tree.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/wrap/sequence/providers.rs
+- claudine/cli/tests/l1/sequence_preflight_baselines.rs
+documentation:
+- claudine/docs/cli/sequence.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/inline/preflight-checks.md
+- claudine/docs/topics/schemas.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+completed-phase: 3
 packages:
 - darkmatter
 - darkmatter-cli
 - darkmatter-lsp
 - claudine
 - claudine-cli
+- simplified-schema
 ---
 
 # Better errors and a diagnostic dry run implementation plan
@@ -88,11 +323,12 @@ keeps its existing lifecycle boundaries, prompts, approval order, and failure id
 
 Completion requires the fleet reports, the equivalent `md` fixture, passive and real-run parity
 proof, portable-path coverage on all four environments, the scoped error guards, and current
-docs and published caller skills. The three phases follow the specification's delivery order.
+docs and published caller skills. Phases 1, 2, and 8 follow the specification's delivery order;
+Phases 3–7 finish the work Phase 1 left open (see "Completing Phase 1").
 Each numbered wave contains independent tasks that may use subagents within the session
 worktree. Complete each wave before its dependent tasks. Every session is non-interactive. Use
 the final implementation log for test evidence and any concrete departures. Review follows Phase
-3.
+8.
 
 ## Phase 1 — Shared findings and passive dry runs
 
@@ -540,7 +776,7 @@ matching existing cases, including the grammar and duplicate-key tests in
 
 ## Phase 2 — Schema-derived checks
 
-- [ ] **Extend Key Validation**
+- [x] **Extend Key Validation**
   - Simplified Schema owns parsing and round-tripping `removed(...)` and object opt-in metadata,
     named-property placement checks, lowering, effective-object metadata/querying, and
     structured key problems. Implement Rules 14–15 at the grammar/serializer, lowering,
@@ -556,7 +792,7 @@ matching existing cases, including the grammar and duplicate-key tests in
 
 ### Wave 4
 
-- [ ] **Project Schema Findings**
+- [x] **Project Schema Findings**
   - Darkmatter owns `markdown/schemas/clean.rs`, `compose/report_diagnostics.rs`, and the
     `md schema validate` adapter. Use the shared ranker and typed problems for suggestions and
     removals. Preserve clean's existing message and repairs. Add new Darkmatter codes and
@@ -569,7 +805,7 @@ matching existing cases, including the grammar and duplicate-key tests in
     proven paths and positions use the existing URI/position mapping. Ensure completion filters
     removed fields from effective shapes. Use the working registered-host/standalone-kind
     interfaces, which already support Claudine YAML documents.
-- [ ] **Declare Authored Roles**
+- [x] **Declare Authored Roles**
   - Claudine owns the authored schema definitions. Add the removed declarations and open-step
     opt-in from Rules 14–15. Use kind-specific shipped triggers for root task, group and
     group-catalog shape, and assign closed task references to group legs in
@@ -603,7 +839,237 @@ matching existing cases, including the grammar and duplicate-key tests in
     `just test` in Simplified Schema, Darkmatter, and Claudine. Update the language
     declaration/options and diagnostic docs, the DMLS schema guidance, and affected repo skills.
 
-## Phase 3 — Sequence errors and delivery
+## Completing Phase 1 (Phases 3–7)
+
+Phase 1 closed with its building blocks landed and none of its tasks finished as written (see
+the implementation log's `decisions-for-review` and `message-to-agent`). Phases 3–7 finish that
+work in five smaller phases. These rules apply to all five:
+
+- **Phase 1's Necessary Rules stay binding.** A rule number below refers to that list. A Phase 1
+  task named in parentheses is the unticked task a phase finishes; tick the Phase 1 checkbox
+  when the last phase contributing to it is done.
+- **Replace the stand-ins.** Each "Redo" note in the log's `decisions-for-review` names code
+  that stands in for the planned design. The phase that owns the redo deletes the stand-in in
+  the same change. Do not keep the old preview, or any stand-in, as a fallback.
+- **The seam stays until Phase 5.** `document_check::enabled()` and
+  `CLAUDINE_TEST_PASSIVE_DRY_RUN` keep the check off the public flag through Phases 3 and 4.
+  Phase 5 deletes both.
+- **Every phase has an exit gate.** Start a phase by reading the previous phase's gate result
+  in the log, and finish an unmet gate before starting new tasks. When a gate cannot be met,
+  leave the checkboxes unticked, begin the log entry with "Phase N incomplete", and list what
+  remains in `message-to-agent`. Never record a close for a gate that is not met.
+- **Phase numbers moved.** Where Phase 1 or Phase 2 text, Rule 16, or a guard tag says
+  "Phase 3", read Phase 8.
+
+## Phase 3 — Shared walker and inputs
+
+Claudine library and `commands/document_check`. This removes the cause of the 208 real test
+failures recorded in the log: the check reads the root `sequence` list by hand and reports
+everything else as not checked.
+
+- [x] **Capture Run Baselines**
+  - (Phase 1 "Capture Contracts", Claudine half.) Before changing `normalize`, `source`, `data`,
+    or `preflight`, record the real-run failure facets and persisted result for graph,
+    reference, input/provider, and Phase 1c failures, including a case where grouped display
+    order differs from the original failure order. Use file-backed fixtures, width 80,
+    `NO_COLOR=1`, and deterministic fake provider observations. Phase 7 compares against these.
+- [x] **Recover Graph**
+  - (Phase 1 task of the same name; Rules 3 and 9.) Split per-item normalization from list
+    iteration in `sequence/normalize.rs::normalize_plan_at`. Add the exhaustive traversal mode
+    to `Loader::walk_plan/load_task/load_group/load_sequence/load_external_task` and to
+    `inputs.rs::discover_sequence_inputs`, collecting at each bounded task or group leg and
+    continuing into siblings. Keep the fail-fast entry points and their error order for real
+    runs. Capture `TaskSite` in the library and rename the CLI selector's private type to
+    `SelectionSite`. Share loaded sources and parse results within the invocation. No second
+    parser and no independent task tree.
+- [x] **Rehost Document Check**
+  - Delete the hand-written reading of the root list in `commands/document_check` and drive the
+    check from the exhaustive walker. Register subjects by `TaskIdentity` in authored order and
+    push `group` and `sequence` host frames for nested occurrences. Keep the existing finding
+    codes and messages.
+  - In exhaustive mode, report `prompt:`, `task:`, `group:`, and `sequence:` resolution failures
+    through `darkmatter::findings::reference` at `Loader::load_prompt` and
+    `source.rs::resolve_sequence_reference`. The fail-fast typed errors are unchanged here.
+  - Add the inputs check: one `composition.missing_properties` row per missing input under its
+    task, from `discover_sequence_inputs` and the existing value preparation with commands
+    skipped. Grade it with Rule 10's cohort rule from injected terminal observations. A value
+    that depends on a skipped command or a runtime scope is `not checked`.
+  - Move any schema check Phase 2 attached to the hand-written walker onto the shared one.
+  - After this task a `not checked` row remains only where the spec calls for one: a
+    command-backed list, a value known only at launch, or a check blocked by another finding.
+- [x] **Measure Coverage**
+  - Cover nested groups, catalog identity, cycles, repeated references, dynamic roots, shape
+    errors, and continuation past a failed second of three tasks. Exercise the "Sequence source
+    and item validators", "Task and group fields", and "Sequence document loaders" rows of the
+    Input Robustness Matrix through recovered check results.
+  - **Exit gate.** Run the Claudine CLI L1 suite with the seam set for the whole run, so the
+    old preview's suites exercise the check. Classify every failure in the log as (a) an
+    assertion on the old preview's text, format, or effects; (b) provider, model, flag, or
+    startup behavior owned by Phase 5; (c) deferred-value or preview marking owned by Phase 4;
+    or (d) a walker gap, where the real preflight decides and the check reports nothing or
+    `not checked`. The gate is zero failures of kind (d). Without the seam, `just test` and
+    `just lint` in `claudine` pass, and the fleet snapshots change only by reviewed additions
+    from the inputs check.
+
+## Phase 4 — Passive composition
+
+Darkmatter (Rules 6 and 7), consumed by Claudine's preview. Today any command in a document
+refuses the whole composition with `ShellExpansionError::SkippedInDryRun`, and remote reads
+follow the real run's policy.
+
+- [ ] **Defer Unavailable Values**
+  - (Phase 1 "Guard Composition", Rule 6.) Replace the whole-document refusal with deferred
+    values carried through evaluation: a typed reason and authored site, propagated through
+    dependent lookups, conditions, collections, selector inputs, paths, and schema slots.
+    Independent branches and siblings still evaluate. Enforce at the shared dispatch sites
+    named in Rule 6, using the existing effect classifications, so a nested document, slot, or
+    callback cannot turn an effect back on.
+  - Apply the passive read policy: a read needing approval and a network `ask` each yield an
+    `info` finding and an unavailable value, with no prompt and no request; `deny` keeps its
+    typed refusal; `allow` fetches without a persistent store. Use an in-memory data and read
+    memo and write no compose, shell, or remote cache.
+- [ ] **Prove Empty Bodies**
+  - (Rule 7.) Record `EmptyBodyCause` while evaluating page blocks, with authored positions and
+    proven condition facts, and emit `dm.compose.empty_body`. A deferred contribution leaves
+    emptiness unchecked. Carry the cause through both `prepare.rs` empty checks in Claudine and
+    replace the guessed text in `render/provider.rs`. `composition.no_executable` suppresses
+    the redundant empty-body finding on its subject.
+- [ ] **Mark Previews**
+  - `document_check/preview.rs` consumes the partial Markdown: skipped constructs are shown as
+    written and marked, a missing input keeps its placeholder, and each dependent check is its
+    own `not checked` row instead of the whole preview. Settle the log's preview decision: give
+    the canonical preparer a passive mode and compose through it, unless it cannot be made
+    effect-free, and record the outcome. Stop inserting setters and `with:` into frontmatter if
+    the canonical path replaces it.
+- [ ] **Prove Passivity**
+  - Use one fixture per effect: frontmatter shell, body shell, an effectful function, a file
+    read needing approval, and remote include, data, and schema reads against a loopback
+    responder counting requests under `allow`, `ask`, and `deny`. Include a nested document and
+    a callback. Assert marker files absent, caches unwritten, and a failed passive call check
+    still preventing effects.
+  - **Exit gate.** A document with one `$( … )` value previews its independent parts, with
+    only the dependent checks unchecked. `just test` passes in `darkmatter` and `claudine`.
+    `darkmatter/docs/inline/preflight-checks.md`, the library compose-option docs, and the
+    `use-darkmatter` skill describe what a dry run leaves unexpanded and how it is marked;
+    `just publish-skills` has run in `darkmatter`.
+
+## Phase 5 — The switch
+
+Claudine CLI (Rules 10–12). After this phase `--dry-run` is the passive check on `sequence`,
+`compose`, and `inline-compose`, and the old document preview is gone.
+
+**Ruling on `--json` (default; the author may overrule before this phase starts).** Declare
+`--json` on `SharedComposeArgs` as the spec says. Claudine owns the flag on the three document
+commands, so a caller who wants a provider's own `--json` forwards it after `--`. Update
+`provider_tail_launch::a_resume_carries_the_tail_exactly_once` to forward it that way.
+
+- [ ] **Record Selection**
+  - (Rule 10.) Record provider attempts in the branches of
+    `wrap/sequence/providers.rs::select_target` and `wrap/composition/target.rs` that choose
+    them, including empty links and each enclosing document consulted, and render the chain
+    from that record. Delete the chain written out in `document_check/selection.rs`. Reuse the
+    pure precedence of `exec_prep::resolve_model_and_validate` in place of the presence check.
+    Apply the real asking rules: stderr terminal status and `review::needs_review` for
+    sequences, the target resolver and eligible preferred-agent fallback for direct and inline
+    composition, and the cohort shape rule for inputs. Remove the dry-run exception that masks
+    an invalid explicit provider hint. Redact secret-shaped values.
+- [ ] **Isolate Startup**
+  - (Phase 1 task of the same name; Rule 11.) Add `json` with its clap requirement on
+    `dry_run`, and the refusal-only `dry_run_shell` with the spec's message. Dispatch the three
+    dry-run commands before telemetry, configuration migration, host-registration refresh, and
+    `ensure_config_exists`, with the passive configuration projection. Exercise help, the first
+    `--`, an option after the file, and `--json` without `--dry-run`.
+- [ ] **Route Dry Runs**
+  - (Phase 1 "Integrate Claudine Checks", Rule 12.) Delete `document_check::enabled()` and the
+    environment seam and route every document dry run to the check. Retire the sequence
+    preview through `task_run.rs` and `sequence_dry_run.rs` and the direct and inline previews
+    through the wrapper launch pipeline. Keep wrapper-command dry runs. Report an unclassified
+    error as `internal.bug`. Send the human report to stderr once, then previews to stdout;
+    under `--json` emit one envelope and no preview text. Exit 0 or 2 from severities, never 1.
+    Declare the dry-run codes once in Claudine's catalog instead of the test-only `CHECK_CODES`.
+- [ ] **Migrate Preview Suites**
+  - Migrate each L1 test that failed under the switch (the suites listed in the log's first
+    decision and Phase 3's classified list). A test asserts the new report, or is deleted with
+    a logged reason when it asserted removed behavior such as `--dry-run-shell` running
+    commands. No test is ignored or skipped to pass the gate.
+  - Add the remaining "Prove Passive Reports" cases: usage errors, 0 and 2 outcomes, stream
+    separation, report-only failures for an invalid configuration and an unreadable root, no
+    standard `StatusBlock` in any dry-run failure, a layout failure that does not lose later
+    output, and the no-write comparison of the fixture home, workdir, registration, and cache
+    directories. Add fixtures and controls for each Claudine code this phase can emit.
+- [ ] **Publish Dry Run**
+  - Update the docs for what now ships: `claudine/docs/cli/sequence.md` (remove the planned
+    marker, the Flags row, and add the removed spelling), `docs/topics/flow-control/sequences.md`
+    (replace the "Composition shell work still runs" callout with the passive table),
+    `docs/topics/composition.md`, `docs/topics/output.md`, the `use-claudine` skill, and the
+    repo `claudine` skill. Run `just publish-skills` in `claudine`.
+  - **Exit gate.** No `enabled()` or seam remains in the tree. `--dry-run-shell` is a usage
+    error on all three commands. The fleet snapshots pass through the real flag. `just test`
+    and `just lint` pass in `claudine` with no newly skipped test.
+
+## Phase 6 — Shared report
+
+Darkmatter and biscuit-file. The parts of Rules 2, 4, 5, and 13 that Phase 1 left out.
+
+- [ ] **Capture Report Baselines**
+  - (Phase 1 "Capture Contracts", Darkmatter half.) Before extracting anything, capture plain
+    and JSON output and exit behavior of `md validate refs`, including listing, empty output,
+    and failures, and the reference report of `md graph` at its existing caller.
+- [ ] **Unify Records**
+  - (Phase 1 "Build Findings", Rule 2.) Serialize `iteration_path` and `included_via` as
+    projections of `trail`, keeping every null and omit contract. Reconcile the record with the
+    spec: `related` is the published name for other locations, and the provider chain's `notes`
+    either map onto it or are documented as an addition in the data contract. Put the same
+    `diagnostic` type in every file under `darkmatter/cli/schemas/output/`. Fold
+    `findings::FINDING_CODES` into `COMPOSE_DIAGNOSTIC_CODES` for the codes `md` emits.
+- [ ] **Extract Renderer**
+  - (Rule 4.) Move the render tree and layout helpers of `ValidationReportView` into
+    `FindingReport` as its reference presentation and keep the view as a compatibility
+    adapter. Compare against the baselines byte for byte.
+- [ ] **Finish References**
+  - (Phase 1 "Build References", Rule 5.) Move the general basename search and its bounds from
+    Claudine into Darkmatter, split passive candidate enumeration from the chooser in
+    `completion/operation_file.rs`, and wire `resolve_composition_source_in_context` and
+    `recover_operation_file` to the shared builder. Suppress case-only suggestions for an
+    equivalent file. Prove no-match versus denied, ambiguous, and I/O outcomes, candidate
+    order, the literal-glob hint, permission filtering, and reused directory reads.
+- [ ] **Combine Document Checks**
+  - (Phase 1 task of the same name; Rule 13.) Feed the sink from the reference, call, and
+    schema families and the passive body verdict in `md compose`, on the ordinary route and
+    after `initialize` on the lifecycle route. Add the `notes.md` fixture and its snapshots.
+    Fix the file-frame line numbers in the unterminated-block excerpt.
+  - **Exit gate.** `md validate refs` and `md graph` output is byte-identical to the baselines.
+    The `notes.md` report shows the missing file and the proven empty body together. Reference
+    recovery, warning policy, and stdin behavior are unchanged. `just test` passes in
+    `darkmatter` and `biscuit-file`, and Claudine's L1 passes against the changed record.
+    `darkmatter/docs/cli/data-contracts.md`, `compose.md`, `validate.md`, and
+    `docs/errors/composition-problems.md` match what ships.
+
+## Phase 7 — Real-run report and guards
+
+Claudine (Rule 8) and the Phase 1 guards.
+
+- [ ] **Report Real Preflight**
+  - (Rule 8.) Add `CompositionError::CheckFailed { report, cause }`, delegating every lifecycle
+    and persistence field to the original typed cause and rendering the report once. Where a
+    real sequence already stops at preflight, collect the independent passive findings after
+    the original boundary settles. Keep input collection, provider review, and shell
+    authorization in their existing order, and move no task-time failure forward. Print new
+    advisory warnings once before the first task on a successful preflight, and recheck only
+    answer-dependent findings after collection.
+  - Verify against Phase 3's baselines: displayed findings plus the complete legacy typed
+    cause, persisted result, and lifecycle routing, including the case where the first
+    displayed row differs from the primary failure, retry with closed approvals, an
+    initialize-created input, and an earlier task providing a file a later task needs.
+- [ ] **Enforce Phase Scope**
+  - (Phase 1 task of the same name, as written there.) Add the site, noun, catch-all, snapshot,
+    and boundary-mapping guards, with existing sequence omissions listed under a Phase 8 tag.
+  - **Exit gate.** Every Phase 1 checkbox is ticked. The mapping guard holds an explicit case
+    per blocking finding and boundary. `just test` and `just lint` pass in `claudine` and
+    `darkmatter`. `claudine/docs/topics/error-architecture.md` and `pre-flight-checks.md`
+    describe the shared findings, the typed cause, and the guards.
+
+## Phase 8 — Sequence errors and delivery
 
 ### Wave 5
 

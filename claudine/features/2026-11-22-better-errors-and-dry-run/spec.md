@@ -3,6 +3,7 @@ kind: feature
 created: 2026-11-22
 status: finalized-spec
 area: claudine
+implemented-by: "claude/opus"
 owner: Ken Snyder <ken@ken.net>
 related:
     - 2026-11-22-claudine-doctor
