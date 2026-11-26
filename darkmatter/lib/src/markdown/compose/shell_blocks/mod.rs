@@ -851,16 +851,20 @@ mod tests {
         assert!(result.contains("hello"), "Expected hello output: {result}");
     }
 
+    /// An absolute document path on every OS: a rootless `/tmp/…` resolves
+    /// against the current drive on Windows.
+    const TEST_SOURCE: &str = if cfg!(windows) { "C:/tmp/test.md" } else { "/tmp/test.md" };
+
     #[test]
     fn source_file_in_error() {
         let content = "::shell-block\nfalse\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
-        let options = options.with_source_file("/tmp/test.md");
+        let options = options.with_source_file(TEST_SOURCE);
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
         match err {
             ShellBlockError::Command { source_file, .. } => {
-                assert_eq!(source_file, Some(std::path::PathBuf::from("/tmp/test.md")));
+                assert_eq!(source_file, Some(std::path::PathBuf::from(TEST_SOURCE)));
             }
             other => panic!("Expected Command error, got: {other:?}"),
         }
@@ -872,14 +876,14 @@ mod tests {
     #[test]
     fn every_block_error_names_the_source_file() {
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
-        let options = options.with_source_file("/tmp/test.md");
+        let options = options.with_source_file(TEST_SOURCE);
         for content in ["::shell-block timeout=bad\ntrue\n::end-block\n", "::shell-block\ntrue\n"] {
             let mut runtime = ShellExpansionRuntime::new();
             let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
             let (ShellBlockError::Parse { source_file, .. }
             | ShellBlockError::Unterminated { source_file, .. }
             | ShellBlockError::Command { source_file, .. }) = &err;
-            assert_eq!(source_file.as_deref(), Some(std::path::Path::new("/tmp/test.md")), "{content:?}: {err:?}");
+            assert_eq!(source_file.as_deref(), Some(std::path::Path::new(TEST_SOURCE)), "{content:?}: {err:?}");
         }
     }
 

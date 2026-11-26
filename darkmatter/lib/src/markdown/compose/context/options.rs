@@ -1910,8 +1910,9 @@ impl ComposeOptions {
     /// that does not depend on it still composes. Remote reads follow the
     /// captured `network` permission: allowed hosts are fetched with no
     /// persistent cache, and a denied host keeps its typed refusal. The
-    /// built-in shell blacklist still refuses a blacklisted command, as the
-    /// real run would. The session survives every child, transclusion,
+    /// built-in shell blacklist still refuses a blacklisted command as
+    /// authored; an alias is not expanded, since that starts the login
+    /// shell. The session survives every child, transclusion,
     /// slot, and callback composition that inherits these options.
     #[must_use]
     pub fn with_dry_run(self) -> Self {
@@ -1925,6 +1926,8 @@ impl ComposeOptions {
     pub fn with_passive_session(mut self, session: crate::markdown::compose::passive::PassiveSession) -> Self {
         self.passive = Some(session);
         self.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
+        // Alias lookup starts the login shell, an effect a dry run never has.
+        self.alias_resolutions = crate::markdown::compose::shell_expansion::alias::AliasResolutions::passive();
         self
     }
 
