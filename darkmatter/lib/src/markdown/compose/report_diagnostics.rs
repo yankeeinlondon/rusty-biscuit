@@ -467,7 +467,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                         actual_type: None,
                         span: authored.map(crate::markdown::AuthoredSpan::range),
                         iteration_path: IterationPath::empty(),
-                        reference_details: None,
+                        reference_details: schema_file_reference_details(problem),
                         data_location: expression.and_then(|expression| expression.data),
                         grants_needed: None,
                         related: Vec::new(),
@@ -490,6 +490,23 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
         }
         _ => with_expression_cause(leaf_diagnostic(leaf), expression_cause(leaf)),
     }
+}
+
+/// The reference fields of a schema problem about a `file`-typed value: the
+/// value as written and its failure class, which a host prints as its
+/// `failure:` row. `None` for every other problem.
+fn schema_file_reference_details(problem: &simplified_schema::ValidationProblem) -> Option<ReferenceDetails> {
+    let diagnostic = problem.file_reference.as_ref()?;
+    let raw = match diagnostic {
+        simplified_schema::FileReferenceDiagnostic::InvalidSyntax { raw }
+        | simplified_schema::FileReferenceDiagnostic::ResolutionFailed { raw, .. }
+        | simplified_schema::FileReferenceDiagnostic::NoMatch { raw, .. } => raw,
+    };
+    Some(ReferenceDetails {
+        reference: Some(raw.clone()),
+        failure: Some(resolution_failure_name(diagnostic.resolution_failure()).to_string()),
+        ..ReferenceDetails::default()
+    })
 }
 
 /// The coded records of a schema preparation failure: a template's

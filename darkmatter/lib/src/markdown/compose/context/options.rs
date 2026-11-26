@@ -336,12 +336,10 @@ pub struct ComposeOptions {
     /// [`Self::ignore_invalid_references`]: every other failure still fails.
     pub(crate) allow_missing_transclusions: bool,
 
-    /// When `true`, the composition is a passive diagnostic pass: no
-    /// document shell command (`$( … )`, `::shell`, a shell block) runs or is
-    /// read from the shell cache. Each one fails with
-    /// [`ShellExpansionError::SkippedInDryRun`](crate::markdown::compose::ShellExpansionError::SkippedInDryRun)
-    /// before it is spawned, so a caller can report what it skipped.
-    pub(crate) dry_run: bool,
+    /// The passive session of a dry run ([`Self::with_dry_run`]); `None` for
+    /// an ordinary composition. Shared by every clone, so children, slots,
+    /// and callbacks defer into one record.
+    pub(crate) passive: Option<crate::markdown::compose::passive::PassiveSession>,
 
     /// When `true`, a `::map` source with no iterable declaration is a
     /// warning instead of an error. Waives only the static source-typing
@@ -787,7 +785,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("allow_missing_transclusions", &self.allow_missing_transclusions)
-            .field("dry_run", &self.dry_run)
+            .field("dry_run", &self.passive.is_some())
             .field("allow_untyped_map_variables", &self.allow_untyped_map_variables)
             .field("allow_untyped_filter_variables", &self.allow_untyped_filter_variables)
             .field("iteration_limits", &self.iteration_limits)
@@ -1121,7 +1119,7 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             allow_missing_transclusions: false,
-            dry_run: false,
+            passive: None,
             allow_untyped_map_variables: false,
             allow_untyped_filter_variables: false,
             iteration_limits: Default::default(),
@@ -1216,8 +1214,14 @@ impl ComposeOptions {
     }
 
     /// Returns true if the given operation is enabled.
+    ///
+    /// A dry run ([`Self::with_dry_run`]) never runs the body's commands, so
+    /// [`ComposeOperation::ShellExpansion`] and
+    /// [`ComposeOperation::ShellBlocks`] read as disabled under one: their
+    /// directives stay as written and are recorded as deferrals.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
         self.enabled_operations.contains(op)
+            && !(self.passive.is_some() && matches!(op, ComposeOperation::ShellExpansion | ComposeOperation::ShellBlocks))
     }
 
     /// Whether the passive call check covers `op`'s surface: an enabled
@@ -1878,21 +1882,44 @@ impl ComposeOptions {
         self
     }
 
-    /// Makes this composition a passive diagnostic pass: no document shell
-    /// command runs or is read from the per-compose shell cache. Each one
-    /// fails with
-    /// [`ShellExpansionError::SkippedInDryRun`](crate::markdown::compose::ShellExpansionError::SkippedInDryRun)
-    /// before anything is spawned. The option survives every child,
-    /// transclusion, and callback composition that inherits these options.
+    /// Makes this composition a passive dry run with a new
+    /// [`PassiveSession`](crate::markdown::compose::passive::PassiveSession).
+    ///
+    /// Nothing with an effect happens: no frontmatter `$( … )` value, body
+    /// `::shell` directive, or `::shell-block` runs, no approval is asked
+    /// for, no login shell is probed, no ICMP packet is sent, and no compose,
+    /// shell, or remote cache is read or written. Each skipped piece of work
+    /// keeps its authored text and is recorded in the session as a
+    /// [`Deferral`](crate::markdown::compose::passive::Deferral); everything
+    /// that does not depend on it still composes. Remote reads follow the
+    /// captured `network` permission: allowed hosts are fetched with no
+    /// persistent cache, and a denied host keeps its typed refusal. The
+    /// built-in shell blacklist still refuses a blacklisted command, as the
+    /// real run would. The session survives every child, transclusion,
+    /// slot, and callback composition that inherits these options.
     #[must_use]
-    pub fn with_dry_run(mut self) -> Self {
-        self.dry_run = true;
+    pub fn with_dry_run(self) -> Self {
+        self.with_passive_session(crate::markdown::compose::passive::PassiveSession::new())
+    }
+
+    /// [`Self::with_dry_run`] recording into an existing `session`, so a
+    /// host composing several documents of one invocation shares one
+    /// record.
+    #[must_use]
+    pub fn with_passive_session(mut self, session: crate::markdown::compose::passive::PassiveSession) -> Self {
+        self.passive = Some(session);
+        self.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
         self
     }
 
     /// Whether this composition is a passive dry run ([`Self::with_dry_run`]).
     pub fn is_dry_run(&self) -> bool {
-        self.dry_run
+        self.passive.is_some()
+    }
+
+    /// The dry run's passive session, when this is one.
+    pub fn passive_session(&self) -> Option<&crate::markdown::compose::passive::PassiveSession> {
+        self.passive.as_ref()
     }
 
     /// Removes a transclusion whose target does not exist, with a warning,
@@ -2011,6 +2038,7 @@ impl ComposeOptions {
         context.nested_compose = self.nested_compose.clone();
         context.host_globals = self.host_globals.clone();
         context.iteration = self.expression_iteration_budget();
+        context.passive = self.passive.clone();
         context
     }
 
@@ -2059,6 +2087,7 @@ impl ComposeOptions {
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.host_globals = self.host_globals.clone();
         context.iteration = self.expression_iteration_budget();
+        context.passive = self.passive.clone();
         context
     }
 
@@ -2783,7 +2812,8 @@ impl ComposeOptions {
     /// cache). Performs no filesystem I/O: the store creates its directories
     /// on the first remote body it writes.
     fn build_remote_fetch_runtime(&self) -> RemoteFetchRuntime {
-        let remote_store = self.cache_root.as_ref().map(|root| {
+        // A dry run fetches what the policy allows but persists nothing.
+        let remote_store = self.cache_root.as_ref().filter(|_| self.passive.is_none()).map(|root| {
             Arc::new(FileStore::at(FileStore::resolve_cache_root(
                 root,
                 self.cache_namespace.as_deref(),
@@ -3483,7 +3513,7 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             allow_missing_transclusions,
-            dry_run,
+            passive,
             allow_untyped_map_variables,
             allow_untyped_filter_variables,
             iteration_limits,
@@ -3704,7 +3734,7 @@ impl ComposeOptions {
         enc.field("allow_missing_transclusions");
         enc.bool(*allow_missing_transclusions);
         enc.field("dry_run");
-        enc.bool(*dry_run);
+        enc.bool(passive.is_some());
         enc.field("allow_untyped_map_variables");
         enc.bool(*allow_untyped_map_variables);
         enc.field("allow_untyped_filter_variables");
@@ -4092,7 +4122,7 @@ impl ComposeOptions {
         cenc.field("allow_missing_transclusions");
         cenc.bool(*allow_missing_transclusions);
         cenc.field("dry_run");
-        cenc.bool(*dry_run);
+        cenc.bool(passive.is_some());
         cenc.field("allow_untyped_map_variables");
         cenc.bool(*allow_untyped_map_variables);
         cenc.field("allow_untyped_filter_variables");

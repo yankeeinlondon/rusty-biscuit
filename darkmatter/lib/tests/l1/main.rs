@@ -184,6 +184,7 @@ mod compose_call_precheck;
 #[cfg(feature = "effects-instrumentation")]
 mod shared_diagnostics;
 mod findings;
+mod passive_compose;
 #[cfg(feature = "effects-instrumentation")]
 mod report_diagnostics;
 mod diagnostic_source_provenance;

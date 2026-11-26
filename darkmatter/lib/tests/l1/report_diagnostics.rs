@@ -432,3 +432,24 @@ mod passive_history {
         );
     }
 }
+
+/// A schema problem about a `file` value carries the value and its failure
+/// class, as a host's `failure:` row prints it.
+#[test]
+fn a_file_value_schema_problem_carries_its_failure_class() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("tree");
+    std::fs::create_dir(&root).unwrap();
+    for (name, value, failure_class) in [("missing.md", "absent.md", "no-match"), ("escape.md", "../../outside.md", "invalid-reference")] {
+        let content = format!("---\n$schema:\n  target: file\ntarget: '{value}'\n---\nbody\n");
+        let (_, failure) = failure(&root, name, &content);
+        let diagnostics = error_diagnostics(&failure.error);
+        assert_eq!(diagnostics.len(), 1, "{name}: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, simplified_schema::SCHEMA_INVALID_FILE_REFERENCE_CODE, "{name}: {diagnostic:#?}");
+        let details = diagnostic.reference_details.as_ref().unwrap_or_else(|| panic!("{name}: {diagnostic:#?}"));
+        assert_eq!(details.failure.as_deref(), Some(failure_class), "{name}");
+        assert_eq!(details.reference.as_deref(), Some(value), "{name}");
+        assert_eq!(serde_json::to_value(diagnostic).unwrap()["failure"], json!(failure_class), "{name}");
+    }
+}

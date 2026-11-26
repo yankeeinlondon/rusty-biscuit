@@ -1011,6 +1011,9 @@ pub(crate) fn call_function(
         return Some(call_host(&entry, &name, args));
     }
     let entry = find_binding(&name)?;
+    if let Some(reason) = passive_refusal(entry.binding.slot_class, entry.binding.canonical, ctx) {
+        return Some(Err(ExpressionError::Unavailable(Box::new(reason))));
+    }
     let answer = call_entry(entry, &name, args, ctx);
     // A schema slot's cached resolution must be re-checked against what a
     // captured or volatile call answered (`schemas::slots::dependencies`).
@@ -1022,6 +1025,30 @@ pub(crate) fn call_function(
         &answer,
     );
     Some(answer)
+}
+
+/// Why a dry run does not call `canonical`, whose slot class is `class`: a
+/// function never allowed in a slot has an effect (a login shell, an ICMP
+/// probe, a provider API), except nested composition, which composes under
+/// the same passive session. `None` outside a dry run.
+fn passive_refusal(
+    class: Option<SlotClass>,
+    canonical: &str,
+    ctx: Option<&ResolutionContext>,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    use crate::markdown::compose::passive::DeferralReason;
+    ctx?.passive.as_ref()?;
+    if class != Some(SlotClass::Rejected) || canonical == "as_markdown" {
+        return None;
+    }
+    let function = canonical.to_string();
+    Some(match canonical {
+        "has_alias" | "has_builtin_function" | "has_user_function" | "can_execute" => {
+            DeferralReason::ShellProbe { function }
+        }
+        "ping" | "ping_under" => DeferralReason::NetworkProbe { function },
+        _ => DeferralReason::ProviderQuery { function },
+    })
 }
 
 /// Calls a host function through the same steps as a built-in pure handler:

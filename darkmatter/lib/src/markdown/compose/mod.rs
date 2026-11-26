@@ -114,6 +114,7 @@ pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+pub mod passive;
 pub mod policy;
 pub mod report_diagnostics;
 pub(crate) mod pipeline;

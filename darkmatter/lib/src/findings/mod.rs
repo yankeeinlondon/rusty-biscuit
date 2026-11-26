@@ -58,9 +58,26 @@ pub enum EmptyBodyCause {
     AuthoredEmpty,
     /// The authored body holds only whitespace.
     Whitespace,
+    /// Every block of the body was excluded by a condition that evaluated
+    /// false, and nothing outside those blocks had content.
+    ExcludedBlocks {
+        /// The excluded blocks, in document order.
+        blocks: Vec<ExcludedBlock>,
+    },
     /// The authored body has content, and the rendered result is empty; no
     /// narrower cause is proven.
     EmptyRendered,
+}
+
+/// A `::block` whose `when=` condition evaluated false, so its content was
+/// left out: the fact an [`EmptyBodyCause::ExcludedBlocks`] is proven from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ExcludedBlock {
+    /// The one-based line of the `::block` directive: in the document's file
+    /// when the body's map proves it, otherwise in the composed body.
+    pub line: usize,
+    /// The condition as written.
+    pub condition: String,
 }
 
 impl EmptyBodyCause {
@@ -70,6 +87,14 @@ impl EmptyBodyCause {
     /// Visible content is judged after embedded render metadata is
     /// stripped, the same predicate Claudine's launch uses.
     pub fn classify(authored: &str, rendered: &str) -> Option<Self> {
+        Self::classify_composed(authored, rendered, &[])
+    }
+
+    /// [`Self::classify`] for a composition that left out `excluded` blocks
+    /// ([`ComposeReport::excluded_blocks`](crate::markdown::compose::ComposeReport::excluded_blocks)):
+    /// an empty result of a body that had blocks left out is
+    /// [`Self::ExcludedBlocks`].
+    pub fn classify_composed(authored: &str, rendered: &str, excluded: &[ExcludedBlock]) -> Option<Self> {
         if !crate::markdown::render_tree::embedded::without_embedded_metadata(rendered).trim().is_empty() {
             return None;
         }
@@ -77,17 +102,26 @@ impl EmptyBodyCause {
             Self::AuthoredEmpty
         } else if authored.trim().is_empty() {
             Self::Whitespace
+        } else if !excluded.is_empty() {
+            Self::ExcludedBlocks { blocks: excluded.to_vec() }
         } else {
             Self::EmptyRendered
         })
     }
 
     /// The cause in the author's terms, completing "the body …".
-    pub fn phrase(&self) -> &'static str {
+    pub fn phrase(&self) -> String {
         match self {
-            Self::AuthoredEmpty => "has no body",
-            Self::Whitespace => "contains only whitespace",
-            Self::EmptyRendered => "rendered to nothing",
+            Self::AuthoredEmpty => "has no body".to_string(),
+            Self::Whitespace => "contains only whitespace".to_string(),
+            Self::ExcludedBlocks { blocks } => {
+                let conditions: Vec<String> = blocks
+                    .iter()
+                    .map(|block| format!("`{}` (line {})", block.condition, block.line))
+                    .collect();
+                format!("rendered to nothing: every block was left out because its condition was false: {}", conditions.join(", "))
+            }
+            Self::EmptyRendered => "rendered to nothing".to_string(),
         }
     }
 
@@ -95,6 +129,9 @@ impl EmptyBodyCause {
     pub fn hint(&self) -> &'static str {
         match self {
             Self::AuthoredEmpty | Self::Whitespace => "add the prompt text after the frontmatter",
+            Self::ExcludedBlocks { .. } => {
+                "pass the values those conditions read, or add body content outside the conditional blocks"
+            }
             Self::EmptyRendered => "check the values the body's expressions and blocks read",
         }
     }

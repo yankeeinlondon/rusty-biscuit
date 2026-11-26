@@ -1,7 +1,6 @@
 //! The shared finding model: the additive `Diagnostic` fields and their data
 //! form, the ordered collector, the human report, the missing-document
-//! builder over biscuit-file's resolution, the empty-body cause, and the
-//! dry-run guard that keeps every document shell command from running.
+//! builder over biscuit-file's resolution, and the empty-body cause.
 
 use std::path::Path;
 
@@ -12,10 +11,7 @@ use darkmatter::findings::{
     Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, EmptyBodyCause, FINDING_CODES, FindingSink, MISSING_DOCUMENT_CODE,
     NOT_CHECKED_CODE, Severity, Subject, Trail, TrailFrame,
 };
-use darkmatter::markdown::compose::ShellExpansionError;
 use darkmatter::findings::HumanLayout;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::{Markdown, MarkdownError};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -231,94 +227,4 @@ fn every_finding_code_is_declared_once_in_the_dm_namespace() {
     codes.dedup();
     assert_eq!(codes.len(), count);
     assert!(codes.iter().all(|code| code.starts_with("dm.")));
-}
-
-fn compose_dry(dir: &Path, text: &str, dry_run: bool) -> Result<Markdown, MarkdownError> {
-    let path = dir.join("doc.md");
-    std::fs::write(&path, text).unwrap();
-    let mut options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
-        .with_source_file(path.clone())
-        .with_config_snapshot(crate::request_support::shell_config(dir, &["prefix touch"]))
-        .with_shell_working_directory(dir);
-    if dry_run {
-        options = options.with_dry_run();
-    }
-    assert_eq!(options.is_dry_run(), dry_run);
-    Markdown::try_from(path.as_path())
-        .unwrap()
-        .compose_with(&crate::request_support::request(options))
-        .map(|(composed, _)| composed)
-}
-
-fn skipped_in_dry_run(error: &MarkdownError) -> bool {
-    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(cause) = current {
-        if let Some(MarkdownError::ShellExpansion(inner)) = cause.downcast_ref::<MarkdownError>()
-            && matches!(**inner, ShellExpansionError::SkippedInDryRun { .. })
-        {
-            return true;
-        }
-        if let Some(ShellExpansionError::SkippedInDryRun { .. }) = cause.downcast_ref::<ShellExpansionError>() {
-            return true;
-        }
-        current = cause.source();
-    }
-    false
-}
-
-/// A pre-approved command runs in an ordinary composition and never in a
-/// dry run, wherever it is written: a frontmatter `$( … )` value, a body
-/// `::shell` line, and a transcluded child's frontmatter.
-/// A case's label, its document, and an optional `(name, text)` child file.
-type DryRunCase<'a> = (&'a str, &'a str, Option<(&'a str, &'a str)>);
-
-#[test]
-fn a_dry_run_runs_no_pre_approved_command_in_frontmatter_body_or_a_transcluded_child() {
-    let cases: [DryRunCase<'_>; 3] = [
-        ("frontmatter", "---\nvalue: $(touch marker-frontmatter)\n---\nbody\n", None),
-        ("body", "body\n\n::shell touch marker-body\n", None),
-        (
-            "child",
-            "parent\n\n::file ./child.md\n",
-            Some(("child.md", "---\nvalue: $(touch marker-child)\n---\nchild\n")),
-        ),
-    ];
-    for (label, text, child) in cases {
-        let dir = TempDir::new().unwrap();
-        if let Some((name, content)) = child {
-            std::fs::write(dir.path().join(name), content).unwrap();
-        }
-        let marker = dir.path().join(format!("marker-{label}"));
-        let error = compose_dry(dir.path(), text, true).expect_err(label);
-        assert!(skipped_in_dry_run(&error), "{label}: {error:?}");
-        assert!(!marker.exists(), "{label}: a dry run spawned the command");
-        // Control: the same document runs the command for real.
-        compose_dry(dir.path(), text, false).unwrap_or_else(|error| panic!("{label}: {error}"));
-        assert!(marker.exists(), "{label}: the control did not run the command");
-    }
-}
-
-/// With no rule approving the command and no approval handler, a dry run
-/// still skips it rather than failing for want of an approval: it asks for
-/// nothing, in frontmatter or the body.
-#[test]
-fn a_dry_run_skips_an_unapproved_command_without_asking() {
-    for (label, text) in [
-        ("frontmatter", "---\nvalue: $(touch marker)\n---\nbody\n"),
-        ("body", "body\n\n::shell touch marker\n"),
-    ] {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("doc.md");
-        std::fs::write(&path, text).unwrap();
-        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), ""))
-            .with_source_file(path.clone())
-            .with_shell_working_directory(dir.path())
-            .with_dry_run();
-        let error = Markdown::try_from(path.as_path())
-            .unwrap()
-            .compose_with(&crate::request_support::request(options))
-            .expect_err(label);
-        assert!(skipped_in_dry_run(&error), "{label}: {error:?}");
-        assert!(!dir.path().join("marker").exists(), "{label}");
-    }
 }

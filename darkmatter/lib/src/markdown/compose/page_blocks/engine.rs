@@ -72,7 +72,15 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
                 if stop(report) {
                     return Ok(None);
                 }
-                evaluate_when(content, &region.span, region.start_line, expr, &site, state, report, members)?
+                match evaluate_when(content, &region.span, region.start_line, expr, &site, state, report, members)? {
+                    Some(condition) => condition,
+                    // A dry run cannot decide it: the region stays as written.
+                    None => {
+                        output.push_str(&content[region.span.clone()]);
+                        cursor = region.span.end;
+                        continue;
+                    }
+                }
             }
             None => true, // No when → treated as enabled
         };
@@ -102,6 +110,12 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
             // False block: append nothing
             removed(&mut edits, region.span.clone());
             report.page_blocks_skipped += 1;
+            // Located only now: resolving the authored opener reads the
+            // filesystem, and only an excluded block is evidence.
+            if let Some(condition) = &region.options.when_expr {
+                let site = ConditionSite { span: &region.span, body_line: region.start_line, opener, current: &|| ctx.clone() };
+                report.excluded_blocks.push(crate::findings::ExcludedBlock { line: site.located().1, condition: condition.clone() });
+            }
         }
 
         cursor = region.span.end;
@@ -116,7 +130,8 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
 /// Evaluates the `when` condition `expr` of the region at `span` (on
 /// one-based body `line`), adding the undeclared reads and the reached
 /// undeclared members it reported to `report`, a failing condition's
-/// included.
+/// included. `None` when a dry run cannot decide it: the condition reads a
+/// value only an effect can produce, and the deferral is recorded.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_when<L: EvaluationLookup>(
     content: &str,
@@ -127,7 +142,7 @@ fn evaluate_when<L: EvaluationLookup>(
     state: &L,
     report: &mut ComposeReport,
     members: Option<&BodyMembers<'_>>,
-) -> Result<bool, PageBlockError> {
+) -> Result<Option<bool>, PageBlockError> {
     let mut observation = Observation::default();
     let condition = site.evaluate(expr, state, &mut observation);
     report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
@@ -137,7 +152,23 @@ fn evaluate_when<L: EvaluationLookup>(
         let start = condition_start(content, span.start, expr);
         report.add_warnings(members.warnings(start, expr, &mut observation));
     }
-    Ok(condition?)
+    match condition {
+        Err(conditions::ConditionError::Eval { cause, .. }) if cause.unavailable_reason().is_some() => {
+            if let (Some(session), Some(reason)) =
+                (state.resolution_context_ref().and_then(|context| context.passive.as_ref()), cause.unavailable_reason())
+            {
+                session.record(crate::markdown::compose::passive::Deferral {
+                    construct: crate::markdown::compose::passive::DeferredConstruct::BlockCondition,
+                    reason: reason.clone(),
+                    authored: expr.to_string(),
+                    key: None,
+                    line: Some(site.located().1),
+                });
+            }
+            Ok(None)
+        }
+        condition => Ok(Some(condition?)),
+    }
 }
 
 fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
@@ -183,7 +214,14 @@ fn render_body<L: EvaluationLookup>(
                 if stop(report) {
                     return Ok(None);
                 }
-                evaluate_when(content, &child.span, child.start_line, expr, &site, state, report, members)?
+                match evaluate_when(content, &child.span, child.start_line, expr, &site, state, report, members)? {
+                    Some(condition) => condition,
+                    None => {
+                        output.push_str(&content[child.span.clone()]);
+                        cursor = child.span.end;
+                        continue;
+                    }
+                }
             }
             None => true,
         };

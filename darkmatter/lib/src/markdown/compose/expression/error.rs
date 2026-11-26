@@ -372,6 +372,15 @@ pub enum ExpressionError {
         refusal: super::read_gate::GateRefusal,
     },
 
+    /// A dry run could not produce this value without an effect: it reads a
+    /// value that needs a command, or calls a function that would start the
+    /// login shell or send a packet (see
+    /// [`passive`](crate::markdown::compose::passive)). Never recovered into
+    /// a value: `try` and `||` pass it through, so the surface that started
+    /// the evaluation keeps its authored text.
+    #[error("not available in a dry run: {}", .0.describe())]
+    Unavailable(Box<crate::markdown::compose::passive::DeferralReason>),
+
     /// An editor observation stopped before it could produce a value: a read
     /// its approvals do not cover, an input it cannot inspect, a remote body
     /// with no fresh cache entry, or an operation the editor does not run
@@ -815,6 +824,7 @@ impl ExpressionError {
             | Self::Provider { .. }
             | Self::ContextNotCaptured { .. }
             | Self::SlotReadRefused { .. }
+            | Self::Unavailable(_)
             | Self::ObservationPending { .. }
             | Self::ContractViolation { .. }
             | Self::FunctionContextNotCaptured { .. }
@@ -893,6 +903,16 @@ impl ExpressionError {
             Self::Callback { source, .. } => source.place(root),
             Self::InvalidSpreadOperand { site, .. } => site.place_in(root),
             _ => {}
+        }
+    }
+
+    /// Why a dry run left this evaluation without a value, when that is the
+    /// failure ([`Unavailable`](Self::Unavailable), also inside a callback).
+    pub fn unavailable_reason(&self) -> Option<&crate::markdown::compose::passive::DeferralReason> {
+        match self {
+            Self::Unavailable(reason) => Some(reason),
+            Self::Callback { source, .. } => source.unavailable_reason(),
+            _ => None,
         }
     }
 

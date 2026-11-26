@@ -67,6 +67,10 @@ reuse. Nothing it selects is written to disk.
 - `ReadWrite` (default): read hits, write misses
 - `Refresh`: ignore existing entries, recompute, then write fresh results
 
+A dry run (`ComposeOptions::with_dry_run()`) forces `Off` and gives remote
+reads no persistent store, so it neither reads nor writes any cache; see
+[Dry runs](../inline/preflight-checks.md#dry-runs).
+
 ### Run-local keys
 
 A composed `::file` child is keyed on:

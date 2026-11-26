@@ -423,6 +423,19 @@ pub(crate) fn interpolate_text_selected<L: EvaluationLookup>(
                             output.replace_range(loc.start..loc.end, &replacement);
                             count += 1;
                         }
+                        // A dry run could not produce this value without an
+                        // effect: the span stays as written.
+                        EvalResult::Error { error, .. } if error.unavailable_reason().is_some() => {
+                            if let (Some(session), Some(reason)) = (evaluator.passive_session(), error.unavailable_reason()) {
+                                session.record(crate::markdown::compose::passive::Deferral {
+                                    construct: crate::markdown::compose::passive::DeferredConstruct::Interpolation,
+                                    reason: reason.clone(),
+                                    authored: output[loc.start..loc.end].to_string(),
+                                    key: None,
+                                    line: None,
+                                });
+                            }
+                        }
                         EvalResult::Error { error, .. } if strict || error.is_authoring_fatal() => {
                             return Err(LocatedInterpolationError::new(
                                 interpolation_error(&loc.expression, error),
@@ -570,6 +583,20 @@ pub(crate) fn interpolate_value_traced<L: EvaluationLookup>(
         warnings.extend(evaluator.member_warnings(&loc.expression, &(loc.start..loc.end)));
         let value = match value {
             Ok(value) => value,
+            // A dry run could not produce this value without an effect: the
+            // value stays as written.
+            Err(cause) if cause.unavailable_reason().is_some() => {
+                if let (Some(session), Some(reason)) = (evaluator.passive_session(), cause.unavailable_reason()) {
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Interpolation,
+                        reason: reason.clone(),
+                        authored: input[loc.start..loc.end].to_string(),
+                        key: None,
+                        line: None,
+                    });
+                }
+                return Ok((Value::String(input.to_string()), 0, warnings, None));
+            }
             Err(cause) => return Err(located(interpolation_error(&loc.expression, cause)).after(warnings)),
         };
         show_new_warnings(&mut before_eval, &warnings, &mut shown).map_err(|failure| failure.after(warnings.clone()))?;

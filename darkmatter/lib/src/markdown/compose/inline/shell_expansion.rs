@@ -280,6 +280,55 @@ pub(crate) fn command_sites(
     sites
 }
 
+/// Records, in a dry run, each body command [`command_sites`] would find if
+/// the request's shell stages ran: they stay as written.
+pub(crate) fn record_deferred_command_sites(
+    markdown: &Markdown,
+    data: &DataRanges,
+    options: &crate::markdown::compose::ComposeRequest,
+) {
+    use crate::markdown::compose::ComposeOperation;
+    use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
+    let Some(session) = options.passive_session() else {
+        return;
+    };
+    let content = markdown.content.as_str();
+    let line_of = |offset: usize| markdown.frontmatter_line_count() + content[..offset].matches('\n').count() + 1;
+    if options.enabled_operations.contains(ComposeOperation::ShellExpansion) && content.contains("::shell ") {
+        let lines = parser::scan_directive_lines(
+            content,
+            Some(data),
+            markdown.full_source_context_for_errors(),
+            markdown.frontmatter_line_count(),
+        );
+        for line in lines {
+            let authored = content[line.span.clone()].trim().to_string();
+            let command = authored.strip_prefix("::shell").map_or_else(|| authored.clone(), |rest| rest.trim().to_string());
+            session.record(Deferral {
+                construct: DeferredConstruct::ShellDirective,
+                reason: DeferralReason::Command { command },
+                authored,
+                key: None,
+                line: Some(line_of(line.span.start)),
+            });
+        }
+    }
+    if options.enabled_operations.contains(ComposeOperation::ShellBlocks) && content.contains("::shell-block") {
+        let pairs = super::super::block_pairs::scan_block_pairs_in(content, Some(data)).unwrap_or_default();
+        for pair in pairs.into_iter().filter(|pair| matches!(pair.kind, super::super::block_pairs::BlockOpenKind::Shell)) {
+            let authored = content[pair.span.clone()].to_string();
+            let command = authored.lines().skip(1).take_while(|line| !line.trim_start().starts_with("::end")).collect::<Vec<_>>().join("\n");
+            session.record(Deferral {
+                construct: DeferredConstruct::ShellBlock,
+                reason: DeferralReason::Command { command: command.trim().to_string() },
+                authored,
+                key: None,
+                line: Some(line_of(pair.span.start)),
+            });
+        }
+    }
+}
+
 /// `line`'s extent in `content`: through the first authored line break after
 /// its keyword, so a line break a value inserted belongs to the directive.
 fn directive_extent(content: &str, data: &DataRanges, line: &parser::DirectiveLine) -> std::ops::Range<usize> {

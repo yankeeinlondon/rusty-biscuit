@@ -74,6 +74,11 @@ impl Markdown {
         // walk and this pass fetch each URL once); otherwise build one whose
         // persistent store holds raw remote bodies. It is the only persistent
         // store a compose run uses (R18).
+        // A dry run reads and writes no compose or shell cache, whatever the
+        // caller set after `with_dry_run`.
+        if options.is_dry_run() {
+            options.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
+        }
         let remote_fetch = options.remote_fetch_runtime();
         options.remote_fetch = Some(remote_fetch.clone());
         // The same reuse rule for the data memo and read set: a caller's
@@ -268,6 +273,14 @@ impl Markdown {
                     report_link_titles(self, origin, &options, &mut report)?;
                 }
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
+                // A dry run leaves the body's commands as written; it records
+                // them once, before the first stage that would run one.
+                if *operation == ComposeOperation::ShellExpansion
+                    && options.is_dry_run()
+                    && let Some(body) = body.as_ref()
+                {
+                    crate::markdown::compose::inline::shell_expansion::record_deferred_command_sites(self, &body.data, &options);
+                }
                 if !options.is_enabled(*operation) {
                     continue;
                 }

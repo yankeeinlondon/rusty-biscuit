@@ -1157,8 +1157,17 @@ fn interpolate_frontmatter_impl(
             origin: None,
             before_eval,
         };
+        let session = evaluator.passive_session();
+        let mark = session.map(crate::markdown::compose::passive::PassiveSession::mark);
         let outcome = rewrite_value(original, evaluator, policy, &mut scope)
             .map_err(|e| key_scoped_failure(key, e));
+        // A value that read a deferred value is deferred in turn, so every
+        // read of it is unavailable too.
+        if let (Some(session), Some(mark), Ok((Value::String(text), _, _))) = (session, mark, &outcome)
+            && let Some(first) = session.deferrals_since(mark).into_iter().next()
+        {
+            session.defer_value(key, text, first.reason, None);
+        }
         if outcome.is_ok() {
             scanned_leaves.extend(scope.scanned);
             origins.push((key.to_string(), scope.origin));

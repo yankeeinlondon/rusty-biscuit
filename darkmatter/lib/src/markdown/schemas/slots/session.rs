@@ -245,6 +245,9 @@ impl SlotSession {
     /// (`ComposeOptions::with_data_runtime`): a request without one gives the
     /// session a runtime of its own, whose reads never reach the command's
     /// read set.
+    ///
+    /// A dry run's session ([`ComposeOptions::with_dry_run`](crate::markdown::compose::ComposeOptions::with_dry_run))
+    /// is a [`SessionMode::ReferenceCheck`] one: it never asks.
     pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
         let checkout = request.resolution_context();
@@ -273,6 +276,11 @@ impl SlotSession {
         );
         if let Some(handler) = &options.shell_approval_handler {
             session = session.with_handler(Arc::clone(handler));
+        }
+        // A dry run asks nothing: a slot whose read no grant allows leaves
+        // its template unresolved, as a reference check does.
+        if options.is_dry_run() {
+            session = session.with_mode(SessionMode::ReferenceCheck);
         }
         session
     }

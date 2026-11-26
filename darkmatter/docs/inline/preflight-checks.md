@@ -550,24 +550,104 @@ session over any reader and writer, which is how the prompt is tested.
 
 ## Dry runs
 
-A library caller that wants to see what a document composes, without running
-anything, builds its options with `ComposeOptions::with_dry_run()`. Under a
-dry run no document command runs and none is offered for approval: a
-`::shell` line, a frontmatter `$( … )` value, and the same in a transcluded
-document each fail with `ShellExpansionError::SkippedInDryRun`, which names
-the command and where it is written. The built-in blacklist still refuses a
-blacklisted command first, as a real run would.
+A dry run composes a document to show what it would produce, with no effect
+at all: no command runs, no login shell is started, no network packet is
+sent, no provider API is queried, no approval is asked for, and no cache is
+read or written. A library caller asks for one with
+`ComposeOptions::with_dry_run()`:
 
 ```rust
 use darkmatter::markdown::compose::ComposeOptions;
 
 let options = ComposeOptions::new().with_dry_run();
 assert!(options.is_dry_run());
+let session = options.passive_session().expect("a dry run records into a session").clone();
+// compose with `options`, then read what was left as written:
+for deferral in session.deferrals() {
+    println!("{:?}: {}", deferral.construct, deferral.reason.describe());
+}
 ```
 
-A caller treats `SkippedInDryRun` as "this part could not be checked", not
-as a failure of the document. Claudine's passive document check does exactly
-that: the task's preview is reported as not checked.
+### What a dry run leaves as written
+
+Work that needs an effect is not an error in a dry run. It is *deferred*: its
+authored text stays in the output exactly as written, and the session
+records a `Deferral` saying which construct was left (`construct`), why
+(`reason`), its authored text, and its frontmatter key or line when known.
+Everything that does not depend on it composes as usual.
+
+Given this document:
+
+```md
+---
+branch: $(git branch --show-current)
+title: Release
+---
+# {{ title }}
+On {{ branch }}.
+::shell git log -1
+::block when="branch == 'main'"
+Ship it.
+::end-block
+Alias {{ has_alias("ll") }}.
+```
+
+a dry run composes:
+
+```md
+# Release
+On {{ branch }}.
+::shell git log -1
+::block when="branch == 'main'"
+Ship it.
+::end-block
+Alias {{ has_alias("ll") }}.
+```
+
+and records five deferrals: the `branch` value, the `{{ branch }}` span that
+reads it, the `::shell` line, the `::block` whose condition reads `branch`,
+and the `has_alias` call. `title` composed, because it reads nothing deferred.
+
+| Construct (`DeferredConstruct`) | Left as written when | Reason (`DeferralReason`) |
+| --- | --- | --- |
+| `FrontmatterValue` | a `$( … )` value, or a value that reads one | `Command`, `DependsOn` |
+| `Interpolation` | a `{{ … }}` span that reads a deferred value or calls an effectful function | `DependsOn`, `ShellProbe`, `NetworkProbe`, `ProviderQuery` |
+| `ShellDirective` | a body `::shell` line | `Command` |
+| `ShellBlock` | a body `::shell-block` region | `Command` |
+| `BlockCondition` | a `::block when=…` whose condition reads a deferred value; the whole region stays, directive lines included | `DependsOn` |
+| `SchemaTemplate` | a `$schema` slot whose read would need approval; the schema's checks are not run | `ReadNeedsApproval` |
+
+The effectful functions are those that start the login shell (`has_alias`,
+`can_execute`, …), send packets (`ping`, `ping_under`), or query a
+provider's API (`pr`, `cicd`, …). A pure function such as `upper` still
+evaluates.
+
+### How deferral spreads
+
+A read of a deferred value is unavailable, and that travels through the
+expression like any evaluation error: through lookups, conditions,
+collections, function arguments, member paths (`branch.name`), and values
+derived from it. `try(…)` and `||` never turn it into a value, so a fallback
+cannot hide what a dry run skipped. The surface that started the evaluation
+keeps its own text: a span, a whole `::block` region, or a frontmatter value,
+which is then deferred in turn. The session is shared by every clone of the
+options, so a transcluded document, a schema slot, and a callback report
+into the same list.
+
+### What a dry run still refuses
+
+A dry run never turns a refusal into a deferral:
+
+- a blacklisted command is refused first, as a real run would refuse it;
+- a remote read the configuration denies keeps its typed refusal, and one it
+  allows is fetched without being stored;
+- a function or call the document may not make at all fails as it would in
+  a real run.
+
+Claudine's passive document check (`--dry-run` on `compose`,
+`inline-compose`, and `sequence`) composes through this mode, marks each
+deferred construct in its preview, and reports each as its own not-checked
+row.
 
 ## Timeouts
 

@@ -160,7 +160,7 @@ schema `file` values too.
 | `--width N` | `with_output_width(renderable::output::Width)` |
 | `--disable baseline-schema` / explicit baseline | build options without `with_darkmatter_baseline_schema()`, or pass `with_baseline_schema(SchemaRoot)` |
 | skip a stage | `.disable(ComposeOperation::Normalization)` or `.only(&[…])` |
-| (no flag) a passive rehearsal | `with_dry_run()`: no document command runs and none is asked to be approved; each fails as `ShellExpansionError::SkippedInDryRun` |
+| (no flag) a passive rehearsal | `with_dry_run()`: nothing with an effect runs (no command, login shell, packet, provider query, approval, or cache); each construct that needs one stays as written and is recorded in `passive_session().deferrals()` (see below) |
 | `::map`/`::filter` limits | `with_max_iteration_visits(NonZeroU64)`, `with_max_expansion_bytes(NonZeroU64)` (defaults 100,000 and 16 MiB) |
 
 The `ComposeOperation` stages are `FrontmatterInterpolation`,
@@ -195,6 +195,39 @@ With no handler, a command that is not whitelisted fails composition with
 `ShellExpansionError::ApprovalRequired`. The built-in blacklist cannot be
 overridden. Call `compose_preflight` first if you want to show the user the
 list of commands before anything runs.
+
+### Dry runs from a library
+
+`ComposeOptions::with_dry_run()` composes with no effect. Whatever needs one
+is left in the output exactly as written, and everything independent of it
+composes as usual. Each thing left is a `Deferral` in
+`options.passive_session()`:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+
+let options = ComposeOptions::new().with_dry_run();
+let session = options.passive_session().expect("a dry run has a session").clone();
+// … compose with `options` …
+for deferral in session.deferrals() {
+    // construct: FrontmatterValue, Interpolation, ShellDirective,
+    // ShellBlock, BlockCondition, or SchemaTemplate
+    println!("{:?} `{}`: {}", deferral.construct, deferral.authored, deferral.reason.describe());
+}
+```
+
+- A `$( … )` frontmatter value, a body `::shell` line or `::shell-block`,
+  and a call that starts the login shell (`has_alias`, `can_execute`, …),
+  sends packets (`ping`), or queries a provider (`pr`, `cicd`, …) are
+  deferred.
+- A read of a deferred value is unavailable, through any expression:
+  the `{{{ … }}}` span stays as written, a `::block` whose condition reads it
+  stays whole, and a frontmatter value that reads it is deferred too.
+  `try(…)` and `||` never recover it.
+- No approval is asked for and no cache is read or written. A `$schema` slot
+  whose read needs approval is deferred (`SchemaTemplate`) and its checks are
+  not run. An allowed remote read is fetched without being stored.
+- A blacklisted command and a denied remote read are still refused.
 
 ## Evaluate one expression
 

@@ -54,6 +54,12 @@ pub struct ComposeReport {
     /// Number of page blocks that evaluated to false and were skipped.
     pub page_blocks_skipped: usize,
 
+    /// The `::block` regions of this document's own body whose condition
+    /// evaluated false, in document order: the evidence an empty body's
+    /// [`EmptyBodyCause`](crate::findings::EmptyBodyCause) is proven from. A
+    /// transcluded child's blocks are its own and are not merged in.
+    pub excluded_blocks: Vec<crate::findings::ExcludedBlock>,
+
     /// Number of transclusions applied.
     pub transclusions_applied: usize,
 

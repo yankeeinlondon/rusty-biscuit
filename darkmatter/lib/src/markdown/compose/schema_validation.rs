@@ -1151,8 +1151,22 @@ fn defers_template(err: &simplified_schema::SchemaError, options: &crate::markdo
         .slot_session
         .as_ref()
         .is_some_and(|session| session.mode() == crate::markdown::schemas::slots::SessionMode::ReferenceCheck);
-    (options.defer_shell_pending_schema_problems || reference_check)
-        && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_))
+    let defers = (options.defer_shell_pending_schema_problems || reference_check)
+        && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_));
+    // A dry run is a reference-check session: the schema it could not
+    // resolve without asking is left unchecked, and said so.
+    if defers && let Some(session) = options.passive_session() {
+        session.record(crate::markdown::compose::passive::Deferral {
+            construct: crate::markdown::compose::passive::DeferredConstruct::SchemaTemplate,
+            reason: crate::markdown::compose::passive::DeferralReason::ReadNeedsApproval {
+                target: "a file its schema slot names".to_string(),
+            },
+            authored: err.to_string(),
+            key: Some("$schema".to_string()),
+            line: None,
+        });
+    }
+    defers
 }
 
 /// Rechecks only caller-file classification against the current effective

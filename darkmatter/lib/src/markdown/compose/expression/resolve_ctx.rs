@@ -114,6 +114,11 @@ pub struct ResolutionContext {
     /// An editor observation's guarded reads; `None` everywhere else, which
     /// leaves every read as it is (see [`super::editor_reads`]).
     pub(crate) editor: Option<Arc<super::editor_reads::EditorReads>>,
+    /// The dry run's passive session; `None` outside a dry run. A read of a
+    /// deferred value and any effectful function fail with
+    /// [`ExpressionError::Unavailable`](super::ExpressionError::Unavailable)
+    /// under it (see [`passive`](crate::markdown::compose::passive)).
+    pub(crate) passive: Option<crate::markdown::compose::passive::PassiveSession>,
 }
 
 /// Unit tests that never resolve a file use an empty `cwd`.
@@ -151,6 +156,7 @@ impl ResolutionContext {
             active_caller_file_provenance: None,
             slot_gate: None,
             editor: None,
+            passive: None,
         }
     }
 

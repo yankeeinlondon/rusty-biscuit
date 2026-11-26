@@ -712,6 +712,7 @@ fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
     match expr {
         Expr::Variable(path) => {
             let binding = lookup.resolve(path)?;
+            crate::markdown::compose::passive::check_read(lookup, path, &binding)?;
             observe_missing(path, &binding, scope, observer);
             Ok(binding.into_value().unwrap_or(Value::Null))
         }

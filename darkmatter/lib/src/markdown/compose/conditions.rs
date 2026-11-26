@@ -80,7 +80,7 @@ pub(crate) struct ConditionSite<'a> {
 }
 
 impl ConditionSite<'_> {
-    fn located(&self) -> (SourceContext, usize, Option<AuthoredSpan>) {
+    pub(crate) fn located(&self) -> (SourceContext, usize, Option<AuthoredSpan>) {
         match (self.opener)(self.span) {
             Some((context, span)) => (context, span.line(), Some(span)),
             None => ((self.current)(), self.body_line, None),

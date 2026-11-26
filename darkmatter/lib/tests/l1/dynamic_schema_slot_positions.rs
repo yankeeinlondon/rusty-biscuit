@@ -175,6 +175,30 @@ mod inline_document {
         assert_at(&case.validate_records(DOC), APPROVAL_REQUIRED, &case.path(DOC), 3, 12, span);
     }
 
+    /// A dry run asks nothing: the slot whose read needs approval leaves its
+    /// schema unchecked, recorded as a deferral, and the document composes.
+    #[test]
+    fn a_dry_run_leaves_an_unapproved_slot_read_unchecked_without_asking() {
+        let case = Case::new(
+            &[(DOC, "---\n$schema:\n  os: enum({{ load_data(\"../data/os.yaml\", \"string[]\") }})\nos: Linux\n---\nBody {{ os }}.\n")],
+            &[("data/os.yaml", "- Linux\n")],
+        );
+        let document = case.path(DOC);
+        let snapshot =
+            RequestSnapshot::new(&case.root).with_home(Some(case.home.path().to_path_buf())).with_env(HashMap::new());
+        let options = ComposeOptions::new().with_source_file(&document).with_trigger_schemas(true).with_dry_run();
+        let session = options.passive_session().cloned().expect("session");
+        let request = ComposeRequest::prepare(options, &snapshot).expect("request");
+        let (composed, _) = Markdown::try_from(document.as_path()).expect("document").compose_with(&request).expect("a dry run composes");
+        assert!(composed.content().contains("Body Linux."), "{}", composed.content());
+        let deferrals = session.deferrals();
+        assert!(
+            deferrals.iter().any(|deferral| deferral.construct
+                == darkmatter::markdown::compose::passive::DeferredConstruct::SchemaTemplate),
+            "{deferrals:#?}"
+        );
+    }
+
     /// R1-F3.13: a `load_data` failure keeps its `dm.data.*` code and its
     /// `data_location`, and its primary position is the slot.
     #[test]
