@@ -750,9 +750,11 @@ fn at_directive_site(
     }
 }
 
-/// The warning of a tolerated transclusion failure. A target that does not
-/// exist is the missing transclusion its recovery governs, and a
-/// `::toc-linking` or `::file-links` failure keeps the code its error reports.
+/// The warning of a tolerated transclusion failure, a child's or an
+/// inclusion composition left out because its target did not resolve. A
+/// target that does not exist is the missing transclusion its recovery
+/// governs, and a `::toc-linking` or `::file-links` failure keeps the code its
+/// error reports.
 /// A failure of a
 /// directive in a document whose lines count generated text (`generated` is
 /// its identity) is worded without its line; a child's keeps its own, and
@@ -760,7 +762,7 @@ fn at_directive_site(
 /// keeps that position. Out of line: the caller's frame recurs once per
 /// nested composition.
 #[inline(never)]
-fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path::Path>) -> ComposeWarning {
+pub(crate) fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path::Path>) -> ComposeWarning {
     let failure = error.resolution_failure();
     // A child's inclusion target failure names the child's own inclusion.
     let located = match error.without_iteration() {

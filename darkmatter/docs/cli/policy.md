@@ -70,10 +70,29 @@ broken in any other way always fails the command, whatever is allowed:
 | Target | Reported as | With the matching `--allow` |
 |---|---|---|
 | `[Guide](./gone.md)`, `![Logo](./gone.png)`, `::file ./gone.md` | `dm.reference.missing_*`, `failure: no-match` | recovered |
+| `prologue: ./gone.md`, or `./gone.md` as one entry of an `epilogue` list | `dm.reference.missing_transclusion`, `failure: no-match` | recovered: the entry is left out and the other entries are still included |
+| `prologue: ./notes.txt` (the file exists but cannot be transcluded) | `dm.transclusion.failure` | fails, status 1 |
 | `[Guide](@)`, `[Guide](<@>)`, `![Logo](@)`, the same in a `prologue` or `epilogue` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
 | a path under a directory `md` cannot read | `dm.reference.failure`, `failure: io` | fails, status 1 |
 | `[Guide](http://[bad)` | `dm.reference.failure`, reason `malformed URL` | fails, status 1 |
-| `::file @`, `::code @`, `::url @` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+| `::file @`, `::code @`, `::url @`, `prologue: "@"` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+
+A document can also tolerate an inclusion it cannot make. When its
+frontmatter sets `ignore_invalid: true`, a `dm.transclusion.failure` row
+above becomes a warning with that code, at the value or directive that wrote
+it: `prologue: ./notes.txt` or `::file ./notes.txt` is left out and reported,
+and the document's other inclusions still compose. `--deny
+dm.transclusion.failure` makes it stop the run again.
+The setting does not change the reference check's rows. An absent target
+(`failure: no-match`) still needs `--allow missing-transclusions`, and an
+invalid one (`::file @`) still fails the command.
+
+```yaml
+---
+ignore_invalid: true
+prologue: [./notes.txt, ./intro.md]   # notes.txt is left out with a warning
+---
+```
 
 ```sh
 md compose doc.md --allow missing-hyperlinks   # [Guide](./gone.md): composes, reports the miss

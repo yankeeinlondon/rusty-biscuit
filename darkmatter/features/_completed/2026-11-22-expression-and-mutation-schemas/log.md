@@ -11,6 +11,7 @@ implementation_9: "2026-11-25T06:59:30+00:00"
 implementation_10: "2026-11-25T16:14:39+00:00"
 implementation_11: "2026-11-25T17:37:04+00:00"
 implementation_12: "2026-11-25T19:57:40+00:00"
+implementation_13: "2026-11-25T21:38:40+00:00"
 ---
 ## Implementation of Review Findings #1
 
@@ -1561,7 +1562,7 @@ The completion report also overstated location coverage for target resolution. W
 | R13-F3.4 | Controls: validating CLI and public report consumers keep error verdict and failure class | clean | No consumer outside `check_references` maps an allowance to an issue (`md validate refs`/`md graph --validate` take no `--allow`; `validate.rs`, `report.rs`, FileTree read severity only). `validate_refs::an_invalid_link_target_is_reported_at_its_position` (validate refs, graph --validate, compose: exit 1, `invalid-reference` at line 3/5) passes; lib class tests pin `InvalidReference`/`UnreadableTarget`/`InvalidUrl` with their classes. |
 | R13-F3.5 | Controls: missing link/image recover, empty link warns, malformed inclusion targets fail under `missing-transclusions`, missing `::file` recovers, suppressed TOC clean | clean | `an_absent_{link,image,inclusion}_target_recovers_under_its_allowance` (exit 0, document kept, `dm.reference.missing_*`, lifecycle `done`), `an_empty_link_target_warns` (exit 0, no allowance), `a_malformed_{inclusion,code,url}_target_refuses_under_its_allowance` (`::file @`/`::code @`/`::url @` exit 1 under `missing-transclusions` and `all`), `a_suppressed_toc_chain_stays_clean` (no diagnostics); all passed before and after. `policy_verbs` and `compose_report_diagnostics` pass. |
 | R13-S7 | Sibling (F3 class): a malformed hyperlink URL (`[Guide](http://[bad)`, `<a href="http://[bad">`), an `InvalidUrl` error issue with no failure class, recovered under `missing-hyperlinks` | fixed | Same predicate: `InvalidUrl` has no `NoMatch` class. `a_malformed_link_url_refuses_under_its_allowance` exit 1 in both routes (failed before: exit 0 with the document); lib `a_malformed_link_url_is_not_missing`. |
-| R13-S8 | Sibling (F3 class): library recovery by `ComposeOptions::with_allow_missing_transclusions` (transclusion engine and preflight) | clean | Both already gate on `err.resolution_failure() == Some(NoMatch)` (`removes_missing` in `transclusion/engine.rs` and `preflight/collect.rs`); the CLI rule now uses the same class test. The deny path (`check_references`' blocking code) and `report_diagnostics::reference_issue_diagnostic` only project codes, never grant recovery. |
+| R13-S8 | Sibling (F3 class): library recovery by `ComposeOptions::with_allow_missing_transclusions` (transclusion engine and preflight) | body controls clean; frontmatter preflight gap verified in R14-F1 | The engine and body preflight gate on `NoMatch`. Frontmatter preflight does not consult the guard for `prologue` or `epilogue`. The CLI rule itself uses the same class test. The deny and diagnostic projection paths grant no recovery. |
 | R13-S9 | Sibling (F3 class): Claudine compose/sequence, DMLS | clean | No Claudine or DMLS source calls reference validation or sets a missing-target allowance (`grep` of `claudine/` and `dmls/src` for `validate_references`, `allow_missing`, `missing-hyperlinks`, `missing_reference_code`: none); Claudine sets only `with_allow_ctx_override`/`with_allow_remote_transclusion`. |
 
 ### Progress
@@ -1595,7 +1596,7 @@ The completion report also overstated location coverage for target resolution. W
 - starting the work on 'R13-F3 recovery by failure class' at 22:08:42
         - defect class: recovery is granted by reference kind without checking that the failure class is a missing target, so any error-severity link, image, or inclusion issue passed under its kind's allowance
         - shared rule: new `ReferenceIssue::is_missing_target()` in `lib/src/markdown/reference/validate.rs`, true only when `resolution_failure()` is `NoMatch` (a well-formed target naming no file); `cli/src/commands/compose.rs::recovers_missing` now takes the issue and returns false unless it holds, then applies the kind's allowance; `check_references` is the one decision for the direct route and `compose/lifecycle.rs::try_prepare`, so both refuse before writing a document or dispatching `composed`
-        - sweep: library `allow_missing_transclusions` (engine and preflight) already gated on `NoMatch` (R13-S8); the deny path and diagnostic code projection grant nothing; `md validate refs`/`md graph --validate` take no allowance (F3.4); Claudine and DMLS apply no reference allowance (R13-S9); sibling found and fixed: a malformed hyperlink URL (`InvalidUrl`, no class) was recovered by `missing-hyperlinks` (R13-S7)
+        - sweep: library `allow_missing_transclusions` (engine and body preflight) already gated on `NoMatch` (R13-S8). Frontmatter preflight did not apply that guard (R14-F1); the deny path and diagnostic code projection grant nothing; `md validate refs`/`md graph --validate` take no allowance (F3.4); Claudine and DMLS apply no reference allowance (R13-S9); sibling found and fixed: a malformed hyperlink URL (`InvalidUrl`, no class) was recovered by `missing-hyperlinks` (R13-S7)
         - decision: the predicate reads the failure class, not `ReferenceIssueCode`, matching the library's transclusion recovery test; alternative (a code match on `MissingLocalTarget`) is equivalent today but would admit any future code that reuses the kind
         - decision: `MissingFragmentTarget` is not a missing target for recovery (no class); composition's check does not validate fragments, so no behavior changes
         - decision: an empty target stays a warning judged by the existing deny path; it is not routed through the predicate
@@ -1603,3 +1604,75 @@ The completion report also overstated location coverage for target resolution. W
         - docs: `docs/cli/policy.md` (absent-only scope table and example), `docs/cli/compose.md` (allowance list and `--allow` bullet), caller skill source `docs/use-skills/use-darkmatter/cli.md` (not republished); repo skill `.claude/skills/darkmatter/SKILL.md`; `docs/cli/validate.md` and `docs/inline/link-validation.md` describe no allowance (unchanged)
         - focused runs: CLI l1 `compose|validate_refs|graph|allow|deny|lifecycle|policy` 870/870; CLI lib+bins `compose` 35/35; darkmatter l1 `reference|policy|inclusion|toc_target_read_sites|diagnostic` 1105/1105; darkmatter lib `reference|policy` 464/464; `just lint` exit 0; new tests each under 1 s
 - work completed for 'R13-F3 recovery by failure class' at 22:14:37
+- starting phase gates at 22:13:30
+        - orchestrator note: an external commit at 22:04 (`72e42717d`, `ca5772ec0`, `91785df1d`, `fac52c10e`) captured the working tree while R13-F2 was in progress, so the R13-F1 changes and most of R13-F2 are in `72e42717d`; the rest of R13-F2 (`toc_target_read_sites.rs`) and all of R13-F3 remain uncommitted. The combined tree was what the gates below verified
+        - orchestrator review: F1 graph and validation call composition's `admit_local_target` / `admit_url_target` (one rule), F2 child load and both TOC heading reads build their error through `read_failure_at`, F3 `check_references` (shared by direct and lifecycle compose) recovers only when `ReferenceIssue::is_missing_target()` holds
+        - darkmatter `just test --max-fail all`: 18,314 passed, 10 skipped, none at or above 5 s; all 38 new library/CLI tests in `reference_inclusion_admission`, `toc_target_read_sites`, `reference_missing_target_class`, `compose_missing_target_recovery` and the new `validate_refs` cases ran and passed
+        - darkmatter `just lint`: exit 0
+        - claudine `just test --max-fail all`: 13,077 passed, 16 skipped; 4 recorded at or above 5 s under load average ~20 on 16 cores (loaded, 10 s allowance), all between 5 and 10 s; each re-measured alone: `sequence_sources_cli::a_sequence_documents_relative_references_resolve_beside_it_on_every_route` 5.47 s → 2.69 s, `with_file_provenance::a_sequence_task_with_file_resolves_beside_its_author_on_every_route` 5.75 s → 2.57 s, `…prefers_its_authors_folder_over_the_launch_folder` 6.37 s → 2.56 s, `…an_absolute_sequence_task_with_file_is_the_same_on_every_route` 6.37 s → 2.60 s (load 13.8–16.2 at re-measure); cleared as load-sensitive spawn-heavy tests; Claudine source unchanged this iteration
+        - claudine `just lint`: exit 0
+        - `just check-tier-coverage darkmatter` and `claudine`: 0 stranded
+        - biscuit-terminal not touched this iteration; not rerun
+        - cross-OS check not run: the changes reuse composition's existing extension and URL admission, move error sites and add a recovery predicate; no path comparison, `#[cfg(windows)]` code or OS-specific API was added. The permission-denied tests are `#[cfg(unix)]` and skip after a probe read when permissions are not enforced (for example, as root)
+- phase gates completed at 22:31:00
+
+### Completion Report
+
+- outcome: **complete**; elapsed 52 min (21:38:40 → 22:31)
+- parent findings: total 3 = fixed 3 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: R13-F1.1–.4 fixed, R13-F1.5 clean; R13-F2.1–.2 fixed, R13-F2.3–.4 clean; R13-F3.1–.3 fixed, R13-F3.4–.5 clean
+- sweep rows: R13-S1, S2, S7 fixed; R13-S3, S4, S5, S6, S9 clean. R13-S8 was verified for the body and engine, with the frontmatter preflight gap recorded in R14-F1
+- verified repairs:
+        - R13-F1: the reference graph (both modes, flattening, FileTree) and validation apply composition's own passive admission (`admit_local_target`: Markdown-only for `::file`/`prologue`/`epilogue`, honoring `allow_local_*`; `admit_url_target`: absolute URL for `::url`) before opening a child, before target-kind branches and before the remote batch; refusals carry composition's code at the directive or key
+        - R13-F2: a selected TOC file that fails to read is a `TransclusionError::Io` naming the file and placed at the directive's `InclusionSite` in composition (warning kept) and in the full graph (hard failure kept), through the same `read_failure_at` the child load uses
+        - R13-F3: missing-target allowances apply only to issues whose failure class is `NoMatch` (`ReferenceIssue::is_missing_target`), in the single decision both compose routes use; invalid, unreadable and malformed link/image targets refuse before output or the `composed` event
+- open findings: none
+- decisions (ledger only; none meet the worth-the-author's-time bar, `human-review` unchanged): admission refusals are hard located errors with composition's codes rather than report issues; a `::url` record's target is always `RemoteUrl`; the local query stays a navigation lookup; `md compose`'s reference check defers a refused inclusion target to composition; the TOC read failure reuses the transclusion read error instead of adding a site to `TocLinkingError::Io`; recovery reads the failure class rather than the issue code
+- changed files (this iteration):
+        - library: `lib/src/markdown/compose/transclusion/{resolver.rs, mod.rs, types.rs, engine.rs}`, `lib/src/markdown/reference/{graph.rs, validate.rs, mod.rs}`
+        - CLI: `cli/src/commands/compose.rs`
+        - tests: new `lib/tests/l1/{reference_inclusion_admission.rs, toc_target_read_sites.rs, reference_missing_target_class.rs}`, new `cli/tests/l1/compose_missing_target_recovery.rs`; updated `lib/tests/l1/main.rs`, `cli/tests/l1/{main.rs, validate_refs.rs}`
+        - docs and skills: `docs/cli/{validate.md, policy.md, compose.md}`, `docs/inline/link-validation.md`, `docs/transclusion/fm-transclusion.md`, `docs/errors/composition-problems.md`, caller skill source `docs/use-skills/use-darkmatter/cli.md` (not republished), `.claude/skills/darkmatter/SKILL.md`
+- final verification: darkmatter `just test` 18,314/18,314 and `just lint` exit 0 (all findings); claudine `just test` 13,077/13,077 with 4 load-sensitive tests cleared alone and `just lint` exit 0 (consumer of the changed error shapes); tier coverage 0 stranded; focused runs per finding are recorded in each Progress entry
+
+### Review 14 record correction (2026-11-25)
+
+The R13-S8 sweep said preflight already applied the missing-target guard. It does for body file and code directives. The frontmatter loop returns the missing-file error without checking the guard. Public `compose_preflight` and `compose_with` calls using the same request and `with_allow_missing_transclusions(true)` disagree for a missing `prologue` or `epilogue` file. Direct and lifecycle runs of the built CLI with `--allow missing-transclusions` exit 1 for both keys, while the equivalent body includes recover. [Review 14](review-14.md)
+
+## Implementation of Review Findings #14
+
+> **started at:** 2026-11-25T22:34:30+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/review-14.md'
+- this is iteration 14 of the review-to-implement cycle
+- the review's `implemented` flag was confirmed `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R14-F1 | Command preflight rejects recoverable missing frontmatter inclusions | pending | |
+| R14-F1.1 | Preflight `prologue` scalar and list: with recovery skip only the absent entry and keep valid siblings; without recovery keep the missing-file error; malformed (`@`) and unsupported (`.txt`) stay blocking | pending | |
+| R14-F1.2 | Preflight `epilogue`: same rule, scalar and mixed list | pending | |
+| R14-F1.3 | CLI direct and lifecycle routes, root and nested child: allowed miss composes, valid siblings and child compose, lifecycle `done` runs; malformed fails | pending | |
+| R14-F1.4 | Public composition and body `::file`/`::code` preflight verdicts retained | pending | |
+| R14-F1.5 | URL admission, TOC required/optional, passive validation, ordinary link/image recovery retained | pending | |
+| R14-F2 | Skipped inclusion warnings lose their authored locations | pending | |
+| R14-F2.1 | Body `::file`/`::code` skip: warning carries authored opener line/column (bare, quoted, after YAML header, after removed block) and the typed code under ignore-invalid; valid controls emit nothing | pending | |
+| R14-F2.2 | Frontmatter `prologue`/`epilogue` skip: warning carries the key or list-entry site and typed code; valid file composes cleanly | pending | |
+| R14-F2.3 | URL-target and remote-disabled skip arms (body and frontmatter): located typed warning; permission decision unchanged | pending | |
+| R14-F2.4 | Direct and lifecycle CLI report and nested child: composition warning located; child name and `done` kept | pending | |
+| R14-F2.5 | Existing TOC warning, optional TOC, UTF-16 TOC, tolerated child warning, refused remote reads keep their sites | pending | |
+
+### Progress
+
+- starting the work on 'R14-F1 Command preflight rejects recoverable missing frontmatter inclusions' at 22:34:50
+        - defect class: a second walker that resolves the same inclusion drops the skip decision the transclusion engine applies to it
+        - subagent 1 (allowed-missing): deleted the duplicate absence check in pre-flight; the engine's predicate became the single shared one; pre-flight's `prologue`/`epilogue` loop now skips an allowed absent entry and keeps walking its siblings
+        - discovered a second instance: the engine's repeated-copy check (`scoped_resolution`) refused a `::map`/`::filter` copy pre-flight had skipped as absent with `NotPreApproved`; fixed
+        - subagent 2 (sibling sweep): pre-flight never consulted `ignore_invalid` (request option or the document's own `ignore_invalid: true`), so a tolerated unsupported `::file`/`::code`/`prologue`/`epilogue` target was refused by `compose_preflight` and `md compose` although `compose_with` skipped it; reproduced (7/8 new tests and the CLI failed before), fixed with one predicate `transclusion::skips_unresolved(options, markdown, &err)` shared by the engine's body, section, and repeated-copy lookups and pre-flight's code, file/url, and frontmatter lookups
+        - a repeated URL copy with remote execution disabled reported `NotPreApproved` instead of the written directive's `UrlExecutionDisabled`; it now takes the written directive's outcome (skip under `ignore_invalid`, otherwise its own located error)
+        - decision: `md compose`'s reference check keeps refusing absent and malformed targets under a document's `ignore_invalid` (documented in `docs/cli/policy.md` as failing whatever is allowed; only `--allow missing-transclusions` recovers an absence); alternative was to honor `ignore_invalid` there, rejected because it would let a frontmatter key disable refusals the policy promises; recorded in docs and skill
+        - focused runs: 1432/1432 and 958/958 (lib + CLI filters), new tests 9 + 8 lib and 4 CLI; `just lint` exit 0; slowest new test 0.6 s
+- work completed for 'R14-F1 Command preflight rejects recoverable missing frontmatter inclusions' at 22:57:10
+- starting the work on 'R14-F2 Skipped inclusion warnings lose their authored locations' at 22:57:15

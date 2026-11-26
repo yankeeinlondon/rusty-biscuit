@@ -379,7 +379,20 @@ naming the codes it governs. The reference check (`compose.rs::check_references`
 direct and lifecycle routes) lets a `missing-*` allowance recover an issue
 only when `ReferenceIssue::is_missing_target` (failure class `NoMatch`) holds;
 an invalid, unreadable, or malformed link, image, or inclusion target always
-refuses, whatever the kind's allowance.
+refuses, whatever the kind's allowance. In the library, every walk that
+resolves an inclusion ahead of or inside composition (pre-flight body and
+`prologue`/`epilogue` lookups, the engine's body and section lookups, and its
+repeated-copy check `scoped_resolution`) decides whether an unresolved target
+is removed through the one `transclusion::skips_unresolved(options, markdown,
+&err)`: any failure when the writing document tolerates invalid references
+(request `ignore_invalid_references`, else its own frontmatter
+`ignore_invalid`, else the context's `IGNORE_INVALID`), else only an absence
+(`NoMatch`) under the missing-transclusion recovery; never add a walker that
+resolves an inclusion without it. A repeated copy pre-flight did not discover
+and composition does not remove fails with its own resolution error, as the
+written directive does. The CLI reference check does not read
+`ignore_invalid`: an absent or invalid inclusion target still needs its
+`--allow` or refuses there.
 
 Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
 `CommandRun::begin` (target, `--width`, default width, `DataShape`), build a

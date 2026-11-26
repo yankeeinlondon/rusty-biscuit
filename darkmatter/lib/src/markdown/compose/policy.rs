@@ -107,6 +107,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::report_diagnostics::FILE_LINKS_MISSING_SOURCE_CODE, "a `::file-links` directive in a document with no source file"),
     (super::report_diagnostics::FILE_LINKS_NOT_A_DIRECTORY_CODE, "a `::file-links --dir` target that is not a directory"),
     (super::report_diagnostics::REFERENCE_FAILURE_CODE, "an inclusion target, a `::toc-linking` target chain, or a `::file-links --dir` target that does not resolve"),
+    (super::report_diagnostics::TRANSCLUSION_FAILURE_CODE, "an inclusion left out because its target cannot be transcluded (a file that is not Markdown, a URL while remote execution is disabled), or a tolerated child failure of another kind"),
     (super::report_diagnostics::INPUT_READ_CODE, "an inclusion target, a `::toc-linking` target, or a `::file-links` directory that cannot be read"),
     (crate::config::load::CONFIG_NOT_SAVED_CODE, "an \"always allow\" approval that applies to this run only because it could not be saved"),
     (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
