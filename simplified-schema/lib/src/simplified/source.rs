@@ -1070,7 +1070,7 @@ fn project_located_shape_suggestions(
         return Err(projection_error());
     };
     for pair in pairs {
-        if pair.key == "$constraints" || is_extends_directive(shape, &pair.key) {
+        if pair.key == "$constraints" || is_extends_directive(shape, &pair.key) || is_key_metadata(shape, &pair.key) {
             continue;
         }
         let definition = match shape.properties.get_mut(&pair.key) {
@@ -2255,6 +2255,11 @@ fn project_shape_source(
             project_extends_source(extends, &pair.value, &property_path, source_offset, source_map)?;
             continue;
         }
+        // A removed key and the advice opt-in have no type to locate inside;
+        // the key span recorded above is their whole source.
+        if is_key_metadata(shape, &pair.key) {
+            continue;
+        }
         let definition = shape.properties.get(&pair.key).or_else(|| {
             super::PatternKey::parse(&pair.key).ok().and_then(|key| {
                 shape
@@ -2274,6 +2279,12 @@ fn project_shape_source(
         )?;
     }
     Ok(())
+}
+
+/// Whether `key` of `shape`'s mapping is a `removed(…)` declaration or the
+/// `$advise-unknown-keys` opt-in rather than a typed member.
+fn is_key_metadata(shape: &SchemaShape, key: &str) -> bool {
+    shape.removed().contains_key(key) || (key == super::ADVISE_UNKNOWN_KEYS && shape.advise_unknown_keys().is_some())
 }
 
 /// Whether `key` of `shape`'s mapping is its `$extends` directive rather

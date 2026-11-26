@@ -340,6 +340,23 @@ invalid trigger `$path` glob or an undeclared category this way, located in
 the document like any other problem, after the document satisfies its
 definition.
 
+`hint` is what to do instead, when the schema proves it, kept apart from
+`message` so a surface can render it on its own line:
+
+| Code | `hint` |
+|---|---|
+| `dm.schema.removed_key` (`RemovedKey`) | the key's `removed(<replacement>)` advice; `path` is the owning object and `offending_property` the key |
+| `dm.schema.unknown_key` (`UnknownKey`) | `` did you mean `name`? `` when one declared key of the object is near the offending key |
+| `dm.schema.near_miss_key` (`NearMissKey`) | `` did you mean `prompt`? ``; advice on an opted-in open object, never a failure (see [`$advise-unknown-keys`](language/objects-and-named-types.md#advice-on-near-miss-keys-advise-unknown-keys)) |
+
+Every suggestion comes from one ranker, `validation::suggest`: lengths under
+three never match, case and `-`/`_` variants always do, otherwise one edit
+(two for keys of five characters or more), where an adjacent transposition
+counts as one edit. A closed object's tie goes to the first declared key; an
+open object's advice requires a unique closest key. The candidates are the
+declared keys of the object schemas the location reaches, through references
+and the union arms the value can select; a removed key is never one.
+
 `validate_strict` and `validate_soft` judge a `serde_json::Value`, which has
 no source text, so their problems carry no `line` or `column`. A caller that
 holds the YAML the value came from fills them in afterwards; positions are

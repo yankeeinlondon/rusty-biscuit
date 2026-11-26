@@ -52,7 +52,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use super::{
     SchemaAdvisory, SchemaArm,
-    embedded::{self, EmbeddedDocument, ShippedSources}, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
+    embedded::{self, EmbeddedDocument, ShippedSources}, KeyDeclarations, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
     StandaloneSchemaEnvelope,
     errors::{DRAFT_2020_12_DIALECT, NotSchemaReason, SchemaError},
     simplified::{
@@ -3307,7 +3307,8 @@ impl ImportEngine<'_> {
         path: &SchemaSourcePath,
     ) -> Result<SchemaShape, SchemaError> {
         if let Some(assembled) = self.assemble(&shape, current, path)? {
-            return self.expand_assembled(assembled, shape.constraints, current);
+            let advise_unknown_keys = shape.advise_unknown_keys().map(<[String]>::to_vec);
+            return self.expand_assembled(assembled, shape.constraints, advise_unknown_keys, current);
         }
         let mut properties = IndexMap::with_capacity(shape.properties.len());
         for (name, def) in shape.properties {
@@ -3327,6 +3328,7 @@ impl ImportEngine<'_> {
             properties,
             pattern_keys,
             constraints: shape.constraints,
+            key_declarations: shape.key_declarations,
             ..SchemaShape::default()
         })
     }
@@ -3340,9 +3342,11 @@ impl ImportEngine<'_> {
         &mut self,
         assembled: composition::Assembled,
         constraints: Vec<Constraint>,
+        advise_unknown_keys: Option<Vec<String>>,
         current: &Namespace,
     ) -> Result<SchemaShape, SchemaError> {
         let composed_sites = assembled.sites();
+        let removed = assembled.removed;
         let mut properties = IndexMap::with_capacity(assembled.literals.len());
         for (name, member) in assembled.literals {
             properties.insert(name, self.expand_member(member, current)?);
@@ -3351,7 +3355,7 @@ impl ImportEngine<'_> {
         for (key, member) in assembled.patterns {
             pattern_keys.push(PatternKeyDef { key, def: self.expand_member(member, current)? });
         }
-        Ok(SchemaShape { properties, pattern_keys, constraints, composition: None, composed_sites })
+        Ok(SchemaShape { properties, pattern_keys, constraints, composition: None, composed_sites, key_declarations: KeyDeclarations::boxed(removed, advise_unknown_keys) })
     }
 
     fn expand_member(&mut self, member: composition::Member, current: &Namespace) -> Result<PropertyDef, SchemaError> {
@@ -5709,9 +5713,19 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
 
+    // A removed key's advice is the owning object's annotation, so it moves
+    // with the `false` property the document does not itself declare.
+    let removed_key = crate::validation::REMOVED_KEYS_ANNOTATION;
+    let baseline_removed = baseline_obj.get(removed_key).and_then(Value::as_object);
     if let Some(baseline_props) = baseline_props {
         for (key, baseline_schema) in baseline_props {
             if !doc_props.contains_key(key) {
+                if let Some(advice) = baseline_removed.and_then(|removed| removed.get(key)) {
+                    let entry = document_obj.entry(removed_key).or_insert_with(|| Value::Object(Map::new()));
+                    if let Value::Object(removed) = entry {
+                        removed.insert(key.clone(), advice.clone());
+                    }
+                }
                 doc_props.insert(key.clone(), baseline_schema.clone());
                 if baseline_required.contains(key.as_str()) && !doc_required.contains(key) {
                     doc_required.push(key.clone());
@@ -5808,6 +5822,8 @@ pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result
         "description",
         "title",
         "$defs",
+        crate::validation::REMOVED_KEYS_ANNOTATION,
+        crate::validation::ADVISE_UNKNOWN_KEYS_ANNOTATION,
     ];
 
     if let Some(ty) = schema.get("type") {

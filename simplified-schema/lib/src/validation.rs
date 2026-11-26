@@ -2,6 +2,8 @@
 //! classifications, its JSON-Pointer view, and the structured cause of a
 //! file-reference failure.
 
+pub mod suggest;
+
 use std::path::PathBuf;
 
 use serde_json::Value;
@@ -84,6 +86,12 @@ pub struct ValidationProblem {
     /// ([`crate::defaults::attribute_problems`]). `None` for a problem about
     /// an authored value.
     pub default: Option<crate::AppliedDefault>,
+    /// What to do instead, when the schema proves it: a removed key's
+    /// replacement advice, or the declared key an unknown or near-miss key
+    /// most closely resembles (`` did you mean `prompt`? ``). Never part of
+    /// [`message`](Self::message), so a surface may render it as its own
+    /// line.
+    pub hint: Option<String>,
 }
 
 impl ValidationProblem {
@@ -145,6 +153,18 @@ pub enum ValidationProblemCode {
     /// definition but fails a check the definition cannot state (an
     /// invalid trigger `$path` glob, an undeclared category).
     KindCheck,
+    /// A key the schema declares `removed(<replacement>)` is present, with
+    /// any value, `null` included. [`ValidationProblem::hint`] carries the
+    /// replacement; [`ValidationProblem::path`] points at the owning object,
+    /// as for [`Self::UnknownKey`].
+    RemovedKey,
+    /// Advice, never a failure: an open object that opted in with
+    /// `$advise-unknown-keys` holds an undeclared key that closely resembles
+    /// exactly one declared key. Reported only by
+    /// [`crate::prepared::Prepared::key_advice`] and
+    /// [`crate::ValidationSuccess::key_advice`], never among a failure's
+    /// problems.
+    NearMissKey,
 }
 
 /// Code of a frontmatter value whose type does not match its declaration.
@@ -159,6 +179,19 @@ pub const SCHEMA_UNKNOWN_KEY_CODE: &str = "dm.schema.unknown_key";
 pub const SCHEMA_INVALID_FILE_REFERENCE_CODE: &str = "dm.schema.invalid_file_reference";
 /// Code of a document-kind check beyond its definition.
 pub const SCHEMA_KIND_CHECK_CODE: &str = "dm.schema.kind_check";
+/// Code of a key the schema declares `removed(...)`.
+pub const SCHEMA_REMOVED_KEY_CODE: &str = "dm.schema.removed_key";
+/// Code of the advice on an undeclared key that resembles a declared one.
+pub const SCHEMA_NEAR_MISS_KEY_CODE: &str = "dm.schema.near_miss_key";
+
+/// The lowered object annotation listing its removed keys and their
+/// replacement advice (`{ "setup": "use …" }`); each key's property schema
+/// is `false`. Internal to Simplified Schema's lowering; read through
+/// [`crate::prepared::describe_problems`].
+pub const REMOVED_KEYS_ANNOTATION: &str = "x-darkmatter-removed";
+/// The lowered object annotation of the `$advise-unknown-keys` opt-in: the
+/// exact key names never advised on.
+pub const ADVISE_UNKNOWN_KEYS_ANNOTATION: &str = "x-darkmatter-advise-unknown-keys";
 /// Code of a schema that could not be resolved, merged, or compiled.
 pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
 
@@ -173,6 +206,8 @@ impl ValidationProblemCode {
             Self::UnknownKey => SCHEMA_UNKNOWN_KEY_CODE,
             Self::InvalidFileReference => SCHEMA_INVALID_FILE_REFERENCE_CODE,
             Self::KindCheck => SCHEMA_KIND_CHECK_CODE,
+            Self::RemovedKey => SCHEMA_REMOVED_KEY_CODE,
+            Self::NearMissKey => SCHEMA_NEAR_MISS_KEY_CODE,
         }
     }
 }
@@ -196,6 +231,11 @@ impl JsonPointer {
         }
         let body = pointer.strip_prefix('/').unwrap_or(pointer);
         let segments = body.split('/').map(decode_pointer_segment).collect();
+        Self { segments }
+    }
+
+    /// The pointer of the decoded `segments`, outermost first.
+    pub fn from_segments(segments: Vec<String>) -> Self {
         Self { segments }
     }
 

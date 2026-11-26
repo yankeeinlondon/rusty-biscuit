@@ -135,8 +135,19 @@ impl CompiledValidators {
 /// Sets each problem's declared property description. Whitespace-only
 /// descriptions and descriptions identical to the rendered message are left
 /// out, so the description only ever adds to the message.
+///
+/// It also settles key problems ([`validate::annotate_key_problems`]): a
+/// removed key's problem names it with its replacement hint, and an unknown
+/// key gains a `did you mean` hint when a declared key is near it.
 pub fn describe_problems(json_schema: &Value, instance: &Value, problems: &mut [ValidationProblem]) {
+    validate::annotate_key_problems(json_schema, instance, problems);
     for problem in problems {
+        // A removed key's path names its owning object, whose description
+        // would misidentify what the author must fix.
+        if problem.code == crate::ValidationProblemCode::RemovedKey {
+            problem.description = None;
+            continue;
+        }
         problem.description = validate::resolve_problem_description(json_schema, problem, instance)
             .filter(|desc| !desc.trim().is_empty())
             .filter(|desc| *desc != problem.message);
@@ -375,11 +386,22 @@ impl Prepared {
     }
 
     fn accepted<'input>(&self, value: Cow<'input, Value>, defaults: Vec<AppliedDefault>) -> ValidationSuccess<'input> {
+        let key_advice = validate::key_advice(&self.json_schema, &value);
         ValidationSuccess {
             value,
             advisories: self.advisories.clone(),
             defaults,
+            key_advice,
         }
+    }
+
+    /// The near-miss key advice for `value` ([`validate::key_advice`]): an
+    /// undeclared key of an object that opts in with `$advise-unknown-keys`
+    /// and closely resembles exactly one declared key. Advice never fails
+    /// validation, so a caller that judged `value` some other way (or whose
+    /// value failed) asks for it here.
+    pub fn key_advice(&self, value: &Value) -> Vec<ValidationProblem> {
+        validate::key_advice(&self.json_schema, value)
     }
 
     fn problems(&self, instance: &Value) -> Vec<ValidationProblem> {

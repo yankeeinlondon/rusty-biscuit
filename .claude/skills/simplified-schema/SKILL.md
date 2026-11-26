@@ -183,6 +183,26 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
 | Locate a resolver failure in a whole YAML file (carrier `$schema`/`types` restored, union arms followed as sequence indices, the spelled name picks the section, never a `-> description` that mentions it) | `yaml_documents::{reference_site, declaration_segments}` (a file-reference failure's declaration is `SchemaError::reference_site()`, recorded at first read: `ImportEngine::resolve_namespace`, `ExampleRehome`, and `resolve/example_sites.rs::ExampleSites` for examples judged after lowering; `None` when two declarations wrote the spelling; a selected file refused for its role gets the naming declaration through `SchemaError::refused_at` in `resolve_reference_in_context` and `resolve_namespace`, never for a content refusal, and keeps it through `triggers::assemble::refused_trigger_file`); a declaration's text with its descriptions blanked, offsets kept: `simplified::grammar::without_descriptions`; a grammar failure under any document's carrier: `locate_carrier_definition_failure(text, "$schema")`; a validation problem a `schema` carrier reported at itself: `LoadedYamlDocument::locate_declaration_problems` |
 
+**Key declarations.** A block-form property `removed(<replacement>)` lives
+in the boxed `SchemaShape::key_declarations` (`KeyDeclarations`, read
+through `shape.removed()` and `shape.advise_unknown_keys()`; boxed so the
+enums holding a shape stay under clippy's variant-size limit), never in
+`properties` (parsed by
+`simplified/mod.rs::removed_declaration`, carried through composition by
+`resolve/composition.rs::Assembled::removed`, lowered to a `false` property
+plus the owner's `x-darkmatter-removed` annotation). `$advise-unknown-keys`
+is `KeyDeclarations::advise_unknown_keys`, lowered to
+`x-darkmatter-advise-unknown-keys`, never inherited. Prepared validation
+rewrites a `false`-property violation into `RemovedKey` (path = owner,
+`offending_property` = key, `hint` = replacement) and hints `UnknownKey` in
+`validate::annotate_key_problems`; `validate::key_advice` produces
+`NearMissKey` advice, returned beside an accepted value
+(`ValidationSuccess::key_advice`) and never among a failure's problems. Every
+suggestion ranks with `validation::suggest` (`md clean` uses it too). Both
+annotations are skipped as key metadata by the projections in
+`simplified/source.rs`, and export writes them back; the inline expression
+writer refuses them as lossy.
+
 `ValidationFailure` is `#[non_exhaustive]`: `InvalidData { problems }`,
 `UnavailableCheck { problems }` (a check this build or an in-memory schema
 cannot run, such as a file check without a file context), and

@@ -27,6 +27,10 @@ pub struct ValidationSuccess<'input> {
     /// has applied them to `value`; strict validation leaves `value` as the
     /// input, so the caller decides whether to apply them.
     pub defaults: Vec<AppliedDefault>,
+    /// Near-miss key advice on the accepted value
+    /// ([`crate::ValidationProblemCode::NearMissKey`]): never a failure, so it
+    /// is reported beside an accepted value.
+    pub key_advice: Vec<ValidationProblem>,
 }
 
 impl ValidationSuccess<'_> {

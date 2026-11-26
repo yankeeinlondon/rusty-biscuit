@@ -162,6 +162,7 @@ fn first_non_string_key(value: &YamlValue, at: &mut Vec<String>) -> Option<Vec<S
 pub fn locating_problem(segments: &[String]) -> ValidationProblem {
     let pointer = crate::JsonPointer::parse(&pointer_string(segments));
     ValidationProblem {
+        hint: None,
         path: pointer.as_pointer_string(),
         message: String::new(),
         kind: crate::ValidationProblemKind::Invalid,

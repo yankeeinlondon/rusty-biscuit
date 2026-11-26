@@ -342,6 +342,17 @@ impl SimplifiedSchema {
         self.with_prepared(|prepared| prepared.validate_soft(value))
     }
 
+    /// The near-miss key advice for `value` (see
+    /// [`Prepared::key_advice`](crate::prepared::Prepared::key_advice)),
+    /// whatever its verdict: empty when the schema cannot be prepared or no
+    /// object opts in with `$advise-unknown-keys`.
+    pub fn key_advice(&self, value: &Value) -> Vec<crate::ValidationProblem> {
+        match self.prepared_state().as_ref() {
+            Ok(prepared) => prepared.key_advice(value),
+            Err(_) => Vec::new(),
+        }
+    }
+
     fn with_prepared<'input>(
         &self,
         judge: impl FnOnce(&Prepared) -> Result<ValidationSuccess<'input>, ValidationFailure>,

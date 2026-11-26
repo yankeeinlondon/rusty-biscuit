@@ -1510,10 +1510,27 @@ fn object_body_from_shape(
         });
     }
 
+    for (prop_name, replacement) in shape.removed() {
+        if shape.properties.contains_key(prop_name) {
+            return Err(SchemaError::Convert {
+                property: if context == "<root>" { prop_name.clone() } else { format!("{context}.{prop_name}") },
+                message: format!(
+                    "`{prop_name}` is declared both as a property and as `removed({replacement})`; a removed key has no type, default, or `required`"
+                ),
+            });
+        }
+        // A removed key is refused whenever it is present, `null` included,
+        // and the owning object carries the advice (a boolean schema has no
+        // annotation of its own).
+        properties.insert(prop_name.clone(), Value::Bool(false));
+    }
+
     // Literal names feed the negative-lookahead exclusion so a key that also
     // names a declared property is validated only by that property's schema
-    // (literal keys win — O-C1).
-    let literal_names: Vec<&str> = shape.properties.keys().map(String::as_str).collect();
+    // (literal keys win — O-C1). A removed key is excluded the same way, so a
+    // pattern never reports it a second time.
+    let literal_names: Vec<&str> =
+        shape.properties.keys().chain(shape.removed().keys()).map(String::as_str).collect();
     let mut catch_all: Option<Value> = None;
     let mut pattern_properties = Map::new();
     for (index, pk) in shape.pattern_keys.iter().enumerate() {
@@ -1554,6 +1571,18 @@ fn object_body_from_shape(
     }
     if !required.is_empty() {
         obj.insert("required".into(), Value::Array(required));
+    }
+    if !shape.removed().is_empty() {
+        obj.insert(
+            crate::validation::REMOVED_KEYS_ANNOTATION.into(),
+            Value::Object(shape.removed().iter().map(|(key, text)| (key.clone(), Value::String(text.clone()))).collect()),
+        );
+    }
+    if let Some(excluded) = shape.advise_unknown_keys() {
+        obj.insert(
+            crate::validation::ADVISE_UNKNOWN_KEYS_ANNOTATION.into(),
+            Value::Array(excluded.iter().cloned().map(Value::String).collect()),
+        );
     }
     Ok(obj)
 }

@@ -62,6 +62,10 @@ pub(super) struct Member {
 pub(super) struct Assembled {
     pub(super) literals: IndexMap<String, Member>,
     pub(super) patterns: Vec<(PatternKey, Member)>,
+    /// The removed-property declarations that won, by key: a removal and a
+    /// literal of the same key replace each other in entry order, and the
+    /// receiver's own removals apply last.
+    pub(super) removed: IndexMap<String, String>,
 }
 
 impl Assembled {
@@ -99,6 +103,7 @@ fn own_members(shape: &SchemaShape, namespace: &Namespace, path: &SchemaSourcePa
                 (pattern.key.clone(), own(&pattern.def, namespace, path))
             })
             .collect(),
+        removed: shape.removed().clone(),
     }
 }
 
@@ -174,10 +179,12 @@ impl ImportEngine<'_> {
         };
         let mut literals: IndexMap<String, Member> = IndexMap::new();
         let mut patterns: Vec<(PatternKey, Member)> = Vec::new();
+        let mut removed: IndexMap<String, String> = IndexMap::new();
         for entry in entries(shape, composition, path) {
             match entry {
                 // `insert` keeps a replaced key at its first position.
                 Entry::Literal(name, def) => {
+                    removed.shift_remove(name);
                     literals.insert(name.clone(), own(def, namespace, path.property(name.as_str())));
                 }
                 Entry::Pattern(pattern) => {
@@ -187,7 +194,12 @@ impl ImportEngine<'_> {
                 Entry::Operand(operand, site_path) => {
                     let target = self.composition_target(operand, namespace, &site_path)?;
                     for (name, member) in &target.literals {
+                        removed.shift_remove(name);
                         literals.insert(name.clone(), Member { copied: true, ..member.clone() });
+                    }
+                    for (name, replacement) in &target.removed {
+                        literals.shift_remove(name);
+                        removed.insert(name.clone(), replacement.clone());
                     }
                     patterns.extend(target.patterns.iter().map(|(key, member)| (key.clone(), Member { copied: true, ..member.clone() })));
                 }
@@ -201,7 +213,11 @@ impl ImportEngine<'_> {
         for (key, member) in patterns {
             winners.insert(emitted_pattern_key(&key, &names), (key, member));
         }
-        Ok(Some(Assembled { literals, patterns: winners.into_values().collect() }))
+        for (name, replacement) in shape.removed() {
+            literals.shift_remove(name);
+            removed.insert(name.clone(), replacement.clone());
+        }
+        Ok(Some(Assembled { literals, patterns: winners.into_values().collect(), removed }))
     }
 
     /// The assembled members of the object `operand` (written at `site_path`

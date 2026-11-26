@@ -8,6 +8,7 @@ mod alias_positions;
 mod bundle_resolution;
 mod callable_catalog_envelopes;
 mod closed_roots;
+mod key_declarations;
 mod coercion_core;
 mod container_contracts;
 mod context_construction_guard;

@@ -1170,6 +1170,7 @@ fn build_problem(
         (!raw.is_empty()).then(|| JsonPointer::parse(raw))
     };
     ValidationProblem {
+        hint: None,
         path,
         message,
         kind,
@@ -2347,6 +2348,259 @@ fn anchor_hash(base_dir: Option<&Path>, fallback: Option<&Path>, judged_in: &Jud
     biscuit_hash::xx_hash_bytes(&bytes)
 }
 
+/// Settles the key problems of `problems`, which were judged against `root`
+/// (the compiled JSON Schema) and `instance`:
+///
+/// - a present key whose property schema is the `false` of a
+///   `removed(<replacement>)` declaration becomes one
+///   [`ValidationProblemCode::RemovedKey`] problem at the owning object, with
+///   the replacement as its hint;
+/// - an [`ValidationProblemCode::UnknownKey`] problem gains a
+///   `did you mean` hint when one declared key of the object it names is
+///   near the offending key ([`crate::validation::suggest::nearest`]).
+///
+/// The schemas consulted are the object schemas the instance location
+/// reaches through references and the union arms its value can select
+/// ([`schema_nodes_at`]); an arm that cannot hold an object contributes no
+/// candidates.
+pub fn annotate_key_problems(root: &Value, instance: &Value, problems: &mut [ValidationProblem]) {
+    use crate::validation::{REMOVED_KEYS_ANNOTATION, suggest};
+    let scope = SchemaScope::new(root);
+    for problem in problems.iter_mut() {
+        match problem.code {
+            ValidationProblemCode::UnknownKey if problem.hint.is_none() => {
+                let segments = problem.instance_path.segments().to_vec();
+                let Some(objects) = object_schemas_at(&scope, root, problem.arm_index, &segments, instance) else {
+                    continue;
+                };
+                let declared = declared_keys(&objects);
+                let pairs: Vec<(String, &str)> = problem
+                    .offending_properties
+                    .iter()
+                    .filter_map(|key| Some((key.clone(), suggest::nearest(key, declared.iter().copied())?)))
+                    .collect();
+                problem.hint = match pairs.as_slice() {
+                    [] => None,
+                    [(_, only)] if problem.offending_properties.len() == 1 => Some(suggest::did_you_mean(only)),
+                    many => Some(
+                        many.iter()
+                            .map(|(key, near)| format!("`{key}`: {}", suggest::did_you_mean(near)))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    ),
+                };
+            }
+            ValidationProblemCode::ConstraintViolation => {
+                let segments = problem.instance_path.segments().to_vec();
+                let Some((key, parent)) = segments.split_last() else {
+                    continue;
+                };
+                let names_false_property = problem.schema_path.as_ref().is_some_and(|path| {
+                    matches!(path.segments(), [.., properties, last] if properties == "properties" && last == key)
+                });
+                if !names_false_property {
+                    continue;
+                }
+                let Some(objects) = object_schemas_at(&scope, root, problem.arm_index, parent, instance) else {
+                    continue;
+                };
+                let replacement = objects.iter().find_map(|object| {
+                    object.get(REMOVED_KEYS_ANNOTATION)?.get(key.as_str())?.as_str()
+                });
+                let Some(replacement) = replacement else {
+                    continue;
+                };
+                let parent_pointer = JsonPointer::from_segments(parent.to_vec());
+                problem.path = parent_pointer.as_pointer_string();
+                problem.instance_path = parent_pointer;
+                problem.code = ValidationProblemCode::RemovedKey;
+                problem.kind = ValidationProblemKind::Invalid;
+                problem.message = format!("key `{key}` has been removed");
+                problem.offending_property = Some(key.clone());
+                problem.offending_properties = vec![key.clone()];
+                problem.hint = Some(replacement.to_string());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The near-miss advice for `instance` judged against `root`: one
+/// [`ValidationProblemCode::NearMissKey`] problem for each undeclared key of
+/// an object whose schema opts in with `$advise-unknown-keys`, when exactly
+/// one declared key is closest to it ([`crate::validation::suggest::unique_nearest`]).
+///
+/// A key is never advised on when the object's schemas declare it (removed
+/// keys included), when an intentional pattern property matches it, or when
+/// the opt-in excludes it. The catch-all that makes the object open is
+/// admission, not evidence, so it never silences advice. Advice is never a
+/// validation failure; the problems carry no line or column.
+pub fn key_advice(root: &Value, instance: &Value) -> Vec<ValidationProblem> {
+    let mut out = Vec::new();
+    if !mentions_key(root, crate::validation::ADVISE_UNKNOWN_KEYS_ANNOTATION) {
+        return out;
+    }
+    let scope = SchemaScope::new(root);
+    let mut segments = Vec::new();
+    advise_at(&scope, vec![root], instance, &mut segments, &mut out);
+    out
+}
+
+fn advise_at<'a>(
+    scope: &SchemaScope<'a>,
+    nodes: Vec<&'a Value>,
+    value: &Value,
+    segments: &mut Vec<String>,
+    out: &mut Vec<ValidationProblem>,
+) {
+    use crate::validation::{ADVISE_UNKNOWN_KEYS_ANNOTATION, suggest};
+    let mut arms = Vec::new();
+    let mut expanded = HashSet::new();
+    for node in nodes {
+        if push_union_arms(scope, node, Some(value), &mut expanded, &mut arms).is_none() {
+            return;
+        }
+    }
+    match value {
+        Value::Object(map) => {
+            let objects: Vec<&Value> = arms.iter().copied().filter(|arm| arm.get("properties").is_some() || arm.get(ADVISE_UNKNOWN_KEYS_ANNOTATION).is_some()).collect();
+            let excluded: Option<Vec<&str>> = objects.iter().find_map(|object| {
+                Some(object.get(ADVISE_UNKNOWN_KEYS_ANNOTATION)?.as_array()?.iter().filter_map(Value::as_str).collect())
+            });
+            if let Some(excluded) = excluded {
+                let declared = declared_keys(&objects);
+                let patterns: Vec<fancy_regex::Regex> = objects
+                    .iter()
+                    .filter_map(|object| object.get("patternProperties")?.as_object())
+                    .flat_map(|patterns| patterns.keys())
+                    .filter_map(|pattern| fancy_regex::Regex::new(pattern).ok())
+                    .collect();
+                for key in map.keys() {
+                    let known = objects
+                        .iter()
+                        .any(|object| object.get("properties").and_then(|props| props.get(key.as_str())).is_some());
+                    if known
+                        || excluded.contains(&key.as_str())
+                        || patterns.iter().any(|pattern| pattern.is_match(key).unwrap_or(true))
+                    {
+                        continue;
+                    }
+                    if let Some(near) = suggest::unique_nearest(key, declared.iter().copied()) {
+                        out.push(near_miss_problem(segments, key, near));
+                    }
+                }
+            }
+            for (key, child) in map {
+                let next: Vec<&Value> = arms
+                    .iter()
+                    .filter_map(|arm| arm.get("properties")?.get(key.as_str()))
+                    .collect();
+                if next.is_empty() {
+                    continue;
+                }
+                segments.push(key.clone());
+                advise_at(scope, next, child, segments, out);
+                segments.pop();
+            }
+        }
+        Value::Array(items) => {
+            let next: Vec<&Value> = arms.iter().filter_map(|arm| arm.get("items")).collect();
+            if next.is_empty() {
+                return;
+            }
+            for (index, item) in items.iter().enumerate() {
+                segments.push(index.to_string());
+                advise_at(scope, next.clone(), item, segments, out);
+                segments.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn near_miss_problem(segments: &[String], key: &str, near: &str) -> ValidationProblem {
+    let instance_path = JsonPointer::from_segments(segments.to_vec());
+    ValidationProblem {
+        path: instance_path.as_pointer_string(),
+        message: format!("key `{key}` is not a declared field, so it is kept as data"),
+        kind: ValidationProblemKind::Invalid,
+        property: None,
+        line: None,
+        column: None,
+        arm_index: None,
+        description: None,
+        code: ValidationProblemCode::NearMissKey,
+        instance_path,
+        schema_path: None,
+        offending_property: Some(key.to_string()),
+        offending_properties: vec![key.to_string()],
+        file_reference: None,
+        caller_file: None,
+        default: None,
+        hint: Some(crate::validation::suggest::did_you_mean(near)),
+    }
+}
+
+/// The object schemas governing the instance location `segments`: the
+/// concrete arms [`schema_nodes_at`] reaches, expanded through references and
+/// the unions the value there can select. `None` when a reference names
+/// nothing.
+fn object_schemas_at<'a>(
+    scope: &SchemaScope<'a>,
+    root: &'a Value,
+    arm_index: Option<usize>,
+    segments: &[String],
+    instance: &Value,
+) -> Option<Vec<&'a Value>> {
+    let (base, beside) = match arm_index {
+        Some(index) => (root.get("anyOf")?.as_array()?.get(index)?, Some(root)),
+        None => (root, None),
+    };
+    let mut nodes = schema_nodes_at(scope, base, beside, segments, instance)?;
+    if segments.is_empty() {
+        nodes.extend(beside);
+    }
+    let mut value = Some(instance);
+    for segment in segments {
+        value = value.and_then(|value| match value {
+            Value::Array(items) => segment.parse::<usize>().ok().and_then(|index| items.get(index)),
+            _ => value.get(segment.as_str()),
+        });
+    }
+    let mut arms = Vec::new();
+    let mut expanded = HashSet::new();
+    for node in nodes {
+        push_union_arms(scope, node, value, &mut expanded, &mut arms)?;
+    }
+    Some(arms.into_iter().filter(|arm| arm.get("properties").is_some()).collect())
+}
+
+/// The declared, non-removed property names of `objects`, first declaration
+/// order first.
+fn declared_keys<'a>(objects: &[&'a Value]) -> Vec<&'a str> {
+    let mut keys: Vec<&'a str> = Vec::new();
+    for object in objects {
+        let Some(properties) = object.get("properties").and_then(Value::as_object) else {
+            continue;
+        };
+        for (key, schema) in properties {
+            if schema != &Value::Bool(false) && !keys.contains(&key.as_str()) {
+                keys.push(key.as_str());
+            }
+        }
+    }
+    keys
+}
+
+/// Whether `key` names a member of any object in `value`.
+fn mentions_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(map) => map.contains_key(key) || map.values().any(|child| mentions_key(child, key)),
+        Value::Array(items) => items.iter().any(|child| mentions_key(child, key)),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3260,6 +3514,7 @@ mod tests {
         arm_index: Option<usize>,
     ) -> ValidationProblem {
         ValidationProblem {
+            hint: None,
             path: path.to_string(),
             message: "msg".to_string(),
             kind,

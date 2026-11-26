@@ -125,7 +125,7 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 pub use simplified::alias_search_work;
 pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, CompositionOperand, Constraint, DRAFT_2020_12, DecodedScalar,
-    Extends, InlineSpread, ObjectComposition,
+    Extends, InlineSpread, KeyDeclarations, ObjectComposition,
     DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
@@ -156,7 +156,8 @@ pub use validate::{
 pub use validation::{
     CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
     SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_KIND_CHECK_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
-    SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, ValidationProblem, ValidationProblemCode,
+    SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, SCHEMA_REMOVED_KEY_CODE, SCHEMA_NEAR_MISS_KEY_CODE,
+    REMOVED_KEYS_ANNOTATION, ADVISE_UNKNOWN_KEYS_ANNOTATION, ValidationProblem, ValidationProblemCode,
     ValidationProblemKind, authored_node_at,
 };
 
