@@ -4,7 +4,7 @@ area: claudine
 total-phases: 8
 created: 2026-11-23
 status: planned
-phase: 5
+phase: 6
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -214,6 +214,175 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
 - darkmatter/docs/use-skills/use-darkmatter/library.md
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+- claudine/cli/src/commands/compose/mod.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/compose/prep/tests.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/selection.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/document_check/tests.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/src/commands/wrap/composition/dry_run/tests.rs
+- claudine/cli/src/commands/wrap/composition/mod.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/preflight.rs
+- claudine/cli/src/commands/wrap/composition/runner.rs
+- claudine/cli/src/commands/wrap/composition/target.rs
+- claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+- claudine/cli/src/commands/wrap/mod.rs
+- claudine/cli/src/commands/wrap/selection_trace.rs
+- claudine/cli/src/commands/wrap/sequence/iterate.rs
+- claudine/cli/src/commands/wrap/sequence/jit.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/src/commands/wrap/sequence/providers.rs
+- claudine/cli/src/commands/wrap/sequence/report.rs
+- claudine/cli/src/commands/wrap/sequence/review/tests.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/perf/report.rs
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/model_required/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/model_required/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/model_required/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/model_required/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/ask.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/metadata.md
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/no_executable/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/no_executable/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/ask.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/seq.yaml
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/authored_text_rendering.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+- claudine/cli/tests/l1/completion_resolution_round_trip.rs
+- claudine/cli/tests/l1/compose_cli.rs
+- claudine/cli/tests/l1/compose_frontmatter_model.rs
+- claudine/cli/tests/l1/compose_prompt_tiers.rs
+- claudine/cli/tests/l1/compose_repository_context.rs
+- claudine/cli/tests/l1/context_construction_guard.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/ctx_per_run.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/entry_point_parity.rs
+- claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+- claudine/cli/tests/l1/launch_trigger_schemas.rs
+- claudine/cli/tests/l1/level1_dry_run_pty.rs
+- claudine/cli/tests/l1/lifecycle_renamed_events.rs
+- claudine/cli/tests/l1/literal_glob_hint.rs
+- claudine/cli/tests/l1/provider_tail_launch.rs
+- claudine/cli/tests/l1/provider_tail_notice.rs
+- claudine/cli/tests/l1/registrations_command.rs
+- claudine/cli/tests/l1/research_sequence_artifacts.rs
+- claudine/cli/tests/l1/sequence_cli.rs
+- claudine/cli/tests/l1/sequence_dry_run.rs
+- claudine/cli/tests/l1/sequence_errors_cli.rs
+- claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+- claudine/cli/tests/l1/sequence_jit.rs
+- claudine/cli/tests/l1/sequence_overlay_pty.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/cli/tests/l1/sequence_task_providers.rs
+- claudine/cli/tests/l1/setter_after_switch.rs
+- claudine/cli/tests/l1/wrap_compose_agent.rs
+- claudine/cli/tests/l1/wrap_compose_preflight.rs
+- claudine/cli/tests/l1/wrap_compose_validation.rs
+- claudine/cli/tests/l1/wrap_inline_compose.rs
+- claudine/cli/tests/l1/wrap_perf.rs
+- claudine/cli/tests/l1/wrap_sequence_composition.rs
+- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+- claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+- claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+- claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+- claudine/cli/tests/level2/level2_perf_capture.rs
+- claudine/cli/tests/level2/main.rs
+- claudine/lib/src/composition/agent_message.rs
+- claudine/lib/src/composition/coordinator/invocation.rs
+- claudine/lib/src/composition/coordinator/tests.rs
+- claudine/lib/src/composition/error/render/selection.rs
+- claudine/lib/src/composition/looping/frame.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/preflight/tests.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/bootstrap.rs
+- claudine/lib/src/composition/prepare/bootstrap/tests.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/select.rs
+- claudine/lib/src/composition/select/tests.rs
+- claudine/lib/src/composition/sequence/preflight/check.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/providers.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+- claudine/lib/src/composition/types.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/diagnostics/registry.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/harness/shell.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- claudine/lib/tests/l1/path_lookup_guard.rs
+docs_updated_during_phase_5:
+- claudine/cli/README.md
+- claudine/docs/cli/index.md
+- claudine/docs/cli/sequence.md
+- claudine/docs/providers/dispatch-inventory.json
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/topics/flow-control/flow-control-reference.md
+- claudine/docs/topics/flow-control/flow-control.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/output.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/architecture.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/claudine/cli-reference.md
+- claudine/docs/use-skills/use-claudine/SKILL.md
+- claudine/docs/use-skills/use-claudine/cli.md
+- claudine/docs/use-skills/use-claudine/composition.md
+- claudine/docs/use-skills/use-claudine/sequences.md
 source-code:
 - claudine/lib/src/doctor/registration_tests.rs
 - darkmatter/lib/src/findings/mod.rs
@@ -354,6 +523,135 @@ source-code:
 - claudine/lib/src/composition/error/render/provider.rs
 - claudine/lib/src/composition/error/tests.rs
 - claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/compose/mod.rs
+- claudine/cli/src/commands/compose/prep/tests.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/src/commands/wrap/composition/dry_run/tests.rs
+- claudine/cli/src/commands/wrap/composition/mod.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/preflight.rs
+- claudine/cli/src/commands/wrap/composition/runner.rs
+- claudine/cli/src/commands/wrap/composition/target.rs
+- claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+- claudine/cli/src/commands/wrap/mod.rs
+- claudine/cli/src/commands/wrap/selection_trace.rs
+- claudine/cli/src/commands/wrap/sequence/iterate.rs
+- claudine/cli/src/commands/wrap/sequence/jit.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/src/commands/wrap/sequence/report.rs
+- claudine/cli/src/commands/wrap/sequence/review/tests.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/perf/report.rs
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/invalid_arguments/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/model_required/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/model_required/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/model_required/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/model_required/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/ask.md
+- claudine/cli/tests/fixtures/check/codes/multiple_executables/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/metadata.md
+- claudine/cli/tests/fixtures/check/codes/no_executable/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/no_executable/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/no_executable/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_not_installed/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unknown/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/control/doc.md
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/provider_unresolved/finding/doc.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/ask.md
+- claudine/cli/tests/fixtures/check/codes/selection_key_as_data/finding/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/args.txt
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/ask.md
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/control/seq.yaml
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/args.txt
+- claudine/cli/tests/fixtures/check/codes/sequence_shape/finding/seq.yaml
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/authored_text_rendering.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+- claudine/cli/tests/l1/completion_resolution_round_trip.rs
+- claudine/cli/tests/l1/compose_cli.rs
+- claudine/cli/tests/l1/compose_frontmatter_model.rs
+- claudine/cli/tests/l1/compose_prompt_tiers.rs
+- claudine/cli/tests/l1/compose_repository_context.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/ctx_per_run.rs
+- claudine/cli/tests/l1/entry_point_parity.rs
+- claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+- claudine/cli/tests/l1/launch_trigger_schemas.rs
+- claudine/cli/tests/l1/level1_dry_run_pty.rs
+- claudine/cli/tests/l1/lifecycle_renamed_events.rs
+- claudine/cli/tests/l1/literal_glob_hint.rs
+- claudine/cli/tests/l1/provider_tail_launch.rs
+- claudine/cli/tests/l1/provider_tail_notice.rs
+- claudine/cli/tests/l1/registrations_command.rs
+- claudine/cli/tests/l1/research_sequence_artifacts.rs
+- claudine/cli/tests/l1/sequence_cli.rs
+- claudine/cli/tests/l1/sequence_dry_run.rs
+- claudine/cli/tests/l1/sequence_errors_cli.rs
+- claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+- claudine/cli/tests/l1/sequence_jit.rs
+- claudine/cli/tests/l1/sequence_overlay_pty.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/cli/tests/l1/sequence_task_providers.rs
+- claudine/cli/tests/l1/setter_after_switch.rs
+- claudine/cli/tests/l1/wrap_compose_agent.rs
+- claudine/cli/tests/l1/wrap_compose_preflight.rs
+- claudine/cli/tests/l1/wrap_compose_validation.rs
+- claudine/cli/tests/l1/wrap_inline_compose.rs
+- claudine/cli/tests/l1/wrap_perf.rs
+- claudine/cli/tests/l1/wrap_sequence_composition.rs
+- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+- claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+- claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+- claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+- claudine/cli/tests/level2/level2_perf_capture.rs
+- claudine/cli/tests/level2/main.rs
+- claudine/lib/src/composition/agent_message.rs
+- claudine/lib/src/composition/coordinator/invocation.rs
+- claudine/lib/src/composition/coordinator/tests.rs
+- claudine/lib/src/composition/error/render/selection.rs
+- claudine/lib/src/composition/looping/frame.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/preflight/tests.rs
+- claudine/lib/src/composition/prepare/bootstrap.rs
+- claudine/lib/src/composition/prepare/bootstrap/tests.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/select.rs
+- claudine/lib/src/composition/select/tests.rs
+- claudine/lib/src/composition/sequence/preflight/providers.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+- claudine/lib/src/composition/types.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/diagnostics/registry.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/harness/shell.rs
+- claudine/lib/tests/l1/path_lookup_guard.rs
 documentation:
 - claudine/docs/cli/sequence.md
 - darkmatter/docs/cli/data-contracts.md
@@ -365,7 +663,17 @@ documentation:
 - simplified-schema/docs/topics/diagnostics.md
 - simplified-schema/docs/topics/language/objects-and-named-types.md
 - darkmatter/docs/topics/caching.md
-completed-phase: 4
+- claudine/cli/README.md
+- claudine/docs/cli/index.md
+- claudine/docs/providers/dispatch-inventory.json
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/topics/flow-control/flow-control-reference.md
+- claudine/docs/topics/flow-control/flow-control.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/output.md
+completed-phase: 5
 packages:
 - darkmatter
 - darkmatter-cli
@@ -695,7 +1003,7 @@ the final implementation log for test evidence and any concrete departures. Revi
     construction/projectors and all report adapters. Compare the reference baselines
     byte-for-byte, including existing machine output and `md graph`. Test equivalent findings vs
     different occurrences, skipped-check linkage, tagged trails and legacy fields.
-- [ ] **Isolate Startup**
+- [x] **Isolate Startup**
   - Claudine owns the startup, config loading, and clap ownership changes in Rule 11. Define the
     early command boundary and its explicit read-only startup inputs. A separate integration
     task will supply the report and command check invocation. Exercise help and
@@ -736,7 +1044,7 @@ the final implementation log for test evidence and any concrete departures. Revi
     with independently excluded content, unknown conditions, warning denial and permitted
     reference recovery, stdin behavior, and lifecycle initialize producing an input. Fix the
     file-frame excerpt in the block error renderer.
-- [ ] **Integrate Claudine Checks**
+- [x] **Integrate Claudine Checks**
   - Wire the graph and reference builders, provider/model/input eligibility, and Darkmatter
     passive compose into the command boundary from Wave 1. Own Claudine's composition resolver
     and chooser adapters, `commands/document_check.rs`, the live sequence integration in
@@ -1036,7 +1344,7 @@ Claudine CLI (Rules 10–12). After this phase `--dry-run` is the passive check 
 commands, so a caller who wants a provider's own `--json` forwards it after `--`. Update
 `provider_tail_launch::a_resume_carries_the_tail_exactly_once` to forward it that way.
 
-- [ ] **Record Selection**
+- [x] **Record Selection**
   - (Rule 10.) Record provider attempts in the branches of
     `wrap/sequence/providers.rs::select_target` and `wrap/composition/target.rs` that choose
     them, including empty links and each enclosing document consulted, and render the chain
@@ -1046,13 +1354,13 @@ commands, so a caller who wants a provider's own `--json` forwards it after `--`
     sequences, the target resolver and eligible preferred-agent fallback for direct and inline
     composition, and the cohort shape rule for inputs. Remove the dry-run exception that masks
     an invalid explicit provider hint. Redact secret-shaped values.
-- [ ] **Isolate Startup**
+- [x] **Isolate Startup**
   - (Phase 1 task of the same name; Rule 11.) Add `json` with its clap requirement on
     `dry_run`, and the refusal-only `dry_run_shell` with the spec's message. Dispatch the three
     dry-run commands before telemetry, configuration migration, host-registration refresh, and
     `ensure_config_exists`, with the passive configuration projection. Exercise help, the first
     `--`, an option after the file, and `--json` without `--dry-run`.
-- [ ] **Route Dry Runs**
+- [x] **Route Dry Runs**
   - (Phase 1 "Integrate Claudine Checks", Rule 12.) Delete `document_check::enabled()` and the
     environment seam and route every document dry run to the check. Retire the sequence
     preview through `task_run.rs` and `sequence_dry_run.rs` and the direct and inline previews
@@ -1060,7 +1368,7 @@ commands, so a caller who wants a provider's own `--json` forwards it after `--`
     error as `internal.bug`. Send the human report to stderr once, then previews to stdout;
     under `--json` emit one envelope and no preview text. Exit 0 or 2 from severities, never 1.
     Declare the dry-run codes once in Claudine's catalog instead of the test-only `CHECK_CODES`.
-- [ ] **Migrate Preview Suites**
+- [x] **Migrate Preview Suites**
   - Migrate each L1 test that failed under the switch (the suites listed in the log's first
     decision and Phase 3's classified list). A test asserts the new report, or is deleted with
     a logged reason when it asserted removed behavior such as `--dry-run-shell` running
@@ -1070,7 +1378,7 @@ commands, so a caller who wants a provider's own `--json` forwards it after `--`
     standard `StatusBlock` in any dry-run failure, a layout failure that does not lose later
     output, and the no-write comparison of the fixture home, workdir, registration, and cache
     directories. Add fixtures and controls for each Claudine code this phase can emit.
-- [ ] **Publish Dry Run**
+- [x] **Publish Dry Run**
   - Update the docs for what now ships: `claudine/docs/cli/sequence.md` (remove the planned
     marker, the Flags row, and add the removed spelling), `docs/topics/flow-control/sequences.md`
     (replace the "Composition shell work still runs" callout with the passive table),
