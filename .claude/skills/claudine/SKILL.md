@@ -555,6 +555,29 @@ configuration's `prompt_for_missing`. Tests: `cli/tests/l1/dry_run_check.rs`,
 `lib/src/composition/sequence/preflight/tests/check_tree.rs`, fixtures
 `cli/tests/fixtures/check/`.
 
+**Real-run preflight report.** A real `claudine sequence` that fails before
+`start` (`root.started` false in `wrap/sequence/mod.rs::execute_sequence`)
+keeps its typed error and wraps it, at that one point, as
+`CompositionError::CheckFailed { report, cause }` when
+`document_check::preflight_failure_report` (the passive check, `Purpose::Failure`,
+over the caller's values plus every runtime write; errors and warnings only)
+finds anything. The wrapper is `Semantic` and every facet, `Display`, severity,
+`variant`, and `diagnostic_source` come from `render::checked_diagnostic(cause)`
+(the cause's own selection), so `err.*`, snapshots, and `finalize` see exactly
+the old failure; `error_walker::try_render_block_report` prints the report once
+in place of the block (`render_preflight_report`, last line "The run stopped
+at: …", left out when a row's message already is the cause's or its suffix
+after `…: `). Rows must say what the replaced block said: a missing input
+carries its schema description, and a selection failure the typed
+`SequenceTaskProviderProblem::remedy()` the block also shows. On the first attempt whose preflight passes, `preflight_advisories`
+(`Purpose::Advisory`: walk and schema-key checks only; no selection, inputs, or
+preview) prints its warnings once before task one unless `--silent`. Tests:
+`cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*` is the mapping
+guard, one case per boundary), `lib/src/composition/error/tests.rs::check_failed`.
+The scope guards (`error_guards/sequence_scope.rs`, allowlist
+`sequence-scope-allow.toml`: site, noun, catch-all) and the code snapshot guard
+(`dry_run_check::codes`) are listed in [Error Architecture](topics/error-architecture.md#the-lossy-boundary-audit).
+
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,
 `parse_loop_block(value, LoopOwner, &LoopLocation)` for a group or sequence

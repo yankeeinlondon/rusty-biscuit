@@ -302,21 +302,28 @@ fn sequence_dry_run_codes(frontmatter: &str, installed: &[&str], args: &[&str]) 
     (output.status.code(), codes)
 }
 
+/// `text` with its whitespace runs collapsed, so a wrapped row matches.
+fn flat(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn count(codes: &[String], code: &str) -> usize {
     codes.iter().filter(|candidate| *candidate == code).count()
 }
 
 /// A `$schema`-required property the frontmatter does not satisfy is
-/// reported for the document and again for every task, rather than stopping
-/// at the first, and no provider launches.
+/// reported once, as the document's input; every task whose body reads it
+/// waits for it (its preview is not checked) rather than repeating it, and
+/// no provider launches.
 #[cfg(unix)]
 #[test]
-fn sequence_dry_run_reports_a_composition_error_for_every_task() {
+fn sequence_dry_run_reports_a_missing_document_input_once() {
     let (code, codes) =
         sequence_dry_run_codes("$schema:\n  topic: 'string(required)'\n", &["goose"], &["--goose"]);
     assert_eq!(code, Some(2), "{codes:?}");
     assert_eq!(count(&codes, "composition.missing_properties"), 1, "{codes:?}");
-    assert_eq!(count(&codes, "dm.schema.missing_required"), 2, "one per task: {codes:?}");
+    assert_eq!(count(&codes, "dm.schema.missing_required"), 0, "no second finding per task: {codes:?}");
+    assert_eq!(count(&codes, "dm.check.not_checked"), 2, "each task's preview waits: {codes:?}");
 }
 
 /// No frontmatter `agent` and no explicit provider: with no TTY, every step
@@ -436,8 +443,8 @@ fn sequence_live_no_agent_aborts_without_launching_provider() {
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("didn't specify the Agent"),
-        "abort body must be the same no-agent breakdown the dry-run table shows; stderr:\n{stderr}"
+        flat(&stderr).contains("no provider for this task; a non-interactive run fails here"),
+        "abort body must be the same no-agent finding the dry run shows; stderr:\n{stderr}"
     );
 }
 
@@ -491,7 +498,7 @@ fn sequence_live_single_invalid_aborts_without_launching_provider() {
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("Invalid Agent") && stderr.contains("not-real"),
+        flat(&stderr).contains("`not-real` (compose.md agent) is not a known provider"),
         "abort body must name the invalid hint; stderr:\n{stderr}"
     );
 }
@@ -512,8 +519,8 @@ fn sequence_live_single_not_installed_aborts_without_launching_provider() {
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("Agent Not Installed"),
-        "abort body must be the not-installed breakdown; stderr:\n{stderr}"
+        flat(&stderr).contains("the Gemini provider (compose.md agent) is not installed"),
+        "abort body must be the not-installed finding; stderr:\n{stderr}"
     );
 }
 
@@ -534,8 +541,8 @@ fn sequence_live_zero_installed_list_aborts_without_launching_provider() {
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("installed/valid"),
-        "abort body must be the zero-installed-list breakdown; stderr:\n{stderr}"
+        flat(&stderr).contains("no provider listed in compose.md agent is installed"),
+        "abort body must be the zero-installed-list finding; stderr:\n{stderr}"
     );
 }
 
@@ -600,7 +607,7 @@ fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
     assert!(!sentinel.exists(), "no provider may launch under the abort");
     assert_eq!(output.status.code(), Some(1), "must abort; stderr:\n{stderr}");
     assert!(
-        stderr.contains("agent resolution failed") && stderr.contains("Invalid Agent"),
+        stderr.contains("agent resolution failed") && flat(&stderr).contains("is not a known provider"),
         "--silent must not suppress the agent-resolution abort message; stderr:\n{stderr}"
     );
 }

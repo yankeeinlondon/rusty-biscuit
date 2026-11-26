@@ -923,12 +923,251 @@ decisions-for-review:
       than one document is not supported"). This is real-run write-back, outside the dry-run switch; the dry run now
       previews such a sequence correctly. Three `sequence_sources_cli` tests were restructured to task prompts around
       it.
+    - |-
+      Phase 6: a finding's `trail` is published in JSON only when it holds a host frame (a Claudine task, group, or
+      sequence); then every frame is written in order. A trail of only transclusion and `::map`/`::filter` frames is
+      published through the legacy `included_via` and `iteration_path` alone, so every `md` output stays byte-identical
+      (the spec's sample always shows `trail`). Alternative: always publish a non-empty `trail`, which adds a field to
+      `md validate refs`/`md compose` JSON and breaks the byte-identical gate. Redo in the hand-written `Serialize` of
+      `Diagnostic` (`compose/expression/diagnostics.rs`) and the data contract.
+    - |-
+      Phase 6: `Diagnostic::with_trail` now puts the host's frames outside the frames a record already has instead of
+      replacing them, so a Claudine projection of a Darkmatter error keeps its iteration and inclusion context (and
+      Claudine JSON now shows those frames in `trail`). Alternative: keep replace semantics and have Claudine merge.
+      Redo in `with_trail` and the Claudine callers that build trails.
+    - |-
+      Phase 6: the reference presentation (`findings::ReferencePresentation`) renders the `ReferenceValidationReport`
+      directly; it is not built by converting the report into a `FindingReport`, because the output needs facts a
+      `Diagnostic` does not hold (syntax kind behind the construct token, scanned count, listing, root title). The
+      generic `FindingReport::presentation()` shares the glyph, path, and layout helpers. Alternative: carry those facts
+      on `Diagnostic` and render one model; that risks the byte-identical baselines.
+    - |-
+      Phase 6: suggestions are capped at three for reference findings and kept at five for operation-file recovery
+      (`recover_operation_file`), so real-run output is unchanged; the cap is a parameter of the shared search.
+      Alternative: three everywhere (update `recovery_enriches_explicit_no_match_without_selecting_suggestion`).
+    - |-
+      Phase 6: Claudine passes an always-admit permission callback to the shared document resolver, because
+      Darkmatter's only file permission (`file-read`) governs schema-slot reads, not root or task documents. A refusal
+      is still typed end to end. Redo if document reads gain a permission: pass the policy's callback in
+      `source.rs::reference_finding` and `document_check::load_root`.
+    - |-
+      Phase 6: `preflight::Loader::load_prompt` and `source.rs::resolve_sequence_reference` (named by Rule 5) are not
+      yet wired to the shared reference builder; Phase 8's Complete Sequence Sites splits resolution/read/parse in
+      `source.rs`/`data.rs` and routes reference resolution to the builder there. The check walk's no-match finding
+      already goes through it.
+    - |-
+      Phase 6: after a reference stop, `md compose` prints the combined findings report only when the call, schema,
+      or empty-body check contributes a finding or a not-checked row; otherwise it prints the existing reference report
+      unchanged. Inside the combined report a reference row is worded as a finding (``file not found in `::file` `` with
+      a hint) rather than the reference table row. An empty-body finding is not raised when the emptiness depends on the
+      broken reference itself. Alternative: always print the combined form after a reference stop, which changes every
+      existing broken-reference output. Redo in `darkmatter/cli/src/commands/compose/combined.rs`.
+    - |-
+      Phase 6: case-only suggestions are hidden only when the name opens the same file as the wanted path (file
+      identity), so on a case-sensitive volume `Notes.md` is now suggested beside a missing `notes.md` (previously
+      always hidden). On macOS/Windows the same-file branch has run only in CI. Alternative: keep hiding every
+      case-only name.
+    - |-
+      Phase 6: a body that composes to nothing now warns `dm.compose.empty_body` on an ordinary `md compose` run
+      (deniable with `--deny dm.compose.empty_body`), as Rule 13 grades it. One existing test now sees the extra
+      record. Alternative: emit it only in the combined report after a reference stop.
+    - |-
+      Phase 6: the slow L1 test `sequence_errors_cli::a_malformed_task_with_is_the_with_family_error_at_the_task`
+      (5.6 s in the package run, 3.8 s alone; four spawns in a loop) was split into four macro-generated tests
+      (about 1 s each). No assertion changed.
+    - |-
+      Phase 6: a dry run no longer expands shell aliases: `ComposeOptions::with_passive_session` installs a
+      passive alias record that starts no login shell and reads every name as not an alias, so the built-in blacklist
+      judges a dry run's commands as authored. Found on Windows, where alias lookup started PowerShell during a
+      `claudine --dry-run` and wrote its profile cache into the fixture home (`dry_run_check::a_dry_run_writes_nothing_anywhere`,
+      `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it`). The dry-run docs already promised no login-shell
+      probe. Alternative: resolve aliases from a static profile read, which would keep blacklist parity for aliased
+      commands but still reads user shell configuration.
+    - |-
+      Phase 7: a real run's preflight stop is wrapped in `CompositionError::CheckFailed` only when the passive check
+      finds an error or warning; otherwise the old error block prints unchanged (a missing root document, for example).
+      The report keeps errors and warnings and drops info and not-checked rows, which describe what a passive check
+      could not do, not why this run stopped. Its last line, `The run stopped at: <cause>`, names the failure the
+      lifecycle read, because the first row is not always it (the "first row differs" baseline). Alternative: always
+      wrap and show every row.
+    - |-
+      Phase 7: the advisory pass before task one runs the passive check with `Purpose::Advisory`: the walk and schema-
+      key checks only, never selection, inputs, or preview, so no advisory depends on a collected answer and nothing is
+      rechecked after collection. It prints only on the first attempt (not on a retry) and not under `--silent`.
+      Alternative: rerun the full check after input collection, which repeats work the real preflight just did and can
+      disagree with it.
+    - |-
+      Phase 7 changed dry-run output: a root body task whose root still lacks an input (not written by `initialize`) is
+      now one `not checked` preview row, like a held prompt task, instead of a second "is a required property" error for
+      the same missing input. Found while pinning the inputs boundary; the input row itself is unchanged.
+    - |-
+      Phase 7: the scope allowlist tags every `Sequence…` entry `sequence-error-standard` (the Phase 8 burn-down) and
+      every other `outside-scope`, rather than `phase-8`, so `docs/` can name the tag without naming a feature phase. 60
+      of the 118 catch-all entries are non-sequence variants, listed so a new variant of any kind cannot silently reach
+      the generic block. Alternative: guard only `Sequence…` variants.
+    - |-
+      Phase 7 was verified in a scratch clone (`/home/build/.cache/rb-p7/repo`, `git clone --shared`, not a worktree or
+      branch) because another session's half-finished move of `claudine/docs/research/` breaks `include_str!` paths and
+      no claudine test compiles in this worktree. Every edit was made in the worktree and copied into the clone; the
+      clone's results stand for this worktree's tree minus that move.
 message-to-agent: |-
-    Phase 5 is closed: every `compose`/`inline-compose`/`sequence` `--dry-run` is the passive check (no seam, no
-    `enabled()`), `--dry-run-shell` is a usage error, and the old previews are deleted. Phase 6 (Shared report) is
-    next. Most of Phase 5 was committed by the author's tooling in `8bdf0ce58` while the phase was in progress, so
-    `git diff 81eff8f41` shows only the last edits; the `*_during_phase_5` lists are the full set.
-
+    Phase 6 (Shared report) is closed; every Phase 6 task and the Phase 1 checkboxes it finished (Capture
+    Contracts, Build Findings, Build References, Combine Document Checks) are ticked. Phase 1's Guard Composition
+    (finished by Phase 4) and Recover Graph (finished by Phase 3) are still unticked in the Phase 1 list: tick them
+    when you confirm, since Phase 7's exit gate needs every Phase 1 checkbox ticked. Phase 6 left for Phase 8 the
+    wiring of `preflight::Loader::load_prompt` and `source.rs::resolve_sequence_reference` to Darkmatter's shared
+    reference builder (`darkmatter::findings::reference::{resolve_document, check_document}`). The real-run report
+    for Phase 7 can render through `FindingReport::presentation()` (node-built, `with_summary`, `CommandOutput`).
+    The author's tooling committed Phase 6 while it ran (`c0345c1c0`, `09bce2a9d`, `5008c0dcc`).
+    Windows: `os-failing: windows` is set on the spec. Two claudine-cli dry-run tests failed on Windows (alias lookup
+    started PowerShell); the fix (passive alias record) landed after the run, but re-verifying on build-win was
+    blocked because another session was restructuring `claudine/docs/research/` in this worktree (tests
+    `include_str!` files it deleted). Rerun `just cross-check claudine-cli --os windows a_dry_run_writes_nothing_anywhere
+    a_preview_leaves_what_needs_an_effect_as_written_and_marks_it` and clear `os-failing` when it passes.
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - Cargo.lock
+    - claudine/cli/src/commands/document_check/mod.rs
+    - claudine/cli/src/commands/document_check/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/completion/operation_file.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/src/completion/walker.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - darkmatter/cli/schemas/output/clean.yaml
+    - darkmatter/cli/schemas/output/code-block.yaml
+    - darkmatter/cli/schemas/output/compose.yaml
+    - darkmatter/cli/schemas/output/delta.yaml
+    - darkmatter/cli/schemas/output/edit.yaml
+    - darkmatter/cli/schemas/output/get.yaml
+    - darkmatter/cli/schemas/output/graph.yaml
+    - darkmatter/cli/schemas/output/hash.yaml
+    - darkmatter/cli/schemas/output/init.yaml
+    - darkmatter/cli/schemas/output/list-themes.yaml
+    - darkmatter/cli/schemas/output/render.yaml
+    - darkmatter/cli/schemas/output/rm.yaml
+    - darkmatter/cli/schemas/output/schema-about.yaml
+    - darkmatter/cli/schemas/output/schema-detect.yaml
+    - darkmatter/cli/schemas/output/schema-triggers.yaml
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/schemas/output/set.yaml
+    - darkmatter/cli/schemas/output/toc.yaml
+    - darkmatter/cli/schemas/output/validate-refs.yaml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/combined.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/output/mod.rs
+    - darkmatter/cli/tests/fixtures/findings/notes_json.json
+    - darkmatter/cli/tests/fixtures/findings/notes_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_markdown.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_clean_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_markdown.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_json.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_plain.txt
+    - darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_missing_input_json.txt
+    - darkmatter/cli/tests/l1/compose_combined_report.rs
+    - darkmatter/cli/tests/l1/compose_data_output.rs
+    - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/reference_report_baselines.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/findings/mod.rs
+    - darkmatter/lib/src/findings/presentation/generic.rs
+    - darkmatter/lib/src/findings/presentation/mod.rs
+    - darkmatter/lib/src/findings/presentation/reference.rs
+    - darkmatter/lib/src/findings/reference.rs
+    - darkmatter/lib/src/findings/reference/basename.rs
+    - darkmatter/lib/src/findings/report.rs
+    - darkmatter/lib/src/findings/trail.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/reference/report.rs
+    - darkmatter/lib/tests/l1/collection_blocks/budget.rs
+    - darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+    - darkmatter/lib/tests/l1/collection_discovery.rs
+    - darkmatter/lib/tests/l1/collection_execution.rs
+    - darkmatter/lib/tests/l1/diagnostic_projection.rs
+    - darkmatter/lib/tests/l1/directive_authored_lines.rs
+    - darkmatter/lib/tests/l1/expression_recovery.rs
+    - darkmatter/lib/tests/l1/findings.rs
+    - darkmatter/lib/tests/l1/glob_implementation_guard.rs
+    - darkmatter/lib/tests/l1/load_data_diagnostics.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/passive_compose.rs
+    - darkmatter/lib/tests/l1/reference_report.rs
+    - darkmatter/lib/tests/l1/reference_suggestions.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/cli/tests/fixtures/findings/notes.md
+docs_updated_during_phase_6:
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/cli/validate.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/errors/composition-problems.md
+    - docs/dependencies.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+source_files_during_phase_7:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/cli/src/commands/document_check/mod.rs
+    - claudine/cli/src/commands/document_check/preview.rs
+    - claudine/cli/src/commands/document_check/tasks.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/output/error_walker.rs
+    - claudine/cli/tests/l1/dry_run_check.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/sequence_scope.rs
+    - claudine/cli/tests/l1/error_guards/sequence-scope-allow.toml
+    - claudine/cli/tests/l1/sequence_preflight_baselines.rs
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_json.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_human.snap
+    - claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_json.snap
+docs_updated_during_phase_7:
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Implementation Log for 2026-11-22-better-errors-and-dry-run (3 phases)
@@ -1681,3 +1920,169 @@ has no fixture: no input reaches it on purpose.
   `compose_report_diagnostics::warnings_and_a_typeless_failure_name_the_document` expects the new empty-body record.
 - Docs: `darkmatter/docs/cli/{data-contracts,compose,validate}.md`, `darkmatter/docs/errors/composition-problems.md`,
   `darkmatter/docs/use-skills/use-darkmatter/cli.md` (`just publish-skills` run), `.claude/skills/darkmatter/SKILL.md`.
+
+### Gates and cross-OS
+
+- Affected-scope calculator (after all edits): `packages` = claudine, claudine-cli, darkmatter, darkmatter-cli,
+  darkmatter-lsp, test-toolkit, sniff (non-empty), so every gate ran.
+- `just test` darkmatter: 18452 passed, none ≥ 5 s. biscuit-file: 1344 passed, none ≥ 5 s. claudine: 13121
+  passed, 1 slow: `sequence_errors_cli::a_malformed_task_with_is_the_with_family_error_at_the_task` 5.64 s in the
+  package run (load average 17 on 16 cores), 3.8 s alone. It looped over four spawns, so it was split into four
+  macro-generated tests (about 1 s each, re-run green). `just lint` darkmatter and claudine: clean (claudine re-run
+  after the split: clean). `just check-tier-coverage claudine`: exit 0.
+- Dependent packages (biscuit-icon-cli, biscuit-speaks-cli, messenger(-cli), playa-cli, biscuit-terminal-cli,
+  research, sniff-detection-cli): none uses a changed symbol; `cargo check --tests` on all of them is clean.
+- Windows (`just cross-check … --os windows`, build-win):
+  - darkmatter: 13328 passed, 2 failed (`shell_blocks::tests::source_file_in_error`,
+    `every_block_error_names_the_source_file`), both pre-existing (a rootless `/tmp/test.md` resolves to
+    `C:/tmp/test.md`). Fixed with a drive-qualified `TEST_SOURCE`; re-run on Windows: 2 passed.
+  - claudine (lib): 7284 passed.
+  - claudine-cli (filtered to the changed areas: operation_file, completion, document_check, dry_run_check,
+    sequence_errors_cli, autocomplete): 741 passed, 2 failed (`dry_run_check::a_dry_run_writes_nothing_anywhere`,
+    `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it`): a dry run's alias lookup started PowerShell,
+    which wrote `AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive` in the fixture home. These
+    tests came in Phase 5 and had not run on Windows. Fix: `ComposeOptions::with_passive_session` installs
+    `AliasResolutions::passive()` (no shell, every name not an alias); unit test
+    `alias::tests::a_dry_run_starts_no_shell_for_an_alias`; darkmatter `--lib` 6463 passed, lib clippy clean.
+  - **Evidence gap:** re-running those two tests on Windows failed to compile: while this phase was closing,
+    another session in this worktree (`claudine claude --yolo`, started 16:03) deleted 439 files under
+    `claudine/docs/research/` and added new folders there, and L1 tests `include_str!` the deleted files. The same
+    change keeps the darkmatter, darkmatter-cli, and claudine-cli L1 binaries from compiling locally, so the two
+    late fixes (alias record, `TEST_SOURCE`) were verified only by darkmatter lib tests. Those tree changes are not
+    this phase's and were left untouched. `os-failing: windows` is set on the spec until the Windows re-run passes.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+| --- | --- |
+| `md validate refs` / `md graph` byte-identical | `darkmatter-cli` `reference_report_baselines::*` (14, unedited after capture) |
+| legacy fields as projections of `trail`, null/omit contracts | `diagnostic_projection::trail_projections::*` (6) |
+| one `diagnostic` type in every output schema | `output_commands::every_schema_file_shares_one_diagnostic_type` |
+| renderer extracted; view delegates | `reference_report::the_view_delegates_to_the_findings_reference_presentation`, `findings::the_generic_presentation_groups_a_subjects_findings_and_escapes_authored_text` |
+| no-match vs refused/ambiguous/I/O, order, glob hint, permission filtering, reused reads, case-only | `darkmatter` l1 `reference_suggestions::*` (17), `findings/reference.rs` unit tests (2) |
+| `md compose` combined report, recovery/stdin/warning policy unchanged, lifecycle route | `darkmatter-cli` `compose_combined_report::*` (13), `combined.rs` unit tests (5) |
+| passive schema never judges a deferred value | `passive_compose::a_deferred_value_is_never_judged_by_its_schema` |
+| unterminated-block excerpt in the file's frame | `directive_authored_lines::an_unterminated_block_excerpt_numbers_file_lines` |
+| a dry run starts no login shell | `alias::tests::a_dry_run_starts_no_shell_for_an_alias` |
+
+## Phase 7
+
+Started 2026-11-26. Phase 6's gate was met (log above); its message asked for the two Phase 1 ticks (Guard
+Composition, Recover Graph), which are confirmed and ticked.
+
+### Where this phase was verified
+
+Two other agent sessions (`claudine claude --yolo`, started in this worktree before this phase) moved
+`claudine/docs/research/{acp,agent-cli,…}` to `claudine/docs/research/providers/…` and have not updated the
+`include_str!` paths that read them (29 in `claudine` lib unit tests alone, plus the lib and CLI L1 binaries and
+darkmatter tests). Nothing in `claudine` compiles for test in this worktree while that move is half done. That work is
+theirs and was left untouched. Every test below therefore ran in a scratch clone,
+`/home/build/.cache/rb-p7/repo` (`git clone --shared` of this worktree at `5008c0dcc`, research files intact), into
+which `sync.sh` copies every changed file of this worktree except the research move. All edits were made here; the
+clone only compiles and runs them. (A first clone under `/tmp` was abandoned: `/tmp` is RAM-backed and its build
+directory was OOM-killed.)
+
+### Report Real Preflight
+
+- `CompositionError::CheckFailed { report: Box<FindingReport>, cause: Box<CompositionError> }` (lib
+  `composition/error/mod.rs`), built by `check_failed` (a cause that already carries a report keeps it), with
+  `check_report`/`checked_cause`. It is `Semantic`; `code`, `category`, `disposition`, `origin`, `severity`, `detail`,
+  `Display`, and `diagnostic_source` all come from `render::checked_diagnostic(cause)`, the diagnostic the selector
+  picks for the cause alone. So a cause behind a transparent wrapper reports what it always did, and the cause never
+  appears again as its own `err.cause`. `from_composition_error` reads `checked_cause()`, so `err.variant` is the
+  cause's too. `status_block` is the cause's.
+- The CLI wraps at exactly one place, `wrap/sequence/mod.rs::execute_sequence`: an `Err` from
+  `execute_sequence_inner` while `!root.started` (every preflight stop, first attempt or retry), after the typed error
+  is settled and before the lifecycle reads it. `with_preflight_report` downcasts to `CompositionError` and asks
+  `document_check::preflight_failure_report` for the passive check (`Purpose::Failure`) of the root, in the state the
+  run stopped in (`preflight_values`: the caller's values, or those collected for it, then every runtime write, the
+  root's `initialize` included). Only errors and warnings are kept (`retain_severities`). No finding means no wrapper.
+  Input collection, provider review, approval, and their order are untouched; nothing moves forward from task time.
+- `output/error_walker.rs::try_render_block_report` finds a `CheckFailed` in the chain and prints
+  `document_check::render_preflight_report` once, in place of the block: a heading with counts, the grouped
+  findings, and `The run stopped at: <cause>`.
+- Advisories: on the first attempt whose preflight passes, `preflight_advisories` (`Purpose::Advisory`: the walk and
+  the schema-key checks only; `check_selection`, `prompt_inputs`, `owner_inputs`, and `preview` return early) prints
+  its warnings once, before task one, unless `--silent`. Because selection and inputs are skipped, no advisory depends
+  on an answer the run collected; that is how "recheck only answer-dependent findings after collection" is met.
+- Found while pinning the inputs case: the passive check reported a root's missing input twice, once as the input and
+  once from previewing the root's own body task without it (`"topic" is a required property`). A root body task
+  (both the `RootList::Body` root and a body step of the root) now waits like a held prompt task: selection is
+  checked, the preview is one `not checked` row. `Check::root_waits` ignores inputs the root's `initialize` writes.
+
+### Verification against the Phase 3 baselines
+
+`cli/tests/l1/sequence_preflight_baselines.rs` keeps every Phase 3 facet unchanged and now also pins `err.msg` (a
+second `finalize` line), the report's rows in order, one report heading, and no error-block gutter. Its Phase 3 cause
+strings were block prose; two of them (provider, inputs) are not `err.msg`, so those cases now pin the message the
+lifecycle actually reads (`step 1 (`ask`) cannot select a provider from `tasks[0].with.agent` …`, `sequence schema
+validation failed for 1 step(s) or document(s); missing required properties`). The facets themselves did not change
+for any case.
+
+| Case | `err.*` facets (unchanged) | Report rows |
+| --- | --- | --- |
+| graph (empty group) | `composition.failed composition correctable author` | task fan: group is invalid |
+| prompt load | same | task find: the prompt file does not exist, at `seq.md:5:13` |
+| sequence resolution (new) | same | task nested: the sequence file does not exist, at `seq.md:5:15` |
+| transclusion (new) | same | task ask: `File not found: ./absent.md`, at `ask.md:3:1` |
+| provider | same | task ask: `nosuch` (with.agent) is not a known provider, with its selection chain |
+| inputs (Phase 1c) | `composition.missing_properties …` | seq.md: `topic` is required and has no value (once) |
+| first row ≠ failure | `composition.failed …` (task two's missing file) | task one's missing input, then task two's missing file |
+| retry stops at preflight | `child`, `blocked` once, then the reread's YAML failure | task nested: YAML parse error |
+| `initialize` writes the input | `composition.failed …` | no `topic` row |
+| earlier task writes a later prompt's file | run succeeds, exit 0 | no report, both tasks run |
+| advisory | run succeeds | one warning (`agent: claude` is step data) before `[1/2] starting ask` |
+
+`retry` under `blocked` is refused by the lifecycle ("not wired for this event"), so the retry case reaches preflight
+again through `failure: retry` after a task fails: an earlier task appends broken YAML to the referenced
+`child.yaml`, and the retry's reread, under the first attempt's closed approvals, stops there.
+
+### Enforce Phase Scope
+
+- Site, noun, and catch-all guards: `cli/tests/l1/error_guards/sequence_scope.rs`, declared from `error_guards.rs`,
+  with `error_guards/sequence-scope-allow.toml` (`guard`, `variant`, `tag`, `reason`). Each compares what a `syn`
+  parse finds with its entries in both directions (unlisted fails, stale fails). Tags: `sequence-error-standard` for
+  every `Sequence…` variant (the Phase 8 burn-down) and `outside-scope` for any other; an entry test enforces the tag
+  rule, a reason, and no duplicates. A sample test proves each scan sees its subject. Today's lists: 52 `Sequence…`
+  variants without a site, 2 with a hard-coded noun (`SequenceExternalLoad`, `SequenceExternalWrongType`), and 118
+  variants (including 60 non-sequence ones) rendering through the generic block.
+- Catalog snapshot guard: `dry_run_check::assert_code_fixture` pins each check code's finding report as
+  `code_<code>_human` and `code_<code>_json` (18 new snapshots, paths made portable), and
+  `codes::every_code_has_its_snapshots_and_every_snapshot_its_code` ties the snapshot set to `CODES` both ways.
+- Mapping guard: `sequence_preflight_baselines::boundaries` holds one explicit case per preflight boundary
+  (`graph`, `inputs`, `prompt_load`, `provider`, `sequence_resolution`, `transclusion`), each asserting the typed
+  facets, `err.msg`, `finalize` routing, and the report's rows; `every_preflight_boundary_has_its_case` keeps
+  `BOUNDARIES` equal to the cases. A missing root document is no preflight stop and keeps its old error, unwrapped
+  (`a_missing_root_document_is_reported_as_before`).
+- Library: `composition/error/tests.rs::check_failed` (three causes of different selector shapes: the snapshot,
+  `from_composition_error`, and `from_error_or_action` equal the cause's; no added cause-chain entry; first report
+  wins).
+
+### Existing suites the report changed
+
+The first full `just test` (fail-fast off) failed 27 existing `claudine-cli` tests, all for one reason: they read the
+replaced error block's title or body (`task provider selection failed`, `sequence missing properties`, `Agent Not
+Installed`, the per-step `Step 1`/`Step 2` table). They now assert the report's row for the same failure and, where
+the typed aggregate matters, the closing `The run stopped at:` line (`sequence_schema` still proves the per-step
+aggregate through `… failed for 2 step(s) …`). Three gaps the comparison exposed were fixed in the code, not the
+tests:
+
+- A missing input's row lacked the schema description the block printed; `push_missing_rows` now writes
+  `` `topic` (string — what is reviewed) `` (dry run included).
+- A typed selection failure other than "unresolvable" became a row without the block's remedy (the circular `model`
+  case lost "pass --model"). The remedy moved to `SequenceTaskProviderProblem::remedy()`; the block renders it after
+  "No task has started.", the finding uses it as its hint.
+- The closing line repeated a row whose message already is the failure (a reference cycle printed its chain twice;
+  a transclusion failure its file twice). It is now omitted when some row's message equals the failure's, or is its
+  suffix after a wrapper's `…: ` prefix. `a_later_graph_refusal_wins_over_an_earlier_missing_input` asserts the line
+  still appears when no row says it.
+
+`wrap_sequence_composition::sequence_dry_run_reports_a_composition_error_for_every_task` (added by Phase 5's
+migration) pinned the duplicate root-input findings the `root_waits` hold removes; it is now
+`sequence_dry_run_reports_a_missing_document_input_once` (spec: "one finding per input, under its task").
+
+The three `with_file_provenance::*_on_every_route` tests were slow before this phase (5.8–6.4 s recorded at
+`75f63f4f8`) because each ran three routes in turn; each is now a module with one test per route (1.6–2.0 s).
+`doctor::a_changed_bundle_darkmatter_refuses_…` and `claudine_schemas::shared_payload_properties_have_identical_types`
+reach 5.0–5.2 s only under the full suite's load (3.5 s and 3.8 s alone), under the 10 s loaded limit, and are not
+this phase's code.

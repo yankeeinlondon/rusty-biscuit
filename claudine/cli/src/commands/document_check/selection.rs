@@ -190,7 +190,11 @@ impl Check {
                     self.push_unresolved(task, state, &trace, Severity::Error, "the run fails before any task starts");
                 } else {
                     let code = claudine::diagnostics::as_diagnostic(&error).map_or(INTERNAL_BUG, |known| known.code());
-                    let mut finding = Diagnostic::projected(code, Severity::Error, error.to_string(), None)
+                    let remedy = match &error {
+                        CompositionError::SequenceTaskProviderSelection { problem, .. } => Some(problem.remedy().to_string()),
+                        _ => None,
+                    };
+                    let mut finding = Diagnostic::projected(code, Severity::Error, error.to_string(), remedy)
                         .with_trail(task.trail.clone());
                     for line in trace.lines() {
                         finding = finding.with_note(line);

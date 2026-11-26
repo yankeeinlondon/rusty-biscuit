@@ -34,6 +34,7 @@ reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
 review-iterations: 0
 needs-rulings: false
+os-failing: windows
 ---
 
 # Better errors and a diagnostic dry run

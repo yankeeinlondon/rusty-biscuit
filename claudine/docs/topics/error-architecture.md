@@ -104,6 +104,53 @@ is the whole wide pointer (address *and* vtable), because a `#[from]` payload ca
 share its parent's address and treating that as a revisit would truncate a healthy
 chain.
 
+## A preflight report around a typed error
+
+When a real `claudine sequence` run stops before its first task, the error it
+returns is the one the run has always returned at that point: the first
+failure in preflight order. On top of that, the run reports every other
+problem it can prove at the same point, so you can fix them all in one edit.
+`CompositionError::CheckFailed { report, cause }` carries both:
+
+- `cause` is the typed error, chosen exactly as before. Every `err.*` field a
+  lifecycle `when:` clause or a persisted record reads (`code`, `category`,
+  `disposition`, `origin`, `detail`, `msg`, `severity`, `variant`, and the
+  one-level `err.cause`) comes from the diagnostic the selector would pick for
+  `cause` alone. The wrapper adds no code, and `diagnostic_source` continues
+  *below* that diagnostic, so it never appears a second time as its own
+  `err.cause`.
+- `report` is a `darkmatter::findings::FindingReport`: the passive check of
+  `--dry-run`, taken in the state the run stopped in (the caller's values plus
+  every runtime write, the root's `initialize` included), with only its errors
+  and warnings kept.
+
+The wrapper is `Semantic`, so it wins selection, and its identity is its
+cause's. Only the CLI's top-level renderer looks at the report: it prints the
+report once, in place of the cause's error block, and names the failure that
+stopped the run on the last line, unless a row already states it (the
+cause's own message, alone or after a wrapper's `…: ` prefix). Any other
+surface renders the cause's block.
+
+```text
+Sequence preflight found 2 errors and 0 warnings; no task ran
+
+task one (seq.md, sequence[0])
+  ✗ error[composition.missing_properties] `topic` has no value
+  …
+
+task two (seq.md, sequence[1])
+  ✗ error[dm.reference.not_found] …
+
+The run stopped at: failed to load external sequence file: `./missing.md`: file not found
+```
+
+The first row need not be the failure: here a dry run groups task one's
+missing input first, but a real run meets task two's missing file in graph
+loading, before it collects inputs, and `err.code` is the file's.
+
+A run whose passive check finds nothing, or whose error is not a typed
+`CompositionError`, returns its error unwrapped and renders as before.
+
 ## The snapshot boundary
 
 Concrete Rust error values never cross a process, wire, or persistence boundary.
@@ -337,6 +384,17 @@ The guards live in `cli/tests/l1/error_guards.rs`, backed by a `syn` reader over
 | `detail_projections_write_only_declared_keys` | a `detail` projection writes a key its codes do not declare |
 | `from_code_projects_a_catalog_shaped_detail_for_every_registered_code` | a registered code projects a top-level `null` detail |
 | `every_diagnostic_in_the_corpus_projects_its_catalog_key_set` | a constructed diagnostic's detail keys ≠ its catalog key set |
+| `sequence_scope::every_sequence_variant_carries_its_site` | a `CompositionError` variant named `Sequence…` has neither a `site` field nor both `source_path` and `property` |
+| `sequence_scope::no_message_hard_codes_a_construct_noun` | an `#[error]` text or a `render/` block spells a construct noun such as "external sequence file" instead of taking it from `ExecutableField::noun` |
+| `sequence_scope::only_listed_variants_reach_the_catch_all_block` | a variant no renderer names, so it falls through to the generic "composition failed" block of `render/provider.rs` |
+
+Three more guards live beside the tests of what they guard:
+
+| Guard | Where | Fails when |
+|-------|-------|-----------|
+| boundary mapping | `cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*`) | a preflight boundary (sequence resolution, prompt load, transclusion, graph, provider, inputs) loses the typed cause, its `err.*` facets, or its `finalize` routing once the report wraps it; each boundary is one explicit case, and a guard keeps the list of boundaries complete |
+| catalog snapshots | `cli/tests/l1/dry_run_check.rs` (`codes::*`) | a dry-run check code has no fixture, no control, or no plain and JSON report snapshot, or a code snapshot names no code |
+| wrapper identity | `lib/src/composition/error/tests.rs` (`check_failed::*`) | a `CheckFailed` differs from its cause in any `err.*` field or snapshot |
 
 ### Why a scan and not a grep
 
@@ -354,7 +412,13 @@ knows two things a grep cannot:
 
 ### Adding an exception
 
-Both allowlists (`error_guards/transport-allow.toml`,
+The sequence scope guards read `error_guards/sequence-scope-allow.toml`: one
+entry per variant (or `render/<file>.rs` for a noun in a renderer) and guard,
+tagged `sequence-error-standard` for a sequence error that does not meet the
+message standard yet and `outside-scope` for any other variant. An unlisted variant and
+an entry matching no variant both fail.
+
+Both D8 allowlists (`error_guards/transport-allow.toml`,
 `error_guards/boxed-diagnostic-allow.toml`) key an entry to an **enclosing
 symbol** — not a source line, which would match by text across files — and
 require a `tag` and a written `reason`. `tag = "retained"` is permanent (no typed

@@ -334,6 +334,16 @@ pub(crate) fn execute_sequence(
     let mut startup_timings = startup_timings;
     loop {
         let outcome = execute_sequence_inner(source, root_sequence, shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        // A failure before `start` is a preflight stop: its typed error is
+        // settled, so the passive report is taken here, in the state the run
+        // stopped in, and changes nothing the lifecycle below reads.
+        let outcome = match outcome {
+            Err(error) if !root.started => {
+                let values = preflight_values(root.collected_overrides.clone().flatten().or_else(|| user_set_overrides.clone()), &runtime);
+                Err(with_preflight_report(error, &crate::commands::document_check::RunState { root: source, invocation: &invocation, shared, values }))
+            }
+            other => other,
+        };
         let (signal, error) = match &outcome {
             Ok(130) => {
                 root.runner.cancel(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
@@ -358,6 +368,31 @@ pub(crate) fn execute_sequence(
             ContainerEventDecision::Skip => return Ok(0),
             other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
         }
+    }
+}
+
+/// The values a real run's passive report reads: the caller's (and those
+/// collected for it), then every runtime write so far.
+fn preflight_values(overrides: Option<serde_json::Value>, runtime: &composition::RuntimeState) -> serde_json::Map<String, serde_json::Value> {
+    let mut values = match overrides {
+        Some(serde_json::Value::Object(values)) => values,
+        _ => serde_json::Map::new(),
+    };
+    values.extend(runtime.mutations());
+    values
+}
+
+/// `error` with the passive check's report of every problem observable
+/// where the run stopped, when the error is a typed composition failure and
+/// the check found an error or warning; `error` unchanged otherwise.
+fn with_preflight_report(error: color_eyre::eyre::Report, state: &crate::commands::document_check::RunState<'_>) -> color_eyre::eyre::Report {
+    let cause = match error.downcast::<CompositionError>() {
+        Ok(cause) => cause,
+        Err(error) => return error,
+    };
+    match crate::commands::document_check::preflight_failure_report(state) {
+        Some(report) => CompositionError::check_failed(cause, report).into(),
+        None => cause.into(),
     }
 }
 
@@ -507,6 +542,9 @@ fn execute_sequence_inner(
 
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
+    // Values are collected once, on the attempt whose preflight first
+    // passes; that attempt alone shows the advisory warnings.
+    let first_preflight = root.collected_overrides.is_none();
 
     // The sequence document's own hints, with `--set` `agent`/`model` above
     // them: what its body steps run on, and the outermost fallback for a
@@ -865,6 +903,22 @@ fn execute_sequence_inner(
 
     // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
+
+    // Warnings no earlier stage showed (key advice, step data that looks like
+    // a selection), once, before the first task. Inputs and providers are
+    // settled by now, so nothing reported here waits on an answer.
+    if first_preflight && !silent {
+        let state = crate::commands::document_check::RunState {
+            root: source,
+            invocation: &prep_context.invocation,
+            shared,
+            values: preflight_values(validated.resolved_overrides.clone(), &root.runtime),
+        };
+        if let Some(report) = crate::commands::document_check::preflight_advisories(&state) {
+            let launch_dir = prep_context.invocation.launch_cwd().to_path_buf();
+            log::message(&crate::commands::document_check::render_preflight_report(&report, None, &log::terminal(), Some(&launch_dir)));
+        }
+    }
 
     let mut run_context = iterate::SequenceRunContext {
         plan: &plan,

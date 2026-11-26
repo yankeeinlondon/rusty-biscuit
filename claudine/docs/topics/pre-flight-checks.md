@@ -491,6 +491,50 @@ records each authored site's position and schema, and approves bytes or shapes
 under one shared approval cache. Discovery performs no shell work. A bad
 template, missing approval-time value, or denied approval aborts before step 1.
 
+#### When preflight stops a sequence
+
+A real run still stops at the first problem its preflight meets, in the same
+order as always: the task graph and every file it names, the root's inputs,
+providers, then shell approval. When it stops there, it also runs the
+`--dry-run` check in the state it stopped in (your `key=value` values and
+everything the root's `initialize` wrote) and prints every error and warning
+that check proves, once, instead of the single error block:
+
+```text
+Sequence preflight found 2 errors and 0 warnings; no task ran
+
+task one (seq.md, sequence[0])
+  ✗ error[composition.missing_properties] `topic` has no value
+  …
+
+task two (seq.md, sequence[1])
+  ✗ error[dm.reference.not_found] …
+
+The run stopped at: failed to load external sequence file: `./missing.md`: file not found
+```
+
+The last line names the failure the run returned; it is left out when one of
+the rows already says exactly that. That failure, not the
+report's first row, is what the root's `blocked`, `failure`, and `finalize`
+handlers see in `err.*`, so a `when:` clause written against it keeps
+matching. A retry reruns preflight under the first attempt's approvals, and
+only the failure the run finally ends with is printed. If the check finds no
+error or warning, the failure prints as an ordinary error block.
+
+A problem a task meets only at its own turn (a later prompt that composes to
+nothing because an earlier task has not yet written the file it reads) is not
+moved to preflight: earlier tasks and `initialize` can still make it right.
+Run `claudine sequence <file> --dry-run` to see those up front.
+
+#### Warnings before the first task
+
+When preflight passes, the run prints, once and before the first task, the
+warnings no earlier stage shows: near-miss keys in the sequence and the files
+it reads (`promt:` beside `prompt:`), and a step's own `agent:` or `model:`,
+which the task reads as data rather than as its provider. Inputs and providers
+are settled by then, so no warning here waits on an answer you already gave.
+A `--silent` run does not print them.
+
 At its turn, each task captures its environment and re-reads its document;
 composition is just in time. Filled commands and prior composed output are
 not reusable authorization. The runtime must prove membership in the upfront

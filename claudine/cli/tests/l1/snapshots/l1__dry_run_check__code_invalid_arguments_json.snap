@@ -1,0 +1,26 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": null,
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.invalid_arguments",
+      "severity": "error",
+      "message": "no file reference was given",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "name the document to check, such as `claudine sequence plan.md --dry-run`"
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

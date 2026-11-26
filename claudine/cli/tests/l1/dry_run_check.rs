@@ -576,7 +576,9 @@ const STATUS_BLOCK_GUTTER: char = '┃';
 /// The check's own code `composition.<code>` is in the report of
 /// `tests/fixtures/check/codes/<code>/finding/` and absent from the clean
 /// report of the `control/` beside it, so a check cannot pass by firing on
-/// everything. Each directory's `args.txt` holds the command line.
+/// everything. Each directory's `args.txt` holds the command line. The
+/// finding's report is pinned in both forms, plain text and JSON, as
+/// `code_<code>_human` and `code_<code>_json`.
 fn assert_code_fixture(code: &str) {
     let root = biscuit_test_harness::manifest_dir!().join("tests/fixtures/check/codes").join(code);
     let full = format!("composition.{code}");
@@ -594,7 +596,13 @@ fn assert_code_fixture(code: &str) {
         assert_eq!(found, expected, "{full} {kind}:\n{}", run.stdout);
         if !expected {
             assert_eq!(run.status.code(), Some(0), "{full} control is clean:\n{}", run.stdout);
+            continue;
         }
+        let mut envelope = envelope;
+        portable(&mut envelope, &launch_spellings(&fixture));
+        insta::assert_json_snapshot!(format!("code_{code}_json"), envelope);
+        let human = run_without_model_env(&fixture, &line.split_whitespace().chain(["--dry-run"]).collect::<Vec<_>>());
+        insta::assert_snapshot!(format!("code_{code}_human"), human.stderr);
     }
 }
 
@@ -630,6 +638,26 @@ mod codes {
         let mut declared: Vec<String> = CODES.iter().map(|code| code.to_string()).collect();
         declared.sort();
         assert_eq!(found, declared);
+    }
+
+    /// The catalog snapshot guard: each code has its plain and JSON report
+    /// snapshots, and every code snapshot belongs to a code with a fixture.
+    #[test]
+    fn every_code_has_its_snapshots_and_every_snapshot_its_code() {
+        let dir = biscuit_test_harness::manifest_dir!().join("tests/l1/snapshots");
+        let prefix = "l1__dry_run_check__code_";
+        let mut snapshots: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                name.strip_prefix(prefix)?.strip_suffix(".snap").map(str::to_string)
+            })
+            .collect();
+        snapshots.sort();
+        let mut expected: Vec<String> =
+            CODES.iter().flat_map(|code| [format!("{code}_human"), format!("{code}_json")]).collect();
+        expected.sort();
+        assert_eq!(snapshots, expected);
     }
 }
 

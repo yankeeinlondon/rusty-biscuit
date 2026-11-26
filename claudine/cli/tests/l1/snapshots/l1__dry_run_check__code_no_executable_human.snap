@@ -1,0 +1,14 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of seq.yaml (no commands run)
+
+task metadata (sequence[0])
+  ✗ this task has no executable, so it would compose the body of seq.yaml, and
+    a YAML file has no body
+      at seq.yaml:2:5
+      hint: add an executable such as `prompt: ./metadata.md`
+  ℹ not checked: provider, inputs (no executable)
+
+Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.

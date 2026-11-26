@@ -3169,6 +3169,26 @@ pub enum CompositionError {
         /// [`Self::LifecycleEvaluationError`]).
         inner: Box<CompositionError>,
     },
+
+    /// A real sequence run stopped at preflight with `cause`, and the passive
+    /// check found `report`'s problems at the same point.
+    ///
+    /// Every lifecycle and persisted field (`err.code`, `err.category`,
+    /// `err.disposition`, `err.origin`, `err.detail`, `err.msg`, severity,
+    /// and the one-level `err.cause`) is the cause's, so a `when:` clause
+    /// matches exactly what it matched before the report existed. The
+    /// wrapper adds no code of its own and no entry to the stored cause
+    /// chain: [`Diagnostic::diagnostic_source`] continues below the cause.
+    /// The CLI renders `report` in place of the cause's block, once.
+    #[error("{}", render::checked_diagnostic(cause))]
+    CheckFailed {
+        /// Every problem the passive check observed, in report order; its
+        /// first row need not be `cause`.
+        report: Box<darkmatter::findings::FindingReport>,
+        /// The typed failure the run returned, chosen in the old preflight
+        /// order.
+        cause: Box<CompositionError>,
+    },
 }
 
 /// Where a file reference was authored, for
@@ -3841,10 +3861,38 @@ impl CompositionError {
             Self::LifecycleEvaluationError { cause, .. }
             | Self::LifecycleWithEvaluationFailed { cause, .. } => cause.as_ref(),
             Self::SequenceTaskValueResolution { cause, .. } => Some(cause),
-            Self::WithFrontmatter { inner, .. } | Self::LifecycleEvaluationAlreadyEmitted { inner } => {
-                inner.lifecycle_cause()
-            }
+            Self::WithFrontmatter { inner, .. }
+            | Self::LifecycleEvaluationAlreadyEmitted { inner }
+            | Self::CheckFailed { cause: inner, .. } => inner.lifecycle_cause(),
             _ => None,
+        }
+    }
+
+    /// Wrap a preflight failure with the passive check's `report`.
+    ///
+    /// A `cause` that already carries a report keeps it: the first report
+    /// observed at the failure's boundary is the one rendered.
+    pub fn check_failed(cause: Self, report: darkmatter::findings::FindingReport) -> Self {
+        match cause {
+            already @ Self::CheckFailed { .. } => already,
+            cause => Self::CheckFailed { report: Box::new(report), cause: Box::new(cause) },
+        }
+    }
+
+    /// The passive check's report, when this is a [`Self::CheckFailed`].
+    pub fn check_report(&self) -> Option<&darkmatter::findings::FindingReport> {
+        match self {
+            Self::CheckFailed { report, .. } => Some(report),
+            _ => None,
+        }
+    }
+
+    /// The typed failure a [`Self::CheckFailed`] reports for; `self`
+    /// otherwise.
+    pub fn checked_cause(&self) -> &Self {
+        match self {
+            Self::CheckFailed { cause, .. } => cause,
+            other => other,
         }
     }
 
@@ -3939,6 +3987,7 @@ impl CompositionError {
     pub fn frontmatter_excerpt(&self) -> Option<&FrontmatterExcerpt> {
         match self {
             CompositionError::WithFrontmatter { excerpt, .. } => Some(excerpt),
+            CompositionError::CheckFailed { cause, .. } => cause.frontmatter_excerpt(),
             _ => None,
         }
     }
@@ -4201,6 +4250,27 @@ pub enum SequenceTaskProviderProblem {
     /// A document's `agent` is an empty list, which the launch schema rejects.
     #[error("an `agent` list needs at least one entry")]
     EmptyAgentList,
+}
+
+impl SequenceTaskProviderProblem {
+    /// What can repair the failure. A provider flag replaces any `agent`
+    /// hint, and `--model` or a model variable any `model` hint, so a remedy
+    /// names one only where it would help: such a failure never occurs under
+    /// the source it would recommend.
+    pub fn remedy(&self) -> &'static str {
+        match self {
+            Self::Unresolvable { .. } => {
+                "Name an installed provider in that `agent`, or pass --claude, --codex, etc. to run every task on one provider."
+            }
+            Self::Circular(variable) if variable.ends_with("model") || variable.ends_with("MODEL") => {
+                "Write the model in that `model`, or pass --model or set MODEL so the hint is not read."
+            }
+            Self::Circular(_) => "Name the provider in that `agent`, or pass --claude, --codex, etc. so the hint is not read.",
+            Self::WrongType { .. } | Self::Evaluation(_) | Self::EmptyAgentList => {
+                "Correct that value: the task's prompt still reads it, whatever provider or model is chosen."
+            }
+        }
+    }
 }
 
 fn unresolvable_reason(state: &super::types::AgentResolutionState) -> String {

@@ -415,37 +415,52 @@ fn sequence_notes(fixture: &CliProcessFixture, document: &std::path::Path) -> St
     launched_notes(fixture, &stderr)
 }
 
-/// A relative `with:` file that exists only beside the task's sequence
-/// document is accepted by approval and bound from there on every route; the
-/// launch folder has no such file.
-#[test]
-fn a_sequence_task_with_file_resolves_beside_its_author_on_every_route() {
-    let fixture = fixture("with-provenance-sequence-routes");
-    for document in write_with_routes(&fixture, "./only-here.md") {
-        let notes = sequence_notes(&fixture, &document);
-        assert!(notes.ends_with("sub/only-here.md"), "{}: {notes}", document.display());
-    }
+/// The `with:` value each case writes, given the fixture.
+enum Notes {
+    Relative(&'static str),
+    Absolute,
 }
 
-/// An absolute `with:` file is the same file on every route.
-#[test]
-fn an_absolute_sequence_task_with_file_is_the_same_on_every_route() {
-    let fixture = fixture("with-provenance-sequence-absolute");
-    let absolute = fixture.cwd().join("sub").join("only-here.md");
-    let spelled = absolute.to_str().unwrap().replace('\\', "/");
-    for document in write_with_routes(&fixture, &spelled) {
-        let notes = sequence_notes(&fixture, &document);
-        assert!(notes.ends_with("sub/only-here.md"), "{}: {notes}", document.display());
-    }
+/// Run route `route` (0 direct, 1 a root's `sequence:`, 2 nested as a task;
+/// see [`write_with_routes`]) of `case`, and assert the prompt received
+/// `expected`. Each route is its own test so the three run in parallel.
+fn assert_with_route(case: &str, notes: Notes, route: usize, expected: &str) {
+    let fixture = fixture(case);
+    let spelled = match notes {
+        Notes::Relative(notes) => notes.to_string(),
+        Notes::Absolute => fixture.cwd().join("sub").join("only-here.md").to_str().unwrap().replace('\\', "/"),
+    };
+    let document = write_with_routes(&fixture, &spelled)[route].clone();
+    let notes = sequence_notes(&fixture, &document);
+    assert!(notes.ends_with(expected), "{}: {notes}", document.display());
 }
 
-/// With a `notes.md` in both the launch folder and beside the sequence
-/// document, the one beside the document is the file the prompt renders.
-#[test]
-fn a_sequence_task_with_file_prefers_its_authors_folder_over_the_launch_folder() {
-    let fixture = fixture("with-provenance-sequence-both");
-    for document in write_with_routes(&fixture, "./notes.md") {
-        let notes = sequence_notes(&fixture, &document);
-        assert!(notes.ends_with("sub/notes.md"), "{}: {notes}", document.display());
-    }
+macro_rules! with_routes {
+    ($($(#[$doc:meta])* $name:ident: $case:literal, $notes:expr, $expected:literal;)*) => {$(
+        $(#[$doc])*
+        mod $name {
+            use super::*;
+            #[test]
+            fn direct() { assert_with_route($case, $notes, 0, $expected); }
+            #[test]
+            fn named_by_a_root() { assert_with_route($case, $notes, 1, $expected); }
+            #[test]
+            fn nested_as_a_task() { assert_with_route($case, $notes, 2, $expected); }
+        }
+    )*};
+}
+
+with_routes! {
+    /// A relative `with:` file that exists only beside the task's sequence
+    /// document is accepted by approval and bound from there on every route;
+    /// the launch folder has no such file.
+    a_sequence_task_with_file_resolves_beside_its_author_on_every_route:
+        "with-provenance-sequence-routes", Notes::Relative("./only-here.md"), "sub/only-here.md";
+    /// An absolute `with:` file is the same file on every route.
+    an_absolute_sequence_task_with_file_is_the_same_on_every_route:
+        "with-provenance-sequence-absolute", Notes::Absolute, "sub/only-here.md";
+    /// With a `notes.md` in both the launch folder and beside the sequence
+    /// document, the one beside the document is the file the prompt renders.
+    a_sequence_task_with_file_prefers_its_authors_folder_over_the_launch_folder:
+        "with-provenance-sequence-both", Notes::Relative("./notes.md"), "sub/notes.md";
 }

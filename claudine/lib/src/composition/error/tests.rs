@@ -3681,3 +3681,67 @@ fn lifecycle_renamed_event_is_a_lifecycle_authoring_error_naming_the_replacement
     assert!(prose.contains("renamed lifecycle event"), "{prose}");
     assert!(prose.contains("Rename the failed: key to blocked:"), "{prose}");
 }
+
+mod check_failed {
+    use super::*;
+    use crate::composition::lifecycle_context::{LifecycleErrorInfo, LifecycleErrorInfoExt};
+    use crate::diagnostics::{DiagnosticSnapshot, select_effective_diagnostic};
+    use darkmatter::findings::{Diagnostic as Finding, FindingSink, Severity as FindingSeverity, Subject};
+
+    /// A report whose first row is not the cause, as when a later task's
+    /// failure is the one the real run returns.
+    fn report() -> darkmatter::findings::FindingReport {
+        let mut sink = FindingSink::new();
+        let subject = sink.register_subject(Subject::document("seq.md", Some(PathBuf::from("seq.md"))));
+        sink.push(subject, Finding::actionable("composition.missing_properties", FindingSeverity::Error, "`topic` has no value", "pass `topic=…`"));
+        sink.finish()
+    }
+
+    /// Causes of each shape the selector treats differently: a plain
+    /// semantic error, one behind a transparent wrapper, and one with a
+    /// registered cause of its own.
+    fn causes() -> Vec<CompositionError> {
+        vec![
+            CompositionError::FileNotFound("./missing.md".to_string()),
+            CompositionError::FileNotFound("./missing.md".to_string()).already_emitted(),
+            CompositionError::SequenceInteractiveRejected(PathBuf::from("seq.md")),
+        ]
+    }
+
+    #[test]
+    fn every_err_field_and_the_snapshot_are_the_causes() {
+        for cause in causes() {
+            let expected = DiagnosticSnapshot::select(&cause).expect("the cause is registered");
+            let expected_info = LifecycleErrorInfo::from_composition_error(&cause);
+            let expected_erased = LifecycleErrorInfo::from_error_or_action("sequence", &cause);
+            let expected_text = cause.to_string();
+            let wrapped = CompositionError::check_failed(cause, report());
+
+            assert_eq!(DiagnosticSnapshot::select(&wrapped).as_ref(), Some(&expected), "{wrapped:?}");
+            assert_eq!(wrapped.to_string(), expected_text);
+            let info = LifecycleErrorInfo::from_composition_error(&wrapped);
+            assert_eq!((info.kind, info.variant, info.msg, info.snapshot), (expected_info.kind, expected_info.variant, expected_info.msg, expected_info.snapshot));
+            let erased = LifecycleErrorInfo::from_error_or_action("sequence", &wrapped);
+            assert_eq!((erased.kind, erased.variant, erased.msg, erased.snapshot), (expected_erased.kind, expected_erased.variant, expected_erased.msg, expected_erased.snapshot));
+        }
+    }
+
+    /// The cause is not stored a second time as its own `err.cause`.
+    #[test]
+    fn the_stored_cause_chain_gains_no_entry() {
+        let cause = CompositionError::FileNotFound("./missing.md".to_string());
+        let wrapped = CompositionError::check_failed(cause, report());
+        assert!(DiagnosticSnapshot::select(&wrapped).unwrap().cause.is_none());
+        let selected = select_effective_diagnostic(&wrapped).and_then(|selected| selected.diagnostic()).unwrap();
+        assert!(crate::diagnostics::next_registered_cause(selected).is_none());
+    }
+
+    #[test]
+    fn the_report_is_kept_once_and_the_first_one_wins() {
+        let wrapped = CompositionError::check_failed(CompositionError::FileNotFound("a.md".into()), report());
+        let empty = darkmatter::findings::FindingSink::new().finish();
+        let rewrapped = CompositionError::check_failed(wrapped, empty);
+        assert_eq!(rewrapped.check_report().map(|report| report.diagnostics().len()), Some(1));
+        assert!(matches!(rewrapped.checked_cause(), CompositionError::FileNotFound(_)));
+    }
+}

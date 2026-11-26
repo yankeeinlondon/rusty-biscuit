@@ -27,6 +27,9 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
                 inner.status_block(term)
             }
+            // The CLI renders a check failure's report instead of a block;
+            // any other surface shows the cause it reports for.
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).status_block(term),
 
             // Semantic over a typed Darkmatter cause: this layer owns the code
             // (a Darkmatter error supplies no facets), but the cause is what
@@ -411,6 +414,10 @@ impl Diagnostic for CompositionError {
         match self {
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => Some(inner.as_ref()),
+            // Below the cause, not the cause: the wrapper speaks with the
+            // cause's identity, so the cause must not appear a second time
+            // as its own `err.cause`.
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).diagnostic_source(),
             other => std::error::Error::source(other),
         }
     }
@@ -421,6 +428,7 @@ impl Diagnostic for CompositionError {
             // same delegation their `status_block` and `Display` already do.
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).code(),
             CompositionError::ComposeFailed(md)
             | CompositionError::PreFlightDiscoveryFailed(md) => compose_failed_code(md),
             CompositionError::InvalidReference { .. }
@@ -500,21 +508,37 @@ impl Diagnostic for CompositionError {
     }
 
     fn category(&self) -> Category {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).category();
+        }
         code_spec(self.code())
             .map(|spec| spec.category)
             .unwrap_or(Category::Composition)
     }
 
     fn disposition(&self) -> Disposition {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).disposition();
+        }
         code_spec(self.code())
             .map(|spec| spec.disposition)
             .unwrap_or(Disposition::Correctable)
     }
 
     fn origin(&self) -> Origin {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).origin();
+        }
         code_spec(self.code())
             .map(|spec| spec.origin)
             .unwrap_or(Origin::Author)
+    }
+
+    fn severity(&self) -> crate::diagnostics::Severity {
+        match self {
+            CompositionError::CheckFailed { cause, .. } => Diagnostic::severity(checked_diagnostic(cause)),
+            _ => self.disposition().default_severity(),
+        }
     }
 
     fn detail(&self) -> Value {
@@ -529,6 +553,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
                 return inner.detail();
             }
+            CompositionError::CheckFailed { cause, .. } => return checked_diagnostic(cause).detail(),
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 cause,
                 expression,
@@ -930,4 +955,14 @@ impl Diagnostic for CompositionError {
 
         base
     }
+}
+
+/// The diagnostic that speaks for a [`CompositionError::CheckFailed`]'s
+/// cause: the one [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic)
+/// chooses for the cause alone, so the wrapper reports what the unwrapped
+/// failure reported, through a transparent wrapper too.
+pub(crate) fn checked_diagnostic(cause: &CompositionError) -> &(dyn Diagnostic + 'static) {
+    crate::diagnostics::select_effective_diagnostic(cause)
+        .and_then(crate::diagnostics::EffectiveDiagnostic::diagnostic)
+        .unwrap_or(cause)
 }

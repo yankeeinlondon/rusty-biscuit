@@ -1,0 +1,41 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.yaml",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.sequence_shape",
+      "severity": "error",
+      "message": "`sequence` is a number, not a list of tasks or a file reference",
+      "source": {
+        "file": "/work/seq.yaml",
+        "line": 1,
+        "column": 11,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "write `sequence:` as a list of tasks"
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: tasks (`sequence` is not a list)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 1
+  }
+}

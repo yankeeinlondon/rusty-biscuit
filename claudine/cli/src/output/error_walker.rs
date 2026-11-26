@@ -33,6 +33,19 @@ use std::path::Path;
 pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Option<String> {
     let root: &(dyn StdError + 'static) = report.as_ref();
 
+    // A sequence stopped at preflight shows the passive check's report, once,
+    // in place of its cause's block; the cause still speaks for `err.*`.
+    if let Some(CompositionError::CheckFailed { report, cause }) = find_check_failed(root) {
+        let launch_dir = crate::request::snapshot().request_dir().to_path_buf();
+        let stopped = cause.to_string();
+        return Some(crate::commands::document_check::render_preflight_report(
+            report,
+            Some(&stopped),
+            term,
+            Some(&launch_dir),
+        ));
+    }
+
     // Selection walks *through* a frontmatter wrapper on its own — the wrapper
     // is `Transparent`, so it never becomes the selected diagnostic. This
     // lookup is only for the excerpt it captured.
@@ -123,6 +136,18 @@ pub(crate) fn evaluation_error_already_emitted(report: &Report) -> bool {
         current = err.source();
     }
     false
+}
+
+/// The first [`CompositionError::CheckFailed`] in the cause chain.
+fn find_check_failed<'a>(root: &'a (dyn StdError + 'static)) -> Option<&'a CompositionError> {
+    let mut current = Some(root);
+    while let Some(err) = current {
+        if let Some(found @ CompositionError::CheckFailed { .. }) = err.downcast_ref::<CompositionError>() {
+            return Some(found);
+        }
+        current = err.source();
+    }
+    None
 }
 
 /// Find the excerpt captured by the first [`CompositionError::WithFrontmatter`]

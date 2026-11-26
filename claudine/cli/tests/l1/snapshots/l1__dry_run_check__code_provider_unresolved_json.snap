@@ -1,0 +1,40 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/doc.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.provider_unresolved",
+      "severity": "error",
+      "message": "no provider for this document; a non-interactive run fails here",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "add `agent: <provider>` to doc.md, or run with `--provider <provider>`",
+      "notes": [
+        "1. --provider flag  not given",
+        "2. doc.md agent     not set"
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: model requirement (no provider)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 1
+  }
+}

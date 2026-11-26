@@ -1,0 +1,26 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/doc.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.model_required",
+      "severity": "error",
+      "message": "OpenCode needs a model in a non-interactive run, and none was found",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "pass `-m <model>`, set `OPENCODE_MODEL`, or add `model:` to the prompt's frontmatter"
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

@@ -112,13 +112,13 @@ fn flatten(text: &str) -> String {
 fn assert_missing_include_failure(success: bool, output: &str, code: Option<&str>) {
     assert!(!success, "a generated include must fail sequence preflight:\n{output}");
     let error = output
-        .find("TransclusionError")
-        .unwrap_or_else(|| panic!("the typed transclusion error renders:\n{output}"));
+        .find("Sequence preflight found")
+        .unwrap_or_else(|| panic!("the preflight report renders:\n{output}"));
     assert!(output.contains(&format!("File not found: {GENERATED}")), "{output}");
     let note = output
         .find(NOTE)
         .unwrap_or_else(|| panic!("the preflight note renders:\n{output}"));
-    assert!(note < error, "the note precedes the error block:\n{output}");
+    assert!(note < error, "the note precedes the report:\n{output}");
     assert_eq!(output.matches("note:").count(), 1, "{output}");
     assert_eq!(output.matches("File not found").count(), 1, "{output}");
     // The note adds guidance only: the selected diagnostic is the same one

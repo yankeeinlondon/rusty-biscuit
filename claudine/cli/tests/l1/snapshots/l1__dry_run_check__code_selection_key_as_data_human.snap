@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of seq.yaml (no commands run)
+
+task ask (sequence[0])
+  ⚠ `agent: claude` is step data (read as `seq.agent`), not the task's provider
+      at seq.yaml:3:5
+      hint: to choose the provider, move it into the task's inputs:
+            `with: { agent: claude }`
+
+Dry run found 0 errors and 1 warning; 0 checks not run. Previewed 1 of 1 task.

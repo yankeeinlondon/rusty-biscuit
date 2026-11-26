@@ -179,7 +179,7 @@ fn an_uninstalled_task_provider_fails_before_any_task_launches() {
     let run = run(&fixture, &record, &[]);
     assert_eq!(run.code, Some(1), "stderr:\n{}", run.stderr);
     assert!(run.launches.is_empty(), "a task launched: {:?}", run.launches);
-    assert!(run.stderr.contains("task provider selection failed"), "stderr:\n{}", run.stderr);
+    assert!(run.stderr.contains("cannot select a provider from"), "stderr:\n{}", run.stderr);
     assert!(run.stderr.contains("tasks[1].with.agent"), "stderr:\n{}", run.stderr);
     assert!(run.stderr.contains("seq.md"), "stderr:\n{}", run.stderr);
 }
@@ -390,7 +390,7 @@ fn an_invalid_with_selection_expression_fails_before_any_task_launches() {
         let run = run(&fixture, &record, &[]);
         assert_eq!(run.code, Some(1), "{key}; stderr:\n{}", run.stderr);
         assert!(run.launches.is_empty(), "{key}: a task launched: {:?}", run.launches);
-        assert!(run.stderr.contains("task provider selection failed"), "{key}; stderr:\n{}", run.stderr);
+        assert!(run.stderr.contains("cannot select a provider from"), "{key}; stderr:\n{}", run.stderr);
         assert!(run.stderr.contains(&format!("tasks[1].with.{key}")), "{key}; stderr:\n{}", run.stderr);
         assert!(run.stderr.contains("seq.md"), "{key}; stderr:\n{}", run.stderr);
         assert!(run.stderr.contains("no_such_function"), "{key}; stderr:\n{}", run.stderr);
@@ -485,7 +485,7 @@ selection_cells! {
         => Expect::FailsBeforeLaunch("agent resolution failed");
     empty_hint_absent_inherits: "", "", &[] => Expect::Launches(&["claude"]);
     empty_hint_empty_string_is_an_invalid_name: "", "{ agent: '' }", &[]
-        => Expect::FailsBeforeLaunch("task provider selection failed");
+        => Expect::FailsBeforeLaunch("cannot select a provider from");
     empty_hint_model_null_and_list_are_no_model: "model: null\n", "{ model: [] }", &[] => Expect::Launches(&["claude"]);
     nonempty_hint_scalar_launches_its_provider: "", "{ agent: goose }", &[] => Expect::Launches(&["goose"]);
     nonempty_hint_list_launches_its_one_installed_member: "", "{ agent: [gemini, goose] }", &[]
@@ -516,7 +516,7 @@ fn assert_empty_agent_list_fails_preflight(name: &str, frontmatter: &str, with: 
     let run = run(&fixture, &record, &[]);
     assert_eq!(run.code, Some(1), "stderr:\n{}", run.stderr);
     assert!(run.launches.is_empty(), "a task launched, the earlier one included: {:?}", run.launches);
-    assert!(run.stderr.contains("task provider selection failed"), "stderr:\n{}", run.stderr);
+    assert!(run.stderr.contains("cannot select a provider from"), "stderr:\n{}", run.stderr);
     // The rendered diagnostic wraps where the temp path's length puts it, so
     // match prose on a border-free, whitespace-collapsed copy and the path on
     // an unbroken fragment.
@@ -525,7 +525,10 @@ fn assert_empty_agent_list_fails_preflight(name: &str, frontmatter: &str, with: 
     assert!(run.stderr.contains(&format!("/cwd/{hint_file}")), "stderr:\n{}", run.stderr);
     assert!(flat.contains("needs at least one entry"), "stderr:\n{}", run.stderr);
     assert!(!run.stderr.contains("could not be evaluated"), "stderr:\n{}", run.stderr);
-    assert!(!run.stderr.contains("is not valid"), "the launch schema reported it: {}", run.stderr);
+    // The run stops at selection, not at the launch schema; the report may
+    // still show the schema's own finding for the same value.
+    let stopped = flat.split("The run stopped at:").nth(1).unwrap_or_default();
+    assert!(stopped.contains("needs at least one entry") && !stopped.contains("is not valid"), "the launch schema stopped it: {}", run.stderr);
 }
 
 #[test]
@@ -556,8 +559,8 @@ fn empty_hint_nested_sequence_list_fails_its_body_step_before_any_task_launches(
     let failed = run(&fixture, &record, &[]);
     assert_eq!(failed.code, Some(1), "stderr:\n{}", failed.stderr);
     assert!(failed.launches.is_empty(), "a task launched, the earlier one included: {:?}", failed.launches);
-    assert!(failed.stderr.contains("task provider selection failed"), "stderr:\n{}", failed.stderr);
-    assert!(failed.stderr.contains("with `agent` in"), "stderr:\n{}", failed.stderr);
+    assert!(failed.stderr.contains("cannot select a provider from"), "stderr:\n{}", failed.stderr);
+    assert!(failed.stderr.contains("from `agent` in"), "stderr:\n{}", failed.stderr);
     assert!(failed.stderr.contains("/cwd/inner.md"), "stderr:\n{}", failed.stderr);
     assert!(failed.stderr.contains("needs at least one entry"), "stderr:\n{}", failed.stderr);
 
@@ -770,7 +773,7 @@ fn a_provider_flag_does_not_replace_a_circular_model() {
     let run = run(&fixture, &record, &["--claude"]);
     assert_eq!(run.code, Some(1), "stderr:\n{}", run.stderr);
     assert!(run.launches.is_empty(), "a task launched: {:?}", run.launches);
-    assert!(run.stderr.contains("task provider selection failed"), "stderr:\n{}", run.stderr);
+    assert!(run.stderr.contains("cannot select a provider from"), "stderr:\n{}", run.stderr);
     assert!(run.stderr.contains("env.MODEL"), "stderr:\n{}", run.stderr);
     // The rendered hint wraps behind a gutter.
     let text = run.stderr.replace("┃ ", "");

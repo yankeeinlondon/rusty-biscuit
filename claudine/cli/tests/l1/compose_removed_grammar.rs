@@ -181,7 +181,13 @@ fn assert_rejected(row_name: &str, mode: Mode) {
     let command = mode.subcommand();
 
     assert_eq!(code, Some(1), "`{command}` exits 1 for `{row_name}`:\n{stderr}");
-    assert!(stderr.contains("removed grammar"), "`{command}`/`{row_name}` renders the typed diagnostic:\n{stderr}");
+    // A sequence stop the passive check also finds renders its report, whose
+    // row and closing line carry the typed message instead of the block title.
+    let reported = matches!(mode, Mode::Sequence)
+        && stderr.contains("Sequence preflight found")
+        && stderr.contains(&format!("removed `{}` grammar", row.removed));
+    let typed = reported || stderr.contains("removed grammar");
+    assert!(typed, "`{command}`/`{row_name}` renders the typed diagnostic:\n{stderr}");
     for needle in [row.path, row.removed, row.replacement] {
         assert!(stderr.contains(needle), "`{command}`/`{row_name}` names `{needle}`:\n{stderr}");
     }

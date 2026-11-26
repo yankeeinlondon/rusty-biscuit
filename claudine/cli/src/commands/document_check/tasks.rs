@@ -211,6 +211,21 @@ impl Check {
                 .collect(),
             Err(_) => HashSet::new(),
         };
+        self.root_waits = match &check.inventory {
+            Ok(inventory) => {
+                let mut initialized = HashSet::new();
+                if let Some(initialize) = frontmatter.get("initialize") {
+                    claudine::composition::collect_written_keys(initialize, &mut initialized);
+                }
+                inventory.owners.iter().any(|owner| {
+                    owner.role == claudine::composition::InputOwnerRole::Root
+                        && owner.missing.as_ref().is_some_and(|entry| {
+                            entry.missing.iter().any(|property| !initialized.contains(&property.name))
+                        })
+                })
+            }
+            Err(_) => false,
+        };
         self.sequence_documents = check.tasks.iter()
             .filter_map(|task| Some((task.site.identity.as_str().to_string(), task.sequence_document.clone()?)))
             .collect();
@@ -243,7 +258,12 @@ impl Check {
                         task_path: root.resolved_path.clone(),
                         seq: None,
                     };
-                    self.check_prompt_task(&task);
+                    if self.root_waits {
+                        self.check_selection(&task);
+                        self.sink.not_checked(root_subject, "preview", "the sequence has no value for one of its inputs", None);
+                    } else {
+                        self.check_prompt_task(&task);
+                    }
                 }
             }
             RootList::Command => {
@@ -674,8 +694,12 @@ impl Check {
             task_path: site.file.clone(),
             seq: task.seq.clone(),
         };
-        // The root's own inputs are the root owner's, reported once.
-        if is_root {
+        // The root's own inputs are the root owner's, reported once; a
+        // preview without one would show the prompt without its value.
+        if is_root && self.root_waits {
+            self.check_selection(&prompt_task);
+            self.sink.not_checked(subject, "preview", "the sequence has no value for one of its inputs", None);
+        } else if is_root {
             self.check_prompt_task(&prompt_task);
         } else {
             self.check_task_prompt(&prompt_task, rows);
@@ -712,6 +736,9 @@ impl Check {
     /// The missing inputs of a prompt task's document, prepared passively
     /// under the caller's setters and the task's `with:`.
     fn prompt_inputs(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
+        if self.purpose == Purpose::Advisory {
+            return;
+        }
         if !task.with_late.is_empty() {
             self.sink.not_checked(task.subject, "inputs", "a `with:` value is known only when the task runs", None);
             return;
@@ -750,6 +777,9 @@ impl Check {
     /// reads its writes as setters for every owner, so an input that stack
     /// may write is `not checked` rather than missing.
     fn owner_inputs(&mut self, check: &SequenceCheck, rows: &mut Vec<MissingRow>) {
+        if self.purpose == Purpose::Advisory {
+            return;
+        }
         let Ok(inventory) = &check.inventory else { return };
         let mut initialized = std::collections::HashSet::new();
         if let Some(initialize) = self.root_ref().markdown.frontmatter().as_map().get("initialize") {
@@ -806,10 +836,14 @@ impl Check {
         let every_shape = rows.iter().all(|row| row.property.interactive_shape.is_some());
         let severity = missing_input_severity(interactive.allowed(), every_shape);
         for row in rows {
-            let kind = row.property.type_label.as_deref().map(|label| format!(" ({label})")).unwrap_or_default();
+            let note = match (row.property.type_label.as_deref(), row.property.description.as_deref()) {
+                (Some(label), Some(description)) => format!(" ({label} — {description})"),
+                (Some(note), None) | (None, Some(note)) => format!(" ({note})"),
+                (None, None) => String::new(),
+            };
             let message = match severity {
-                Severity::Warning => format!("`{}`{kind} has no value; an interactive run asks for it", row.property.name),
-                _ => format!("`{}`{kind} is required and has no value; a non-interactive run fails here", row.property.name),
+                Severity::Warning => format!("`{}`{note} has no value; an interactive run asks for it", row.property.name),
+                _ => format!("`{}`{note} is required and has no value; a non-interactive run fails here", row.property.name),
             };
             self.sink.push(
                 row.subject,

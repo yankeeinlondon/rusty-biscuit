@@ -627,8 +627,11 @@ fn run_with_marker(
 }
 
 fn assert_nested_span_rejection(stderr: &str, property: &str) {
+    // A sequence that stops at preflight shows the report's row instead of
+    // the error block's title.
     assert!(
-        stderr.contains("nested interpolation inside a string literal"),
+        stderr.contains("nested interpolation inside a string literal")
+            || (stderr.contains(" nests ") && stderr.contains("inside the string literal")),
         "stderr must carry the nested-span error; stderr was:\n{stderr}"
     );
     assert!(stderr.contains(property), "stderr must name `{property}`:\n{stderr}");

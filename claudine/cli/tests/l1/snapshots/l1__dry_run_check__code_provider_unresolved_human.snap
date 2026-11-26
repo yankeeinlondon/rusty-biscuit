@@ -1,0 +1,15 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of doc.md (no commands run)
+
+doc.md
+  ✗ no provider for this document; a non-interactive run fails here
+      1. --provider flag  not given
+      2. doc.md agent     not set
+      hint: add `agent: <provider>` to doc.md, or run with `--provider
+            <provider>`
+  ℹ not checked: model requirement (no provider)
+
+Dry run found 1 error and 0 warnings; 1 check not run. Previewed 1 of 1 task.

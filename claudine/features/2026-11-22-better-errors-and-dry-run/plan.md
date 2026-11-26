@@ -4,7 +4,7 @@ area: claudine
 total-phases: 8
 created: 2026-11-23
 status: planned
-phase: 6
+phase: 7
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -681,6 +681,150 @@ packages:
 - claudine
 - claudine-cli
 - simplified-schema
+source_files_during_phase_6:
+- darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- Cargo.lock
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/tests.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/completion/operation_file.rs
+- claudine/cli/src/completion/operation_file/recovery_tests.rs
+- claudine/cli/src/completion/walker.rs
+- claudine/cli/tests/l1/sequence_errors_cli.rs
+- claudine/lib/src/composition/resolve.rs
+- claudine/lib/src/composition/sequence/source.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/init.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/combined.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/tests/fixtures/findings/notes_json.json
+- darkmatter/cli/tests/fixtures/findings/notes_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_json.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_markdown.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_broken_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/graph_validate_clean_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_json.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_markdown.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_broken_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_json.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_clean_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_json.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_empty_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_json.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_listing_plain.txt
+- darkmatter/cli/tests/fixtures/reference_baselines/validate_refs_missing_input_json.txt
+- darkmatter/cli/tests/l1/compose_combined_report.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/reference_report_baselines.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/findings/mod.rs
+- darkmatter/lib/src/findings/presentation/generic.rs
+- darkmatter/lib/src/findings/presentation/mod.rs
+- darkmatter/lib/src/findings/presentation/reference.rs
+- darkmatter/lib/src/findings/reference.rs
+- darkmatter/lib/src/findings/reference/basename.rs
+- darkmatter/lib/src/findings/report.rs
+- darkmatter/lib/src/findings/trail.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/reference/report.rs
+- darkmatter/lib/tests/l1/collection_blocks/budget.rs
+- darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/directive_authored_lines.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/glob_implementation_guard.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/passive_compose.rs
+- darkmatter/lib/tests/l1/reference_report.rs
+- darkmatter/lib/tests/l1/reference_suggestions.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/cli/tests/fixtures/findings/notes.md
+docs_updated_during_phase_6:
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/errors/composition-problems.md
+- docs/dependencies.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+source_files_during_phase_7:
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/mod.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/lifecycle/context.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/output/error_walker.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/error_guards.rs
+- claudine/cli/tests/l1/error_guards/sequence_scope.rs
+- claudine/cli/tests/l1/error_guards/sequence-scope-allow.toml
+- claudine/cli/tests/l1/sequence_preflight_baselines.rs
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_invalid_arguments_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_model_required_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_multiple_executables_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_no_executable_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_not_installed_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unknown_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_provider_unresolved_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_selection_key_as_data_json.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_human.snap
+- claudine/cli/tests/l1/snapshots/l1__dry_run_check__code_sequence_shape_json.snap
+docs_updated_during_phase_7:
+- claudine/docs/topics/error-architecture.md
+- claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/claudine/SKILL.md
 ---
 
 # Better errors and a diagnostic dry run implementation plan
@@ -1013,7 +1157,7 @@ the final implementation log for test evidence and any concrete departures. Revi
 
 ### Wave 2
 
-- [ ] **Guard Composition**
+- [x] **Guard Composition**
   - Darkmatter owns passive dispatch, deferred-value propagation, and empty-body instrumentation
     in Rules 6–7. Keep `md` CLI wiring and reference-report code outside this task. Expose
     passive composition's full findings plus its optional partial markdown and empty-body cause.
@@ -1026,7 +1170,7 @@ the final implementation log for test evidence and any concrete departures. Revi
     memo and root-filter interface. Leave Claudine caller edits to graph and CLI integration.
     Prove no-match versus denied/ambiguous/I/O, candidate order, literal glob hint, permission
     filtering, and reused directory reads.
-- [ ] **Recover Graph**
+- [x] **Recover Graph**
   - Claudine library owns per-item recovery, locations and occurrence identity, the exhaustive
     graph/input traversal mode, and typed provider observations in Rules 8–10. Own
     `composition/sequence/{normalize,source,data,preflight}` and the shared task identity and

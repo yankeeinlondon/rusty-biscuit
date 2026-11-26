@@ -1145,7 +1145,7 @@ mod document_inputs {
         );
 
         let stderr = run(&workspace, &["sequence", root.to_str().unwrap()], false);
-        assert!(stderr.contains("missing properties"), "{stderr}");
+        assert!(stderr.contains("missing required properties"), "{stderr}");
         assert!(!workspace.cwd().join("events.log").exists(), "nothing started: {stderr}");
     }
 
@@ -1384,7 +1384,7 @@ mod frozen_complete_reproduction {
         let errors = errors(&report);
         assert_eq!(errors.len(), 1, "{report:#}");
         assert_eq!(errors[0]["code"], "composition.missing_properties", "not a step-state verdict: {report:#}");
-        assert!(errors[0]["message"].as_str().unwrap().contains("`spec` (file)"), "{report:#}");
+        assert!(errors[0]["message"].as_str().unwrap().contains("`spec` (file — the specification to complete)"), "{report:#}");
         assert!(errors[0]["source"]["file"].as_str().unwrap().ends_with("complete.yaml"), "{report:#}");
         assert_eq!(repro.launches(), 0, "{report:#}");
     }
@@ -1552,8 +1552,8 @@ mod derived_provider_reads {
             &[("reads.md", "---\nchoice: claude\nagent: \"{{ choice }}\"\n---\nRead.\n")],
         );
         assert!(!success, "{stderr}");
-        assert!(stderr.contains("Agent Not Installed:(Claude)"), "{stderr}");
-        assert!(stderr.contains("No task has started"), "{stderr}");
+        assert!(stderr.contains("the Claude provider (reads.md frontmatter agent) is not installed"), "{stderr}");
+        assert!(stderr.contains("no task ran"), "{stderr}");
         assert_eq!(launches, 0, "{stderr}");
     }
 }

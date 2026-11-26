@@ -159,8 +159,22 @@ struct PromptTask<'a> {
     seq: Option<Value>,
 }
 
+/// What a [`Check`] is run for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    /// `--dry-run`: every check, and the previews.
+    DryRun,
+    /// A real sequence stopped at preflight: every check, no preview kept.
+    Failure,
+    /// A real sequence passed preflight: only the checks no prompt or
+    /// review answers (the authored keys and the walk), so no finding
+    /// depends on an answer the run has already collected.
+    Advisory,
+}
+
 struct Check {
     mode: Mode,
+    purpose: Purpose,
     /// The command's options, with the caller tail owned once the root is
     /// read.
     shared: SharedComposeArgs,
@@ -186,12 +200,16 @@ struct Check {
     /// The `(file, property)` of each prompt task whose owner is missing an
     /// input.
     waiting_prompts: std::collections::HashSet<(PathBuf, String)>,
+    /// Whether the root misses an input its `initialize` does not write, so
+    /// a body task of the root waits for it as a prompt task would.
+    root_waits: bool,
 }
 
 impl Check {
     fn new(mode: Mode, shared: SharedComposeArgs, stderr_is_tty: bool) -> Self {
         Self {
             mode,
+            purpose: Purpose::DryRun,
             shared,
             stderr_is_tty,
             launch_dir: None,
@@ -208,6 +226,7 @@ impl Check {
             task_subjects: std::collections::HashMap::new(),
             sequence_documents: std::collections::HashMap::new(),
             waiting_prompts: std::collections::HashSet::new(),
+            root_waits: false,
         }
     }
 
@@ -473,6 +492,9 @@ impl Check {
 
     /// The provider and model checks of one prompt task.
     fn check_selection(&mut self, task: &PromptTask<'_>) {
+        if self.purpose == Purpose::Advisory {
+            return;
+        }
         match self.select_provider(task) {
             Some(target) => self.check_model(task, &target),
             None => {
@@ -506,6 +528,103 @@ impl Check {
         }
     }
 
+}
+
+/// The state a real sequence run is in where its passive report is taken.
+pub(crate) struct RunState<'a> {
+    pub(crate) root: &'a ResolvedCompositionSource,
+    pub(crate) invocation: &'a InvocationContext,
+    pub(crate) shared: &'a SharedComposeArgs,
+    /// The caller's values, then every runtime write so far (the root's
+    /// `initialize` included), as the run's next preparation reads them.
+    pub(crate) values: Map<String, Value>,
+}
+
+/// The passive check of a real sequence that stopped at preflight, taken
+/// where it stopped: its errors and warnings, or `None` when it observed
+/// neither. No preview is composed into the report and nothing runs.
+pub(crate) fn preflight_failure_report(state: &RunState<'_>) -> Option<FindingReport> {
+    let report = run_for(Purpose::Failure, state);
+    let report = retain_severities(&report, &[Severity::Error, Severity::Warning]);
+    report.has_problems().then_some(report)
+}
+
+/// The warnings a real sequence that passed preflight has not shown: the
+/// key advice and step-data warnings of every file its walk read. `None`
+/// when there are none.
+pub(crate) fn preflight_advisories(state: &RunState<'_>) -> Option<FindingReport> {
+    let report = run_for(Purpose::Advisory, state);
+    let report = retain_severities(&report, &[Severity::Warning]);
+    report.has_problems().then_some(report)
+}
+
+fn run_for(purpose: Purpose, state: &RunState<'_>) -> FindingReport {
+    let mut check = Check::new(Mode::Sequence, state.shared.clone(), std::io::stderr().is_terminal());
+    check.purpose = purpose;
+    check.launch_dir = Some(state.invocation.launch_cwd().to_path_buf());
+    check.read_config(state.invocation);
+    check.invocation = Some(state.invocation.clone());
+    check.root = Some(state.root.clone());
+    check.setters = state.values.clone();
+    check.check_sequence();
+    check.sink.finish()
+}
+
+/// `report` with only the findings of a `keep` severity, and only the
+/// subjects that still hold one.
+fn retain_severities(report: &FindingReport, keep: &[Severity]) -> FindingReport {
+    let mut sink = FindingSink::new();
+    let mut subjects = std::collections::HashMap::new();
+    for entry in report.entries() {
+        if !keep.contains(&entry.diagnostic().severity) {
+            continue;
+        }
+        let Some(subject) = report.subject(entry.subject()) else { continue };
+        let id = *subjects.entry(entry.subject()).or_insert_with(|| sink.register_subject(subject.clone()));
+        sink.push(id, entry.diagnostic().clone());
+    }
+    sink.finish()
+}
+
+/// A real run's preflight report for a person: a heading, the findings,
+/// and the failure that stopped the run (`stopped`; `None` for advisories
+/// on a run that goes on) when no finding already states it. Ends in a
+/// newline.
+pub(crate) fn render_preflight_report(
+    report: &FindingReport,
+    stopped: Option<&str>,
+    term: &biscuit_terminal::terminal::Terminal,
+    launch_dir: Option<&Path>,
+) -> String {
+    let layout = HumanLayout { width: Some(term.width()), launch_dir: launch_dir.map(Path::to_path_buf) };
+    let counts = report.counts();
+    let found = format!("{} and {}", outcome::plural(counts.errors, "error"), outcome::plural(counts.warnings, "warning"));
+    let title = match stopped {
+        Some(_) => format!("Sequence preflight found {found}; no task ran"),
+        None => format!("Sequence preflight found {found}; the sequence runs"),
+    };
+    let mut out = format!("{title}\n\n");
+    let body = report.render_human(term, &layout);
+    if !body.is_empty() {
+        out.push_str(&body);
+        out.push('\n');
+    }
+    // The failure is named only when no row already says it (the failure's
+    // text, or its text under a wrapper's `…: ` prefix): the first row can
+    // belong to another task than the one the run stopped at.
+    if let Some(stopped) = stopped {
+        let stopped = claudine::harness::concise_message(stopped);
+        let words = |text: &str| text.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let failure = words(&stopped);
+        let said = report.diagnostics().iter().any(|diagnostic| {
+            let row = words(&diagnostic.message);
+            !row.is_empty() && failure.ends_with(&row) && (row.len() == failure.len() || failure[failure.len() - row.len() - 1].ends_with(':'))
+        });
+        if !said {
+            out.push_str(&format!("\nThe run stopped at: {stopped}\n"));
+        }
+    }
+    out
 }
 
 /// The YAML text of `path`'s authored data (`text`): a YAML file whole, a

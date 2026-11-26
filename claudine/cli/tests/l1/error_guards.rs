@@ -42,6 +42,7 @@
 //! four of them are the arms that prove the scanner is not blind, and merging
 //! those into the corpus test would make the corpus test its own witness.
 
+mod sequence_scope;
 mod source_scan;
 
 use std::collections::{BTreeMap, BTreeSet};

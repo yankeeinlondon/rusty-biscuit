@@ -18,6 +18,9 @@ impl Check {
     /// Prepares the task's prompt passively and keeps its preview, or records
     /// why it could not be previewed.
     pub(super) fn preview(&mut self, task: &PromptTask<'_>) {
+        if self.purpose == Purpose::Advisory {
+            return;
+        }
         let session = PassiveSession::new();
         let Some(options) = self.passive_prepare_options(task, session.clone()) else { return };
         // A sequence step composes a document with a string `prompt:`

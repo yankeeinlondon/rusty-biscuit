@@ -1,0 +1,15 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of doc.md (no commands run)
+
+doc.md
+  ✗ the Codex provider (doc.md agent) is not installed: `codex` is not on PATH;
+    a non-interactive run fails here
+      1. --provider flag  not given
+      2. doc.md agent     `codex`: not installed: `codex` is not on PATH
+      hint: install Codex, or choose another provider
+  ℹ not checked: model requirement (no provider)
+
+Dry run found 1 error and 0 warnings; 1 check not run. Previewed 1 of 1 task.
