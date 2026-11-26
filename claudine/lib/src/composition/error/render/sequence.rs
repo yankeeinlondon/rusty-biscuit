@@ -85,6 +85,7 @@ fn parts(err: &CompositionError) -> Option<(String, String)> {
     use CompositionError as E;
     let noun = |field: &Option<ExecutableField>| field.map_or("file", ExecutableField::noun);
     let forward = |path: &Path| biscuit_file::to_forward_slash_string(path);
+    let shown = |path: &Path| code_span(&forward(path));
     let (headline, hint): (String, String) = match err {
         E::SequenceInvalid { .. } => (
             "invalid sequence definition".into(),
@@ -112,28 +113,28 @@ fn parts(err: &CompositionError) -> Option<(String, String)> {
         E::SequenceSourceRead { field, path, source, .. } => (
             format!("{} unreadable", noun(field)),
             match source.kind() {
-                std::io::ErrorKind::PermissionDenied => format!("Grant read permission on {}.", forward(path)),
-                _ => format!("Make {} a readable file.", forward(path)),
+                std::io::ErrorKind::PermissionDenied => format!("Grant read permission on {}.", shown(path)),
+                _ => format!("Make {} a readable file.", shown(path)),
             },
         ),
         E::SequenceSourceParse { field, path, stage, source, site } => (
             format!("{} does not parse", noun(field)),
             match (stage, source) {
                 (_, SequenceLoadCause::DuplicateKey { key, .. }) => {
-                    format!("Remove one of the repeated `{key}` keys from {}.", forward(path))
+                    format!("Remove one of the repeated `{key}` keys from {}.", shown(path))
                 }
                 (_, SequenceLoadCause::JsonLine { line, .. }) => {
-                    format!("Fix line {line} of {}: each line holds one JSON value.", forward(path))
+                    format!("Fix line {line} of {}: each line holds one JSON value.", shown(path))
                 }
                 (SourceParseStage::Frontmatter, _) => format!(
                     "Correct the declaration at `{}`.",
                     site.property.as_deref().unwrap_or("$schema")
                 ),
                 (SourceParseStage::YamlConversion, _) => {
-                    format!("Use string keys and plain values in {}.", forward(path))
+                    format!("Use string keys and plain values in {}.", shown(path))
                 }
-                (SourceParseStage::Yaml, _) => format!("Fix the YAML syntax of {}.", forward(path)),
-                _ => format!("Fix the JSON syntax of {}.", forward(path)),
+                (SourceParseStage::Yaml, _) => format!("Fix the YAML syntax of {}.", shown(path)),
+                _ => format!("Fix the JSON syntax of {}.", shown(path)),
             },
         ),
         E::SequenceExternalWrongType { site, .. } => (
@@ -154,7 +155,7 @@ fn parts(err: &CompositionError) -> Option<(String, String)> {
         ),
         E::SequenceExclusiveExecutable { fields, .. } => (
             "more than one executable".into(),
-            format!("Keep one of {} and move each other one to a step of its own.", fields.join(", ")),
+            format!("Keep one of {} and move the others to steps of their own.", fields.join(", ")),
         ),
         E::SequenceReservedStateKey { key, .. } => (
             "reserved state key".into(),
@@ -197,7 +198,7 @@ fn parts(err: &CompositionError) -> Option<(String, String)> {
         ),
         E::SequenceOperatorMissingField { field, index, .. } => (
             "item lacks the operator's field".into(),
-            format!("Add `{field}` to item {index}, or read a field every item has."),
+            format!("Add `{field}` to item {}, or read a field every item has.", index + 1),
         ),
         E::SequenceOperatorEmptyName { expression, .. } => (
             "empty generated name".into(),

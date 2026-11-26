@@ -160,7 +160,7 @@ fn template_defaults_cannot_write_declarations() {
         for sequence in ["[]", "[alpha]"] {
             let error = direct(&dir, &extra, sequence).unwrap_err();
             assert!(
-                matches!(&error, CompositionError::SequenceReservedTemplateKey(found) if found == key),
+                matches!(&error, CompositionError::SequenceReservedTemplateKey { key: found, .. } if found == key),
                 "{key} on {sequence}: {error:?}"
             );
         }
@@ -248,7 +248,7 @@ fn state_violations_name_the_step_and_the_declaring_owner() {
         other => panic!("expected SequenceStateSchemaViolation, got {other:?}"),
     }
     let text = error.to_string();
-    assert!(text.starts_with("sequence step 1 (`red`) failed schema validation at `color`:"), "{text}");
+    assert!(text.starts_with("step 2 (`red`) failed schema validation at `color`:"), "{text}");
     assert!(text.contains("(`$state` of `sequence` in "), "{text}");
 
     // A referenced document's violation names that document, not the referrer.

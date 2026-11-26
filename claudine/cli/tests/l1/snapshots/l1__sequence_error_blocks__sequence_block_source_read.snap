@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: task file unreadable
+┃ 
+┃ could not read task file tasks/build.yaml: permission denied
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Grant read permission on tasks/build.yaml.

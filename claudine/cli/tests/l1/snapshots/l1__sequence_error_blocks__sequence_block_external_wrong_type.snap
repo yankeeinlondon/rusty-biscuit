@@ -1,0 +1,9 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: wrong sequence file structure
+┃ 
+┃ data/rows.yaml has the wrong structure: expected a list, found a string
+┃ 
+┃ Give the file a root sequence: list, make its root a list, or select a list with -> offset.

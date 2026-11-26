@@ -1,0 +1,15 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: "portable_text(&fixture, &human.stderr)"
+---
+Dry run of seq.md (no commands run)
+
+task find (sequence[0])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:5:13
+      hint: create missing.md before a real run, or correct the reference
+  ℹ not checked: provider, inputs (the prompt file could not be read)
+
+Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.

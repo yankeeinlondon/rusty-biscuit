@@ -1,0 +1,39 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.failed",
+      "severity": "error",
+      "message": "task file `/work/bad.yaml` is not valid YAML: YAML parse error: did not find expected ',' or ']' at line 3 column 1, while parsing a flow sequence at line 2 column 9",
+      "source": {
+        "file": "/work/bad.yaml",
+        "line": null,
+        "column": null,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "Fix the YAML syntax of `/work/bad.yaml`.",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "t",
+          "property": "sequence[0]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

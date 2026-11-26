@@ -1,0 +1,16 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: projection(&err)
+---
+{
+  "code": "composition.failed",
+  "category": "Composition",
+  "disposition": "Correctable",
+  "origin": "Author",
+  "detail": {
+    "source_path": null
+  },
+  "snapshot_cause": null,
+  "message": "invalid sequence definition: step 3 must be a string or object, got number",
+  "hint": "Correct the value named above: a sequence is a list of steps, a file reference, an expression, or a shell expansion."
+}

@@ -106,7 +106,7 @@ fn every_owning_document_is_inventoried_with_its_file_and_container() {
         // `$schema` and `$state` requirements are not inputs.
         let missing: Vec<Vec<String>> = inventory.owners.iter().map(missing_names).collect();
         assert_eq!(missing, [vec!["reviewer"], vec!["spec"], vec!["leg_input"], vec![]], "{name}");
-        let Some(CompositionError::SequenceMissingProperties { failures, failure_count }) = inventory.missing_error() else {
+        let Some(CompositionError::SequenceMissingProperties { failures, failure_count, .. }) = inventory.missing_error() else {
             panic!("{name}: expected the combined report");
         };
         assert_eq!(failure_count, 3);
@@ -184,7 +184,7 @@ sequence:
     // authored reference is read as the literal file name it always was.
     assert!(matches!(
         resolved,
-        Err(CompositionError::SequenceExternalLoad { ref context, .. }) if context.contains("{{ plan }}")
+        Err(CompositionError::SequenceReferenceResolution { ref reference, .. }) if reference.contains("{{ plan }}")
     ), "{resolved:?}");
     fs::write(&root, fs::read_to_string(&root).unwrap().replace("  - name: nested\n    prompt: \"{{ plan }}\"\n", "")).unwrap();
     let resolved = discover(&root, &caller, json!({"spec": "work/spec.md"})).unwrap();

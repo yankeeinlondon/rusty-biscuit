@@ -1,0 +1,14 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: invalid sequence definition
+┃ 
+┃ invalid sequence definition: step 3 must be a string or object, got number
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Correct the value named above: a sequence is a list of steps, a file reference, an
+┃ expression, or a shell expansion.

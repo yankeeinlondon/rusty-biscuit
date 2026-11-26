@@ -74,9 +74,7 @@ fn missing_documents(envelope: &Value) -> Vec<&Value> {
         .collect()
 }
 
-/// Every string in `value` that holds a `\`, by JSON pointer, skipping
-/// `source.file`: Darkmatter's `DiagnosticSource` serializes that field in
-/// native spelling, which on Linux and macOS is already `/`.
+/// Every string in `value` that holds a `\`, by JSON pointer.
 fn backslashed(value: &Value, pointer: String, found: &mut Vec<String>) {
     match value {
         Value::String(text) if text.contains('\\') => found.push(format!("{pointer} = {text}")),
@@ -87,9 +85,6 @@ fn backslashed(value: &Value, pointer: String, found: &mut Vec<String>) {
         }
         Value::Object(map) => {
             for (key, item) in map {
-                if key == "file" && pointer.ends_with("/source") {
-                    continue;
-                }
                 backslashed(item, format!("{pointer}/{key}"), found);
             }
         }

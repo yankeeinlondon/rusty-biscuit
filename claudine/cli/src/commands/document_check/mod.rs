@@ -203,6 +203,10 @@ struct Check {
     /// Whether the root misses an input its `initialize` does not write, so
     /// a body task of the root waits for it as a prompt task would.
     root_waits: bool,
+    /// The tasks whose `agent` value provider selection already reported
+    /// as unusable; their document's schema verdict on that same `agent`
+    /// is not reported again.
+    agent_reported: std::collections::HashSet<SubjectId>,
 }
 
 impl Check {
@@ -227,6 +231,7 @@ impl Check {
             sequence_documents: std::collections::HashMap::new(),
             waiting_prompts: std::collections::HashSet::new(),
             root_waits: false,
+            agent_reported: std::collections::HashSet::new(),
         }
     }
 
@@ -389,7 +394,11 @@ impl Check {
     /// projection, then Claudine's diagnostic code, else as `internal.bug`.
     /// Darkmatter's catch-all `dm.compose.failure` record means it classified
     /// nothing, so it is never reported. A file-reference
-    /// failure carries its class (`failure`), as a real run's `failure:` row.
+    /// failure carries its class (`failure`), as a real run's `failure:` row,
+    /// and a sequence error its block's hint
+    /// ([`CompositionError::sequence_hint`]) at its site's file. A schema
+    /// verdict only on an `agent` value selection already reported for the
+    /// subject is not reported (`None`).
     fn push_error(
         &mut self,
         subject: SubjectId,
@@ -397,6 +406,15 @@ impl Check {
         trail: Trail,
     ) -> Option<FindingId> {
         use darkmatter::markdown::compose::report_diagnostics::{COMPOSE_FAILURE_CODE, error_diagnostics};
+        if self.agent_reported.contains(&subject)
+            && let Some(CompositionError::SchemaValidation { problems, .. }) = error.downcast_ref::<CompositionError>()
+            && !problems.is_empty()
+            && problems.iter().all(|problem| problem.trim_start_matches('/') == "agent")
+        {
+            // Selection's row names the `agent` value and its fix; the
+            // schema's verdict on the same value says less.
+            return None;
+        }
         let projected = error_diagnostics(error);
         let unclassified = matches!(projected.as_slice(), [only] if only.code == COMPOSE_FAILURE_CODE);
         // Darkmatter's catch-all is never the answer: Claudine's own code
@@ -411,8 +429,18 @@ impl Check {
             }
             return first;
         }
+        let composition = error.downcast_ref::<CompositionError>();
         let mut diagnostic = match claudine::diagnostics::as_diagnostic(error) {
-            Some(known) => Diagnostic::projected(known.code(), Severity::Error, error.to_string(), None),
+            // A sequence error's row says what its block says: the same
+            // hint, at its file.
+            Some(known) => {
+                let hint = composition.and_then(CompositionError::sequence_hint);
+                let diagnostic = Diagnostic::projected(known.code(), Severity::Error, error.to_string(), hint);
+                match composition.and_then(CompositionError::sequence_site).and_then(|site| site.file.clone()) {
+                    Some(file) => diagnostic.with_source(DiagnosticSource::file_only(Some(file))),
+                    None => diagnostic,
+                }
+            }
             None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
         };
         if let Some(failure) = error.downcast_ref::<CompositionError>().and_then(CompositionError::resolution_failure) {

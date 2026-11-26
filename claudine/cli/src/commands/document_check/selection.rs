@@ -184,6 +184,11 @@ impl Check {
             Err(error) => {
                 // An unusable own hint fails the real run before any task
                 // starts, on a terminal too.
+                if let CompositionError::SequenceTaskProviderSelection { property, .. } = &error
+                    && (property == "agent" || property.ends_with(".agent"))
+                {
+                    self.agent_reported.insert(task.subject);
+                }
                 if let CompositionError::SequenceTaskProviderSelection { problem, .. } = &error
                     && let SequenceTaskProviderProblem::Unresolvable { state, .. } = problem.as_ref()
                 {

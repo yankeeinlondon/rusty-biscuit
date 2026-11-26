@@ -1039,7 +1039,7 @@ fn level2_transclusion_failure_renders_darkmatter_block_in_tmux() {
     // cannot produce.
     capture.assert_contains("missing-chapter.md", "the authored reference must be named");
     capture.assert_contains(
-        "Check file existence and permissions",
+        "or correct the reference",
         "Darkmatter's own hint must survive the Claudine wrapper",
     );
     assert_eq!(

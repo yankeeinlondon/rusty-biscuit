@@ -5,9 +5,12 @@
 //! passive session, so the preview is what the real command would compose,
 //! except that work needing an effect is left as written. Each thing left
 //! as written is its own `not checked` row, and the human preview marks it.
+//! A warning the preparation reports, which a real run would print, is a
+//! warning row.
 
 use claudine::composition::CallerInputLayers;
 use darkmatter::markdown::compose::passive::{Deferral, DeferredConstruct, PassiveSession};
+use darkmatter::markdown::compose::report_diagnostics::warning_diagnostic;
 
 use super::*;
 
@@ -43,7 +46,19 @@ impl Check {
             self.sink.not_checked(task.subject, check_name(deferral), &deferral.reason.describe(), None);
         }
         match prepared {
-            Ok(prepared) => self.previews.push(marked(&prepared.prompt, &deferrals)),
+            Ok(prepared) => {
+                // What the real run would print as a warning (a tolerated
+                // transclusion failure, for one) is a warning here too.
+                // Skipped triggers are reported once per invocation elsewhere.
+                for warning in prepared.warnings.iter().filter(|warning| warning.invalid_trigger_source().is_none()) {
+                    let mut diagnostic = warning_diagnostic(warning).with_trail(task.trail.clone());
+                    if diagnostic.source.is_none() {
+                        diagnostic = diagnostic.with_source(DiagnosticSource::file_only(Some(task.prompt.resolved_path.clone())));
+                    }
+                    self.sink.push(task.subject, diagnostic);
+                }
+                self.previews.push(marked(&prepared.prompt, &deferrals));
+            }
             Err(CompositionError::ComposedBodyEmpty { cause, .. }) => {
                 self.sink.push(
                     task.subject,

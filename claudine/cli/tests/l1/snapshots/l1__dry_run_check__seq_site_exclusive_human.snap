@@ -1,0 +1,14 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: "portable_text(&fixture, &human.stderr)"
+---
+Dry run of seq.md (no commands run)
+
+task both (sequence[0])
+  ✗ this task names more than one executable: `prompt`, `sequence`
+      in seq.md
+      hint: keep exactly one executable per task, and move the others
+            into their own tasks
+  ℹ not checked: provider, inputs (more than one executable)
+
+Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.

@@ -12,7 +12,7 @@
 //!
 //! Before the fix, command-level template discovery dereferences the body's
 //! `::file` transclusion (condition-blind by design) before `initialize` runs,
-//! so the run fails with `TransclusionError: I/O failure` / `File not found`
+//! so the run fails with `TransclusionError: file not found in ::file` / `File not found`
 //! and the file that initialization would have created is never written.
 //!
 //! A third test pins the R2 approval boundary on the direct route: without

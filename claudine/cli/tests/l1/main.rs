@@ -253,6 +253,7 @@ mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod sequence_error_blocks;
 mod sequence_dry_run;
 mod steer_cli;
 mod task_guards;

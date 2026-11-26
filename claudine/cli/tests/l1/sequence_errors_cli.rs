@@ -202,7 +202,7 @@ fn an_authored_object_step_without_a_name_is_rejected() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("index 0") && stderr.contains("missing required `name`"),
+        stderr.contains("step 1 is missing its required `name`"),
         "an inline list is authored-for-sequences and stays strict; stderr:\n{stderr}"
     );
 }
@@ -218,7 +218,7 @@ fn an_authored_non_string_scalar_step_is_rejected() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("index 1"),
+        stderr.contains("step 2 "),
         "the error must locate the offending step; stderr:\n{stderr}"
     );
     assert!(
@@ -240,7 +240,7 @@ fn a_null_item_is_rejected_even_from_a_lenient_source() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("item 1 is null"),
+        stderr.contains("item 2 is null"),
         "expected the null-item rejection naming the index; stderr:\n{stderr}"
     );
 }
@@ -355,7 +355,7 @@ fn an_operator_missing_its_source_field_names_the_item_index() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("cannot read `color`") && stderr.contains("item 1"),
+        stderr.contains("cannot read `color`") && stderr.contains("item 2 "),
         "the failure must be attributable to one item; stderr:\n{stderr}"
     );
 }
@@ -368,7 +368,7 @@ fn an_operator_applied_to_a_scalar_item_names_the_item_index() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("requires object items") && stderr.contains("item 1 is string"),
+        stderr.contains("requires object items") && stderr.contains("item 2 is string"),
         "expected the scalar-item rejection; stderr:\n{stderr}"
     );
 }
@@ -381,7 +381,7 @@ fn a_template_operator_producing_an_empty_name_names_the_item_index() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("produced an empty name for item 1"),
+        stderr.contains("produced an empty name for item 2"),
         "a name must be a non-empty string; stderr:\n{stderr}"
     );
 }

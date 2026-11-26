@@ -140,7 +140,7 @@ mod boundaries {
             &format!("---\nagent: goose\nsequence:\n  - name: find\n    prompt: ./missing.md\n{FINALIZE}---\n"),
         )],
         facets = "composition.failed composition correctable author",
-        cause = "failed to load external sequence file: `./missing.md`: file not found",
+        cause = "prompt file `./missing.md` could not be resolved: file not found",
         rows = &["task find (sequence[0])", "the prompt file does not exist", "at seq.md:5:13", "hint: create missing.md before a real run"];
 
         /// A `sequence:` task names a sequence document that does not exist.
@@ -149,7 +149,7 @@ mod boundaries {
             &format!("---\nagent: goose\nsequence:\n  - name: nested\n    sequence: ./child.md\n{FINALIZE}---\n"),
         )],
         facets = "composition.failed composition correctable author",
-        cause = "failed to load external sequence file: `./child.md`: file not found",
+        cause = "sequence `./child.md` could not be resolved: file not found",
         rows = &["task nested (sequence[0])", "the sequence file does not exist", "at seq.md:5:15"];
 
         /// A prompt document includes a file that does not exist.
@@ -159,7 +159,7 @@ mod boundaries {
         ],
         facets = "composition.failed composition correctable author",
         cause = "pre-flight discovery failed: Transclusion error:",
-        rows = &["task ask (sequence[0])", "File not found: ./absent.md", "at ask.md:3:1"];
+        rows = &["task ask (sequence[0])", "file not found in `::file`", "at ask.md:3:1"];
 
         /// A task's `with.agent` names no provider.
         provider: files = &[
@@ -228,10 +228,10 @@ fn a_later_graph_refusal_wins_over_an_earlier_missing_input() {
         ),
     ]);
     assert_baseline(&outcome, 1, "composition.failed composition correctable author",
-        "failed to load external sequence file: `./missing.md`: file not found",
+        "prompt file `./missing.md` could not be resolved: file not found",
         &["task one (sequence[0])", "`topic` (string) is required and has no value", "task two (sequence[1])", "the prompt file does not exist"]);
     // No row says the failure in its own words, so the closing line names it.
-    assert!(flat(&outcome.stderr).contains("The run stopped at: failed to load external sequence file"), "stderr:\n{}", outcome.stderr);
+    assert!(flat(&outcome.stderr).contains("The run stopped at: prompt file `./missing.md` could not be resolved"), "stderr:\n{}", outcome.stderr);
 }
 
 /// A task fails and the root's `failure` retries; between the attempts an
@@ -255,7 +255,7 @@ fn a_retry_that_stops_at_preflight_reports_once() {
         panic!("the first attempt's task, `blocked` once, then `finalize` once: {:?}", outcome.facets);
     };
     assert_eq!([first.as_str(), blocked.as_str(), facets.as_str()], ["child", "blocked", "composition.failed composition correctable author"]);
-    assert!(msg.contains("failed to load external sequence file:") && msg.contains("YAML parse error"), "{msg}");
+    assert!(msg.contains("child.yaml` is not valid YAML:") && msg.contains("YAML parse error"), "{msg}");
     assert_eq!(outcome.stderr.matches(REPORT_HEADING).count(), 1, "stderr:\n{}", outcome.stderr);
     let stderr = flat(&outcome.stderr);
     assert!(stderr.contains("task nested (sequence[0])"), "stderr:\n{}", outcome.stderr);
@@ -274,7 +274,7 @@ fn an_input_initialize_writes_is_not_reported_missing() {
         ),
     )]);
     assert_baseline(&outcome, 1, "composition.failed composition correctable author",
-        "failed to load external sequence file: `./missing.md`: file not found", &[]);
+        "prompt file `./missing.md` could not be resolved: file not found", &[]);
     assert!(!outcome.stderr.contains("topic"), "`topic` was written by `initialize`; stderr:\n{}", outcome.stderr);
 }
 

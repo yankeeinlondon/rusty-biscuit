@@ -169,7 +169,8 @@ fn a_dry_run_reports_the_same_preflight_failure_without_side_effects() {
         .collect();
     assert_eq!(errors.len(), 1, "{stdout}");
     assert_eq!(errors[0]["code"], "dm.reference.missing_transclusion", "{stdout}");
-    assert!(errors[0]["message"].as_str().unwrap().contains(&format!("File not found: {GENERATED}")), "{stdout}");
+    assert_eq!(errors[0]["message"], "file not found in `::file`", "{stdout}");
+    assert_eq!(errors[0]["reference"], GENERATED, "{stdout}");
     assert_eq!(errors[0]["trail"][0]["label"], "one", "{stdout}");
     case.assert_no_side_effects(&stdout);
 }

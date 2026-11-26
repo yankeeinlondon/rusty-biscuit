@@ -665,7 +665,7 @@ fn a_referenced_formal_documents_state_declaration_validates_the_step_state() {
     let errors = errors(&report);
     assert_eq!(errors.len(), 1, "{report:#}");
     assert!(
-        errors[0]["message"].as_str().unwrap().contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
+        errors[0]["message"].as_str().unwrap().contains("step 1 (`blue`) failed schema validation at `/rank`"),
         "the violation must name the step index, its id, and the failing property: {report:#}"
     );
 }
@@ -734,7 +734,7 @@ fn a_directly_invoked_documents_state_declaration_validates_the_step_state() {
     let errors = errors(&report);
     assert_eq!(errors.len(), 1, "{report:#}");
     assert!(
-        errors[0]["message"].as_str().unwrap().contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
+        errors[0]["message"].as_str().unwrap().contains("step 1 (`blue`) failed schema validation at `/rank`"),
         "the direct mode must report the same step-state violation the referenced mode does: {report:#}"
     );
 }
@@ -1160,7 +1160,7 @@ mod document_inputs {
         );
 
         let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
-        assert!(stderr.contains("sequence step 0 (`blue`) failed schema validation at `color`"), "{stderr}");
+        assert!(stderr.contains("step 1 (`blue`) failed schema validation at `color`"), "{stderr}");
         assert!(!stderr.contains("missing properties"), "{stderr}");
     }
 

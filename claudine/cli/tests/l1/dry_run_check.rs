@@ -223,6 +223,39 @@ fn compose_checks_the_provider_and_its_model_requirement() {
     assert!(stderr.contains("OpenCode needs a model in a non-interactive run"), "stderr:\n{stderr}");
 }
 
+/// A transcluded file the real run would replace with a notice and warn
+/// about (it does not parse) is a warning row of the dry run in the
+/// including document, not a clean report; the same document with a valid
+/// part is the control.
+#[test]
+fn a_tolerated_transclusion_failure_is_a_warning_row() {
+    let fixture = CliProcessFixture::named("dry-run-tolerated-transclusion");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\n---\n# Doc\n\n::file part.md\n\nbody\n").unwrap();
+
+    fs::write(fixture.cwd().join("part.md"), "part text\n").unwrap();
+    let control = run(&fixture, &["compose", "doc.md", "--dry-run"]);
+    assert_eq!(control.status.code(), Some(0), "stderr:\n{}", control.stderr);
+    assert!(control.stdout.contains("part text"), "stdout:\n{}", control.stdout);
+    assert!(control.stderr.contains("Dry run found 0 errors and 0 warnings"), "stderr:\n{}", control.stderr);
+
+    fs::write(fixture.cwd().join("part.md"), "---\ntitle: [unclosed\n---\npart text\n").unwrap();
+    let human = run(&fixture, &["compose", "doc.md", "--dry-run"]);
+    assert_eq!(human.status.code(), Some(2), "stderr:\n{}", human.stderr);
+    assert!(prose(&human.stderr).contains("Failed to parse frontmatter in"), "stderr:\n{}", human.stderr);
+    assert!(human.stderr.contains("Dry run found 0 errors and 1 warning"), "stderr:\n{}", human.stderr);
+    assert!(human.stdout.contains("_Could not transclude `part.md`_"), "stdout:\n{}", human.stdout);
+
+    let json = run(&fixture, &["compose", "doc.md", "--dry-run", "--json"]);
+    assert_eq!(json.status.code(), Some(2), "stdout:\n{}", json.stdout);
+    let envelope: Value = serde_json::from_str(&json.stdout).unwrap();
+    let diagnostics = envelope["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 1, "{}", json.stdout);
+    assert_eq!(diagnostics[0]["severity"], "warning", "{}", json.stdout);
+    assert!(diagnostics[0]["source"]["file"].as_str().unwrap().ends_with("doc.md"), "{}", json.stdout);
+    assert_eq!(envelope["summary"]["warnings"], 1, "{}", json.stdout);
+}
+
 /// `inline-compose --dry-run` leaves the input file byte-for-byte intact.
 #[test]
 fn inline_compose_dry_run_leaves_the_file_intact() {
@@ -341,10 +374,10 @@ fn a_document_that_fails_to_parse_fails_only_its_task() {
     let stderr = prose(&run.stderr);
     assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
     for expected in [
-        "child.yaml: YAML parse error: sequence[0]: duplicate entry with key \"name\" at line 3 column 5",
-        "rows.json5: JSON5 parse error",
+        "is not valid YAML: YAML parse error: sequence[0]: duplicate entry with key \"name\" at line 3 column 5 in child.yaml",
+        "is not valid JSON: JSON5 parse error",
         "line 1 column 15",
-        "rows.jsonl: line 3: duplicate key `name`",
+        "repeats a key: line 3: duplicate key `name`",
         "child.md: Failed to parse frontmatter",
         "Previewed 1 of 2 tasks.",
     ] {
@@ -933,4 +966,223 @@ fn an_inline_containers_schema_is_not_checked() {
     let run = run(&fixture, &["sequence", "c.yaml", "--dry-run"]);
     assert_eq!(run.status.code(), Some(0), "{}", run.stderr);
     assert!(prose(&run.stderr).contains("not checked: `$schema` (an inline container's schema judges the values at its turn)"), "{}", run.stderr);
+}
+
+/// A fixture named `name` with a `goose` provider on `PATH` and each
+/// `(path, text)` file written into its launch directory.
+fn sequence_fixture(name: &str, files: &[(&str, &str)]) -> CliProcessFixture {
+    let fixture = CliProcessFixture::named(name);
+    install_provider_binary(&fixture, "goose");
+    for (path, text) in files {
+        fs::write(fixture.cwd().join(path), text).unwrap();
+    }
+    fixture
+}
+
+/// The passive check of `seq.md`: the human report, and the JSON envelope
+/// with the launch directory made portable.
+fn sequence_reports(fixture: &CliProcessFixture) -> (Run, Value) {
+    let human = run(fixture, &["sequence", "seq.md", "--dry-run"]);
+    let json = run(fixture, &["sequence", "seq.md", "--dry-run", "--json"]);
+    let mut envelope: Value = serde_json::from_str(&json.stdout).unwrap_or_else(|error| panic!("{error}: {}", json.stdout));
+    portable(&mut envelope, &launch_spellings(fixture));
+    (human, envelope)
+}
+
+/// The JSON envelope of the passive check of `seq.md`, for a control that
+/// needs only its rows.
+fn sequence_json(fixture: &CliProcessFixture) -> (Run, Value) {
+    let json = run(fixture, &["sequence", "seq.md", "--dry-run", "--json"]);
+    let envelope: Value = serde_json::from_str(&json.stdout).unwrap_or_else(|error| panic!("{error}: {}", json.stdout));
+    (json, envelope)
+}
+
+/// `text` with the launch directory spelled `/work`, so a plain snapshot is
+/// the same on every host.
+fn portable_text(fixture: &CliProcessFixture, text: &str) -> String {
+    let mut value = Value::String(text.to_string());
+    portable(&mut value, &launch_spellings(fixture));
+    value.as_str().unwrap().to_string()
+}
+
+/// The error rows of an envelope, as `(code, message, hint)`.
+fn error_rows(envelope: &Value) -> Vec<(String, String, Option<String>)> {
+    envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["severity"] == "error")
+        .map(|row| {
+            (
+                row["code"].as_str().unwrap().to_string(),
+                row["message"].as_str().unwrap().to_string(),
+                row["hint"].as_str().map(ToString::to_string),
+            )
+        })
+        .collect()
+}
+
+/// A missing prompt file: the passive check names it, and the real run's
+/// stop line names the prompt file and the proven cause. Control: the file
+/// present, nothing is reported.
+#[test]
+fn a_missing_prompt_file_is_named_by_its_noun_and_cause() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: find\n    prompt: ./missing.md\n---\n";
+    let fixture = sequence_fixture("seq-site-missing-prompt", &[("seq.md", seq)]);
+    let (human, envelope) = sequence_reports(&fixture);
+    let real = run(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
+    insta::assert_snapshot!("seq_site_missing_prompt_human", portable_text(&fixture, &human.stderr));
+    assert!(
+        prose(&real.stderr).contains("The run stopped at: prompt file `./missing.md` could not be resolved: file not found"),
+        "{}",
+        real.stderr
+    );
+    insta::assert_json_snapshot!("seq_site_missing_prompt_json", envelope);
+}
+
+/// The control of [`a_missing_prompt_file_is_named_by_its_noun_and_cause`]:
+/// the file present, nothing is reported.
+#[test]
+fn a_present_prompt_file_is_not_reported() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: find\n    prompt: ./missing.md\n---\n";
+    let control = sequence_fixture("seq-site-missing-prompt-control", &[("seq.md", seq), ("missing.md", "find it\n")]);
+    let (json, envelope) = sequence_json(&control);
+    assert_eq!(json.status.code(), Some(0), "{}", json.stdout);
+    assert!(error_rows(&envelope).is_empty(), "{envelope:#}");
+}
+
+/// A task file that is not valid YAML: one row names the task file and the
+/// parse failure, located in that file, with the hint for the cause.
+/// Control: valid YAML reports nothing.
+#[test]
+fn a_task_file_yaml_error_names_the_file_and_the_parse_stage() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./bad.yaml\n---\n";
+    let fixture = sequence_fixture("seq-site-yaml", &[("seq.md", seq), ("bad.yaml", "kind: task\nprompt: [unclosed\n")]);
+    let (human, envelope) = sequence_reports(&fixture);
+    let real = run(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
+    // The row holds the absolute path, so its wrapping varies by host: the
+    // JSON snapshot pins the text, and the human report its shape.
+    let stderr = prose(&human.stderr);
+    assert!(stderr.contains("task t (sequence[0]) ✗ task file `"), "{}", human.stderr);
+    assert!(stderr.contains("in bad.yaml hint: Fix the YAML syntax of `"), "{}", human.stderr);
+    insta::assert_json_snapshot!("seq_site_yaml_json", envelope);
+    let rows = error_rows(&envelope);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].1.starts_with("task file `/work/bad.yaml` is not valid YAML:"), "{rows:?}");
+    assert_eq!(rows[0].2.as_deref(), Some("Fix the YAML syntax of `/work/bad.yaml`."));
+    assert!(prose(&real.stderr).contains("is not valid YAML"), "{}", real.stderr);
+}
+
+/// The control of [`a_task_file_yaml_error_names_the_file_and_the_parse_stage`]:
+/// valid YAML reports nothing.
+#[test]
+fn a_valid_task_file_is_not_reported() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./bad.yaml\n---\n";
+    let control = sequence_fixture(
+        "seq-site-yaml-control",
+        &[("seq.md", seq), ("bad.yaml", "kind: task\nprompt: ./p.md\n"), ("p.md", "do it\n")],
+    );
+    let (json, envelope) = sequence_json(&control);
+    assert_eq!(json.status.code(), Some(0), "{}", json.stdout);
+    assert!(error_rows(&envelope).is_empty(), "{envelope:#}");
+}
+
+/// A step naming two executables: the real run stops at a one-based step
+/// that lists every executable a step may declare. Control: one executable.
+#[test]
+fn an_exclusive_executable_names_the_one_based_step_and_the_choices() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: both\n    prompt: ./x.md\n    sequence: ./y.md\n---\n";
+    let fixture = sequence_fixture("seq-site-exclusive", &[("seq.md", seq), ("x.md", "x\n")]);
+    let (human, envelope) = sequence_reports(&fixture);
+    let real = run(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
+    insta::assert_snapshot!("seq_site_exclusive_human", portable_text(&fixture, &human.stderr));
+    insta::assert_json_snapshot!("seq_site_exclusive_json", envelope);
+    assert!(
+        prose(&real.stderr).contains(
+            "The run stopped at: step 1 declares more than one executable field (prompt, sequence); \
+             a step declares at most one of prompt, shell, side_effect, group, task, sequence"
+        ),
+        "{}",
+        real.stderr
+    );
+}
+
+/// The control of [`an_exclusive_executable_names_the_one_based_step_and_the_choices`]:
+/// one executable reports nothing.
+#[test]
+fn a_single_executable_is_not_reported() {
+    let control = sequence_fixture(
+        "seq-site-exclusive-control",
+        &[("seq.md", "---\nagent: goose\nsequence:\n  - name: both\n    prompt: ./x.md\n---\n"), ("x.md", "x\n")],
+    );
+    let (json, envelope) = sequence_json(&control);
+    assert_eq!(json.status.code(), Some(0), "{}", json.stdout);
+    assert!(error_rows(&envelope).is_empty(), "{envelope:#}");
+}
+
+/// An unknown field on a task file: the parser's row offers the near miss
+/// as its hint. Control: a key near nothing gets the list instead.
+#[test]
+fn an_unknown_task_field_offers_its_near_miss() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./t.yaml\n---\n";
+    let fixture = sequence_fixture(
+        "seq-site-unknown-field",
+        &[("seq.md", seq), ("t.yaml", "kind: task\nprompt: ./x.md\nwhem: \"true\"\n"), ("x.md", "x\n")],
+    );
+    let (human, envelope) = sequence_reports(&fixture);
+    assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
+    insta::assert_snapshot!("seq_site_unknown_field_human", portable_text(&fixture, &human.stderr));
+    insta::assert_json_snapshot!("seq_site_unknown_field_json", envelope);
+    let parser_row = error_rows(&envelope).into_iter().find(|row| row.0 == "composition.failed").expect("the parser's row");
+    assert!(parser_row.1.starts_with("`whem` is not a field of a `prompt` task; expected one of"), "{parser_row:?}");
+    assert_eq!(parser_row.2.as_deref(), Some("Did you mean `when`? Rename `whem`."));
+}
+
+/// The control of [`an_unknown_task_field_offers_its_near_miss`]: a key near
+/// nothing gets the list of fields instead.
+#[test]
+fn an_unknown_task_field_near_nothing_lists_the_fields() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./t.yaml\n---\n";
+    let control = sequence_fixture(
+        "seq-site-unknown-field-control",
+        &[("seq.md", seq), ("t.yaml", "kind: task\nprompt: ./x.md\nzzzzzz: \"true\"\n"), ("x.md", "x\n")],
+    );
+    let (_, envelope) = sequence_json(&control);
+    let parser_row = error_rows(&envelope).into_iter().find(|row| row.0 == "composition.failed").expect("the parser's row");
+    assert!(parser_row.2.as_deref().is_some_and(|hint| hint.starts_with("Remove `zzzzzz`, or use one of")), "{parser_row:?}");
+}
+
+/// `agent: []` is reported once, by the provider selection row, and not
+/// again as a schema row. Control: a second schema problem in the same file
+/// keeps its schema row.
+#[test]
+fn an_empty_agent_list_is_reported_once() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: one\n    prompt: ./task.md\n---\n";
+    let fixture = sequence_fixture("seq-agent-empty", &[("seq.md", seq), ("task.md", "---\nagent: []\n---\nTask body\n")]);
+    for args in [&["sequence", "seq.md", "--dry-run"][..], &["sequence", "seq.md"][..]] {
+        let run = run(&fixture, args);
+        let stderr = prose(&run.stderr);
+        assert!(stderr.contains("an `agent` list needs at least one entry"), "{args:?}: {}", run.stderr);
+        assert!(!stderr.contains("schema validation failed"), "{args:?}: one row per problem:\n{}", run.stderr);
+        assert!(stderr.contains("found 1 error"), "{args:?}: {}", run.stderr);
+    }
+
+    let inline = sequence_fixture(
+        "seq-agent-empty-with",
+        &[("seq.md", "---\nagent: goose\nsequence:\n  - name: one\n    prompt: ./p.md\n    with: { agent: [] }\n---\n"), ("p.md", "hi\n")],
+    );
+    let inline_run = run(&inline, &["sequence", "seq.md", "--dry-run"]);
+    assert!(prose(&inline_run.stderr).contains("found 1 error"), "{}", inline_run.stderr);
+
+    let control = sequence_fixture(
+        "seq-agent-empty-control",
+        &[("seq.md", seq), ("task.md", "---\nagent: []\nyolo: maybe\n---\nTask body\n")],
+    );
+    let control_run = run(&control, &["sequence", "seq.md", "--dry-run"]);
+    let stderr = prose(&control_run.stderr);
+    assert!(stderr.contains("an `agent` list needs at least one entry"), "{}", control_run.stderr);
+    assert!(stderr.contains("schema validation failed") && stderr.contains("/yolo"), "{}", control_run.stderr);
 }

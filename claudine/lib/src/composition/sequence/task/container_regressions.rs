@@ -278,7 +278,7 @@ fn body_preparation_failure_runs_enclosing_failure_and_finalize() {
     struct RejectedBody;
     impl PromptTaskRunner for RejectedBody {
         fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
-            Err(CompositionError::SequenceInvalid("body validation refused".into()))
+            Err(CompositionError::sequence_invalid("body validation refused", crate::composition::SequenceSite::unlocated()))
         }
         fn run(&self, _request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
             panic!("a rejected body cannot launch")

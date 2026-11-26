@@ -331,7 +331,8 @@ pub enum CompositionError {
         /// The hint's source-rooted property (`agent`, `tasks[1].with.agent`).
         property: String,
         /// The enclosing containers, outermost first (`group \`review\``).
-        containers: Vec<String>,
+        /// A boxed slice, so the variant stays within the error size limit.
+        containers: Box<[String]>,
         /// Why no provider can be selected. Boxed: the classified state it
         /// may carry would otherwise widen every `CompositionError`.
         problem: Box<SequenceTaskProviderProblem>,
@@ -2050,7 +2051,8 @@ pub enum CompositionError {
 
     /// An operator was applied to an item that is not an object.
     #[error(
-        "sequence operator `{operator}` requires object items, but item {index} is {found}"
+        "sequence operator `{operator}` requires object items, but item {} is {found}",
+        index + 1
     )]
     SequenceOperatorItemNotObject {
         /// The operator name.
@@ -2064,7 +2066,10 @@ pub enum CompositionError {
     },
 
     /// An operator's source field is missing from an item.
-    #[error("sequence operator `{operator}` cannot read `{field}`: item {index} does not have it")]
+    #[error(
+        "sequence operator `{operator}` cannot read `{field}`: item {} does not have it",
+        index + 1
+    )]
     SequenceOperatorMissingField {
         /// The operator name.
         operator: String,
@@ -2078,8 +2083,9 @@ pub enum CompositionError {
 
     /// A `template(expr)` operator produced an empty or null name.
     #[error(
-        "sequence operator `template({expression})` produced an empty name for item {index}; \
-         a name must be a non-empty string"
+        "sequence operator `template({expression})` produced an empty name for item {}; \
+         a name must be a non-empty string",
+        index + 1
     )]
     SequenceOperatorEmptyName {
         /// Zero-based item index.
@@ -2115,7 +2121,7 @@ pub enum CompositionError {
     },
 
     /// A lenient (foreign-data) item was `null`.
-    #[error("sequence item {index} is null; every item must be a scalar or an object")]
+    #[error("sequence item {} is null; every item must be a scalar or an object", index + 1)]
     SequenceNullItem {
         /// Zero-based item index.
         index: usize,
@@ -2125,13 +2131,14 @@ pub enum CompositionError {
 
     /// A step's normalized state failed its owner's `$state` schema.
     ///
-    /// `index` is zero-based within the owning list, so `source_path` and
-    /// `container` (the list's authored path: `sequence`, or
-    /// `sequence[1].sequence` for a nested container) are what tell two
-    /// owners' step 0 apart.
+    /// `index` is zero-based within the owning list (prose shows it
+    /// one-based), so `source_path` and `container` (the list's authored
+    /// path: `sequence`, or `sequence[1].sequence` for a nested container)
+    /// are what tell two owners' first steps apart.
     #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message} \
+        "step {} (`{id}`) failed schema validation at `{property}`: {message} \
          (`$state` of `{container}` in {source_path})",
+        index + 1,
         source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceStateSchemaViolation {

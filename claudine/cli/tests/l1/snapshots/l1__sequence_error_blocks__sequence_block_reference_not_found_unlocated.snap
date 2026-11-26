@@ -1,0 +1,9 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: sequence not found
+┃ 
+┃ sequence ./child.md could not be resolved: file not found
+┃ 
+┃ Correct the reference ./child.md.

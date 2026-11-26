@@ -540,7 +540,7 @@ mod tests {
         let err = reject_sequence_interactive(&source)
             .expect_err("interactive: true must be rejected for sequence");
         assert!(
-            matches!(err, CompositionError::SequenceInteractiveRejected(_)),
+            matches!(err, CompositionError::SequenceInteractiveRejected { .. }),
             "expected SequenceInteractiveRejected, got {err:?}"
         );
     }

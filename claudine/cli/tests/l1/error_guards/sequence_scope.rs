@@ -9,12 +9,15 @@
 //! - **Catch-all.** A variant no renderer names falls through to the
 //!   generic "composition failed" block in `render/provider.rs`; only the
 //!   variants listed may.
+//! - **Own arm.** Every variant the dispatcher routes to
+//!   `render/sequence.rs` has its own arm in that file's `parts`, and
+//!   `parts` names no variant the dispatcher does not route there.
 //!
 //! Each guard compares the variants it finds with its entries in
 //! [`ALLOWLIST`]: an unlisted variant fails, and so does an entry that no
-//! longer matches one. A `Sequence…` variant's entry is tagged
-//! `sequence-error-standard`, the burn-down that gives every sequence error
-//! its site and its own block; any other variant's is `outside-scope`.
+//! longer matches one. Every `Sequence…` variant now meets the standard, so
+//! the only entries left are tagged `outside-scope`; a `Sequence…` entry
+//! fails.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -90,62 +93,121 @@ fn variants(error_mod: &Path) -> Vec<Variant> {
         .collect()
 }
 
-/// Every `CompositionError::X` a pattern names.
-#[derive(Default)]
-struct PatternVariants(BTreeSet<String>);
+/// Every `CompositionError::X` a pattern names, through any of `owners`
+/// (`CompositionError` and the names a `use … as` gives it).
+struct PatternVariants<'a> {
+    owners: &'a BTreeSet<String>,
+    names: BTreeSet<String>,
+}
 
-impl<'ast> Visit<'ast> for PatternVariants {
+impl<'ast> Visit<'ast> for PatternVariants<'_> {
     fn visit_path(&mut self, path: &'ast syn::Path) {
         let segments: Vec<String> = path.segments.iter().map(|segment| segment.ident.to_string()).collect();
         if let [.., owner, variant] = segments.as_slice()
-            && owner == "CompositionError"
+            && self.owners.contains(owner)
         {
-            self.0.insert(variant.clone());
+            self.names.insert(variant.clone());
         }
         syn::visit::visit_path(self, path);
     }
 }
 
-/// The variants named by the arms of the first `match` in `function`'s
-/// body, in `file`.
-fn named_arms(file: &syn::File, function: &str) -> BTreeSet<String> {
-    struct Finder<'a> {
-        function: &'a str,
-        arms: Option<BTreeSet<String>>,
+/// `CompositionError` and every name a `use CompositionError as …` in
+/// `file` gives it.
+fn owner_names(file: &syn::File) -> BTreeSet<String> {
+    #[derive(Default)]
+    struct Renames(BTreeSet<String>);
+    impl<'ast> Visit<'ast> for Renames {
+        fn visit_use_rename(&mut self, rename: &'ast syn::UseRename) {
+            if rename.ident == "CompositionError" {
+                self.0.insert(rename.rename.to_string());
+            }
+        }
     }
-    impl<'ast> Visit<'ast> for Finder<'_> {
-        fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+    let mut renames = Renames::default();
+    renames.visit_file(file);
+    renames.0.insert("CompositionError".to_string());
+    renames.0
+}
+
+/// The arms of the first `match` in `function`'s body, in `file`: a
+/// statement `match`, or the value of a `let`.
+fn first_match_arms<'f>(file: &'f syn::File, function: &str) -> &'f [syn::Arm] {
+    struct Finder<'a, 'f> {
+        function: &'a str,
+        arms: Option<&'f [syn::Arm]>,
+    }
+    impl<'f> Visit<'f> for Finder<'_, 'f> {
+        fn visit_item_impl(&mut self, item: &'f syn::ItemImpl) {
             // Only `CompositionError`'s own renderer.
             if matches!(&*item.self_ty, syn::Type::Path(path) if path.path.is_ident("CompositionError")) {
                 syn::visit::visit_item_impl(self, item);
             }
         }
-        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+        fn visit_impl_item_fn(&mut self, item: &'f syn::ImplItemFn) {
             if item.sig.ident == self.function && self.arms.is_none() {
                 self.arms = first_match(&item.block);
             }
         }
-        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        fn visit_item_fn(&mut self, item: &'f syn::ItemFn) {
             if item.sig.ident == self.function && self.arms.is_none() {
                 self.arms = first_match(&item.block);
             }
         }
     }
-    fn first_match(block: &syn::Block) -> Option<BTreeSet<String>> {
+    fn first_match(block: &syn::Block) -> Option<&[syn::Arm]> {
         block.stmts.iter().find_map(|stmt| match stmt {
-            syn::Stmt::Expr(syn::Expr::Match(found), _) => {
-                let mut names = PatternVariants::default();
-                for arm in &found.arms {
-                    names.visit_pat(&arm.pat);
-                }
-                Some(names.0)
-            }
+            syn::Stmt::Expr(syn::Expr::Match(found), _) => Some(found.arms.as_slice()),
+            syn::Stmt::Local(syn::Local { init: Some(init), .. }) => match &*init.expr {
+                syn::Expr::Match(found) => Some(found.arms.as_slice()),
+                _ => None,
+            },
             _ => None,
         })
     }
     let mut finder = Finder { function, arms: None };
     finder.visit_file(file);
     finder.arms.unwrap_or_else(|| panic!("no `match` found in `{function}`"))
+}
+
+/// The variants the patterns of `arms` name.
+fn arm_variants<'a>(file: &syn::File, arms: impl IntoIterator<Item = &'a syn::Arm>) -> BTreeSet<String> {
+    let owners = owner_names(file);
+    let mut names = PatternVariants { owners: &owners, names: BTreeSet::new() };
+    for arm in arms {
+        names.visit_pat(&arm.pat);
+    }
+    names.names
+}
+
+/// The variants named by the arms of the first `match` in `function`'s
+/// body, in `file`.
+fn named_arms(file: &syn::File, function: &str) -> BTreeSet<String> {
+    arm_variants(file, first_match_arms(file, function))
+}
+
+/// The variants named by the arms of `function`'s first `match` whose body
+/// calls the path `callee` (for example `["sequence", "status_block"]`).
+fn arms_routed_to(file: &syn::File, function: &str, callee: &[&str]) -> BTreeSet<String> {
+    struct Calls<'a> {
+        callee: &'a [&'a str],
+        found: bool,
+    }
+    impl<'ast> Visit<'ast> for Calls<'_> {
+        fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(path) = &*call.func {
+                let segments: Vec<String> = path.path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+                self.found |= segments.ends_with(&self.callee.iter().map(ToString::to_string).collect::<Vec<_>>());
+            }
+            syn::visit::visit_expr_call(self, call);
+        }
+    }
+    let routed = first_match_arms(file, function).iter().filter(|arm| {
+        let mut calls = Calls { callee, found: false };
+        calls.visit_expr(&arm.body);
+        calls.found
+    });
+    arm_variants(file, routed)
 }
 
 /// The guard's findings against its allowlist: unlisted findings, then
@@ -216,8 +278,27 @@ fn only_listed_variants_reach_the_catch_all_block() {
     }
 }
 
-/// Each entry names a known guard and tag, a `Sequence…` variant is tagged
-/// `sequence-error-standard` and every other `outside-scope`, and each gives a reason.
+/// Every variant routed to the sequence renderer has its own arm there, and
+/// that renderer names nothing it is not routed: a variant added to the
+/// route without a headline and hint fails, and so does a stale arm.
+#[test]
+fn every_routed_sequence_variant_has_its_own_arm() {
+    let root = area_root();
+    let render = root.join("lib/src/composition/error/render");
+    let routed = arms_routed_to(&parse(&render.join("mod.rs")), "status_block", &["sequence", "status_block"]);
+    let own = named_arms(&parse(&render.join("sequence.rs")), "parts");
+    let missing: Vec<_> = routed.difference(&own).collect();
+    let stale: Vec<_> = own.difference(&routed).collect();
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "render/sequence.rs `parts`: no arm for {missing:?}; arms the dispatcher does not route: {stale:?}"
+    );
+    assert!(!routed.is_empty(), "the dispatcher routes sequence variants to render/sequence.rs");
+}
+
+/// Each entry names a known guard and an `outside-scope` tag (no
+/// `Sequence…` variant or renderer may be excepted any more), and each gives
+/// a reason.
 #[test]
 fn every_scope_entry_names_its_guard_tag_and_reason() {
     let text = std::fs::read_to_string(area_root().join(ALLOWLIST)).unwrap();
@@ -225,8 +306,11 @@ fn every_scope_entry_names_its_guard_tag_and_reason() {
     let mut seen = BTreeSet::new();
     for entry in &list.allow {
         assert!(["site", "noun", "catch_all"].contains(&entry.guard.as_str()), "unknown guard: {entry:?}");
-        let expected = if entry.variant.starts_with("Sequence") || entry.variant.starts_with("render/") { "sequence-error-standard" } else { "outside-scope" };
-        assert_eq!(entry.tag, expected, "{entry:?}");
+        assert!(
+            !entry.variant.starts_with("Sequence") && !entry.variant.starts_with("render/"),
+            "a sequence variant or renderer meets the standard and takes no exception: {entry:?}"
+        );
+        assert_eq!(entry.tag, "outside-scope", "{entry:?}");
         assert!(entry.reason.split_whitespace().count() >= 5, "a reason says why: {entry:?}");
         assert!(seen.insert((entry.guard.clone(), entry.variant.clone())), "duplicate entry: {entry:?}");
     }
@@ -246,9 +330,18 @@ fn the_scope_guards_see_their_subjects() {
             fn status_block(&self) -> u8 {
                 match self {
                     CompositionError::SequenceSited { .. } | CompositionError::Other => 1,
+                    CompositionError::SequenceNoSite { .. } => sequence::status_block(self),
                     _ => 2,
                 }
             }
+        }
+        fn parts(err: &CompositionError) -> u8 {
+            use CompositionError as E;
+            let found = match err {
+                E::SequenceNoSite { .. } => 1,
+                _ => 2,
+            };
+            found
         }
     "#;
     let dir = std::env::temp_dir().join(format!("scope-guard-{}", std::process::id()));
@@ -259,6 +352,12 @@ fn the_scope_guards_see_their_subjects() {
     let no_site: Vec<_> = found.iter().filter(|variant| variant.name.starts_with("Sequence") && !variant.fields.contains("site")).map(|variant| variant.name.as_str()).collect();
     assert_eq!(no_site, ["SequenceNoSite"]);
     assert!(found[0].message.contains("external sequence file"));
-    assert_eq!(named_arms(&parse(&path), "status_block"), BTreeSet::from(["SequenceSited".to_string(), "Other".to_string()]));
+    let file = parse(&path);
+    assert_eq!(
+        named_arms(&file, "status_block"),
+        BTreeSet::from(["SequenceSited".to_string(), "Other".to_string(), "SequenceNoSite".to_string()])
+    );
+    assert_eq!(arms_routed_to(&file, "status_block", &["sequence", "status_block"]), BTreeSet::from(["SequenceNoSite".to_string()]));
+    assert_eq!(named_arms(&file, "parts"), BTreeSet::from(["SequenceNoSite".to_string()]), "an aliased `let` match is read");
     std::fs::remove_dir_all(&dir).unwrap();
 }

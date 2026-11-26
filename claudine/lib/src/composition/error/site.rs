@@ -70,15 +70,4 @@ impl SequenceSite {
             self.task = task.map(str::to_string);
         }
     }
-
-    /// The `where` of the site in prose: `` `sequence[2]` of seq.md ``,
-    /// `seq.md`, or `None` when the file is unknown.
-    #[must_use]
-    pub fn describe(&self) -> Option<String> {
-        let file = biscuit_file::to_forward_slash_string(self.file.as_deref()?);
-        Some(match &self.property {
-            Some(property) => format!("`{property}` of {file}"),
-            None => file,
-        })
-    }
 }

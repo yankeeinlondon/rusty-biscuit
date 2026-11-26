@@ -212,10 +212,10 @@ fn sequence_trigger_activation_follows_the_value_shape() {
     let discovered = repo.discover().expect("the shipped bundle loads");
     let number = repo.write_document("sequence-number.md", include_str!("../fixtures/sequence-schema/sequence-number.md"));
     let error = sequence_rejection(&repo, &number).expect("the parser rejects `sequence: 42`");
-    assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+    assert!(matches!(error, CompositionError::SequenceInvalid { .. }), "{error}");
     let boolean = repo.write_document("sequence-boolean.md", "---\nsequence: true\n---\n");
     let error = sequence_rejection(&repo, &boolean).expect("the parser rejects `sequence: true`");
-    assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+    assert!(matches!(error, CompositionError::SequenceInvalid { .. }), "{error}");
 
     for (name, text) in [
         ("sequence-null", include_str!("../fixtures/sequence-schema/sequence-null.md")),

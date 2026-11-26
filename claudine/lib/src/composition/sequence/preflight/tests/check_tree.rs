@@ -229,15 +229,15 @@ fn invalid_root_items_keep_their_positions() {
         "tasks[10] last sequence[10] seq.md",
     ]);
     for needle in [
-        "sequence item 0 is null",
-        "step at index 1 must be a string or object, got number",
-        "step at index 2 must be a string or object, got array",
-        "step at index 3 is missing required `name` property",
-        "declares multiple executable fields (prompt, shell)",
-        "declares multiple executable fields (sequence, shell)",
+        "sequence item 1 is null",
+        "step 2 must be a string or object, got number",
+        "step 3 must be a string or object, got array",
+        "step 4 is missing its required `name` property",
+        "declares more than one executable field (prompt, shell)",
+        "declares more than one executable field (sequence, shell)",
         "must be a non-empty file reference, got string",
         "must be a non-empty file reference, got null",
-        "step at index 9 has `name` of type number",
+        "step 10 has a `name` of type number",
     ] {
         assert_message(&check, needle);
     }
@@ -321,7 +321,7 @@ fn lenient_rows_keep_their_projection_and_refuse_only_null() {
         "tasks[0].sequence[4] step-5 sequence[4] rows.yaml ! composition.failed",
         "tasks[1] tail sequence[1] seq.md",
     ]);
-    assert_message(&check, "sequence item 4 is null");
+    assert_message(&check, "sequence item 5 is null");
 }
 
 /// Every loader: a file that was read and failed to parse fails only the

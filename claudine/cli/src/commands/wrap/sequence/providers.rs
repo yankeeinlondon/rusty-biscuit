@@ -661,7 +661,7 @@ fn task_error(site: &SelectionSite, hint_path: PathBuf, property: String, proble
         task_path: site.task_path.clone(),
         hint_path,
         property,
-        containers: site.containers.clone(),
+        containers: site.containers.clone().into_boxed_slice(),
         problem: Box::new(problem),
         site: Box::new(claudine::composition::SequenceSite::file(&site.task_path).in_task(site.label.clone())),
     }
