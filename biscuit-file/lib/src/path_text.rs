@@ -1,16 +1,16 @@
-//! The path→text boundary: rendering an OS path as portable text.
+//! The path→text boundary: rendering OS paths with forward slashes.
 
 use std::path::Path;
 
-/// Render a filesystem path as portable text, or `None` when no faithful
-/// portable spelling exists.
+/// Rewrite path separators with forward slashes, or return `None` for a
+/// Windows prefix that requires its native spelling.
 ///
-/// Returns `None` exactly when [`to_portable_string`] would fall back to the
+/// Returns `None` exactly when [`to_forward_slash_string`] would fall back to the
 /// native spelling: a Windows UNC, device-namespace, or verbatim path that
 /// [`dunce::simplified`] declined to reduce. Callers that must not emit a
 /// native spelling — a Markdown link destination, for instance — branch on
 /// this rather than inspecting the rendered string.
-pub fn try_portable_string(path: &Path) -> Option<String> {
+pub fn try_forward_slash_string(path: &Path) -> Option<String> {
     let reduced = dunce::simplified(path);
 
     #[cfg(windows)]
@@ -27,21 +27,22 @@ pub fn try_portable_string(path: &Path) -> Option<String> {
     Some(reduced.to_string_lossy().replace('\\', "/"))
 }
 
-/// Render a filesystem path according to biscuit-file's portable-text policy.
+/// Rewrite path separators with forward slashes, with a native Windows
+/// fallback. For a verified file reference, use `PortablePath`.
 ///
 /// On Windows, a safely reducible verbatim-disk prefix is removed through
 /// [`dunce::simplified`]. Disk, rooted, and relative paths are then rendered
 /// with `/` separators. UNC, device-namespace, and verbatim paths that cannot
 /// be reduced faithfully retain their native spelling; use
-/// [`try_portable_string`] when that fallback is not acceptable.
+/// [`try_forward_slash_string`] when that fallback is not acceptable.
 ///
 /// The result uses [`Path::to_string_lossy`]: non-Unicode data is replaced
 /// with U+FFFD. On Unix, `\` is a legal filename character and is rendered as
-/// `/`; see the feature spec's accepted limitations.
-pub fn to_portable_string(path: &Path) -> String {
-    // `try_portable_string` returns `None` only for a prefix `simplified`
+/// `/`.
+pub fn to_forward_slash_string(path: &Path) -> String {
+    // `try_forward_slash_string` returns `None` only for a prefix `simplified`
     // left untouched, so the fallback can render `path` itself.
-    try_portable_string(path).unwrap_or_else(|| path.to_string_lossy().into_owned())
+    try_forward_slash_string(path).unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
 /// Canonicalize `path` and reduce a Windows verbatim-disk (`\\?\C:\...`)
@@ -78,7 +79,7 @@ mod tests {
     #[test]
     fn relative_backslash_path_becomes_forward_slashes() {
         assert_eq!(
-            to_portable_string(Path::new(r"docs\file.md")),
+            to_forward_slash_string(Path::new(r"docs\file.md")),
             "docs/file.md"
         );
     }
@@ -86,7 +87,7 @@ mod tests {
     #[test]
     fn relative_forward_slash_path_is_unchanged() {
         assert_eq!(
-            to_portable_string(Path::new("docs/file.md")),
+            to_forward_slash_string(Path::new("docs/file.md")),
             "docs/file.md"
         );
     }
@@ -94,7 +95,7 @@ mod tests {
     #[test]
     fn rooted_path_is_unchanged() {
         assert_eq!(
-            to_portable_string(Path::new("/repo/file.md")),
+            to_forward_slash_string(Path::new("/repo/file.md")),
             "/repo/file.md"
         );
     }
@@ -105,7 +106,7 @@ mod tests {
     #[cfg(not(windows))]
     fn unix_literal_backslash_in_a_filename_is_converted() {
         assert_eq!(
-            to_portable_string(Path::new(r"my\report.md")),
+            to_forward_slash_string(Path::new(r"my\report.md")),
             "my/report.md"
         );
     }
@@ -118,7 +119,7 @@ mod tests {
 
         let path = Path::new(OsStr::from_bytes(b"bad\xFF.md"));
         let expected = path.to_string_lossy().replace('\\', "/");
-        assert_eq!(to_portable_string(path), expected);
+        assert_eq!(to_forward_slash_string(path), expected);
     }
 
     #[test]
@@ -137,14 +138,14 @@ mod tests {
         let os_string = OsString::from_wide(&raw);
         let path = Path::new(&os_string);
         let expected = path.to_string_lossy().replace('\\', "/");
-        assert_eq!(to_portable_string(path), expected);
+        assert_eq!(to_forward_slash_string(path), expected);
     }
 
     #[test]
     #[cfg(windows)]
     fn windows_disk_path_becomes_forward_slashes() {
         assert_eq!(
-            to_portable_string(Path::new(r"C:\repo\file.md")),
+            to_forward_slash_string(Path::new(r"C:\repo\file.md")),
             "C:/repo/file.md"
         );
     }
@@ -153,7 +154,7 @@ mod tests {
     #[cfg(windows)]
     fn windows_safe_verbatim_disk_path_is_reduced() {
         assert_eq!(
-            to_portable_string(Path::new(r"\\?\C:\repo\docs\file.md")),
+            to_forward_slash_string(Path::new(r"\\?\C:\repo\docs\file.md")),
             "C:/repo/docs/file.md"
         );
     }
@@ -166,7 +167,7 @@ mod tests {
     #[cfg(windows)]
     fn windows_verbatim_dot_component_stays_native() {
         let input = r"\\?\C:\repo\.\docs";
-        assert_eq!(to_portable_string(Path::new(input)), input);
+        assert_eq!(to_forward_slash_string(Path::new(input)), input);
     }
 
     #[test]
@@ -182,7 +183,7 @@ mod tests {
         ];
 
         for input in inputs {
-            let rendered = to_portable_string(Path::new(input));
+            let rendered = to_forward_slash_string(Path::new(input));
             assert_eq!(rendered, input, "{input} should keep its native spelling");
             assert!(
                 rendered.starts_with(r"\\?\"),
@@ -201,7 +202,7 @@ mod tests {
         ];
 
         for input in inputs {
-            assert_eq!(to_portable_string(Path::new(input)), input);
+            assert_eq!(to_forward_slash_string(Path::new(input)), input);
         }
     }
 
@@ -219,7 +220,7 @@ mod tests {
         std::fs::write(canonical.join("note.md"), b"note").unwrap();
         assert_eq!(std::fs::read(authored.join("note.md")).unwrap(), b"note");
         assert!(
-            try_portable_string(&canonical).is_some(),
+            try_forward_slash_string(&canonical).is_some(),
             "{} has no portable spelling",
             canonical.display()
         );
@@ -331,7 +332,7 @@ mod tests {
             }
             std::fs::create_dir_all(&long).unwrap();
             let canonical = canonicalize_simplified(&long).unwrap();
-            assert!(try_portable_string(&canonical).is_none(), "{}", canonical.display());
+            assert!(try_forward_slash_string(&canonical).is_none(), "{}", canonical.display());
             spellings.push(canonical.to_string_lossy().into_owned());
             (spellings, temp)
         };
@@ -388,13 +389,13 @@ mod tests {
         for (input, expected) in cases {
             let path = Path::new(input);
             assert_eq!(
-                try_portable_string(path).as_deref(),
+                try_forward_slash_string(path).as_deref(),
                 expected,
                 "unexpected decline decision for {input}"
             );
             match expected {
-                Some(portable) => assert_eq!(to_portable_string(path), portable),
-                None => assert_eq!(to_portable_string(path), path.to_string_lossy()),
+                Some(portable) => assert_eq!(to_forward_slash_string(path), portable),
+                None => assert_eq!(to_forward_slash_string(path), path.to_string_lossy()),
             }
         }
     }

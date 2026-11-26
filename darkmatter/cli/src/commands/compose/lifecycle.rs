@@ -410,7 +410,7 @@ impl<'a> ComposeHost<'a> {
         let mutation_root = compose
             .request
             .resolution_context()
-            .launch_magic_scope()
+            .launch_scope()
             .local_root()
             .to_path_buf();
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);

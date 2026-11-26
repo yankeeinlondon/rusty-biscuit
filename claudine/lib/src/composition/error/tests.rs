@@ -35,7 +35,7 @@ fn file_link_uses_encoded_url_and_portable_label() {
     assert!(link.contains("a%20b%23%25.md"), "expected encoded URL: {link}");
     assert!(
         link.contains(&biscuit_terminal::components::prose::Prose::escape_text(
-            &biscuit_file::to_portable_string(&path)
+            &biscuit_file::to_forward_slash_string(&path)
         )),
         "expected escaped portable label: {link}"
     );
@@ -1035,7 +1035,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.md");
     let executable = std::env::current_exe().expect("test executable path should be available");
-    let executable = biscuit_file::to_portable_string(&executable);
+    let executable = biscuit_file::to_forward_slash_string(&executable);
     let command = format!("\"{executable}\" --definitely-invalid-libtest-option");
     let approved_command = format!("{executable} --definitely-invalid-libtest-option");
     let content = format!(

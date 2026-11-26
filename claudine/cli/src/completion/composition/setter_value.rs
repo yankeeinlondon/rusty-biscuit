@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 
 use super::{Candidate, file_name_matches};
 use crate::completion::frontmatter;
@@ -92,8 +92,8 @@ fn gather_committed_root(
             Ok(r) => r,
             Err(_) => continue,
         };
-        let rel_str = to_portable_string(rel);
-        let dir = to_portable_string(Path::new(dir));
+        let rel_str = to_forward_slash_string(rel);
+        let dir = to_forward_slash_string(Path::new(dir));
         let insert = if dir.is_empty() {
             rel_str
         } else {

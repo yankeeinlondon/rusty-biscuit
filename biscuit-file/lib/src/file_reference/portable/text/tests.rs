@@ -129,14 +129,14 @@ fn literal_dot_names_are_rejected() {
 
 #[cfg(unix)]
 #[test]
-fn a_unix_backslash_name_is_rejected_rather_than_split() {
+fn a_unix_backslash_name_uses_native_text_to_preserve_components() {
     assert_eq!(
         render(Lead::Relative { parent_hops: 0 }, &[r"my\report.md"]),
-        Err(TextRejection::ChangesComponents)
+        Ok(r"./my\report.md".to_string())
     );
     assert_eq!(
         render_absolute(Path::new(r"/repo/my\report.md")),
-        Err(TextRejection::ChangesComponents)
+        Ok(r"/repo/my\report.md".to_string())
     );
 }
 

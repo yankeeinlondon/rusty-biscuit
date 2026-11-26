@@ -353,7 +353,7 @@ async fn a_wrapped_child_registers_as_unavailable_until_its_profile_is_mapped() 
     assert_eq!(snapshot.availability.reason.as_deref(), Some(UNMAPPED_PROFILE_REASON));
     assert_eq!(snapshot.target.wrapper.pid, std::process::id(), "bound to this wrapper process");
     assert_eq!(snapshot.facts.launch_mode, LaunchMode::NonInteractive);
-    assert_eq!(snapshot.facts.cwd.as_deref(), Some(biscuit_file::to_portable_string(tmp.path()).as_str()));
+    assert_eq!(snapshot.facts.cwd.as_deref(), Some(biscuit_file::to_forward_slash_string(tmp.path()).as_str()));
 }
 
 // ---------------------------------------------------------------------------

@@ -155,9 +155,9 @@ pub fn load_style_file(argument: &OsStr, request: &MdRequest) -> Result<LoadedSt
         .wrap_err_with(|| format!("`--style {text}` did not open"))?;
     let path = opened.path().to_path_buf();
     // Resolution may land on another spelling of the file; its own extension decides.
-    let format = format_of(&path).ok_or_else(|| unsupported(text, &biscuit_file::to_portable_string(&path)))?;
+    let format = format_of(&path).ok_or_else(|| unsupported(text, &biscuit_file::to_forward_slash_string(&path)))?;
     let bytes = std::fs::read(&path).map_err(|error| {
-        refusal(text, format!("`--style {text}`: could not read `{}`: {error}", biscuit_file::to_portable_string(&path)))
+        refusal(text, format!("`--style {text}`: could not read `{}`: {error}", biscuit_file::to_forward_slash_string(&path)))
     })?;
     let document = parse_local_document(bytes, format, &DataSourceIdentity::local(&path))
         .map_err(|error| malformed(text, &path, &error))?;
@@ -171,14 +171,14 @@ pub fn load_style_file(argument: &OsStr, request: &MdRequest) -> Result<LoadedSt
                 Some(other) => {
                     let message = format!(
                         "`{offset}` in the style file `{}` is {}, not a mapping",
-                        biscuit_file::to_portable_string(&path),
+                        biscuit_file::to_forward_slash_string(&path),
                         kind_name(other)
                     );
                     return Err(located_failure(text, &path, message));
                 }
                 None => {
                     let message =
-                        format!("the style file `{}` has no `{offset}`", biscuit_file::to_portable_string(&path));
+                        format!("the style file `{}` has no `{offset}`", biscuit_file::to_forward_slash_string(&path));
                     return Err(located_failure(text, &path, message));
                 }
             }
@@ -402,7 +402,7 @@ impl CliStyleInputs {
             StyleSourceKind::File => self.files.get(&origin.source)?,
             StyleSourceKind::Document => self.document.as_ref()?,
         };
-        let file = Some(PathBuf::from(biscuit_file::to_portable_string(file)));
+        let file = Some(PathBuf::from(biscuit_file::to_forward_slash_string(file)));
         Some(match &origin.span {
             Some(span) => DiagnosticSource::at(file, span.line as usize, span.column as usize),
             None => DiagnosticSource::file_only(file),
@@ -444,7 +444,7 @@ pub fn document_style_layer(document: &Markdown, path: Option<&Path>, context: F
             .map(|(key, span)| (key, StyleSpan { line: span.line + 1, ..span }))
             .collect()
     });
-    let identity = path.map_or_else(|| "<stdin>".to_string(), biscuit_file::to_portable_string);
+    let identity = path.map_or_else(|| "<stdin>".to_string(), biscuit_file::to_forward_slash_string);
     StyleLayer::document(value, identity, context, positions)
 }
 
@@ -670,7 +670,7 @@ fn unsupported(argument: &str, file: &str) -> Report {
 /// `dm.style.invalid_root`, in that file.
 fn located_failure(argument: &str, path: &Path, message: String) -> Report {
     let mut record = output_diagnostic(STYLE_INVALID_ROOT_CODE, Severity::Error, &message);
-    record.source = Some(DiagnosticSource::file_only(Some(PathBuf::from(biscuit_file::to_portable_string(path)))));
+    record.source = Some(DiagnosticSource::file_only(Some(PathBuf::from(biscuit_file::to_forward_slash_string(path)))));
     record.reference_details = Some(ReferenceDetails { reference: Some(argument.to_string()), ..ReferenceDetails::default() });
     ClassifiedFailure::located(eyre!(message), vec![record])
 }
@@ -678,7 +678,7 @@ fn located_failure(argument: &str, path: &Path, message: String) -> Report {
 /// A file that is not UTF-8 or not valid in its format: `dm.data.malformed`,
 /// located as `load_data` locates it.
 fn malformed(argument: &str, path: &Path, error: &DataError) -> Report {
-    let file = biscuit_file::to_portable_string(path);
+    let file = biscuit_file::to_forward_slash_string(path);
     let (message, location) = match error {
         DataError::Malformed { message, location, .. } => (message.clone(), Some(location.clone())),
         other => (other.to_string(), None),

@@ -769,7 +769,7 @@ fn installed_registration_setup_reports_an_inline_register_list_and_keeps_the_re
 #[test]
 fn installed_registration_setup_replaces_a_legacy_entry_whose_manifest_is_gone() {
     let fixture = Fixture::new();
-    let absolute = biscuit_file::to_portable_string(&legacy_manifest_path(&fixture.home()));
+    let absolute = biscuit_file::to_forward_slash_string(&legacy_manifest_path(&fixture.home()));
     fixture.write(&fixture.darkmatter(), &format!("register:\n  - {absolute}\n  - {LEGACY_MANIFEST_REFERENCE}\n"));
 
     let setup = fixture.setup().unwrap();

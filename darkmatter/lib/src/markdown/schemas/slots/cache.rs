@@ -70,7 +70,7 @@ pub(crate) fn resolution_key(
         .iter()
         .map(|(path, text)| {
             serde_json::json!([
-                biscuit_file::to_portable_string(path),
+                biscuit_file::to_forward_slash_string(path),
                 hex(biscuit_hash::blake3_hash_bytes(text.as_bytes()))
             ])
         })
@@ -80,7 +80,7 @@ pub(crate) fn resolution_key(
         .iter()
         .map(|slot| {
             serde_json::json!([
-                slot.origin.as_deref().map(biscuit_file::to_portable_string),
+                slot.origin.as_deref().map(biscuit_file::to_forward_slash_string),
                 // The whole authored range: a failure served from here is
                 // positioned at these spans.
                 slot.span.start,
@@ -100,10 +100,10 @@ pub(crate) fn resolution_key(
         // A returned definition's imports read the verified bundle the
         // template was met under, which no read source records.
         "bundle": pending.verified_bundle().map(|bundle| {
-            serde_json::json!([biscuit_file::to_portable_string(bundle.root()), bundle.revision()])
+            serde_json::json!([biscuit_file::to_forward_slash_string(bundle.root()), bundle.revision()])
         }),
         "context": crate::markdown::compose::file_resolution_context_identity(context),
-        "repository": repository.map(biscuit_file::to_portable_string),
+        "repository": repository.map(biscuit_file::to_forward_slash_string),
         "home": context.home_dir().is_some(),
     }));
     ResolutionKey(biscuit_hash::blake3_hash_bytes(canonical.as_bytes()))

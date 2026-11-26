@@ -1842,7 +1842,7 @@ impl<'a> Loader<'a> {
 
         let nested_label = format!(
             "{label} → task `{}`",
-            biscuit_file::to_portable_string(&path)
+            biscuit_file::to_forward_slash_string(&path)
         );
         self.enter(&path)?;
         let result = self.load_task(
@@ -1930,7 +1930,7 @@ impl<'a> Loader<'a> {
 
                 let nested_label = format!(
                     "{label} → group `{}`",
-                    biscuit_file::to_portable_string(&path)
+                    biscuit_file::to_forward_slash_string(&path)
                 );
                 self.enter_reference(&path, selected_entry)?;
                 let result = self.build_group(

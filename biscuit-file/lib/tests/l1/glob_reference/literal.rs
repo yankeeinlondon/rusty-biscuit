@@ -105,7 +105,7 @@ fn recursive_references_keep_their_payload_literal() {
     assert_eq!(resolve("%docs/spec.md"), Some(nested));
     assert_eq!(resolve("%./config.toml"), Some(config));
     assert_eq!(resolve("%{{ODD}}/x.md"), Some(odd.clone()));
-    let absolute = format!("%{}", biscuit_file::to_portable_string(&odd_dir.join("x.md")));
+    let absolute = format!("%{}", biscuit_file::to_forward_slash_string(&odd_dir.join("x.md")));
     assert_eq!(resolve(&absolute), Some(odd));
     assert_eq!(resolve("%missing.md"), None);
 }
@@ -141,7 +141,7 @@ fn matches_is_lexical_for_paths_that_do_not_exist() {
 fn matches_without_context_judges_the_full_path() {
     let fx = Fixture::new();
     let spec = fx.repo.join("fixes/x/spec.md");
-    let portable_repo = biscuit_file::to_portable_string(&fx.repo);
+    let portable_repo = biscuit_file::to_forward_slash_string(&fx.repo);
 
     // Control: a bare `**/` pattern admits the full path, which need not exist.
     assert!(glob(&["**/fixes/**/spec.md"]).matches_without_context(&spec));

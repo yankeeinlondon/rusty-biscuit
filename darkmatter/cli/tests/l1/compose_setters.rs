@@ -484,7 +484,7 @@ mod origins {
         let fixture = fixture_with_files("setters-origin-nested", "./beside.png");
         let out = composed(&fixture, &["sub/doc.md", "author.avatar=launch.png"]);
         let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("launch.png");
-        assert!(out.ends_with(&biscuit_file::to_portable_string(&launch)), "{out}");
+        assert!(out.ends_with(&biscuit_file::to_forward_slash_string(&launch)), "{out}");
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod origins {
         let out = composed(&fixture, &["sub/doc.md", "author.avatar=assets/avatar.png"]);
         let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("assets").join("avatar.png");
         let (avatar, cover) = out.split_once(' ').unwrap();
-        assert_eq!(avatar, biscuit_file::to_portable_string(&launch));
+        assert_eq!(avatar, biscuit_file::to_forward_slash_string(&launch));
         assert!(!cover.contains(fixture.cwd().to_str().unwrap()) && cover.ends_with("mine.png"), "{out}");
     }
 
@@ -532,7 +532,7 @@ mod origins {
         let fixture = union_fixture("setters-origin-union-set");
         let out = composed(&fixture, &["sub/doc.md", "--set", r#"{"author":{"avatar":"assets/avatar.png","cover":"assets/avatar.png","children":[]}}"#]);
         let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("assets").join("avatar.png");
-        assert_eq!(out, format!("{0} {0}", biscuit_file::to_portable_string(&launch)));
+        assert_eq!(out, format!("{0} {0}", biscuit_file::to_forward_slash_string(&launch)));
     }
 }
 

@@ -42,7 +42,7 @@ fn context(root: &Path) -> biscuit_file::FileResolutionContext {
 }
 
 fn pending_at(root: &Path, schema: &Path) -> PendingSchema {
-    let reference = serde_yaml_ng::Value::String(biscuit_file::to_portable_string(schema));
+    let reference = serde_yaml_ng::Value::String(biscuit_file::to_forward_slash_string(schema));
     match simplified_schema::resolve::resolve_yaml_schema(
         &reference,
         root,

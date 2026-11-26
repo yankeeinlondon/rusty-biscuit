@@ -33,7 +33,7 @@ fn compose_rejects_pending_target_before_child_command_can_execute() {
         "compose_rejects_pending_target_before_child_command_can_execute",
     );
     let sentinel = fixture.workspace_path().join("child-command-ran");
-    let sentinel_text = biscuit_file::to_portable_string(&sentinel);
+    let sentinel_text = biscuit_file::to_forward_slash_string(&sentinel);
     fixture.write_file(
         "cwd/child.md",
         &format!("::shell touch {sentinel_text}\n"),
@@ -146,7 +146,7 @@ fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory()
         .success()
         .stdout(predicate::str::contains(format!(
             "Launch: {}",
-            biscuit_file::to_portable_string(&expected_launch)
+            biscuit_file::to_forward_slash_string(&expected_launch)
         )));
 }
 
@@ -291,14 +291,14 @@ fn test_compose_portable_env_variable_round_trips() {
 
     let abs_root = std::fs::canonicalize(&project_root).unwrap();
     let abs_target_markdown =
-        biscuit_file::to_portable_string(&std::fs::canonicalize(&target_file).unwrap());
+        biscuit_file::to_forward_slash_string(&std::fs::canonicalize(&target_file).unwrap());
     let md_file = docs.join("test.md");
     std::fs::write(&md_file, format!("[config]({abs_target_markdown})\n")).unwrap();
 
     let compose = |path: &std::path::Path, declared: bool| {
         let mut command = fixture.command();
         // Exported spelling: a verbatim `\\?\` value cannot anchor `{{VAR}}/…`.
-        command.env("PROJECT_ROOT", biscuit_file::to_portable_string(&abs_root));
+        command.env("PROJECT_ROOT", biscuit_file::to_forward_slash_string(&abs_root));
         if declared {
             command.env("PORTABLE_ENV_VARIABLES", "PROJECT_ROOT");
         } else {
@@ -382,7 +382,7 @@ fn test_compose_html_spaced_attributes() {
     );
     let abs_repo = std::fs::canonicalize(&repo).unwrap();
     assert!(
-        !stdout.contains(&biscuit_file::to_portable_string(&abs_repo)),
+        !stdout.contains(&biscuit_file::to_forward_slash_string(&abs_repo)),
         "stdout should not contain an absolute path, got:\n{stdout}"
     );
 }

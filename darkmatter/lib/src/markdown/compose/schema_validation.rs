@@ -333,7 +333,7 @@ impl CallerProjection {
             let ([ValuePathSegment::Key(key), below @ ..], Some(text)) = (path.as_slice(), native.as_str()) else {
                 continue;
             };
-            let portable = biscuit_file::to_portable_string(Path::new(text));
+            let portable = biscuit_file::to_forward_slash_string(Path::new(text));
             if portable == text {
                 continue;
             }
@@ -2340,7 +2340,7 @@ fn resolve_caller_file_value_on_path<'r>(
                     })?;
             }
             let native = path.to_string_lossy().into_owned();
-            let presentation = biscuit_file::to_portable_string(&path);
+            let presentation = biscuit_file::to_forward_slash_string(&path);
             return Ok(Some(ResolvedCallerFileValue {
                 native: serde_json::Value::String(native),
                 presentation: serde_json::Value::String(presentation),
@@ -2400,7 +2400,7 @@ fn resolve_caller_file_value_on_path<'r>(
             .map(|candidate| candidate.candidate().provenance())
             .unwrap_or(biscuit_file::RootProvenance::Absolute);
         let native = resolved.to_string_lossy().into_owned();
-        let presentation = biscuit_file::to_portable_string(&resolved);
+        let presentation = biscuit_file::to_forward_slash_string(&resolved);
         return Ok(Some(ResolvedCallerFileValue {
             native: serde_json::Value::String(native),
             presentation: serde_json::Value::String(presentation),

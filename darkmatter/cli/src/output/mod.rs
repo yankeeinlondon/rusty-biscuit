@@ -205,7 +205,7 @@ pub fn report_run_notices(notices: Vec<Diagnostic>, data_output: bool) {
 #[must_use]
 pub fn notice_text(notice: &Diagnostic) -> String {
     let located = |source: &DiagnosticSource| {
-        let file = biscuit_file::to_portable_string(source.file.as_ref()?);
+        let file = biscuit_file::to_forward_slash_string(source.file.as_ref()?);
         Some(match (source.line, source.column) {
             (Some(line), Some(column)) => format!("{file}:{line}:{column}"),
             _ => file,

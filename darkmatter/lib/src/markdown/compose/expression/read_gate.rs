@@ -73,7 +73,7 @@ pub enum ReadLocation {
 impl fmt::Display for ReadLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Local(path) => f.write_str(&biscuit_file::to_portable_string(path)),
+            Self::Local(path) => f.write_str(&biscuit_file::to_forward_slash_string(path)),
             Self::Remote(url) => f.write_str(url.as_str()),
             Self::Glob(pattern) => f.write_str(pattern),
         }

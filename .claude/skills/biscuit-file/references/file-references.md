@@ -11,7 +11,7 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 | Prefix | `FileReferenceKind` | Resolution roots |
 |--------|---------------------|------------------|
 | `./`, `../` | `ExplicitRelative` | Authoring `cwd` only; no fallback |
-| _(none)_ | `ImplicitRelative` | Authoring `cwd`, then repository root |
+| _(none)_ | `ImplicitRelative` | Authoring directory and repository by default, or the captured launch bases |
 | POSIX root, Windows drive/UNC | `Absolute` | Authored absolute path only |
 | `~`, `~/` (`~\` on Windows) | `Home` | Captured home only; `~user` is rejected |
 | `@`, `@/` | `Magic` | Local tier (local prepends → package → package area → local root → local appends), then user tier (user prepends → home → user appends) |
@@ -37,6 +37,13 @@ Magic consumes exactly the authored `@` or `@/` sigil form. Its remaining
 payload must be relative: repeated POSIX separators and Windows
 drive-qualified, rooted, or UNC payloads return `InvalidSyntax` rather than
 replacing a configured magic root. This also applies under recursive `%`.
+
+
+Use `with_implicit_bases(ImplicitBases::Launch)` for launch-relative values.
+The mode is inherited by source and directory derivations. Launch-mode
+implicit references use the captured launch tree for containment. See the
+[lookup and planning contract](../../../../biscuit-file/docs/topics/file-references.md#implicit-relative-paths)
+and [value spelling](../../../../biscuit-file/docs/topics/file-references.md#spell-values-for-launch-lookup).
 
 ### Magic (`@`) tiers
 
@@ -147,13 +154,15 @@ compare `base_dir()` with `cwd()` to infer the boundary; use
 `base_dir_is_boundary()`.
 
 `@` does not follow those re-anchored scopes. The context carries an immutable
-`LaunchMagicScope` (request directory plus its repository, package, and
+`LaunchScope` (request directory plus its repository, package, and
 package-area roots), captured by `new` and the anchor builders and copied
 unchanged by `for_source`, `for_cwd`, and the trusted-external derivations.
 A nested `@x.md` in a prompt from `~/.claudine` or another repository searches
-the launch tree first; `./`, bare, `&`, and `^` keep source anchors. A caller
+the launch tree first. Explicit relative, authoring-mode implicit, `&`, and
+`^` references keep source anchors. A caller
 that rebuilds a context around an external source (rather than deriving it)
-seeds `with_launch_magic_scope(launch.launch_magic_scope().clone())`.
+seeds `with_launch_scope(launch.launch_scope().clone())` for `@`. Derive the
+context when implicit launch lookup must also keep the launch tree.
 `magic_search_roots()` returns the ordered, deduplicated `@` chain with
 provenance for diagnostics.
 

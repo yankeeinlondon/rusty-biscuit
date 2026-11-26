@@ -2,12 +2,13 @@
 //!
 //! [`PortablePath`] evaluates an ordered [`PortabilityPreference`] strategy
 //! against a target, verifies each candidate with the resolver in one
-//! prepared [`FileResolutionContext`](crate::FileResolutionContext), and
+//! prepared [`FileResolutionContext`](crate::FileResolutionContext) or checks
+//! launch shadows, and
 //! reports every attempt as typed data. [`PathIdentity`] is the shared
 //! lexical identity behind every prefix test and relative route; the
 //! crate-internal `text` seam turns generated references into text.
 
-// Evaluation verifies every spelling with the resolver, so it and the
+// Evaluation uses the filesystem, so it and the
 // diagnostics, anchors, and text rendering it alone uses need
 // `file-reference`; path identity and the strategy vocabulary are passive.
 #[cfg(feature = "file-reference")]
@@ -17,6 +18,8 @@ mod env_anchor;
 #[cfg(feature = "file-reference")]
 mod evaluate;
 mod path_identity;
+#[cfg(feature = "file-reference")]
+mod shadow;
 mod strategy;
 #[cfg(feature = "file-reference")]
 mod text;
@@ -34,6 +37,8 @@ pub use path_identity::{PathIdentity, RelativeRoute};
 pub(crate) use path_identity::normalize_native;
 #[cfg(feature = "file-reference")]
 pub(crate) use path_identity::first_seen_by_identity;
+#[cfg(feature = "file-reference")]
+pub use shadow::{FsShadowProbe, ShadowCache, ShadowProbe};
 pub use strategy::{IntentForms, PortabilityPreference};
 
 /// The valid portable variable names `env` declares.

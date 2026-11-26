@@ -189,6 +189,10 @@ fn a_review_document_previews_the_first_ten_lines_of_the_shipped_feature_review_
     let shipped = include_str!("../../../../schemas/feature-review.yaml").replace("\r\n", "\n");
     let target = hovers.schemas().join("feature-review.yaml");
     write(&target, &shipped);
+    write(
+        &hovers.schemas().join("review-fix-cycle.yaml"),
+        include_str!("../../../../schemas/review-fix-cycle.yaml"),
+    );
     let markdown = hovers.schema_value(&hovers.doc("review-3.md"), "feature-review.yaml");
 
     let definition: Vec<&str> = shipped

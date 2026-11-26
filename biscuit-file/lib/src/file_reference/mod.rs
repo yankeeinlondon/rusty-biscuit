@@ -40,9 +40,9 @@ pub use glob::{GlobListing, PreparedGlobReference, SkippedEntry};
 pub use portable::{IntentForms, PathIdentity, PortabilityPreference, RelativeRoute};
 #[cfg(feature = "file-reference")]
 pub use portable::{
-    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding, FsShadowProbe,
     InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortablePath, PortablePathError,
-    PortableReference, ProbeError, ResolutionProblem, SpellingProblem,
+    PortableReference, ProbeError, ResolutionProblem, ShadowCache, ShadowProbe, SpellingProblem,
 };
 
 #[cfg(feature = "fetch")]
@@ -52,7 +52,7 @@ pub use error::FetchError;
 /// callers can register convention magic search roots (e.g. a tool's
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
-    BaseDirOrigin, ContextAnchor, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
+    BaseDirOrigin, ContextAnchor, FileResolutionContext, ImplicitBases, LaunchScope, MagicPathRegistration, PackageAreaFallback,
     RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, capture_env,
     home_dir, user_cache_dir, user_cache_dir_from,
 };
@@ -70,7 +70,7 @@ pub use context::find_git_root;
 pub enum FileReferenceKind {
     /// `./foo`, `../foo` (and their `.\`/`..\` spellings). Pinned to `cwd`.
     ExplicitRelative,
-    /// A bare path (`foo`, `path/to/foo`) with no `cwd`-pinning sigil.
+    /// A relative path without a prefix, such as `foo` or `path/to/foo`.
     ImplicitRelative,
     /// A platform-native absolute path.
     Absolute,
@@ -123,11 +123,11 @@ pub enum RootProvenance {
     Vault,
     /// The authored absolute path (no joined root).
     Absolute,
-    /// The request directory serving as the local root for an `@` chain that
-    /// has no repository.
+    /// The launch directory for implicit launch lookup or for an `@` chain
+    /// that has no repository.
     ///
     /// Distinct from [`RootProvenance::Source`], which remains the authoring
-    /// `cwd` for bare and explicit-relative references: reusing `Source` here
+    /// `cwd` for authoring and explicit-relative references: reusing `Source` here
     /// would let `CandidatePlanOrder::AuthoringBaseFirst` boost the wrong
     /// `@` candidate.
     LocalRoot,
@@ -227,6 +227,24 @@ pub(crate) fn make_candidate(path: PathBuf, provenance: RootProvenance) -> Resol
     ResolutionCandidate { path, provenance }
 }
 
+/// The filesystem entry a direct reference should match.
+#[cfg(feature = "file-reference")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    File,
+    Directory,
+}
+
+/// A selected or planned local target.
+#[cfg(feature = "file-reference")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedTarget {
+    pub path: PathBuf,
+    pub provenance: RootProvenance,
+    /// Whether the selected path matched the requested entry kind.
+    pub existed: bool,
+}
+
 /// The outcome of probing a single candidate path.
 ///
 /// A `Missing` or `NonFile` candidate advances the ordered search; an `Io`
@@ -238,9 +256,9 @@ pub(crate) fn make_candidate(path: PathBuf, provenance: RootProvenance) -> Resol
 pub enum ProbeDisposition {
     /// The path does not exist.
     Missing,
-    /// The path exists but is not a regular file (e.g. a directory).
+    /// The path exists but has the wrong entry kind.
     NonFile,
-    /// The path is a regular file (or a symlink to one), or a missing location
+    /// The path has the requested entry kind, or is a missing location
     /// the caller declared present
     /// ([`FileReference::resolve_detailed_with_presence`]) -- the winner.
     Matched,
@@ -492,15 +510,14 @@ pub enum CompletionEntryForm {
     RepositoryRoot,
     /// `^`-prefixed path searched through package, area, and repository roots.
     RepositoryScoped,
-    /// Bare implicit-relative path. Roots are the caller-provided working
-    /// directory and the enclosing git root (in that order, when distinct).
+    /// Implicit relative path. Roots follow the context's [lookup policy](ImplicitBases).
     ImplicitRelative,
 }
 
 /// Expansion of a partial completion token.
 ///
-/// Returned by [`FileReference::complete_partial`] for tokens in the two
-/// supported entry forms. Exposes the absolute directories a completion
+/// Returned by [`FileReference::complete_partial`] for supported tokens.
+/// Exposes the absolute directories a completion
 /// consumer should enumerate, the partial filename being matched, and the
 /// prefix the shell will re-insert in front of each emitted candidate.
 #[cfg(feature = "file-reference")]
@@ -851,7 +868,67 @@ impl FileReference {
     ///
     /// [`resolve_in_context`]: Self::resolve_in_context
     pub fn resolve_detailed(&self, ctx: &FileResolutionContext) -> DetailedResolution {
-        self.resolve_detailed_inner(ctx, &mut |_| true, &mut |_| false)
+        self.resolve_detailed_as(ctx, EntryKind::File)
+    }
+
+    /// Resolve a reference against the requested entry kind. Recursive
+    /// references search for files only.
+    pub fn resolve_detailed_as(&self, ctx: &FileResolutionContext, kind: EntryKind) -> DetailedResolution {
+        self.resolve_detailed_inner(ctx, kind, &mut |_| true, &mut |_| false)
+    }
+
+    /// Select a local target, including one that does not exist yet. On a
+    /// launch-relative miss, use the first candidate with an existing parent
+    /// directory. If no parent exists, use the first candidate.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a typed resolution failure for invalid references, recursive
+    /// references, and filesystem errors.
+    pub fn plan_target(
+        &self,
+        ctx: &FileResolutionContext,
+        kind: EntryKind,
+    ) -> Result<PlannedTarget, FileReferenceError> {
+        if self.class().recursive {
+            return Err(FileReferenceError::InvalidSyntax(format!(
+                "recursive reference `{}` has no single planned target", self.raw
+            )));
+        }
+        let detailed = self.resolve_detailed_as(ctx, kind);
+        if let Some(error) = detailed.error {
+            return Err(error);
+        }
+        if let DetailedOutcome::Matched(path) = detailed.outcome
+            && let Some(matched) = detailed.candidates.last()
+        {
+            return Ok(PlannedTarget {
+                path,
+                provenance: matched.candidate().provenance(),
+                existed: true,
+            });
+        }
+        let mut candidates = detailed.candidates.iter().map(ProbedCandidate::candidate);
+        let first = candidates.next().ok_or_else(|| FileReferenceError::InvalidSyntax(
+            format!("reference `{}` has no local target", self.raw),
+        ))?;
+        let mut selected = first;
+        if ctx.implicit_bases() == ImplicitBases::Launch
+            && detailed.effective_kind == FileReferenceKind::ImplicitRelative
+        {
+            for candidate in std::iter::once(first).chain(candidates) {
+                let path = resolve::normalize_components(candidate.path());
+                if let Some(parent) = path.parent() && resolve::parent_directory_exists(parent)? {
+                    selected = candidate;
+                    break;
+                }
+            }
+        }
+        Ok(PlannedTarget {
+            path: resolve::normalize_components(selected.path()),
+            provenance: selected.provenance(),
+            existed: false,
+        })
     }
 
     /// [`resolve_detailed`](Self::resolve_detailed), asking `admit` about each
@@ -906,6 +983,7 @@ impl FileReference {
         let mut refusal = None;
         let detailed = self.resolve_detailed_inner(
             ctx,
+            EntryKind::File,
             &mut |path| match admit(path) {
                 Ok(()) => true,
                 Err(error) => {
@@ -924,6 +1002,7 @@ impl FileReference {
     fn resolve_detailed_inner(
         &self,
         ctx: &FileResolutionContext,
+        kind: EntryKind,
         admit: &mut dyn FnMut(&Path) -> bool,
         present: &mut dyn FnMut(&Path) -> bool,
     ) -> DetailedResolution {
@@ -953,6 +1032,7 @@ impl FileReference {
             ctx.magic_paths(),
             ctx.vault_roots(),
             &internal,
+            kind,
             admit,
             present,
         );
@@ -1151,14 +1231,9 @@ impl FileReference {
     /// Expand a partial completion token against an explicit
     /// [`FileResolutionContext`], reading no ambient process state.
     ///
-    /// This is the document-backed counterpart to [`complete_partial`]: instead
-    /// of discovering the repository root and home directory live from `cwd`,
-    /// it consumes the captured repository root, home directory, and configured
-    /// magic roots the context supplies. Completion and execution therefore
-    /// share one candidate builder and one context, so a value emitted here
-    /// enumerates from the same roots [`resolve_detailed`] probes (D9). The
-    /// `Magic` form in particular now surfaces the context's configured magic
-    /// roots, which the ambient [`complete_partial`] cannot see.
+    /// Uses the captured roots, including configured magic roots and the
+    /// [implicit lookup policy](ImplicitBases). Completion enumerates those
+    /// roots in the order [`resolve_detailed`] probes them.
     ///
     /// The supported entry forms and the returned shape are identical to
     /// [`complete_partial`].

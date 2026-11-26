@@ -109,7 +109,7 @@ fn refusal(frontmatter: &Value) -> Refusal {
     };
     Refusal {
         variant,
-        source_path: biscuit_file::to_portable_string(source_path),
+        source_path: biscuit_file::to_forward_slash_string(source_path),
         property: property.clone(),
         text,
     }

@@ -56,7 +56,7 @@ impl PrepRunner for CliPrepRunner {
         .caller_input_records;
         shared.set = Some(overlay.to_string());
         shared.caller_arguments = Default::default();
-        let file = biscuit_file::to_portable_string(&target);
+        let file = biscuit_file::to_forward_slash_string(&target);
         let status = match kind {
             TargetKind::Sequence => super::sequence::run_sequence_target(shared, file, self.verbose),
             TargetKind::Document(kind) => {

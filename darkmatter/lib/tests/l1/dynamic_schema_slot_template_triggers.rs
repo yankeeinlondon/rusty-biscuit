@@ -138,7 +138,7 @@ fn a_property_the_document_declares_never_evaluates_the_trigger_slot() {
     let resolved = effective(&case.schemas(Some(session(&data))), &markdown).expect("the document's owner wins");
     let owner = resolved["properties"]["owner"].to_string();
     assert!(owner.contains(r#""type":"string""#) && !owner.contains("properties"), "{resolved}");
-    let entry = biscuit_file::to_portable_string(&owner_type);
+    let entry = biscuit_file::to_forward_slash_string(&owner_type);
     assert!(!data.read_set().contains(&entry), "{:?}", data.read_set());
 
     let markdown = case.document("topic: sandbox\n");

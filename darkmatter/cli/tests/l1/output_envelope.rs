@@ -1004,7 +1004,7 @@ fn stderr_has_its_own_width_on_a_terminal() {
 
 /// How the read set names a file that exists: its canonical path, with `/`.
 fn read_entry(path: &Path) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).expect("the file exists"))
+    biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(path).expect("the file exists"))
 }
 
 /// Runs `args` with `--output json` and returns the one value, after requiring

@@ -112,9 +112,9 @@ fn structural_validators_resolve_only_context_free_file_values() {
         std::fs::create_dir_all(dir.path().join(tree).join("x")).unwrap();
         std::fs::write(dir.path().join(tree).join("x/spec.md"), "x").unwrap();
     }
-    let fix = biscuit_file::to_portable_string(&dir.path().join("fixes/x/spec.md"));
-    let feature = biscuit_file::to_portable_string(&dir.path().join("features/x/spec.md"));
-    let missing = biscuit_file::to_portable_string(&dir.path().join("fixes/x/absent.md"));
+    let fix = biscuit_file::to_forward_slash_string(&dir.path().join("fixes/x/spec.md"));
+    let feature = biscuit_file::to_forward_slash_string(&dir.path().join("features/x/spec.md"));
+    let missing = biscuit_file::to_forward_slash_string(&dir.path().join("fixes/x/absent.md"));
     let schema = json!({
         "type": "object",
         "properties": {
@@ -162,7 +162,7 @@ fn a_string_documents_links_normalize_against_the_request_context() {
     gix::init(&repo).unwrap();
     let target = repo.join("docs/guide.md");
     std::fs::write(&target, "# Guide\n").unwrap();
-    let absolute = biscuit_file::to_portable_string(&target);
+    let absolute = biscuit_file::to_forward_slash_string(&target);
     let md: Markdown = format!("See [the guide]({absolute}).\n").into();
 
     let request = request_at(&repo.join("docs"), ComposeOptions::new());

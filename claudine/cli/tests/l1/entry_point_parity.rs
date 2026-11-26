@@ -38,7 +38,7 @@ mod matrix;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use biscuit_file::{ResolutionFailure, to_portable_string};
+use biscuit_file::{ResolutionFailure, to_forward_slash_string};
 use matrix::{
     Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, GlobConsumer, GlobDocumentCell, GlobValueCell,
     LAUNCH_MAGIC, Observed, Owner, ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
@@ -98,7 +98,7 @@ fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output
 /// the repository, absolute outside it.
 fn document_argument(fixture: &ParityFixture, document: &Path) -> String {
     match document.strip_prefix(fixture.repo()) {
-        Ok(relative) => to_portable_string(relative),
+        Ok(relative) => to_forward_slash_string(relative),
         Err(_) => document.to_string_lossy().into_owned(),
     }
 }
@@ -323,7 +323,7 @@ fn supplied_glob_value(
                 .build()
                 .args(["compose", "--dry-run"])
                 .arg(&prompt)
-                .arg(format!("spec={}", to_portable_string(&candidate)))
+                .arg(format!("spec={}", to_forward_slash_string(&candidate)))
                 .output()
                 .expect("run claudine compose --dry-run with a supplied value");
             (candidate, outcome(&output))

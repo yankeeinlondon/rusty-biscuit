@@ -16,7 +16,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::prose::Prose;
@@ -356,8 +356,8 @@ fn badge_markup(badge: &str) -> String {
 
 fn path_label(path: &Path) -> String {
     biscuit_file::canonicalize_simplified(path)
-        .map(|p| to_portable_string(&p))
-        .unwrap_or_else(|_| to_portable_string(path))
+        .map(|p| to_forward_slash_string(&p))
+        .unwrap_or_else(|_| to_forward_slash_string(path))
 }
 
 fn file_href(path: &Path) -> Option<String> {

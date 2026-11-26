@@ -116,7 +116,7 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
     });
     log::message(&format!(
         "Updated {}.",
-        biscuit_file::to_portable_string(&config_path)
+        biscuit_file::to_forward_slash_string(&config_path)
     ));
     Ok(())
 }
@@ -143,7 +143,7 @@ async fn run_set_prompt_for_missing(value: &str) -> color_eyre::Result<()> {
     log::message(&format!("Set prompt_for_missing to {new_value}."));
     log::message(&format!(
         "Updated {}.",
-        biscuit_file::to_portable_string(&config_path)
+        biscuit_file::to_forward_slash_string(&config_path)
     ));
     Ok(())
 }

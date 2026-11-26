@@ -155,7 +155,7 @@ exit 0
         expected_marker_line: MARKER.to_string(),
         expected_stdout: format!(
             "probe-body repo={repo}\n{PROVIDER_TEXT}\n",
-            repo = biscuit_file::to_portable_string(&canonical(fixture.cwd()))
+            repo = biscuit_file::to_forward_slash_string(&canonical(fixture.cwd()))
         ),
         marker_row_styled,
     }

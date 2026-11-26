@@ -24,7 +24,7 @@
 use std::io;
 use std::path::Path;
 
-use biscuit_file::{FileReference, to_portable_string};
+use biscuit_file::{FileReference, to_forward_slash_string};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -734,7 +734,7 @@ fn extract_file_detail(path: &Path) -> FileDetail {
         .file_stem()
         .and_then(|s| s.to_str())
         .map(str::to_string)
-        .unwrap_or_else(|| to_portable_string(path));
+        .unwrap_or_else(|| to_forward_slash_string(path));
     FileDetail {
         badge: "FILE".to_string(),
         name,
@@ -750,16 +750,16 @@ fn path_label(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(root)
         && !rel.as_os_str().is_empty()
     {
-        return to_portable_string(rel);
+        return to_forward_slash_string(rel);
     }
     if let Some(home) = &ctx.home
         && path.starts_with(home)
         && let Ok(rel) = path.strip_prefix(home)
         && !rel.as_os_str().is_empty()
     {
-        return format!("~/{}", to_portable_string(rel));
+        return format!("~/{}", to_forward_slash_string(rel));
     }
-    to_portable_string(path)
+    to_forward_slash_string(path)
 }
 
 /// The chosen candidate as a resolved absolute path, resolved through the
@@ -775,7 +775,7 @@ fn resolve_file_value(path: &Path, ctx: &ScopeContext) -> io::Result<serde_json:
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("file not found: {}", to_portable_string(path)),
+                format!("file not found: {}", to_forward_slash_string(path)),
             )
         })?;
     Ok(serde_json::Value::String(resolved.display().to_string()))

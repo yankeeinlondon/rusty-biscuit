@@ -191,7 +191,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
         [
             format!(
                 "git add {}",
-                biscuit_file::to_portable_string(prepared.source_repo_root.as_ref().unwrap())
+                biscuit_file::to_forward_slash_string(prepared.source_repo_root.as_ref().unwrap())
             ),
             "just commit".to_string(),
             "git add ..".to_string(),

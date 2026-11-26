@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string as portable;
+use biscuit_file::to_forward_slash_string as portable;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::utils::layout::{Alignment, Edges, Length};

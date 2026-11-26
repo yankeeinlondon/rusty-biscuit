@@ -77,7 +77,7 @@ impl Repo {
             home: outer.clone(),
             runtime: RefCell::new(DataRuntime::new()),
         };
-        let os_type = os_type.replace("OUTSIDE", &biscuit_file::to_portable_string(&repo.outer));
+        let os_type = os_type.replace("OUTSIDE", &biscuit_file::to_forward_slash_string(&repo.outer));
         repo.write("schema.yaml", &format!("kind: schema\n$schema:\n    os: {os_type}\n"));
         repo.write("doc.md", "---\n$schema: ./schema.yaml\nos: a\n---\n\nBody.\n");
         for (name, text) in files {
@@ -160,12 +160,12 @@ impl Repo {
 
     /// Whether anything observed `path` (read its bytes or probed it).
     fn observed(&self, path: &Path) -> bool {
-        let entry = biscuit_file::to_portable_string(path);
+        let entry = biscuit_file::to_forward_slash_string(path);
         self.runtime().observations_since(ReadMark::default()).iter().any(|observation| observation.entry == entry)
     }
 
     fn read_set_has(&self, path: &Path) -> bool {
-        self.runtime().read_set().contains(&biscuit_file::to_portable_string(path))
+        self.runtime().read_set().contains(&biscuit_file::to_forward_slash_string(path))
     }
 }
 

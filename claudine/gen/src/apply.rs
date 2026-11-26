@@ -258,7 +258,7 @@ fn load_committed_catalog(area: &Path) -> Result<Option<Value>, GenError> {
         .map_err(|err| GenError::Json {
             message: format!(
                 "committed catalog `{}`: {err}",
-                biscuit_file::to_portable_string(&path)
+                biscuit_file::to_forward_slash_string(&path)
             ),
         })
 }

@@ -53,7 +53,7 @@ fn validate_strictly(schema_text: &str, value: &Value) {
 
 /// How the read set and `data_location.file` name a file that exists.
 fn read_entry(path: &Path) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).expect("the file exists"))
+    biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(path).expect("the file exists"))
 }
 
 /// The only diagnostic, after requiring there is exactly one.

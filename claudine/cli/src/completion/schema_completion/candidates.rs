@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use biscuit_file::{
     FileReference, FileResolutionContext, PathIdentity, PortabilityPreference, PortablePath,
-    canonicalize_simplified, to_portable_string,
+    canonicalize_simplified, to_forward_slash_string,
 };
 
 use darkmatter::markdown::schemas::{
@@ -129,7 +129,7 @@ fn file_candidates(
             let Ok(rel) = path.strip_prefix(&base) else {
                 continue;
             };
-            let rel_text = to_portable_string(rel);
+            let rel_text = to_forward_slash_string(rel);
             if !excluded.is_empty() && excluded.contains(&rel_text) {
                 continue;
             }
@@ -338,7 +338,7 @@ fn candidate_value(path: &Path, resolution: &FileResolutionContext) -> Option<St
     let launch_relative = PathIdentity::new(path)
         .relative_from(&PathIdentity::new(resolution.cwd()))
         .filter(|route| route.parent_hops() == 0 && !route.forward().is_empty())
-        .and_then(|route| FileReference::new(&to_portable_string(&route.to_path_buf())).ok());
+        .and_then(|route| FileReference::new(&to_forward_slash_string(&route.to_path_buf())).ok());
     let portable = match launch_relative {
         Some(reference) => PortablePath::from_reference(reference).with_ctx(resolution),
         None => PortablePath::from_path(path).with_ctx(resolution),
@@ -372,10 +372,10 @@ fn rel_or_name_matches(path: &Path, base: &Path, active: &str) -> bool {
     let target = path
         .strip_prefix(base)
         .ok()
-        .map(to_portable_string)
+        .map(to_forward_slash_string)
         .or_else(|| {
             path.file_name()
-                .map(|name| to_portable_string(Path::new(name)))
+                .map(|name| to_forward_slash_string(Path::new(name)))
         });
     target.is_some_and(|t| contains_ci(&t, active))
 }

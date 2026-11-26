@@ -95,7 +95,7 @@ impl Fixture {
     }
 
     fn absolute(&self, relative: &str) -> String {
-        biscuit_file::to_portable_string(&self.root().join(relative))
+        biscuit_file::to_forward_slash_string(&self.root().join(relative))
     }
 }
 

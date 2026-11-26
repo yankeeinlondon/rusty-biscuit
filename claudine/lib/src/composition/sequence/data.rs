@@ -94,7 +94,7 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
     if is_markdown(path) {
         return load_markdown_document(path).map(|(document, _)| document);
     }
-    let context = || biscuit_file::to_portable_string(path);
+    let context = || biscuit_file::to_forward_slash_string(path);
     let text = std::fs::read_to_string(path).map_err(|error| CompositionError::SequenceExternalLoad {
         context: context(),
         source: match SourceFormat::for_path(path) {
@@ -118,7 +118,7 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
 ///
 /// As [`load_document`], with the same text for the same content.
 pub fn load_document_from_text(path: &Path, text: &str) -> Result<LoadedDocument, CompositionError> {
-    let context = || biscuit_file::to_portable_string(path);
+    let context = || biscuit_file::to_forward_slash_string(path);
     match SourceFormat::for_path(path) {
         SourceFormat::Yaml => {
             let yaml = biscuit_file::Yaml::from_str(text).map_err(|e| {
@@ -189,14 +189,14 @@ fn parse_line_delimited(path: &Path, text: &str) -> Result<Value, CompositionErr
             continue;
         }
         let line_failure = |e| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_portable_string(path),
+            context: biscuit_file::to_forward_slash_string(path),
             source: SequenceLoadCause::JsonLine {
                 line: offset + 1,
                 source: e,
             },
         };
         if let DuplicateScan(Some(duplicate)) = serde_json::from_str::<DuplicateScan>(line).map_err(line_failure)? {
-            return Err(duplicate.into_error(biscuit_file::to_portable_string(path), Some(offset + 1)));
+            return Err(duplicate.into_error(biscuit_file::to_forward_slash_string(path), Some(offset + 1)));
         }
         let value: Value = serde_json::from_str(line).map_err(line_failure)?;
         items.push(value);

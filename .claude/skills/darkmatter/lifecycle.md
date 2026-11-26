@@ -77,7 +77,7 @@ pages with the behavior.
   boundary, never a base. Every host (`md compose` and every Claudine
   route: compose, wrapper, staged boot, loop harness, sequence container,
   task, step guard) builds its `EffectEngine` with the request context's
-  `launch_magic_scope().local_root()` (the working tree containing the
+  `launch_scope().local_root()` (the working tree containing the
   launch directory, else that directory), so a prompt in a sibling library
   can edit a `{{ ctx.cwd }}` path but not a file beside itself. The resolver
   derives the document context from `inputs.file_resolution_context`, so a

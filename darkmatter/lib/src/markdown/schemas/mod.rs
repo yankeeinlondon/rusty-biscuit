@@ -387,7 +387,7 @@ fn discarded_by_higher_layers(document: &[String], triggers: &[Vec<String>]) -> 
 fn document_template_identity(value: &Value, base_dir: &Path) -> String {
     format!(
         "document\0{}\0{}",
-        biscuit_file::to_portable_string(base_dir),
+        biscuit_file::to_forward_slash_string(base_dir),
         biscuit_hash::canonical_json(value)
     )
 }
@@ -575,7 +575,7 @@ fn same_registered_trigger(
 fn registered_digest(payload: SchemaDigest, host: &crate::config::registration::RegisteredHostProfile) -> SchemaDigest {
     let provenance = format!(
         "registered-host\0{}\0{}\0{}",
-        biscuit_file::to_portable_string(&host.manifest().path),
+        biscuit_file::to_forward_slash_string(&host.manifest().path),
         host.manifest().content_hash,
         host.revision()
     );
@@ -1689,7 +1689,7 @@ impl DarkmatterSchemas {
         // and slots resolve to a different schema without them.
         let identity = format!(
             "trigger\0{}\0{}\0{}",
-            biscuit_file::to_portable_string(source),
+            biscuit_file::to_forward_slash_string(source),
             serde_json::to_string(payload).unwrap_or_default(),
             pending.omitted_properties().join("\0")
         );

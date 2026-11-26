@@ -138,7 +138,7 @@ environment's cell and how to record an execution ban.
 - `ctx.*` path values and Markdown presentation are portable (`/`); an eager
   `file()`'s effective frontmatter value keeps native spelling. Tests compare
   against the spelling the surface actually emits (`biscuit_file`'s
-  `to_portable_string` for portable surfaces).
+  `to_forward_slash_string` for portable surfaces).
 - `#[cfg(unix)]` and `#[cfg(windows)]` test the **target**, not the build
   host. A `#![cfg(unix)]` inside a test file does not stop Cargo building that
   test's dev-dependencies for a Windows target; gate the dependency graph.

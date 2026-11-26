@@ -152,7 +152,7 @@ where
             if let Err(error) = write(&guardrails_path, DEFAULT_GUARDRAILS.as_bytes()) {
                 warn!(
                     "failed to migrate guardrails file {}: {error}",
-                    biscuit_file::to_portable_string(&guardrails_path)
+                    biscuit_file::to_forward_slash_string(&guardrails_path)
                 );
             }
             return DEFAULT_GUARDRAILS.to_string();
@@ -163,7 +163,7 @@ where
     if let Err(error) = write(&guardrails_path, DEFAULT_GUARDRAILS.as_bytes()) {
         warn!(
             "failed to write guardrails file {}: {error}",
-            biscuit_file::to_portable_string(&guardrails_path)
+            biscuit_file::to_forward_slash_string(&guardrails_path)
         );
     }
 

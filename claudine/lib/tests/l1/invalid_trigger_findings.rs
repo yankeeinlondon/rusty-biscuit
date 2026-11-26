@@ -162,7 +162,7 @@ fn an_authored_schema_naming_the_skipped_trigger_still_fails() {
     let trigger = fixture.root.join("home/schemas/memory.yaml");
     let document = fixture.document(
         "names-trigger.md",
-        &format!("$schema: {}", biscuit_file::to_portable_string(&trigger)),
+        &format!("$schema: {}", biscuit_file::to_forward_slash_string(&trigger)),
     );
 
     let error = fixture.verdict(&document, &TriggerFindings::default()).expect_err("a trigger file is no document schema");

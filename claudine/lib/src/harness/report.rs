@@ -64,7 +64,7 @@ fn source_file_success_markup(resolved_path: &Path) -> String {
 
 fn linked_path_markup(path: &Path) -> String {
     let label_path = path.file_name().map(Path::new).unwrap_or(path);
-    let label = prose_escape(&biscuit_file::to_portable_string(label_path));
+    let label = prose_escape(&biscuit_file::to_forward_slash_string(label_path));
     match url::Url::from_file_path(path) {
         Ok(href) => format!("<a href={}>{label}</a>", Prose::quoted_attr(href.as_str())),
         Err(()) => label,

@@ -539,7 +539,7 @@ fn show_spool() {
         .root
         .file_name()
         .map(Path::new)
-        .and_then(biscuit_file::try_portable_string)
+        .and_then(biscuit_file::try_forward_slash_string)
         .unwrap_or_else(|| "<private spool>".to_string());
     print!(
         "{}",

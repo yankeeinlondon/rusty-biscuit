@@ -50,7 +50,7 @@ fn chooser_rejects_absolute_directory_case_aliases() {
         std::fs::create_dir_all(tmp.path().join(stored)).unwrap();
         std::fs::write(tmp.path().join(stored).join("a.md"), "# A\n").unwrap();
         fs_capability::probe_directory_alias(tmp.path(), stored, authored);
-        let root = biscuit_file::to_portable_string(tmp.path());
+        let root = biscuit_file::to_forward_slash_string(tmp.path());
         let ctx = ScopeContext::discover_from(tmp.path());
         let offered = |pattern: String| file_candidate_paths(&[vec![vec![pattern]]], &ctx);
 

@@ -1192,7 +1192,7 @@ mod tests {
     fn resolve_file_reference_no_match_for_missing_absolute_path() {
         let dir = temp_dir();
         // An absolute path on this host: `/tmp/...` is foreign on Windows.
-        let raw = biscuit_file::to_portable_string(&dir.path().join("darkmatter-test-missing-absolute-xyz.md"));
+        let raw = biscuit_file::to_forward_slash_string(&dir.path().join("darkmatter-test-missing-absolute-xyz.md"));
         let raw = raw.as_str();
         let err = resolve_file_reference_in_context(raw, None, None, &context_at(dir.path())).expect_err("should fail with NoMatch");
         let rendered = err.to_string();

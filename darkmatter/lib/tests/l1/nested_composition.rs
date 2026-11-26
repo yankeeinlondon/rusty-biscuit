@@ -274,7 +274,7 @@ fn nested_links_are_normalized_once_at_the_root() {
     let temp = tempfile::tempdir().unwrap();
     let home_link = format!(
         "[home]({})",
-        biscuit_file::to_portable_string(&biscuit_file::home_dir().unwrap().join("notes.md"))
+        biscuit_file::to_forward_slash_string(&biscuit_file::home_dir().unwrap().join("notes.md"))
     );
     let body = format!("{{{{ as_markdown(\"{home_link}\") }}}}\n");
     let (path, file_document) = root_document(temp.path(), "root.md", &body);
@@ -374,7 +374,7 @@ fn approval_set(document: &Markdown, options: &ComposeOptions) -> HashSet<String
 fn preflight_discovers_nested_effects_without_composing_them() {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("nested-ran");
-    let sentinel_text = biscuit_file::to_portable_string(&sentinel);
+    let sentinel_text = biscuit_file::to_forward_slash_string(&sentinel);
     let (path, document) = root_document(
         temp.path(),
         "root.md",
@@ -421,7 +421,7 @@ fn preflight_discovers_nested_effects_without_composing_them() {
 fn assert_shape_fails_before_execution(name: &str, frontmatter: &str, body: &str, dependency: &str) {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("frontmatter-ran");
-    let sentinel_text = biscuit_file::to_portable_string(&sentinel);
+    let sentinel_text = biscuit_file::to_forward_slash_string(&sentinel);
     let (path, document) = root_document(
         temp.path(),
         name,
@@ -514,7 +514,7 @@ fn a_probe_dependent_frontmatter_shell_value_fails_before_execution() {
 fn frontmatter_nested_effects_wait_for_the_root_gate() {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("nested-ran");
-    let sentinel_text = biscuit_file::to_portable_string(&sentinel);
+    let sentinel_text = biscuit_file::to_forward_slash_string(&sentinel);
     let (path, document) = root_document(
         temp.path(),
         "root.md",
@@ -573,7 +573,7 @@ async fn nested_content_never_introduces_remote_transclusion() {
 fn assert_callback_preflight_scope(frontmatter: &str, body: &str, commands: &[&str], rejected: bool) {
     let temp = tempfile::tempdir().unwrap();
     let marker = temp.path().join("preflight-ran");
-    let marker_text = biscuit_file::to_portable_string(&marker);
+    let marker_text = biscuit_file::to_forward_slash_string(&marker);
     let (path, document) = root_document(
         temp.path(),
         "root.md",

@@ -331,7 +331,7 @@ fn summary_declined_file_uri_falls_back_to_plain_text() {
     let summary = render_system_prompt_summary(&source, SystemPromptMode::Append, 10, None, &term);
 
     assert!(!summary.contains("\x1b]8;;"));
-    assert!(strip_ansi_codes(&summary).contains(&to_portable_string(&path)));
+    assert!(strip_ansi_codes(&summary).contains(&to_forward_slash_string(&path)));
 }
 
 // --- Body tests ---

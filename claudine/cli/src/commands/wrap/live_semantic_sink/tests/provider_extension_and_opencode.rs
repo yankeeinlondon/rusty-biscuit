@@ -777,7 +777,7 @@ fn read_tool_call_renders_path_as_cwd_relative_blue_link() {
     // legitimately carry the absolute `file://` URL — that is metadata,
     // not visible text — so we only forbid the absolute path from
     // appearing as the bracket label.
-    let absolute_label = format!("[{}]", biscuit_file::to_portable_string(&source));
+    let absolute_label = format!("[{}]", biscuit_file::to_forward_slash_string(&source));
     assert!(
         !rendered.contains(&absolute_label),
         "absolute path must not appear as visible label: {rendered:?}"

@@ -551,7 +551,7 @@ fn write_json(out: &mut dyn Write, scan: &RefsScan, report: RefsReport, errors: 
     let envelope = Envelope {
         report_schema_version: REPORT_SCHEMA_VERSION,
         schema_version: SchemaVersion::CURRENT,
-        root_dir: biscuit_file::to_portable_string(&scan.scan_root),
+        root_dir: biscuit_file::to_forward_slash_string(&scan.scan_root),
         boundary: BOUNDARY,
         selector: &scan.selector,
         direction: scan.direction,

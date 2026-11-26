@@ -74,7 +74,7 @@ fn canonical(fixture: &CliProcessFixture, relative: &str) -> String {
 /// `relative` as the envelope's `read_set` spells it: canonical, in portable
 /// forward-slash form (unlike the slot gate's native spelling).
 fn read_entry(fixture: &CliProcessFixture, relative: &str) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists"))
+    biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists"))
 }
 
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> Output {

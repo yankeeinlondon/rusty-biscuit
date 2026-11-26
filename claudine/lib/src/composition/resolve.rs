@@ -134,10 +134,10 @@ pub fn derive_request_context_for_source(
     source_path: &Path,
 ) -> Result<FileResolutionContext, CompositionError> {
     let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
-        reference: biscuit_file::to_portable_string(source_path),
+        reference: biscuit_file::to_forward_slash_string(source_path),
         source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
             "resolved source path has no parent directory: {}",
-            biscuit_file::to_portable_string(source_path)
+            biscuit_file::to_forward_slash_string(source_path)
         )),
     })?;
 
@@ -156,7 +156,7 @@ pub fn derive_request_context_for_source(
         Some(source_path),
         git_root.as_deref(),
         repo_info.as_ref(),
-        Some(provisional_context.launch_magic_scope()),
+        Some(provisional_context.launch_scope()),
     )?)
 }
 
@@ -204,7 +204,7 @@ pub fn resolve_composition_source_in_context(
         .unwrap_or("");
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return Err(CompositionError::NotMarkdown(
-            biscuit_file::to_portable_string(&resolved_path),
+            biscuit_file::to_forward_slash_string(&resolved_path),
         ));
     }
 

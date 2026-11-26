@@ -80,7 +80,7 @@ async fn run_interactive_initialization() -> Result<()> {
     log::message("");
     log::message(&format!(
         "  Config: {}",
-        biscuit_file::to_portable_string(&path)
+        biscuit_file::to_forward_slash_string(&path)
     ));
     log::message("  Edit with: claudine config");
     log::message("");
@@ -281,8 +281,8 @@ pub(crate) fn write_with_darkmatter_setup(
             // reported.
             let claudine_config = match setup.darkmatter {
                 Ok(handshake) => {
-                    let darkmatter = biscuit_file::to_portable_string(&handshake.darkmatter_config);
-                    let claudine = biscuit_file::to_portable_string(&handshake.claudine_config);
+                    let darkmatter = biscuit_file::to_forward_slash_string(&handshake.darkmatter_config);
+                    let claudine = biscuit_file::to_forward_slash_string(&handshake.claudine_config);
                     match handshake.permissions {
                         // Pointing a file with no block of its own at Claudine's is
                         // the documented default, as quiet as Claudine's own first
@@ -307,17 +307,17 @@ pub(crate) fn write_with_darkmatter_setup(
             match &setup.publication {
                 claudine::composition::registration::PublishOutcome::Published { manifest, .. } => log::info(&format!(
                     "  Published Claudine's host registration at `{}`",
-                    biscuit_file::to_portable_string(manifest)
+                    biscuit_file::to_forward_slash_string(manifest)
                 )),
                 outcome => log::info(&format!(
                     "  Claudine's host registration at `{}` is current",
-                    biscuit_file::to_portable_string(outcome.manifest())
+                    biscuit_file::to_forward_slash_string(outcome.manifest())
                 )),
             }
             match setup.registration {
                 Ok(report) if !report.replaced.is_empty() => log::message(&format!(
                     "  Darkmatter registration: `{}` now lists `{}` in place of {}",
-                    biscuit_file::to_portable_string(&report.path),
+                    biscuit_file::to_forward_slash_string(&report.path),
                     claudine::composition::registration::MANIFEST_REFERENCE,
                     report.replaced.iter().map(|entry| format!("`{entry}`")).collect::<Vec<_>>().join(", ")
                 )),
@@ -329,7 +329,7 @@ pub(crate) fn write_with_darkmatter_setup(
                     for path in cleanup.removed {
                         log::message(&format!(
                             "  Removed the retired host registration `{}`",
-                            biscuit_file::to_portable_string(&path)
+                            biscuit_file::to_forward_slash_string(&path)
                         ));
                     }
                 }
@@ -337,7 +337,7 @@ pub(crate) fn write_with_darkmatter_setup(
                     for path in &failure.removed {
                         log::message(&format!(
                             "  Removed `{}` of the retired host registration",
-                            biscuit_file::to_portable_string(path)
+                            biscuit_file::to_forward_slash_string(path)
                         ));
                     }
                     let state = if failure.removed.is_empty() { "was not removed" } else { "was only partly removed" };

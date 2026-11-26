@@ -241,7 +241,7 @@ fn malformed_declarations_and_invalid_values_fail_discovery() {
 #[test]
 fn discovery_runs_nothing() {
     let dir = TempDir::new().unwrap();
-    let marker = |name: &str| biscuit_file::to_portable_string(&dir.path().join(name));
+    let marker = |name: &str| biscuit_file::to_forward_slash_string(&dir.path().join(name));
     write(dir.path(), "prompt.md", &format!("---\nprobe: \"$(touch {})\"\n---\nP.\n", marker("prompt-shell")));
     write(dir.path(), "child.yaml", &format!(
         "kind: sequence\nprobe: \"$(touch {})\"\ninitialize:\n  - ensure_file: {}\nsequence:\n  - name: ask\n    prompt: ./prompt.md\n",

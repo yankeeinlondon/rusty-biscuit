@@ -576,7 +576,7 @@ fn edit_value(raw_file: &str, request: &MdRequest) -> Result<Completed<CommandVa
     let shown = canonical.display().to_string();
     let terminal = shown.clone();
     let data = EditData {
-        file: Some(biscuit_file::to_portable_string(&canonical)),
+        file: Some(biscuit_file::to_forward_slash_string(&canonical)),
         // The command may carry arguments; the executable is its first word.
         editor: editor.split_whitespace().next().map(str::to_string),
         created,

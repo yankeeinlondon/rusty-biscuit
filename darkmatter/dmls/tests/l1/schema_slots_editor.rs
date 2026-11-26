@@ -60,7 +60,7 @@ fn permit(root: &Path, entries: &[&str]) {
 /// `permissions.file-read`, relative to the reading document.
 fn allow_file_persisted(root: &Path, file: &Path) {
     let relative = file.strip_prefix(root).expect("a workspace file");
-    permit(root, &[&format!("./{}", biscuit_file::to_portable_string(relative))]);
+    permit(root, &[&format!("./{}", biscuit_file::to_forward_slash_string(relative))]);
 }
 
 fn snapshot(root: &Path) -> darkmatter::markdown::compose::RequestSnapshot {

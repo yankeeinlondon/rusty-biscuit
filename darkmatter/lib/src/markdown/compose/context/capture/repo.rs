@@ -17,7 +17,7 @@ pub(super) const KEYS: &[&str] = &[
 /// `\\` before punctuation as an escape; forward slashes are valid on every
 /// platform and survive composition intact.
 fn portable_dir(path: &std::path::Path) -> String {
-    strip_trailing_sep(&biscuit_file::to_portable_string(path))
+    strip_trailing_sep(&biscuit_file::to_forward_slash_string(path))
 }
 
 pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {

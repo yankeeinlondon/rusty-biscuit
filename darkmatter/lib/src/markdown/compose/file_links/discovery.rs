@@ -717,7 +717,7 @@ mod tests {
 
         let glob = format!(
             "::file-links \"{}/*.md\"\n",
-            biscuit_file::to_portable_string(outside.path())
+            biscuit_file::to_forward_slash_string(outside.path())
         );
         let render = discover_content(&glob, &source)
             .unwrap()

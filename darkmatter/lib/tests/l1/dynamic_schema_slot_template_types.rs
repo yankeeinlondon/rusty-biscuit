@@ -84,7 +84,7 @@ impl Fixture {
 
     /// The portable read-set entry of `relative`.
     fn entry(&self, relative: &str) -> String {
-        biscuit_file::to_portable_string(&self.path(relative))
+        biscuit_file::to_forward_slash_string(&self.path(relative))
     }
 
     /// A [`DarkmatterSchemas`] resolving through `session`, as one command.
@@ -199,7 +199,7 @@ fn a_granted_import_resolves_and_is_observed() {
     let expected = owner_schema(&DarkmatterSchemas::new(fixture.context()), &static_markdown).expect("static resolves");
     assert_eq!(owner, expected);
     assert!(owner.to_string().contains(r#""required":["name"]"#), "{owner}");
-    let entry = biscuit_file::to_portable_string(&fixture.path("types.yaml"));
+    let entry = biscuit_file::to_forward_slash_string(&fixture.path("types.yaml"));
     assert!(data.read_set().contains(&entry), "{:?}", data.read_set());
 }
 

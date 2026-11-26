@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, to_portable_string};
+use biscuit_file::{FileResolutionContext, to_forward_slash_string};
 use tempfile::TempDir;
 
 use super::{Fixture, glob, link_dir, snapshot};
@@ -37,7 +37,7 @@ pub(super) fn assert_admits(pattern: &str, file: &Path, ctx: &FileResolutionCont
 }
 
 pub(super) fn absolute(dir: &Path, rest: &str) -> String {
-    format!("{}/{rest}", to_portable_string(dir))
+    format!("{}/{rest}", to_forward_slash_string(dir))
 }
 
 /// Criterion 26: an absolute pattern's literal directories are matched

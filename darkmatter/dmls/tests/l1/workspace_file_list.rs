@@ -420,7 +420,7 @@ fn external_payload_workspace(workspace: &LspWorkspace, external: &std::path::Pa
     std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
     let payload = external.join("prompt.yaml");
     std::fs::write(&payload, "$schema:\n  model: string(required)\n").unwrap();
-    let payload_reference = biscuit_file::to_portable_string(&payload);
+    let payload_reference = biscuit_file::to_forward_slash_string(&payload);
     std::fs::write(
         schemas.join("prompt.trigger.yaml"),
         format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: \"{payload_reference}\"\n"),

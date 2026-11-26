@@ -18,7 +18,7 @@
 use crate::config::migration_receipt::{self, MigrationSource};
 use crate::markdown::hash::node_edit::Layout;
 use crate::yaml_edit::{YamlEdit, YamlEditError, edit_yaml_paths_in_layout};
-use biscuit_file::{Indentation, PathIdentity, YamlError, canonicalize_simplified, to_portable_string};
+use biscuit_file::{Indentation, PathIdentity, YamlError, canonicalize_simplified, to_forward_slash_string};
 use std::cell::{OnceCell, RefCell};
 use simplified_schema::PropertyPath;
 use std::fmt;
@@ -474,7 +474,7 @@ impl ConfigTransaction {
             }
             return Ok(self);
         }
-        let order_key = to_portable_string(&resolved);
+        let order_key = to_forward_slash_string(&resolved);
         let position = self.targets.partition_point(|target| target.order_key <= order_key);
         self.targets.insert(
             position,

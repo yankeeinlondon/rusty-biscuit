@@ -68,7 +68,7 @@ impl Fixture {
     /// from the other document's and from anything ambient.
     fn map(&self, dir: &str) -> DocumentEnvironment {
         DocumentEnvironment::new(HashMap::from([
-            (PROBE.to_string(), biscuit_file::to_portable_string(&self.root.join(dir))),
+            (PROBE.to_string(), biscuit_file::to_forward_slash_string(&self.root.join(dir))),
             ("AGENT".to_string(), format!("agent-{dir}")),
             ("MODEL".to_string(), format!("model-{dir}")),
             ("SCHEMAS_DIR".to_string(), self.schemas(dir).display().to_string()),
@@ -90,7 +90,7 @@ impl Fixture {
     }
 
     fn expected(&self, dir: &str) -> String {
-        let value = biscuit_file::to_portable_string(&self.root.join(dir));
+        let value = biscuit_file::to_forward_slash_string(&self.root.join(dir));
         let title = if dir == "a" { "Title A" } else { "Title B" };
         format!("env=[{value}] agent=[agent-{dir}] lazy=[agent-{dir}] ref=[{title}]")
     }
@@ -143,7 +143,7 @@ fn schemas_dir_root(context: &biscuit_file::FileResolutionContext) -> Option<Pat
 
 /// Assert that every consumer of one prepared document read `dir`'s map.
 fn assert_document_reads(fixture: &Fixture, prepared: &Prepared, dir: &str) {
-    let value = biscuit_file::to_portable_string(&fixture.root.join(dir));
+    let value = biscuit_file::to_forward_slash_string(&fixture.root.join(dir));
     let prompt = &prepared.composition.prompt;
     assert!(prompt.contains(&fixture.expected(dir)), "{dir}: {prompt}");
     assert!(prompt.contains(&format!("child=[{value}]")), "the transclusion reads {dir}: {prompt}");
@@ -217,8 +217,8 @@ fn a_second_document_reads_its_own_map_and_the_first_keeps_its_own() {
     assert_eq!(second.home_dir(), first.home_dir());
     assert_eq!(second.launch_cwd(), first.launch_cwd());
     assert_eq!(
-        second.launch_file_resolution_context().launch_magic_scope(),
-        first.launch_file_resolution_context().launch_magic_scope(),
+        second.launch_file_resolution_context().launch_scope(),
+        first.launch_file_resolution_context().launch_scope(),
     );
     assert_eq!(
         &second
@@ -287,7 +287,7 @@ fn a_child_process_starts_from_the_document_map_with_the_launch_home() {
     let baseline = document.env_baseline();
     assert_eq!(
         baseline.get(PROBE),
-        Some(std::ffi::OsStr::new(&biscuit_file::to_portable_string(&fixture.root.join("b")))),
+        Some(std::ffi::OsStr::new(&biscuit_file::to_forward_slash_string(&fixture.root.join("b")))),
     );
     // A raw variable the launch map never named is the document's too.
     let launch_baseline = launch.env_baseline();

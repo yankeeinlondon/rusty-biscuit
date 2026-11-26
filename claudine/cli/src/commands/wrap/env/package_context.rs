@@ -60,7 +60,7 @@ pub(crate) fn resolve_launch_workspace_context(
             package_context: None,
             warnings: vec![format!(
                 "failed to resolve monorepo package metadata for '{}': {}",
-                biscuit_file::to_portable_string(launch_cwd),
+                biscuit_file::to_forward_slash_string(launch_cwd),
                 error
             )],
         },
@@ -108,7 +108,7 @@ pub(crate) fn launch_workspace_context_from_repo_info(
                 None,
                 vec![format!(
                     "monorepo detected at '{}' but no packages were reported",
-                    biscuit_file::to_portable_string(&repo.root)
+                    biscuit_file::to_forward_slash_string(&repo.root)
                 )],
             ),
         },
@@ -150,8 +150,8 @@ fn resolve_package_context_from_packages(
         None,
         vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            biscuit_file::to_portable_string(&repo.root),
-            biscuit_file::to_portable_string(cwd)
+            biscuit_file::to_forward_slash_string(&repo.root),
+            biscuit_file::to_forward_slash_string(cwd)
         )],
     )
 }
@@ -178,7 +178,7 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
             package_context: None,
             warnings: vec![format!(
                 "monorepo detected at '{}' but no packages were reported",
-                biscuit_file::to_portable_string(&repo.root)
+                biscuit_file::to_forward_slash_string(&repo.root)
             )],
         });
     };
@@ -206,8 +206,8 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
         package_context: None,
         warnings: vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            biscuit_file::to_portable_string(&repo.root),
-            biscuit_file::to_portable_string(cwd)
+            biscuit_file::to_forward_slash_string(&repo.root),
+            biscuit_file::to_forward_slash_string(cwd)
         )],
     })
 }

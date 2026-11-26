@@ -408,7 +408,7 @@ pub(crate) fn save_file_approval(
         Err(error) => {
             let mut warning = ComposeWarning::new(
                 NOT_SAVED_STAGE,
-                format!("always allowing `{}`: {error}", biscuit_file::to_portable_string(path)),
+                format!("always allowing `{}`: {error}", biscuit_file::to_forward_slash_string(path)),
             );
             warning.code = Some(CONFIG_NOT_SAVED_CODE.to_string());
             warning.path.clone_from(&error.file);

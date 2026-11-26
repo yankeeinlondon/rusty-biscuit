@@ -10011,7 +10011,7 @@ fn test_repo_worktree_verbose_includes_path() {
     let trimmed = stdout.trim();
     assert!(trimmed.starts_with("my-worktree ["));
     assert!(trimmed.ends_with("]"));
-    let expected_path = biscuit_file::to_portable_string(
+    let expected_path = biscuit_file::to_forward_slash_string(
         &std::fs::canonicalize(worktree_path).expect("canonical worktree path"),
     );
     assert!(trimmed.contains(&expected_path));
@@ -10181,7 +10181,7 @@ fn test_repo_worktrees_verbose_output() {
         stdout.contains("located at"),
         "verbose should include path: {stdout}"
     );
-    let expected_path = biscuit_file::to_portable_string(
+    let expected_path = biscuit_file::to_forward_slash_string(
         &std::fs::canonicalize(worktree_path).expect("canonical worktree path"),
     );
     assert!(

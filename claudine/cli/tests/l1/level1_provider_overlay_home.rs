@@ -891,7 +891,7 @@ fn codex_repo_perf_output_names_the_provider_overlay_not_a_home() {
     // compared with every space removed.
     let expected = format!(
         "CODEX_HOME points the provider at its overlay in {}; your home directory is unchanged.",
-        biscuit_file::to_portable_string(&overlay)
+        biscuit_file::to_forward_slash_string(&overlay)
     );
     let unspaced = |s: &str| s.split_whitespace().collect::<String>();
     assert!(unspaced(&text).contains(&unspaced(&expected)), "{text}");

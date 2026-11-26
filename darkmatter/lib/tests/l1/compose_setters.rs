@@ -455,7 +455,7 @@ $schema:
         let (composed, _) = Markdown::try_from(path.as_path()).unwrap().compose_with(&request).unwrap();
         let rendered: Value = serde_json::from_str(composed.content().trim()).unwrap();
         let avatar = launch.root.join("assets").join("avatar.png");
-        assert_eq!(rendered, json!({"avatar": biscuit_file::to_portable_string(&avatar), "children": []}));
+        assert_eq!(rendered, json!({"avatar": biscuit_file::to_forward_slash_string(&avatar), "children": []}));
     }
 
     /// The rendered text is portable, while the value later stages read stays native.
@@ -476,7 +476,7 @@ $schema:
             .with_setters(plan(&["author.avatar=assets/avatar.png"]));
         let request = crate::request_support::request_at(&launch.root, base);
         let (composed, _) = Markdown::try_from(path.as_path()).unwrap().compose_with(&request).unwrap();
-        let rendered = biscuit_file::to_portable_string(std::path::Path::new(launch.avatar().as_str().unwrap()));
+        let rendered = biscuit_file::to_forward_slash_string(std::path::Path::new(launch.avatar().as_str().unwrap()));
         assert!(composed.content().contains(&format!("CHILD {rendered}")), "{}", composed.content());
     }
 

@@ -808,7 +808,7 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     // Longest first: a prefix would otherwise mask the form that contains it.
     let mut portable_roots = roots
         .iter()
-        .map(|root| biscuit_file::to_portable_string(root))
+        .map(|root| biscuit_file::to_forward_slash_string(root))
         .collect::<Vec<_>>();
     portable_roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
     roots.sort_by_key(|root| std::cmp::Reverse(root.as_os_str().len()));
@@ -824,7 +824,7 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
                     return;
                 }
                 if !text.contains("[BASE]") {
-                    let mut portable = biscuit_file::to_portable_string(std::path::Path::new(text));
+                    let mut portable = biscuit_file::to_forward_slash_string(std::path::Path::new(text));
                     for root in portable_roots {
                         portable = portable.replace(root, "[BASE]");
                     }

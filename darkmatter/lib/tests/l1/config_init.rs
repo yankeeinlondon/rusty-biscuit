@@ -351,7 +351,7 @@ fn register_manifest_adds_a_list_to_a_file_without_one() {
 fn register_manifest_deduplicates_by_the_manifest_it_names_not_the_spelling() {
     let fixture = Fixture::new();
     let manifest = with_manifest(&fixture);
-    let absolute = biscuit_file::to_portable_string(&manifest);
+    let absolute = biscuit_file::to_forward_slash_string(&manifest);
     let original = format!("register:\n    - {absolute}\n");
     fixture.write("home/.darkmatter.yaml", &original);
     let before = fixture.files();
@@ -468,7 +468,7 @@ fn replace_manifest_registration_replaces_the_old_entry_in_place_keeping_every_o
 fn replace_manifest_registration_matches_a_missing_old_manifest_in_every_spelling() {
     let fixture = Fixture::new();
     with_new_manifest(&fixture);
-    let absolute = biscuit_file::to_portable_string(&old_manifest(&fixture));
+    let absolute = biscuit_file::to_forward_slash_string(&old_manifest(&fixture));
     for spelling in [absolute.as_str(), "~/.acme/darkmatter-host.yaml", "./.acme/darkmatter-host.yaml"] {
         fixture.write("home/.darkmatter.yaml", &format!("register:\n    - {spelling}\n"));
         let report = replace(&fixture).unwrap();
@@ -486,7 +486,7 @@ fn entry_names_location_matches_the_entries_the_writer_removes() {
     let fixture = Fixture::new();
     with_new_manifest(&fixture);
     fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
-    let absolute = biscuit_file::to_portable_string(&old_manifest(&fixture));
+    let absolute = biscuit_file::to_forward_slash_string(&old_manifest(&fixture));
     let names = |entry: &str| {
         darkmatter::config::registration::entry_names_location(entry, &fixture.user_file(), &fixture.context(), &old_manifest(&fixture))
     };
@@ -516,7 +516,7 @@ fn replace_manifest_registration_leaves_one_canonical_entry_at_the_first_affecte
     let fixture = Fixture::new();
     let new = with_new_manifest(&fixture);
     fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
-    let new_absolute = biscuit_file::to_portable_string(&new);
+    let new_absolute = biscuit_file::to_forward_slash_string(&new);
     let original = format!(
         "register:\n    - ~/.other/darkmatter-host.yaml\n    - {new_absolute}\n    - ~/.acme/darkmatter-host.yaml\n    - {NEW_REFERENCE}\n    - ~/.acme/darkmatter-host.yaml\n"
     );

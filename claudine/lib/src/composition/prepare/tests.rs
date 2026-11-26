@@ -1021,7 +1021,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     };
     let source_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
-    let executable = biscuit_file::to_portable_string(&probe_executable);
+    let executable = biscuit_file::to_forward_slash_string(&probe_executable);
     let command = format!("\"{executable}\"");
     let source = make_source(
         &source_dir,

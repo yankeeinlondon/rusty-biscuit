@@ -257,7 +257,7 @@ fn a_receipt_naming_another_target_is_refused() {
     let fixture = Fixture::new();
     fixture.publish_deleting_legacy();
     let mut receipt = fixture.receipt_value();
-    receipt["target"] = json!(biscuit_file::to_portable_string(&fixture.root.join("other.yaml")));
+    receipt["target"] = json!(biscuit_file::to_forward_slash_string(&fixture.root.join("other.yaml")));
     fixture.write_receipt(&receipt);
 
     let error = refusal(&fixture.target, &fixture.known());
@@ -329,7 +329,7 @@ fn invalid_receipt_shapes_are_located_errors_that_keep_the_source() {
         edit(&mut value);
         serde_json::to_string_pretty(&value).unwrap()
     };
-    let backup = biscuit_file::to_portable_string(&fixture.root.join("legacy.bak"));
+    let backup = biscuit_file::to_forward_slash_string(&fixture.root.join("legacy.bak"));
 
     let cases: Vec<(&str, String, &str)> = vec![
         ("missing field", edited(&|v| drop(v.as_object_mut().unwrap().remove("published_hash"))), "/published_hash"),

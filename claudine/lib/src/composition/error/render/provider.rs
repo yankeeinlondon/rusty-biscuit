@@ -137,7 +137,7 @@ fn render_magic_no_match_body(
         code_span(payload),
     );
     for root in resolution.magic_search_roots() {
-        let path = biscuit_file::to_portable_string(root.path());
+        let path = biscuit_file::to_forward_slash_string(root.path());
         let marker = (root.provenance() == RootProvenance::Magic).then_some(" (*)");
         roots.push_str(&format!(
             "\n- <cyan>{}</cyan>{}",
@@ -165,7 +165,7 @@ fn render_candidate_no_match_body(
     let mut body = vec![Prose::new(format!(
         "Cannot resolve <cyan>{}</cyan> from launch directory <cyan>{}</cyan>.",
         code_span(reference),
-        code_span(&biscuit_file::to_portable_string(resolution.base_dir())),
+        code_span(&biscuit_file::to_forward_slash_string(resolution.base_dir())),
     ))];
 
     if !resolution.candidates().is_empty() {
@@ -182,7 +182,7 @@ fn render_candidate_no_match_body(
                 RootProvenance::Absolute => "absolute",
                 RootProvenance::LocalRoot => "local root",
             };
-            let path = biscuit_file::to_portable_string(probed.candidate().path());
+            let path = biscuit_file::to_forward_slash_string(probed.candidate().path());
             tried.push_str(&format!(
                 "\n- <b>{provenance}</b>: <cyan>{}</cyan>",
                 code_span(&path),

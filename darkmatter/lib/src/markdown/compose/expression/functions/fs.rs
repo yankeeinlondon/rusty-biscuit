@@ -430,7 +430,7 @@ pub(super) fn resolve_anchored_path_shape(
 /// file. Any other input keeps the display form ([`path_display_components`]).
 pub(super) fn render_built_path(path: &Path, absolute_input: bool, ctx: &ResolutionContext) -> String {
     if absolute_input {
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     } else {
         make_portable_relative_in_context(path, &ctx.cwd, &ctx.file_resolution_context)
     }
@@ -744,7 +744,7 @@ pub fn dirname_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value
     if absolute_input || Path::new(&projected).is_absolute() {
         return Ok(Value::String(
             path.parent()
-                .map(biscuit_file::to_portable_string)
+                .map(biscuit_file::to_forward_slash_string)
                 .unwrap_or_default(),
         ));
     }
@@ -912,7 +912,7 @@ pub(super) fn markdown_destination(destination: &str) -> String {
 /// reference that
 /// names a different file once the composed document moves.
 pub(super) fn portable_destination(function: &'static str, path: &Path) -> Result<String, ExpressionError> {
-    biscuit_file::try_portable_string(path).ok_or_else(|| {
+    biscuit_file::try_forward_slash_string(path).ok_or_else(|| {
         expression_other(
             function,
             format!(
@@ -1259,13 +1259,13 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
     ctx.data.observe_listing(
         crate::markdown::compose::expression::data::ObservationKind::Glob,
         raw.to_string(),
-        listing.matches.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+        listing.matches.iter().map(|path| biscuit_file::to_forward_slash_string(path)).collect(),
     );
     Ok(Value::Array(
         listing
             .matches
             .iter()
-            .map(|path| Value::String(biscuit_file::to_portable_string(path)))
+            .map(|path| Value::String(biscuit_file::to_forward_slash_string(path)))
             .collect(),
     ))
 }

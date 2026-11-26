@@ -423,7 +423,7 @@ pub fn derive_in_own_repository(
         Some(reference) => own.for_trusted_external_source_reference(reference, resolved),
         None => own.for_trusted_external_source(resolved),
     };
-    source.with_launch_magic_scope(launch.launch_magic_scope().clone())
+    source.with_launch_scope(launch.launch_scope().clone())
 }
 
 /// The working-tree root of the Git checkout nearest to `dir`: the closest
@@ -1123,7 +1123,7 @@ mod tests {
             let accepted = request.clone().with_accepted_source_file(&source, None);
             let context = accepted.source_file_resolution_context();
             assert_eq!(context.repository_root(), Some(notes.as_path()), "{}", source.display());
-            assert_eq!(context.launch_magic_scope(), request.resolution_context().launch_magic_scope());
+            assert_eq!(context.launch_scope(), request.resolution_context().launch_scope());
             assert!(Arc::ptr_eq(request.config_snapshot(), accepted.config_snapshot()));
         }
         assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1, "one discovery for the notes checkout");

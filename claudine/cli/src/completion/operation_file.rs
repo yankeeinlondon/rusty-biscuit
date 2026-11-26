@@ -17,7 +17,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, FileReferenceKind, to_portable_string};
+use biscuit_file::{FileReference, FileReferenceKind, to_forward_slash_string};
 use ignore::WalkBuilder;
 use biscuit_tui::components::choose::ChoiceOption;
 use claudine::composition::{
@@ -110,7 +110,7 @@ where
             continue;
         };
         if entry.is_file && entry.file_name == filename {
-            matches.insert(to_portable_string(&entry.relative_path));
+            matches.insert(to_forward_slash_string(&entry.relative_path));
             if matches.len() == MAX_SUGGESTIONS {
                 break;
             }
@@ -402,7 +402,7 @@ fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(root)
         && !rel.as_os_str().is_empty()
     {
-        return to_portable_string(rel);
+        return to_forward_slash_string(rel);
     }
 
     if let Some(home) = &ctx.home
@@ -410,10 +410,10 @@ fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(home)
         && !rel.as_os_str().is_empty()
     {
-        return format!("~/{}", to_portable_string(rel));
+        return format!("~/{}", to_forward_slash_string(rel));
     }
 
-    to_portable_string(path)
+    to_forward_slash_string(path)
 }
 
 #[cfg(test)]

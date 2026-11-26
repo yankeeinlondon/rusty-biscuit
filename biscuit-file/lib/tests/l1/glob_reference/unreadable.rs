@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::{
-    FileReference, FileReferenceError, FileResolutionContext, GlobReferenceError, to_portable_string,
+    FileReference, FileReferenceError, FileResolutionContext, GlobReferenceError, to_forward_slash_string,
 };
 
 use super::directory_case::{absolute, assert_admits, assert_rejects};
@@ -98,7 +98,7 @@ fn an_unreadable_search_directory_fails_list_files_and_take_first() {
 #[test]
 fn every_listing_prefix_reports_the_unreadable_directory() {
     let (fx, locked) = locked_docs();
-    let absolute = format!("{}/docs/locked/*.md", to_portable_string(&fx.repo));
+    let absolute = format!("{}/docs/locked/*.md", to_forward_slash_string(&fx.repo));
     let Some(_guard) = Locked::new(&locked) else { return };
     let ctx = ctx(&fx);
 

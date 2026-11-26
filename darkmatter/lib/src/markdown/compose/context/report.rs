@@ -1058,8 +1058,8 @@ impl ComposeWarning {
     /// target lies outside the file tree. One per link: the same link reached
     /// by two globs, or by one glob evaluated twice, is one issue.
     pub(crate) fn skipped_symlink(stage: impl Into<String>, entry: &biscuit_file::SkippedEntry) -> Self {
-        let link = biscuit_file::to_portable_string(&entry.link);
-        let target = biscuit_file::to_portable_string(&entry.target);
+        let link = biscuit_file::to_forward_slash_string(&entry.link);
+        let target = biscuit_file::to_forward_slash_string(&entry.target);
         Self {
             code: Some(Self::GLOB_SKIPPED_SYMLINK_CODE.to_string()),
             identity: Some(WarningIdentity {

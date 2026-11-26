@@ -42,7 +42,7 @@ impl DarkmatterSchemas {
     pub fn resolve_schema_file(&self, path: &Path, text: &str) -> Result<ResolvedSchema, SchemaError> {
         let document = parse(path, text)?;
         with_text(path, text, || {
-            let template = biscuit_file::to_portable_string(path);
+            let template = biscuit_file::to_forward_slash_string(path);
             let roots = simplified_schema::roots::SchemaRoots::for_document(&self.file_resolution_context)?;
             let export = if document.exports_schema {
                 Some(match self.prepare_export(&document, path, text, roots.search_paths()) {

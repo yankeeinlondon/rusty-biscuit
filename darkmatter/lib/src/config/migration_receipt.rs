@@ -32,7 +32,7 @@ use crate::config::write::{
     ConfigWriteError, LOCK_SUFFIX, PathProblem, acquire_lock, read_optional, replace_file, resolve_target,
     sibling,
 };
-use biscuit_file::{PathIdentity, canonicalize_simplified, try_portable_string};
+use biscuit_file::{PathIdentity, canonicalize_simplified, try_forward_slash_string};
 use serde_json::{Map, Value, json};
 use std::ffi::OsString;
 use std::fmt;
@@ -382,7 +382,7 @@ pub(crate) fn write_locked(
 
 /// `path` as portable text, only when that text names `path` again.
 fn faithful_text(path: &Path) -> Option<String> {
-    let text = try_portable_string(path)?;
+    let text = try_forward_slash_string(path)?;
     (PathIdentity::new(Path::new(&text)) == PathIdentity::new(path)).then_some(text)
 }
 

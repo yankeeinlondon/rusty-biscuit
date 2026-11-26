@@ -242,7 +242,7 @@ pub(super) fn dispatch_terminal_control(
                 chain: ledger
                     .chain()
                     .iter()
-                    .map(|path| biscuit_file::to_portable_string(path))
+                    .map(|path| biscuit_file::to_forward_slash_string(path))
                     .collect(),
                 limit: claudine::composition::MAX_PROXY_HOPS,
             }

@@ -95,6 +95,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn portable_text_declines_unc_namespace_rewriting() {
-        assert!(biscuit_file::try_portable_string(Path::new(r"\\server\share\f.md")).is_none());
+        assert!(biscuit_file::try_forward_slash_string(Path::new(r"\\server\share\f.md")).is_none());
     }
 }

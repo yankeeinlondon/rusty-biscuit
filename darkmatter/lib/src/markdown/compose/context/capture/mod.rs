@@ -286,7 +286,7 @@ mod tests {
         );
 
         let cwd = values.get("cwd").and_then(Value::as_str).expect("ctx.cwd");
-        assert_eq!(cwd, biscuit_file::to_portable_string(outside.path()));
+        assert_eq!(cwd, biscuit_file::to_forward_slash_string(outside.path()));
         assert!(Path::new(cwd).is_absolute());
         assert!(!values.contains_key("repo_root"));
         assert!(diagnostics.is_empty());

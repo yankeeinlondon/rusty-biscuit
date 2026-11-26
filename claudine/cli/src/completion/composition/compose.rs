@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 
 use super::{Candidate, REPO_DIR_WALK_RANK, display_name, file_name_matches};
 use crate::completion::frontmatter;
@@ -124,7 +124,7 @@ pub(super) fn gather_repo_dirs(
         let Ok(rel) = entry_path.strip_prefix(render_base) else {
             continue;
         };
-        let rel_str = to_portable_string(rel);
+        let rel_str = to_forward_slash_string(rel);
         if rel_str.is_empty() {
             continue;
         }
@@ -251,7 +251,7 @@ pub(super) fn format_relative_insert(
     if let Some(root) = scopes::effective_repo_root(ctx)
         && let Ok(rel) = entry.strip_prefix(root)
     {
-        let rel_str = to_portable_string(rel);
+        let rel_str = to_forward_slash_string(rel);
         if !rel_str.is_empty() {
             return Some(rel_str);
         }
@@ -263,11 +263,11 @@ pub(super) fn format_relative_insert(
     // 3. Fallback: scope-leaf-relative rendering.
     let leaf = scope.path.file_name()?;
     let rel = entry.strip_prefix(&scope.path).ok()?;
-    let rel_str = to_portable_string(rel);
+    let rel_str = to_forward_slash_string(rel);
     if rel_str.is_empty() {
         return None;
     }
-    Some(format!("{}/{rel_str}", to_portable_string(Path::new(leaf))))
+    Some(format!("{}/{rel_str}", to_forward_slash_string(Path::new(leaf))))
 }
 
 fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<String> {
@@ -276,7 +276,7 @@ fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<Strin
         return None;
     }
     let rel = entry.strip_prefix(home).ok()?;
-    let rel_text = to_portable_string(rel);
+    let rel_text = to_forward_slash_string(rel);
     if rel_text.is_empty() {
         return None;
     }

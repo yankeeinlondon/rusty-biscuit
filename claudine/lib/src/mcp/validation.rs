@@ -106,7 +106,7 @@ pub fn validate_state(
             "repo",
             &repo_defaults.defaults,
             catalog,
-            Some(biscuit_file::to_portable_string(
+            Some(biscuit_file::to_forward_slash_string(
                 &repo_root.join(".claudine/mcp.json"),
             )),
         );

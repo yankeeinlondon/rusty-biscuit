@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{PathIdentity, canonicalize_simplified, to_portable_string};
+use biscuit_file::{PathIdentity, canonicalize_simplified, to_forward_slash_string};
 use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableColumn};
@@ -353,7 +353,7 @@ impl ValidationReportView {
     fn relative_display(&self, path: &Path) -> String {
         let absolute = self.absolute_path(path);
         let Some(launch_dir) = self.launch_dir.as_deref() else {
-            return to_portable_string(&absolute);
+            return to_forward_slash_string(&absolute);
         };
         let route_between = |file: &Path, dir: &Path| PathIdentity::new(file).relative_from(&PathIdentity::new(dir));
         let canonical = |path: &Path| canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
@@ -361,15 +361,15 @@ impl ValidationReportView {
             .filter(|route| route.parent_hops() == 0)
             .or_else(|| route_between(&canonical(&absolute), &canonical(launch_dir)));
         match route {
-            Some(route) => to_portable_string(&route.to_path_buf()),
-            None => to_portable_string(&absolute),
+            Some(route) => to_forward_slash_string(&route.to_path_buf()),
+            None => to_forward_slash_string(&absolute),
         }
     }
 
     /// The absolute path as a link destination whose `#` and `?` still belong
     /// to the path. Nothing else is rewritten.
     fn portable_destination(&self, path: &Path) -> String {
-        to_portable_string(&self.absolute_path(path))
+        to_forward_slash_string(&self.absolute_path(path))
             .replace('#', "%23")
             .replace('?', "%3F")
     }
@@ -377,7 +377,7 @@ impl ValidationReportView {
     /// The path's `file://` URI, or its portable text when no URI can name it.
     fn file_uri(&self, path: &Path) -> String {
         let absolute = self.absolute_path(path);
-        url::Url::from_file_path(&absolute).map_or_else(|()| to_portable_string(&absolute), String::from)
+        url::Url::from_file_path(&absolute).map_or_else(|()| to_forward_slash_string(&absolute), String::from)
     }
 
     fn path_link(&self, path: &Path, links: LinkStyle, children: Vec<RenderNode>) -> RenderNode {
@@ -567,7 +567,7 @@ fn trail_step_text(step: &ReferenceTrailStep) -> String {
 }
 
 fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| to_portable_string(path), |name| name.to_string_lossy().into_owned())
+    path.file_name().map_or_else(|| to_forward_slash_string(path), |name| name.to_string_lossy().into_owned())
 }
 
 /// Phrasing nodes for Prose `text`, whose styling tags take effect.

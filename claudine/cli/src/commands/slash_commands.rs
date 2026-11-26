@@ -129,7 +129,7 @@ fn render_detail(term: &Terminal, cmd: &CommandInfo) {
 
     let name_line = Prose::new(format!(
         "<a href={}><b>{}</b></a> {badge}",
-        Prose::quoted_attr(&biscuit_file::to_portable_string(&cmd.command_file_path)),
+        Prose::quoted_attr(&biscuit_file::to_forward_slash_string(&cmd.command_file_path)),
         Prose::escape_text(&cmd.name),
     ));
     log::data(&name_line.render(term));
@@ -291,7 +291,7 @@ fn render_exceptions(
                                     .join(", ");
                                 let label = format!(
                                     r#"<b><a href="{}">{}</a></b> (<i>missing the properties {}</i>)"#,
-                                    biscuit_file::to_portable_string(&e.command_file_path),
+                                    biscuit_file::to_forward_slash_string(&e.command_file_path),
                                     e.name,
                                     props_markup
                                 );
@@ -302,7 +302,7 @@ fn render_exceptions(
                             for e in entries {
                                 let label = format!(
                                     r#"<b><a href="{}">{}</a></b> (<i>contains tab characters in YAML indentation</i>)"#,
-                                    biscuit_file::to_portable_string(&e.command_file_path),
+                                    biscuit_file::to_forward_slash_string(&e.command_file_path),
                                     e.name
                                 );
                                 detail_list.add(Prose::new(label));
@@ -317,7 +317,7 @@ fn render_exceptions(
                                     .unwrap_or_default();
                                 let label = format!(
                                     r#"<a href="{}"><b>{}</b></a> (<i>specifies <orange>model{model_info}</orange></i>)"#,
-                                    biscuit_file::to_portable_string(&e.command_file_path),
+                                    biscuit_file::to_forward_slash_string(&e.command_file_path),
                                     e.name
                                 );
                                 detail_list.add(Prose::new(label));

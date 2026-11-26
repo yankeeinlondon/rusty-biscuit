@@ -3266,8 +3266,8 @@ fn encode_file_resolution_context(
     }
     enc.bool(context.is_trusted_external_authoring_cwd());
 
-    let scope = context.launch_magic_scope();
-    enc.field("launch_magic_scope");
+    let scope = context.launch_scope();
+    enc.field("launch_scope");
     for path in [
         Some(scope.request_dir()),
         scope.repository_root(),
@@ -4394,7 +4394,7 @@ mod tests {
         assert_eq!(request.context.anchor(), expected);
         assert_eq!(
             request.context.get("cwd"),
-            Some(&serde_json::json!(biscuit_file::to_portable_string(&expected))),
+            Some(&serde_json::json!(biscuit_file::to_forward_slash_string(&expected))),
         );
     }
 
@@ -4819,7 +4819,7 @@ mod tests {
     /// differ only in that scope can resolve the same `@` reference to
     /// different files, so both identity products must distinguish them.
     #[test]
-    fn identities_distinguish_launch_magic_scope() {
+    fn identities_distinguish_launch_scope() {
         let launch_a = biscuit_file::FileResolutionContext::from_snapshot(
             fixture_root("repo/area-a"),
             None,
@@ -4833,8 +4833,8 @@ mod tests {
         )
         .with_repository_root(fixture_root("repo"));
         assert_ne!(
-            launch_a.launch_magic_scope(),
-            launch_b.launch_magic_scope(),
+            launch_a.launch_scope(),
+            launch_b.launch_scope(),
             "fixture must vary only the launch scope"
         );
 
@@ -4843,13 +4843,13 @@ mod tests {
             fixed_opts(),
             source
                 .clone()
-                .with_launch_magic_scope(launch_a.launch_magic_scope().clone()),
+                .with_launch_scope(launch_a.launch_scope().clone()),
         );
         let b = req_in(
             fixed_opts(),
             source
                 .clone()
-                .with_launch_magic_scope(launch_b.launch_magic_scope().clone()),
+                .with_launch_scope(launch_b.launch_scope().clone()),
         );
 
         assert_ne!(rid(&a), rid(&b));

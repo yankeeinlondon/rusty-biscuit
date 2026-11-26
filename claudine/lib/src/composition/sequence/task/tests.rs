@@ -289,9 +289,9 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
 /// `RUNNER~1` temp directory and macOS's `/var` symlink; the sequence's own
 /// document keeps the spelling it was opened with. Either names the same file.
 fn reported_source(path: &Path, message: &str) -> String {
-    let raw = biscuit_file::to_portable_string(path);
+    let raw = biscuit_file::to_forward_slash_string(path);
     let canonical =
-        biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap());
+        biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(path).unwrap());
     [raw, canonical]
         .into_iter()
         .find(|spelling| message.contains(spelling.as_str()))
@@ -2553,7 +2553,7 @@ mod side_effect_tasks {
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         assert_eq!(snapshot.code, "composition.lifecycle_invalid");
         assert_eq!(snapshot.detail["property"], json!(expected));
-        let portable_source = biscuit_file::to_portable_string(Path::new(&source));
+        let portable_source = biscuit_file::to_forward_slash_string(Path::new(&source));
         assert!(snapshot.message.contains(&portable_source), "{}", snapshot.message);
         let err_value = info.to_value();
         assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);

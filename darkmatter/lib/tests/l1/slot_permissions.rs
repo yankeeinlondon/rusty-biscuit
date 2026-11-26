@@ -313,7 +313,7 @@ fn a_listing_returns_only_permitted_files_and_never_asks() {
     home.write("data/b.yaml", OS_LIST);
     let config = home.permissions(&["~/data/os.yaml"]);
     let handler = Answering::new(Some((GrantDecision::Allow, GrantScope::Once)));
-    let entry = |name: &str| Value::String(biscuit_file::to_portable_string(&home.path(&format!("data/{name}"))));
+    let entry = |name: &str| Value::String(biscuit_file::to_forward_slash_string(&home.path(&format!("data/{name}"))));
 
     let session = home.session(&DataRuntime::new(), Arc::clone(&config)).with_handler(handler.clone());
     assert_eq!(home.os(session), Ok(json!([entry("os.yaml")])));

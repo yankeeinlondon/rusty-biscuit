@@ -158,7 +158,7 @@ fn setup_reports_a_partly_removed_retired_registration() {
 
     set_mode(0o755);
     assert!(success, "a cleanup failure is a warning:\n{stderr}");
-    let inner = biscuit_file::to_portable_string(&revisions.join("0123abcd"));
+    let inner = biscuit_file::to_forward_slash_string(&revisions.join("0123abcd"));
     assert!(stderr.contains(&format!("Removed `{inner}` of the retired host registration")), "{stderr}");
     assert!(stderr.contains("The retired host registration was only partly removed"), "{stderr}");
     assert!(!revisions.join("0123abcd").exists() && revisions.is_dir() && legacy_manifest_path(&home).is_file());

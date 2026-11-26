@@ -100,7 +100,7 @@ impl Case {
 
     /// Asserts nothing read `name`'s bytes or listed this folder.
     fn assert_unread(&self, name: &str) {
-        let entry = biscuit_file::to_portable_string(&self.path(name));
+        let entry = biscuit_file::to_forward_slash_string(&self.path(name));
         let observations = self.observations();
         let read = observations.iter().find(|observation| {
             observation.entry == entry && matches!(observation.kind, ObservationKind::File | ObservationKind::Url)
@@ -165,7 +165,7 @@ mod inline_slots_are_judged_before_their_data_is_read {
         case.grant_file(NAMES);
         let document = case.inline_document(&format!("enum({{{{ {LOADED} }}}})"));
         case.compose(&document).unwrap_or_else(|failure| panic!("composes: {}", failure.error));
-        let entry = biscuit_file::to_portable_string(&case.path(NAMES));
+        let entry = biscuit_file::to_forward_slash_string(&case.path(NAMES));
         assert!(case.runtime.read_set().contains(&entry), "{:?}", case.runtime.read_set());
     }
 }
@@ -189,7 +189,7 @@ fn validate_schema_reads_the_permitted_page_and_stops_before_its_schema() {
     let document = case.referenced_document("enum({{ validate_schema('./page.md') ? ['Linux'] : ['Linux'] }})");
     case.compose_needing_approval(&document);
     case.assert_unread("private.yaml");
-    let page = biscuit_file::to_portable_string(&case.path("page.md"));
+    let page = biscuit_file::to_forward_slash_string(&case.path("page.md"));
     assert!(
         case.observations().iter().any(|observation| observation.entry == page && observation.hash.is_some()),
         "the permitted page is read: {:?}",

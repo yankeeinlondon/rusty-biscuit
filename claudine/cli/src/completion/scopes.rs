@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, to_portable_string};
+use biscuit_file::{FileResolutionContext, to_forward_slash_string};
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
 
 /// The composition command the scopes are being resolved for.
@@ -123,7 +123,7 @@ pub(crate) fn path_matches_query(path: &Path, query_lower: &str) -> bool {
         return true;
     }
     let query = query_lower.replace('\\', "/");
-    to_portable_string(path)
+    to_forward_slash_string(path)
         .to_ascii_lowercase()
         .contains(&query)
 }

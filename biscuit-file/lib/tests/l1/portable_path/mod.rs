@@ -132,7 +132,7 @@ pub(crate) fn not_applicable(attempt: &Attempt) -> &NotApplicable {
 
 /// The absolute reference text the library writes for `path`.
 pub(crate) fn absolute_text(path: &Path) -> String {
-    biscuit_file::to_portable_string(path)
+    biscuit_file::to_forward_slash_string(path)
 }
 
 pub(crate) fn same_file(left: &Path, right: &Path) -> bool {

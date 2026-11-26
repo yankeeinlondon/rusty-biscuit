@@ -604,12 +604,12 @@ mod schema_validation_integration {
             assert_eq!(frontmatter.get("spec"), Some(&serde_json::json!(native_spec)));
             assert_eq!(frontmatter.get("x"), frontmatter.get("spec"));
             // `dirname` of the absolute caller value keeps its absolute anchor.
-            let plan = format!("{}/plan.md", biscuit_file::to_portable_string(&case_dir));
+            let plan = format!("{}/plan.md", biscuit_file::to_forward_slash_string(&case_dir));
             assert_eq!(frontmatter.get("plan"), Some(&serde_json::json!(plan)));
             assert!(
                 composed.content().contains(&format!(
                     "SPEC={}",
-                    biscuit_file::to_portable_string(&spec)
+                    biscuit_file::to_forward_slash_string(&spec)
                 )),
                 "direct body interpolation should use the portable eager-file presentation: {}",
                 composed.content(),
@@ -718,12 +718,12 @@ mod schema_validation_integration {
         );
         let plan = format!(
             "{}/stable.md",
-            biscuit_file::to_portable_string(spec.parent().unwrap())
+            biscuit_file::to_forward_slash_string(spec.parent().unwrap())
         );
         assert_eq!(composed.frontmatter().as_map()["plan"], serde_json::json!(plan));
         assert!(composed.content().contains(&format!(
             "SPEC={}",
-            biscuit_file::to_portable_string(&spec)
+            biscuit_file::to_forward_slash_string(&spec)
         )));
         assert!(composed.content().contains(&format!("PLAN={plan}")));
     }
@@ -853,7 +853,7 @@ mod schema_validation_integration {
             composed.frontmatter().as_map()["plan"],
             serde_json::json!(format!(
                 "{}/plan.md",
-                biscuit_file::to_portable_string(spec.parent().unwrap())
+                biscuit_file::to_forward_slash_string(spec.parent().unwrap())
             )),
         );
         assert!(
@@ -909,7 +909,7 @@ mod schema_validation_integration {
         );
         let plan = format!(
             "{}/plan.md",
-            biscuit_file::to_portable_string(spec.parent().unwrap())
+            biscuit_file::to_forward_slash_string(spec.parent().unwrap())
         );
         assert_eq!(composed.frontmatter().as_map()["plan"], serde_json::json!(plan));
         assert!(composed.content().contains(&format!("PLAN={plan}")));
@@ -1078,7 +1078,7 @@ mod schema_validation_integration {
             );
             assert_eq!(
                 composed.content().trim(),
-                biscuit_file::to_portable_string(expected),
+                biscuit_file::to_forward_slash_string(expected),
                 "presentation must preserve the selected identity for `{raw}`",
             );
         }
@@ -1220,7 +1220,7 @@ mod schema_validation_integration {
         );
         assert_eq!(
             composed.content().trim(),
-            biscuit_file::to_portable_string(&spec),
+            biscuit_file::to_forward_slash_string(&spec),
         );
     }
 
@@ -1282,7 +1282,7 @@ mod schema_validation_integration {
         );
         assert_eq!(
             composed.content().trim(),
-            biscuit_file::to_portable_string(&spec),
+            biscuit_file::to_forward_slash_string(&spec),
         );
     }
 
@@ -1605,7 +1605,7 @@ mod schema_validation_integration {
             composed.frontmatter().as_map()["spec"],
             serde_json::json!(native(&spec)),
         );
-        assert_eq!(composed.content().trim(), biscuit_file::to_portable_string(&spec));
+        assert_eq!(composed.content().trim(), biscuit_file::to_forward_slash_string(&spec));
     }
 
     /// The two-tree union of ruling D1. `kind` is an optional discriminator
@@ -1687,7 +1687,7 @@ mod schema_validation_integration {
             .unwrap();
         assert_eq!(
             composed.content().trim(),
-            biscuit_file::to_portable_string(&fixture.launch.join("fixes/x/spec.md")),
+            biscuit_file::to_forward_slash_string(&fixture.launch.join("fixes/x/spec.md")),
         );
 
         let problems = rejected_problems(fixture.compose(serde_json::json!({
@@ -2129,7 +2129,7 @@ mod schema_validation_integration {
         let presentation = composed.content().trim();
 
         assert_eq!(std::path::PathBuf::from(native), spec);
-        assert_eq!(presentation, biscuit_file::to_portable_string(&spec));
+        assert_eq!(presentation, biscuit_file::to_forward_slash_string(&spec));
         assert!(native.contains('\\'));
         assert!(presentation.contains('/'));
     }
@@ -2188,17 +2188,17 @@ mod schema_validation_integration {
         assert_eq!(frontmatter.get("union_selected"), frontmatter.get("union_spec"));
         assert!(composed.content().contains(&format!(
             "DIRECT={}",
-            biscuit_file::to_portable_string(&first)
+            biscuit_file::to_forward_slash_string(&first)
         )));
         assert!(composed.content().contains(&format!(
             "UNION={}",
-            biscuit_file::to_portable_string(&union)
+            biscuit_file::to_forward_slash_string(&union)
         )));
 
         #[cfg(windows)]
         {
             assert!(frontmatter["selected"].as_str().unwrap().contains('\\'));
-            assert!(!biscuit_file::to_portable_string(&first).contains('\\'));
+            assert!(!biscuit_file::to_forward_slash_string(&first).contains('\\'));
         }
     }
 

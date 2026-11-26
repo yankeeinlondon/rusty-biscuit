@@ -1600,7 +1600,7 @@ impl<'a> StackExecutor<'a> {
                 // A retry's target is the fresh re-read of this same document.
                 overlay: self.resolve_with_overlay(
                     with,
-                    &biscuit_file::to_portable_string(self.inputs.source_path),
+                    &biscuit_file::to_forward_slash_string(self.inputs.source_path),
                     &location,
                     fm,
                 )?,

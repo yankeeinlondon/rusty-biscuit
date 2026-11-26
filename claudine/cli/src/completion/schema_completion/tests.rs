@@ -954,7 +954,7 @@ fn candidates_outside_the_launch_folder_take_the_first_form_that_resolves() {
     assert_offers_resolve_and_are_admitted(&effective, &patterns(&["~/notes/*spec*.md"]), &ctx);
 
     // Outside both: the absolute path.
-    let absolute = format!("{}/*spec*.md", biscuit_file::to_portable_string(&outside));
+    let absolute = format!("{}/*spec*.md", biscuit_file::to_forward_slash_string(&outside));
     let effective = spec_schema(&absolute);
     let values = offered(&effective, "", &ctx);
     assert_eq!(values.len(), 1, "{values:?}");

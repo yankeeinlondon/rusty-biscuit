@@ -289,7 +289,7 @@ fn implicit_no_match_projects_ordered_candidate_detail() {
     assert_eq!(detail["failure"], serde_json::json!("no_match"));
     assert_eq!(
         detail["repository_root"],
-        serde_json::json!(biscuit_file::to_portable_string(repo.path()))
+        serde_json::json!(biscuit_file::to_forward_slash_string(repo.path()))
     );
 
     let candidates = detail["candidates"]
@@ -300,7 +300,7 @@ fn implicit_no_match_projects_ordered_candidate_detail() {
     let source_candidate = repo.path().join("prompts/absent.md");
     assert_eq!(
         candidates[0]["path"],
-        serde_json::json!(biscuit_file::to_portable_string(&source_candidate))
+        serde_json::json!(biscuit_file::to_forward_slash_string(&source_candidate))
     );
     assert_eq!(candidates[0]["provenance"], serde_json::json!("source"));
     assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
@@ -308,7 +308,7 @@ fn implicit_no_match_projects_ordered_candidate_detail() {
     let repo_candidate = repo.path().join("absent.md");
     assert_eq!(
         candidates[1]["path"],
-        serde_json::json!(biscuit_file::to_portable_string(&repo_candidate))
+        serde_json::json!(biscuit_file::to_forward_slash_string(&repo_candidate))
     );
     assert_eq!(candidates[1]["provenance"], serde_json::json!("repository"));
     assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));

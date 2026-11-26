@@ -22,7 +22,7 @@ use crate::markdown::reference::{
 use crate::markdown::types::MarkdownResult;
 use biscuit_file::{
     FileResolutionContext, Finding, PathIdentity, PortabilityPreference, PortablePath,
-    try_portable_string,
+    try_forward_slash_string,
 };
 
 const STAGE: &str = "link_normalization";
@@ -163,7 +163,7 @@ pub fn normalize_links(
                     continue;
                 };
                 // A decoded filename must not become a link-layer suffix.
-                if let Some(text) = try_portable_string(&path)
+                if let Some(text) = try_forward_slash_string(&path)
                     && split_suffix(&text).0 != text
                 {
                     report.add_warning(ComposeWarning::new(
@@ -271,7 +271,7 @@ pub fn normalize_links(
 /// The warning for a destination that kept its absolute path because no
 /// portable reference reaches it.
 fn absolute_fallback_warning(destination: &str, path_text: &str) -> ComposeWarning {
-    let message = if try_portable_string(Path::new(path_text)).is_none() {
+    let message = if try_forward_slash_string(Path::new(path_text)).is_none() {
         format!(
             "the destination <blue>{destination}</blue> has no faithful portable spelling and no relative, repository, environment, or home reference reaches it; it was left exactly as authored."
         )
@@ -343,7 +343,7 @@ mod tests {
     /// is verbatim (`\\?\C:\…`), and `{{VAR}}/rest` cannot resolve under a
     /// verbatim value (see the `os` skill, Windows path spelling).
     fn env_value(path: &Path) -> String {
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     }
 
     fn normalize(content: &str, options: &ComposeRequest) -> (String, ComposeReport) {
@@ -387,7 +387,7 @@ mod tests {
         /// The destination `link_resolve` writes: canonical, portable text.
         fn absolute(&self, relative: &str) -> String {
             let path = relative.split('/').fold(self.repo.clone(), |path, name| path.join(name));
-            biscuit_file::to_portable_string(&fs::canonicalize(path).unwrap())
+            biscuit_file::to_forward_slash_string(&fs::canonicalize(path).unwrap())
         }
     }
 
@@ -482,7 +482,7 @@ mod tests {
     fn a_target_under_home_is_home_rooted() {
         let home = biscuit_file::home_dir().expect("Has home dir");
         let target = home.join("some_file.txt");
-        let content = format!("[file]({})\n", biscuit_file::to_portable_string(&target));
+        let content = format!("[file]({})\n", biscuit_file::to_forward_slash_string(&target));
 
         let (output, report) = normalize(&content, &test_request(ComposeOptions::new()));
 
@@ -506,7 +506,7 @@ mod tests {
         )]);
         let content = format!(
             "<a href=\"{}\">config</a>\n",
-            biscuit_file::to_portable_string(&project.join("config.json"))
+            biscuit_file::to_forward_slash_string(&project.join("config.json"))
         );
 
         let options = detached_options(&root, env).derive(|options| options.with_portable_env(["PROJECT_ROOT"]));
@@ -531,7 +531,7 @@ mod tests {
             ("PROJECT_ROOT".to_string(), value.clone()),
             ("DOCS_BASE".to_string(), value),
         ]);
-        let destination = biscuit_file::to_portable_string(&project.join("config.json"));
+        let destination = biscuit_file::to_forward_slash_string(&project.join("config.json"));
         let content = format!("[config]({destination})\n");
 
         let (output, report) = normalize(&content, &detached_options(&root, env));
@@ -562,8 +562,8 @@ mod tests {
         ]);
         let content = format!(
             "[a]({})\n[b]({})\n",
-            biscuit_file::to_portable_string(&config.join("a.json")),
-            biscuit_file::to_portable_string(&notes.join("b.md")),
+            biscuit_file::to_forward_slash_string(&config.join("a.json")),
+            biscuit_file::to_forward_slash_string(&notes.join("b.md")),
         );
 
         let options = detached_options(&root, env).derive(|options| options.with_portable_env(["NOTES"]));
@@ -590,7 +590,7 @@ mod tests {
         ]);
         let content = format!(
             "[config]({})",
-            biscuit_file::to_portable_string(&child.join("config.json"))
+            biscuit_file::to_forward_slash_string(&child.join("config.json"))
         );
 
         let options = detached_options(&root, env).derive(|options| options.with_portable_env(["USER", "USER_NAME"]));
@@ -631,10 +631,10 @@ mod tests {
         let abs_quotes = fs::canonicalize(repo.join("single_quotes.md")).unwrap();
         let content = format!(
             "[link](<{}>)\n<img src='{}'>\n<a href=\"{}\" data-alt='{}'>link</a>",
-            biscuit_file::to_portable_string(&abs_parens),
-            biscuit_file::to_portable_string(&abs_quotes),
-            biscuit_file::to_portable_string(&abs_quotes),
-            biscuit_file::to_portable_string(&abs_quotes)
+            biscuit_file::to_forward_slash_string(&abs_parens),
+            biscuit_file::to_forward_slash_string(&abs_quotes),
+            biscuit_file::to_forward_slash_string(&abs_quotes),
+            biscuit_file::to_forward_slash_string(&abs_quotes)
         );
 
         let (output, report) = normalize(&content, &options_with_repo(&source_file));
@@ -643,7 +643,7 @@ mod tests {
             output,
             format!(
                 "[link](<with (parens).md>)\n<img src='single_quotes.md'>\n<a href=\"single_quotes.md\" data-alt='{}'>link</a>",
-                biscuit_file::to_portable_string(&abs_quotes)
+                biscuit_file::to_forward_slash_string(&abs_quotes)
             ),
             "only destinations change; a data attribute is not a link"
         );
@@ -751,7 +751,7 @@ mod tests {
         let other = root.join("other");
         fs::create_dir_all(&other).unwrap();
         fs::write(other.join("x.md"), "").unwrap();
-        let destination = biscuit_file::to_portable_string(&other.join("x.md"));
+        let destination = biscuit_file::to_forward_slash_string(&other.join("x.md"));
         (dir, detached_options(&root, HashMap::new()), destination)
     }
 
@@ -836,7 +836,7 @@ mod tests {
         let canonical = fixture.absolute("assets/image.png");
         let options = options_with_repo(&fixture.source);
 
-        for destination in [canonical, biscuit_file::to_portable_string(&lexical)] {
+        for destination in [canonical, biscuit_file::to_forward_slash_string(&lexical)] {
             let (output, _) = normalize(&format!("![i]({destination})"), &options);
             assert_eq!(output, "![i](assets/image.png)", "{destination}");
         }
@@ -931,7 +931,7 @@ mod tests {
             let destination =
                 format!(r"{}\assets\{unsafe_name}\image.png", verbatim_repo.display());
             assert!(
-                try_portable_string(Path::new(&destination)).is_none(),
+                try_forward_slash_string(Path::new(&destination)).is_none(),
                 "{label}: fixture must be one `dunce` declines"
             );
 
@@ -950,7 +950,7 @@ mod tests {
         let long_name = "a".repeat(250);
         let destination = format!(r"{}\assets\{long_name}\image.png", verbatim_repo.display());
         assert!(
-            try_portable_string(Path::new(&destination)).is_none(),
+            try_forward_slash_string(Path::new(&destination)).is_none(),
             "fixture must exceed MAX_PATH or it proves nothing"
         );
 
@@ -975,7 +975,7 @@ mod tests {
         for (label, unsafe_name) in unsafe_component_fixtures() {
             let destination = format!(r"{}\docs\{unsafe_name}\f.md", root.display());
             assert!(
-                try_portable_string(Path::new(&destination)).is_none(),
+                try_forward_slash_string(Path::new(&destination)).is_none(),
                 "{label}: fixture must be one `dunce` declines"
             );
 
@@ -993,7 +993,7 @@ mod tests {
         for (label, unsafe_name) in unsafe_component_fixtures() {
             let destination = format!(r"{}\docs\{unsafe_name}\f.md", home.display());
             assert!(
-                try_portable_string(Path::new(&destination)).is_none(),
+                try_forward_slash_string(Path::new(&destination)).is_none(),
                 "{label}: fixture must be one `dunce` declines"
             );
 
@@ -1004,7 +1004,7 @@ mod tests {
 
     /// The success control for [`env_anchor_preserves_every_unsafe_category`]:
     /// without it the gate cannot be told apart from a blanket refusal to
-    /// anchor anything `try_portable_string` declined.
+    /// anchor anything `try_forward_slash_string` declined.
     #[cfg(windows)]
     #[test]
     fn env_anchored_over_max_path_destination_still_normalizes() {
@@ -1013,7 +1013,7 @@ mod tests {
         let long_name = "a".repeat(250);
         let destination = format!(r"{}\docs\{long_name}\f.md", root.display());
         assert!(
-            try_portable_string(Path::new(&destination)).is_none(),
+            try_forward_slash_string(Path::new(&destination)).is_none(),
             "fixture must exceed MAX_PATH or it proves nothing"
         );
 
@@ -1036,7 +1036,7 @@ mod tests {
         let long_name = "a".repeat(250);
         let destination = format!(r"{}\docs\{long_name}\f.md", home.display());
         assert!(
-            try_portable_string(Path::new(&destination)).is_none(),
+            try_forward_slash_string(Path::new(&destination)).is_none(),
             "fixture must exceed MAX_PATH or it proves nothing"
         );
 

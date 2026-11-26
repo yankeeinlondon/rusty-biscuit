@@ -153,7 +153,7 @@ bf ref ./Cargo.toml                  # alias for 'reference'
 ### Output spelling
 
 Resolved paths print as portable text through
-[`biscuit_file::to_portable_string`](../README.md), so `bf ref ./Cargo.toml`
+[`biscuit_file::to_forward_slash_string`](../README.md), so `bf ref ./Cargo.toml`
 prints `C:/repo/Cargo.toml` on Windows rather than `C:\repo\Cargo.toml`. A
 script that captures this output behaves the same on every host.
 

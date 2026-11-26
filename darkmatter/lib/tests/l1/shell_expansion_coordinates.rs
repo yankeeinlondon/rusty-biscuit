@@ -40,7 +40,7 @@ fn compose_options(dir: &TempDir) -> ComposeOptions {
 /// macOS, Windows, and Linux.
 fn failing_command() -> String {
     let executable = std::env::current_exe().expect("test executable path should be available");
-    let executable = biscuit_file::to_portable_string(&executable);
+    let executable = biscuit_file::to_forward_slash_string(&executable);
     format!("\"{executable}\" --definitely-invalid-libtest-option")
 }
 

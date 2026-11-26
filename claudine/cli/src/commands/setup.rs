@@ -33,7 +33,7 @@ pub async fn run(_args: SetupArgs) -> Result<()> {
     };
     log::message(&format!(
         "Claudine is set up with Darkmatter; its configuration is `{}`",
-        biscuit_file::to_portable_string(&path)
+        biscuit_file::to_forward_slash_string(&path)
     ));
     Ok(())
 }

@@ -93,7 +93,7 @@ fn a_document_valid_under_the_resolved_list_composes_and_reads_the_data_file() {
     let (_, report) = compose(&repo.path(DOCUMENT_FILE), home.path(), ComposeOptions::new())
         .unwrap_or_else(|failure| panic!("composes: {}", failure.error));
     assert!(
-        report.read_set.contains(&biscuit_file::to_portable_string(&repo.path(DATA_FILE))),
+        report.read_set.contains(&biscuit_file::to_forward_slash_string(&repo.path(DATA_FILE))),
         "the slot's read is in the read set: {:?}",
         report.read_set
     );
@@ -238,7 +238,7 @@ fn a_matched_template_trigger_payload_resolves_and_applies() {
         .expect_err("Windows is not in the resolved list");
     let messages = messages(&failure);
     assert!(messages.contains("Windows"), "{messages}");
-    assert!(failure.read_set.contains(&biscuit_file::to_portable_string(&root.join("data/os.yaml"))), "{:?}", failure.read_set);
+    assert!(failure.read_set.contains(&biscuit_file::to_forward_slash_string(&root.join("data/os.yaml"))), "{:?}", failure.read_set);
 }
 
 #[test]

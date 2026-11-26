@@ -92,7 +92,7 @@ impl ExecutionSteering {
                 claudine::steering::vocabulary::LaunchMode::NonInteractive
             },
             provider_version: None,
-            cwd: Some(biscuit_file::to_portable_string(cwd)),
+            cwd: Some(biscuit_file::to_forward_slash_string(cwd)),
             name: None,
         };
         let executor = steering.as_ref().map_or_else(|| Arc::new(NoAdapter) as Arc<dyn SteeringExecutor>, |(_, _, executor)| Arc::clone(executor));

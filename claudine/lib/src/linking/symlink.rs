@@ -56,16 +56,16 @@ pub fn create_resource_link(
     let relative = source.strip_prefix(source_root).map_err(|_| {
         ClaudineError::LinkingError(format!(
             "source path {} is not contained within source root {}",
-            biscuit_file::to_portable_string(source),
-            biscuit_file::to_portable_string(source_root)
+            biscuit_file::to_forward_slash_string(source),
+            biscuit_file::to_forward_slash_string(source_root)
         ))
     })?;
 
     if relative.as_os_str().is_empty() {
         return Err(ClaudineError::LinkingError(format!(
             "source path {} resolves to an empty relative path beneath {}",
-            biscuit_file::to_portable_string(source),
-            biscuit_file::to_portable_string(source_root)
+            biscuit_file::to_forward_slash_string(source),
+            biscuit_file::to_forward_slash_string(source_root)
         )));
     }
 
@@ -115,8 +115,8 @@ pub fn create_resource_link(
                 return Ok(LinkResult::Skipped {
                     reason: format!(
                         "symlink exists but points to {} (expected {})",
-                        biscuit_file::to_portable_string(&existing_target),
-                        biscuit_file::to_portable_string(&link_target)
+                        biscuit_file::to_forward_slash_string(&existing_target),
+                        biscuit_file::to_forward_slash_string(&link_target)
                     ),
                 });
             }
@@ -125,7 +125,7 @@ pub fn create_resource_link(
             return Ok(LinkResult::Skipped {
                 reason: format!(
                     "real {path_label} already exists at {}",
-                    biscuit_file::to_portable_string(&dest)
+                    biscuit_file::to_forward_slash_string(&dest)
                 ),
             });
         }
@@ -158,7 +158,7 @@ pub fn create_skill_link(
     let source_root = source.parent().ok_or_else(|| {
         ClaudineError::LinkingError(format!(
             "source path has no parent: {}",
-            biscuit_file::to_portable_string(source)
+            biscuit_file::to_forward_slash_string(source)
         ))
     })?;
     create_resource_link(source, source_root, dest_dir, scope)
@@ -185,12 +185,12 @@ pub fn relative_path(from_dir: &Path, target: &Path) -> PathBuf {
         debug_assert!(
             from_dir.is_absolute(),
             "from_dir must be absolute: {}",
-            biscuit_file::to_portable_string(from_dir)
+            biscuit_file::to_forward_slash_string(from_dir)
         );
         debug_assert!(
             target.is_absolute(),
             "target must be absolute: {}",
-            biscuit_file::to_portable_string(target)
+            biscuit_file::to_forward_slash_string(target)
         );
     }
 

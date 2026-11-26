@@ -215,7 +215,7 @@ fn a_remote_reference_is_refused_without_fetching() {
 fn bare_names_and_rooted_references_are_refused_even_with_schema_roots() {
     let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[]);
     let roots = [fixture.root().join("schemas")];
-    let absolute = biscuit_file::to_portable_string(&roots[0].join("types.yaml"));
+    let absolute = biscuit_file::to_forward_slash_string(&roots[0].join("types.yaml"));
     for reference in ["types.yaml", "&bundle/schemas/types.yaml", "~/types.yaml", "%./types.yaml", absolute.as_str()] {
         let schema = yaml(&format!("owner: \"Owner@{reference}\"\n"));
         let (resolved, reads) = bundle::with(&fixture.sources, || {

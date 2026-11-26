@@ -55,7 +55,7 @@ impl Fixture {
     }
 
     fn path_text(&self, name: &str) -> String {
-        biscuit_file::to_portable_string(&self.root.join(name))
+        biscuit_file::to_forward_slash_string(&self.root.join(name))
     }
 }
 

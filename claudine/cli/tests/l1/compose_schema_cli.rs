@@ -1281,7 +1281,7 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
             .fold(launched, |path, component| path.join(component));
         let expected = format!(
             "Save the plan as \"{}/plan.md\"",
-            biscuit_file::to_portable_string(spec.parent().unwrap())
+            biscuit_file::to_forward_slash_string(spec.parent().unwrap())
         );
         assert!(
             stdout.contains(&expected),
@@ -2069,7 +2069,7 @@ impl SpellingCase {
         seed_cargo_workspace(ws.path(), &["pkg"]);
         write_file(&ws.path().join(self.stored).join("a.md"), "# A\n");
         common::fs_capability::probe_directory_alias(ws.path(), self.stored, self.authored);
-        let root = biscuit_file::to_portable_string(ws.path());
+        let root = biscuit_file::to_forward_slash_string(ws.path());
         #[cfg(unix)]
         let guard = match self.traversal_only {
             Some(dir) => Some(TraversalOnly::new(&ws.path().join(dir))?),

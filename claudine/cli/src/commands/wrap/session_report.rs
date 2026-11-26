@@ -80,7 +80,7 @@ impl SessionPresence {
         if let Some(repo) = env_context.repo.as_ref() {
             details.insert(
                 "repo_root".into(),
-                json!(biscuit_file::to_portable_string(&repo.root)),
+                json!(biscuit_file::to_forward_slash_string(&repo.root)),
             );
         }
         if let Some(pid) = env_context.claudine_pid {

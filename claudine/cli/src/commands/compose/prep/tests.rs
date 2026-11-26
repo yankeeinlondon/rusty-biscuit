@@ -140,7 +140,7 @@ fn compose_and_inline_explicit_misses_keep_probe_evidence_and_suggestions() {
         assert_eq!(detail["reference"], "./docs/unifi/access.md");
         assert_eq!(
             detail["base_dir"],
-            biscuit_file::to_portable_string(dir.path())
+            biscuit_file::to_forward_slash_string(dir.path())
         );
         assert_eq!(detail["failure"], "no_match");
         assert_eq!(

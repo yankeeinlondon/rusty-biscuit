@@ -41,7 +41,7 @@ pub fn run(args: UninstallArgs) -> Result<()> {
                     std::fs::remove_file(&path)?;
                     log::message(&format!(
                         "  Removed {}",
-                        biscuit_file::to_portable_string(&path)
+                        biscuit_file::to_forward_slash_string(&path)
                     ));
                 }
             }

@@ -45,7 +45,7 @@ pub(crate) fn composition_dispatch_context(
     );
     context.insert(
         "composition_source_path".into(),
-        serde_json::Value::String(biscuit_file::to_portable_string(
+        serde_json::Value::String(biscuit_file::to_forward_slash_string(
             &request.prepared.resolved_path,
         )),
     );
@@ -435,7 +435,7 @@ pub(crate) fn agent_prompt_message(
 ) -> Option<String> {
     match state {
         AgentResolutionState::SingleInvalid { hint } => {
-            let file_label = biscuit_file::to_portable_string(source_path);
+            let file_label = biscuit_file::to_forward_slash_string(source_path);
             let file_link = crate::cli_utils::file_url(source_path).map_or_else(
                 || file_label.clone(),
                 |file_href| format!("<a href=\"{file_href}\">{file_label}</a>"),

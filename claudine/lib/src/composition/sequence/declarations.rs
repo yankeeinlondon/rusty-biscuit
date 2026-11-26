@@ -342,7 +342,7 @@ impl PreparedSequenceSchema {
         // `$schema` is a key every frontmatter accepts; a refusal here would be
         // a Darkmatter invariant change, kept typed as the declaring file's.
         frontmatter.insert("$schema", declaration.clone()).map_err(|error| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_portable_string(source_path),
+            context: biscuit_file::to_forward_slash_string(source_path),
             source: SequenceLoadCause::Frontmatter(Box::new(error)),
         })?;
         let view = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");

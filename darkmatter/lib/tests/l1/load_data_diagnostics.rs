@@ -30,7 +30,7 @@ fn write(dir: &Path, name: &str, content: impl AsRef<[u8]>) -> PathBuf {
 /// The portable spelling `data_location.file` uses for `name` in `dir`.
 fn entry(dir: &Path, name: &str) -> String {
     let canonical = biscuit_file::canonicalize_simplified(dir).expect("canonical dir");
-    biscuit_file::to_portable_string(&canonical.join(name))
+    biscuit_file::to_forward_slash_string(&canonical.join(name))
 }
 
 fn failure_with(path: &Path, options: ComposeOptions) -> Box<ComposeFailure> {

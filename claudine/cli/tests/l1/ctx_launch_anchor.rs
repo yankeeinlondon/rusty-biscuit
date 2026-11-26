@@ -119,7 +119,7 @@ fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
         assert!(
             output.contains(&format!(
                 "CWD={}",
-                biscuit_file::to_portable_string(&launched_spelling(&launch_dir))
+                biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir))
             )),
             "launch CWD must be reported for {}\noutput:\n{output}",
             doc.display()
@@ -226,7 +226,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
         provider.contains("AREA=alpha") && provider.contains("FILE=true"),
         "provider-bound body must contain launch area and source-owned eager file: {provider}"
     );
-    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+    let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
     assert!(provider.contains(&format!("CWD={expected_cwd}")), "{provider}");
     assert!(
         provider.contains("SOURCE-BODY") && !provider.contains("LAUNCH-FRAGMENT"),
@@ -325,7 +325,7 @@ mod caller_file_anchor_survives_direct_and_proxy_success_guards {
             .assert()
             .success();
 
-        let expected = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
+        let expected = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_spec));
         let provider = fs::read_to_string(&provider_log).unwrap_or_default();
         assert_eq!(provider.matches("TARGET SPEC=").count(), 1, "{provider}");
         assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
@@ -338,7 +338,7 @@ mod caller_file_anchor_survives_direct_and_proxy_success_guards {
             .collect::<PathBuf>()
             .display()
             .to_string();
-        let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+        let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
         assert_eq!(
             events
                 .matches(&format!("anchored={expected_spec_native} cwd={expected_cwd}"))
@@ -400,8 +400,8 @@ mod loop_route_keeps_launch_area_for_root_and_package_documents {
 
         let provider = fs::read_to_string(&provider_log).unwrap_or_default();
         assert!(provider.contains(&format!("{label}:AREA=alpha")), "{provider}");
-        let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
-        let expected_spec = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
+        let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
+        let expected_spec = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_spec));
         assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 2);
         assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 2);
         assert_eq!(
@@ -468,7 +468,7 @@ fn dry_run_external_source_and_outside_launch_matrix() {
         "no launch package area exists outside every repository\noutput:\n{output}"
     );
     assert!(
-        !output.contains(&format!("REPO={}", biscuit_file::to_portable_string(&root))),
+        !output.contains(&format!("REPO={}", biscuit_file::to_forward_slash_string(&root))),
         "no launch repository exists outside every repository; the prompt's own \
          repository must not be substituted\noutput:\n{output}"
     );

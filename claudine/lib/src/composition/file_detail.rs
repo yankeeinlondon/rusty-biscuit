@@ -132,7 +132,7 @@ fn file_stem_fallback(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())
         .map(str::to_string)
-        .unwrap_or_else(|| biscuit_file::to_portable_string(path))
+        .unwrap_or_else(|| biscuit_file::to_forward_slash_string(path))
 }
 
 /// A stored literal token shows as the text it holds.

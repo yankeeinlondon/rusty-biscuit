@@ -100,7 +100,7 @@ pub fn provider_check(term: &Terminal, slug: &str, outcome: &CheckOutcome) -> St
             term,
             format!(
                 "{slug}: <yellow>committed data.rs missing</yellow> at {} — run `claudine-gen generate`",
-                esc(&biscuit_file::to_portable_string(path))
+                esc(&biscuit_file::to_forward_slash_string(path))
             ),
         ),
     }
@@ -128,7 +128,7 @@ pub fn artifact_check(
             term,
             format!(
                 "{label} <yellow>missing</yellow> at {} — run `claudine-gen generate`",
-                esc(&biscuit_file::to_portable_string(path))
+                esc(&biscuit_file::to_forward_slash_string(path))
             ),
         ),
     }
@@ -272,7 +272,7 @@ pub fn decide_header(term: &Terminal, path: &Path, diff: &[String]) -> String {
         term,
         format!(
             "{}: {} differing line{}",
-            esc(&biscuit_file::to_portable_string(path)),
+            esc(&biscuit_file::to_forward_slash_string(path)),
             diff.len(),
             if diff.len() == 1 { "" } else { "s" }
         ),
@@ -292,7 +292,7 @@ pub fn wrote(term: &Terminal, path: &Path) -> String {
         term,
         format!(
             "<green>wrote</green> {}",
-            esc(&biscuit_file::to_portable_string(path))
+            esc(&biscuit_file::to_forward_slash_string(path))
         ),
     )
 }
@@ -328,7 +328,7 @@ pub fn declined_summary(
             term,
             format!(
                 "  <red>declined:</red> {}",
-                esc(&biscuit_file::to_portable_string(&entry.path))
+                esc(&biscuit_file::to_forward_slash_string(&entry.path))
             ),
         ));
         if let Some(snippet) = &entry.override_snippet {
@@ -393,7 +393,7 @@ pub fn agent_errors_findings(
         format!(
             "{slug}: {} deterministic finding(s) written to {}",
             findings.len(),
-            esc(&biscuit_file::to_portable_string(findings_path))
+            esc(&biscuit_file::to_forward_slash_string(findings_path))
         ),
     );
     let items: Vec<String> = findings.iter().map(|f| f.detail.clone()).collect();
@@ -412,7 +412,7 @@ pub fn agent_errors_gate_error(
         term,
         format!(
             "{slug}: deterministic gate error written to {}: {}",
-            esc(&biscuit_file::to_portable_string(findings_path)),
+            esc(&biscuit_file::to_forward_slash_string(findings_path)),
             esc(error.unwrap_or("unknown gate error"))
         ),
     )

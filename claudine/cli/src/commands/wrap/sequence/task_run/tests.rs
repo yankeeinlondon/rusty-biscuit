@@ -137,7 +137,7 @@ fn task_source_belongs_to_the_authoring_repo_context_to_the_launch_repo() {
     // caller launched from (D1/AC7).
     assert_eq!(
         context.get("repo_root").and_then(Value::as_str),
-        Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
+        Some(biscuit_file::to_forward_slash_string(&fixture.launch_repo).as_str())
     );
     assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
 }
@@ -165,7 +165,7 @@ fn distributed_task_uses_launch_area_and_selected_target_identity() {
     assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
     assert_eq!(
         context.get("repo_root").and_then(Value::as_str),
-        Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
+        Some(biscuit_file::to_forward_slash_string(&fixture.launch_repo).as_str())
     );
     assert_eq!(context.get("area").and_then(Value::as_str), Some("alpha"));
     let effective = context.as_object();
@@ -254,7 +254,7 @@ fn every_expression_bearing_field_is_scanned_for_ctx_references() {
 
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
+            Some(biscuit_file::to_forward_slash_string(&fixture.launch_repo).as_str()),
             "`{field}` was not scanned for runtime-context references"
         );
     }
@@ -300,7 +300,7 @@ fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
 
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
+            Some(biscuit_file::to_forward_slash_string(&fixture.launch_repo).as_str()),
             "`{label}` was not scanned for runtime-context references"
         );
     }

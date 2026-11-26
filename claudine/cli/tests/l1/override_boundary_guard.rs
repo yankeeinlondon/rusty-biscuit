@@ -72,7 +72,7 @@ fn sources() -> Vec<(String, String)> {
     files
         .into_iter()
         .filter_map(|path| {
-            let relative = biscuit_file::to_portable_string(path.strip_prefix(&root).unwrap());
+            let relative = biscuit_file::to_forward_slash_string(path.strip_prefix(&root).unwrap());
             (!is_test_path(&relative)).then(|| (relative, fs::read_to_string(&path).unwrap()))
         })
         .collect()

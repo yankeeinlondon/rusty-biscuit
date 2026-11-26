@@ -88,7 +88,7 @@ fn test_env_var_interpolation() {
     env.insert(
         "PROJECT_ROOT_INTEGRATION".to_string(),
         // Exported spelling: a verbatim `\\?\` value cannot anchor `{{VAR}}/…`.
-        biscuit_file::to_portable_string(&project_root),
+        biscuit_file::to_forward_slash_string(&project_root),
     );
     let snapshot = biscuit_file::FileResolutionContext::new(&elsewhere)
         .without_home_dir()
@@ -100,7 +100,7 @@ fn test_env_var_interpolation() {
             .only(operations);
         darkmatter::markdown::compose::ComposeRequest::with_context(options, snapshot.clone()).unwrap()
     };
-    let content = format!("[config]({})", biscuit_file::to_portable_string(&target));
+    let content = format!("[config]({})", biscuit_file::to_forward_slash_string(&target));
 
     let (composed, _) = Markdown::new(&content)
         .compose_with(&options(&[

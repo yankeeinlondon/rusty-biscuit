@@ -89,7 +89,7 @@ impl BundleSources {
     /// [`InvalidBundle`] for a relative root or a key that is empty, holds
     /// `\`, or has an empty, `.`, or `..` segment.
     pub fn on_disk(root: &Path, members: BTreeMap<String, Arc<[u8]>>) -> Result<Self, InvalidBundle> {
-        let label = biscuit_file::to_portable_string(root);
+        let label = biscuit_file::to_forward_slash_string(root);
         if !root.is_absolute() {
             return Err(InvalidBundle { bundle: label, message: "the bundle root must be an absolute directory".into() });
         }

@@ -64,7 +64,7 @@ fn codex_sqlite_home(env: &EnvBaseline, source_root: &Path) -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!(
             "Codex SQLite home '{}' must be an absolute path",
-            biscuit_file::to_portable_string(&path)
+            biscuit_file::to_forward_slash_string(&path)
         );
     }
     Ok(path)

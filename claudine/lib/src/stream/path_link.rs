@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 use url::Url;
 
 /// Maximum length of the *visible* text inside the OSC8 link. Paths
@@ -44,7 +44,7 @@ pub fn format_file_link(raw: &str, cwd: &Path, home: Option<&Path>) -> String {
         && !rel.as_os_str().is_empty()
     {
         return match Url::from_file_path(path) {
-            Ok(href) => osc8_link(href.as_str(), &to_portable_string(&rel)),
+            Ok(href) => osc8_link(href.as_str(), &to_forward_slash_string(&rel)),
             Err(()) => escape_prose(raw),
         };
     }
@@ -52,7 +52,7 @@ pub fn format_file_link(raw: &str, cwd: &Path, home: Option<&Path>) -> String {
         && let Some(rel) = strip_prefix(path, home)
         && !rel.as_os_str().is_empty()
     {
-        let visible = format!("~/{}", to_portable_string(&rel));
+        let visible = format!("~/{}", to_forward_slash_string(&rel));
         return match Url::from_file_path(path) {
             Ok(href) => osc8_link(href.as_str(), &visible),
             Err(()) => escape_prose(raw),

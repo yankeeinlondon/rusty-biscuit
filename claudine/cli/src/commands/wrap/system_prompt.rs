@@ -68,7 +68,7 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
                 StandardPromptScope::User => "user",
                 StandardPromptScope::CurrentDirectory => "cwd",
             };
-            format!("{} ({})", biscuit_file::to_portable_string(path), scope_label)
+            format!("{} ({})", biscuit_file::to_forward_slash_string(path), scope_label)
         }
         SystemPromptSource::ExplicitFile { path, mode } => {
             let mode_label = match mode {
@@ -77,7 +77,7 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
             };
             format!(
                 "{} (explicit {})",
-                biscuit_file::to_portable_string(path),
+                biscuit_file::to_forward_slash_string(path),
                 mode_label
             )
         }
@@ -91,7 +91,7 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
             };
             format!(
                 "{} (non-interactive {})",
-                biscuit_file::to_portable_string(path),
+                biscuit_file::to_forward_slash_string(path),
                 scope_label
             )
         }

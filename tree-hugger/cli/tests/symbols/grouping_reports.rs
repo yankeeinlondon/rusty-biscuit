@@ -17,7 +17,7 @@ fn json_groups_preserve_overall_counts_and_order() {
     let raw = scratch.stdout(&["--json", "functions", "--stats"]);
     let report = json_of(&raw);
     assert_eq!(report["report_schema_version"], 1);
-    assert_eq!(report["package_root_dir"], biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(scratch.repo.path()).unwrap()));
+    assert_eq!(report["package_root_dir"], biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(scratch.repo.path()).unwrap()));
     for (before, after) in [("root_dir", "package_root_dir"), ("package_root_dir", "stats"), ("stats", "groups"), ("groups", "errors")] {
         assert!(raw.find(&format!("\"{before}\"")).unwrap() < raw.find(&format!("\"{after}\"")).unwrap());
     }
@@ -117,8 +117,8 @@ fn subpackage_scan_keeps_separate_root_frames() {
     let output = scratch.process(&args).current_dir(scratch.repo.path().join("a")).output().unwrap();
     let report = json_of(&crate::stdout_of(output, &args));
     let root = biscuit_file::canonicalize_simplified(scratch.repo.path()).unwrap();
-    assert_eq!(report["root_dir"], biscuit_file::to_portable_string(&root.join("a")));
-    assert_eq!(report["package_root_dir"], biscuit_file::to_portable_string(&root));
+    assert_eq!(report["root_dir"], biscuit_file::to_forward_slash_string(&root.join("a")));
+    assert_eq!(report["package_root_dir"], biscuit_file::to_forward_slash_string(&root));
     assert_eq!(report["groups"].as_array().unwrap().len(), 1);
     assert_eq!(report["groups"][0]["package"]["path"], "a");
     assert_eq!(report["groups"][0]["stats"], report["stats"]);

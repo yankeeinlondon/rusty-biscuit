@@ -454,7 +454,7 @@ impl Rehearsal {
 }
 
 fn portable(path: &Path) -> String {
-    biscuit_file::to_portable_string(path)
+    biscuit_file::to_forward_slash_string(path)
 }
 
 /// A command on the fixture `PATH`: a `/bin/sh` script, or a `.cmd` on Windows.

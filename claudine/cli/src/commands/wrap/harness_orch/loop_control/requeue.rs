@@ -178,7 +178,7 @@ pub(super) async fn enqueue_requeue_entry_async(
         level: "info".to_string(),
         message: format!(
             "deferred {} for {}",
-            biscuit_file::to_portable_string(&prompt_state.source_path),
+            biscuit_file::to_forward_slash_string(&prompt_state.source_path),
             delay
         ),
         metadata_json: serde_json::to_string(&metadata)?,

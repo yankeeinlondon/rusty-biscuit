@@ -84,7 +84,7 @@ impl Case {
     /// The observation one read of `rows.csv` adds.
     fn rows_read(&self) -> Observation {
         Observation {
-            entry: biscuit_file::to_portable_string(&self.path(ROWS)),
+            entry: biscuit_file::to_forward_slash_string(&self.path(ROWS)),
             kind: ObservationKind::File,
             hash: Some(biscuit_hash::blake3_hash_bytes(ROWS_TEXT.as_bytes())),
         }
@@ -92,7 +92,7 @@ impl Case {
 
     /// The observations of `rows.csv` recorded while `run` ran.
     fn rows_observed_during(&self, run: impl FnOnce()) -> Vec<Observation> {
-        let entry = biscuit_file::to_portable_string(&self.path(ROWS));
+        let entry = biscuit_file::to_forward_slash_string(&self.path(ROWS));
         let mark = self.runtime.read_mark();
         run();
         self.runtime.observations_since(mark).into_iter().filter(|observation| observation.entry == entry).collect()

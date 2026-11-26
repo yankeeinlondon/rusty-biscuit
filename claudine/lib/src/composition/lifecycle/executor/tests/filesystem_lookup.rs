@@ -170,7 +170,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
     let resolved = resolved.as_str().unwrap_or_default();
     assert_eq!(
         resolved,
-        biscuit_file::to_portable_string(&ctx_root),
+        biscuit_file::to_forward_slash_string(&ctx_root),
         "ctx.* must capture against ctx_base_dir (launch area), not base_dir"
     );
     assert_ne!(
@@ -265,12 +265,12 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
     let resolved = resolved.as_str().unwrap_or_default();
     assert_eq!(
         resolved,
-        biscuit_file::to_portable_string(&launch_root),
+        biscuit_file::to_forward_slash_string(&launch_root),
         "lifecycle must reuse the launch-area snapshot, not the prompt dir"
     );
     assert_ne!(
         resolved,
-        biscuit_file::to_portable_string(&prompt_repo_root),
+        biscuit_file::to_forward_slash_string(&prompt_repo_root),
         "lifecycle ctx.* must not resolve against the prompt's own repo"
     );
 }

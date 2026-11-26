@@ -167,7 +167,7 @@ mod file_exists {
             let lookup = Lookup { value, context: Some(context.clone()) };
             evaluate(&parse(&format!("{function}(p)")).unwrap(), &lookup)
         };
-        let absolute = biscuit_file::to_portable_string(&root.join("page.md"));
+        let absolute = biscuit_file::to_forward_slash_string(&root.join("page.md"));
         let rows: Vec<(String, bool)> = MALFORMED
             .iter()
             .map(|raw| (raw.to_string(), false))

@@ -286,7 +286,7 @@ fn strings(items: &[&str]) -> Vec<String> {
 }
 
 fn portable(path: &Path) -> String {
-    biscuit_file::to_portable_string(path)
+    biscuit_file::to_forward_slash_string(path)
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────────

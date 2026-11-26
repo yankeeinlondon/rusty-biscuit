@@ -135,7 +135,7 @@ fn resolve_sequence_source(
 
     if !composition::is_yaml_source(&resolved_path) {
         return Err(CompositionError::NotMarkdown(
-            biscuit_file::to_portable_string(&resolved_path),
+            biscuit_file::to_forward_slash_string(&resolved_path),
         ));
     }
 
@@ -170,7 +170,7 @@ pub(crate) fn emit_empty_sequence_notice(path: &std::path::Path) {
         &biscuit_terminal::components::prose::Prose::new(format!(
             "<dim>sequence</dim> <bold>{}</bold> resolved to <bold>0 steps</bold>; \
              nothing to run.",
-            biscuit_file::to_portable_string(path)
+            biscuit_file::to_forward_slash_string(path)
         ))
         .render(&crate::log::terminal()),
     );
@@ -632,7 +632,7 @@ mod tests {
             assert_eq!(detail["failure"], "no_match");
             assert_eq!(
                 detail["base_dir"],
-                biscuit_file::to_portable_string(dir.path())
+                biscuit_file::to_forward_slash_string(dir.path())
             );
             assert_eq!(detail["candidates"].as_array().unwrap().len(), 1);
             if reference.ends_with(".yaml") {

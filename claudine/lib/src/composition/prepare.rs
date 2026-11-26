@@ -785,7 +785,7 @@ impl<'a> PromptOrigin<'a> {
 
     /// The context identity of the body generated from `path`'s `prompt`.
     fn context_identity(path: &Path) -> PathBuf {
-        PathBuf::from(format!("<prompt of {}>", biscuit_file::to_portable_string(path)))
+        PathBuf::from(format!("<prompt of {}>", biscuit_file::to_forward_slash_string(path)))
     }
 
     const PROPERTY: &'static str = "prompt";
@@ -1685,7 +1685,7 @@ fn prepare_inline_on(
             "inline_guardrails",
             format!(
                 "{} still contains retired response-harvesting instructions. Migrate it to tell the agent to edit {{document_path}} directly; Claudine preserved the customization and continued this run.",
-                biscuit_file::to_portable_string(&path)
+                biscuit_file::to_forward_slash_string(&path)
             ),
         ));
     }

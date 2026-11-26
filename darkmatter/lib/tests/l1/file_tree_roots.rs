@@ -153,7 +153,7 @@ fn the_same_document_opened_without_an_anchor_has_no_boundary() {
         layout.home.join("Downloads/escape.md"),
         layout.notes.join("inbox/escape.md"),
     ] {
-        let body = format!("::file \"{}\"\n", biscuit_file::to_portable_string(&child));
+        let body = format!("::file \"{}\"\n", biscuit_file::to_forward_slash_string(&child));
         let content = composed(&layout.work, snapshot(&layout), &body);
         assert!(content.contains("outside-content"), "{}: {content}", child.display());
     }

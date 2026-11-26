@@ -207,22 +207,22 @@ Source: `biscuit-file/lib/src/path_text.rs` (unfeatured — available with `--no
 
 ```rust
 use std::path::Path;
-use biscuit_file::{to_portable_string, try_portable_string};
+use biscuit_file::{to_forward_slash_string, try_forward_slash_string};
 
 // Portable text when a faithful slash-separated spelling exists;
 // otherwise the NATIVE spelling, unchanged.
-let s: String = to_portable_string(Path::new(r"docs\file.md")); // "docs/file.md"
+let s: String = to_forward_slash_string(Path::new(r"docs\file.md")); // "docs/file.md"
 
 // Same policy, with the fallback exposed so a caller can branch on it.
-let maybe: Option<String> = try_portable_string(Path::new(r"\\server\share\f.md")); // None
+let maybe: Option<String> = try_forward_slash_string(Path::new(r"\\server\share\f.md")); // None
 ```
 
 Which to use:
 
 | Consumer | Function | Why |
 |----------|----------|-----|
-| Markdown link destination, generated URL-adjacent text | `try_portable_string` | CommonMark eats backslash escapes; a native spelling does not survive a parse. Error or preserve on `None`. |
-| Diagnostics, completion candidates, YAML scalars | `to_portable_string` | Native text is still correct output for these. |
+| Markdown link destination, generated URL-adjacent text | `try_forward_slash_string` | CommonMark eats backslash escapes; a native spelling does not survive a parse. Error or preserve on `None`. |
+| Diagnostics, completion candidates, YAML scalars | `to_forward_slash_string` | Native text is still correct output for these. |
 
 Declined (`None` / native fallback) on Windows: UNC, device-namespace, and any
 verbatim path `dunce::simplified` will not reduce — reserved DOS names,
@@ -296,7 +296,7 @@ and then reduces a dot-free verbatim path with `dunce`. Never hand-roll another
 `diff_paths` routes through `PathIdentity` after that normalization.
 
 Crate-internal: `portable::text::{render_reference, render_absolute}` is the
-generated-reference text seam. It renders through `try_portable_string`, then
+generated-reference text seam. It renders through `try_forward_slash_string`, then
 re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
 `\`, literal verbatim dots, Windows names that change without `\\?\`),
 `GrammarMismatch` (`{{…}}` in a name, a leading sigil in a bare name), and

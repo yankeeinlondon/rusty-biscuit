@@ -217,9 +217,9 @@ fn relative_or_abs(path: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir()
         && let Ok(rel) = path.strip_prefix(&cwd)
     {
-        return biscuit_file::to_portable_string(rel);
+        return biscuit_file::to_forward_slash_string(rel);
     }
-    biscuit_file::to_portable_string(path)
+    biscuit_file::to_forward_slash_string(path)
 }
 
 /// Render the classified `agent` resolution state into a multi-line cell.

@@ -172,7 +172,7 @@ mod compose_slot_approvals {
         let granted = request.map_options(|options| options.with_slot_session(session));
         let (_, report) = compose(&document, &granted).unwrap_or_else(|failure| panic!("composes: {}", failure.error));
         assert!(
-            report.read_set.contains(&biscuit_file::to_portable_string(&repo.path(DATA_FILE))),
+            report.read_set.contains(&biscuit_file::to_forward_slash_string(&repo.path(DATA_FILE))),
             "{:?}",
             report.read_set
         );

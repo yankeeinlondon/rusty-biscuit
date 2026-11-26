@@ -75,7 +75,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{PathIdentity, ResolutionFailure, canonicalize_simplified, to_portable_string};
+use biscuit_file::{PathIdentity, ResolutionFailure, canonicalize_simplified, to_forward_slash_string};
 
 /// The package whose runner executes an entry point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1082,7 +1082,7 @@ impl ParityFixture {
     /// detection), and the `## TARGET <id>` heading.
     pub fn write_route_files(&self) {
         for path in self.route_files() {
-            let id = to_portable_string(path.strip_prefix(&self.root).unwrap());
+            let id = to_forward_slash_string(path.strip_prefix(&self.root).unwrap());
             write(&path, &route_document(&id));
         }
     }
@@ -1104,7 +1104,7 @@ impl ParityFixture {
         self.route_files()
             .into_iter()
             .filter(|path| {
-                let id = to_portable_string(path.strip_prefix(&self.root).unwrap());
+                let id = to_forward_slash_string(path.strip_prefix(&self.root).unwrap());
                 text.contains(&format!("{}:", route_slug(&id))) || text.contains(&format!("\"{}\"", route_slug(&id)))
             })
             .collect()
@@ -1155,7 +1155,7 @@ impl ParityFixture {
         let schema = match_schema(&cell.form.patterns(GLOB_DEPTH.levels_below_root()));
         let documents = self.glob_match_documents(cell);
         for (candidate, path) in &documents {
-            let value = to_portable_string(candidate);
+            let value = to_forward_slash_string(candidate);
             write(path, &format!("---\n{schema}spec: '{value}'\n---\n\n# Cell\n"));
         }
         documents
@@ -1341,8 +1341,8 @@ impl ParityFixture {
         let canonical = canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
         let root = canonicalize_simplified(&self.root).unwrap_or_else(|_| self.root.clone());
         match canonical.strip_prefix(&root) {
-            Ok(relative) => format!("{{root}}/{}", to_portable_string(relative)),
-            Err(_) => to_portable_string(&canonical),
+            Ok(relative) => format!("{{root}}/{}", to_forward_slash_string(relative)),
+            Err(_) => to_forward_slash_string(&canonical),
         }
     }
 }
@@ -1773,7 +1773,7 @@ impl CrossRepositoryFixture {
             ("repository root", "&schemas/order.yaml".into(), SchemaOwner::Source),
             ("repository scoped", "^schemas/order.yaml".into(), SchemaOwner::Source),
             ("explicit relative", "./order.yaml".into(), SchemaOwner::Source),
-            ("absolute", to_portable_string(&self.source().join("schemas/order.yaml")), SchemaOwner::Source),
+            ("absolute", to_forward_slash_string(&self.source().join("schemas/order.yaml")), SchemaOwner::Source),
             ("magic", "@order.yaml".into(), SchemaOwner::Launch),
         ]
     }

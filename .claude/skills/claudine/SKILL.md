@@ -525,7 +525,7 @@ home.
 
 Every lifecycle `EffectEngine` in `cli/src` takes its mutation root from
 `claudine::invocation_context::lifecycle_mutation_root(invocation, context)`,
-never `launch_magic_scope().local_root()` directly: it refuses a retained
+never `launch_scope().local_root()` directly: it refuses a retained
 failed launch discovery (`CompositionError::LaunchRepositoryUnreadable`,
 `io.read_failed`) so the launch-directory fallback is used only after a
 successful observation of no working tree. A direct wrapper's memory-file

@@ -19,7 +19,7 @@ fn parse_shell_value(
 }
 
 fn available_executable() -> String {
-    biscuit_file::to_portable_string(
+    biscuit_file::to_forward_slash_string(
         &std::env::current_exe().expect("test executable path should be available"),
     )
 }

@@ -126,7 +126,7 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
     let absent_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     let portable_package =
-        biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
+        biscuit_file::to_forward_slash_string(&std::fs::canonicalize(&package).unwrap());
     // A caller file renders its native semantic path; compare its spelling
     // portably so Windows and POSIX agree on the identity.
     let specification = absent_design_prompt
@@ -801,7 +801,7 @@ fn assert_direct_and_proxy_file_failure_agree(case: &str, schema: &str, expressi
                 .join(raw);
         assert_eq!(
             direct_diagnostic["detail"]["candidates"][0]["path"],
-            biscuit_file::to_portable_string(&expected_candidate),
+            biscuit_file::to_forward_slash_string(&expected_candidate),
             "{case} retained the wrong selected candidate: {direct_diagnostic}"
         );
     }
@@ -963,7 +963,7 @@ fn canonical_portable(path: &std::path::Path) -> String {
     for name in tail.into_iter().rev() {
         out.push(name);
     }
-    biscuit_file::to_portable_string(&out)
+    biscuit_file::to_forward_slash_string(&out)
 }
 
 #[test]

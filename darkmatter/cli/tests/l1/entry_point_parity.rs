@@ -21,7 +21,7 @@ mod matrix;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use biscuit_file::{ResolutionFailure, to_portable_string};
+use biscuit_file::{ResolutionFailure, to_forward_slash_string};
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use matrix::{
     Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, GlobConsumer, GlobDocumentCell, LAUNCH_MAGIC,
@@ -78,7 +78,7 @@ fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output
 /// the repository, absolute outside it.
 fn document_argument(fixture: &ParityFixture, document: &Path) -> String {
     match document.strip_prefix(fixture.repo()) {
-        Ok(relative) => to_portable_string(relative),
+        Ok(relative) => to_forward_slash_string(relative),
         Err(_) => document.to_string_lossy().into_owned(),
     }
 }
@@ -771,7 +771,7 @@ fn document_context_keeps_the_source_repository_and_the_launch_scope() {
     let fixture = CrossRepositoryFixture::create(cli.workspace_path());
     let document = fixture.write_magic_document();
     let request = MdRequest::new(RequestSnapshot::new(fixture.launch()).with_home(Some(cli.home().to_path_buf())));
-    let opening = FileReference::new(&to_portable_string(&document)).unwrap();
+    let opening = FileReference::new(&to_forward_slash_string(&document)).unwrap();
 
     for opening in [None, Some(&opening)] {
         let context = request.document_context(opening, &document).expect("document context");
@@ -781,7 +781,7 @@ fn document_context_keeps_the_source_repository_and_the_launch_scope() {
             "repository (opening {opening:?})",
         );
         assert_eq!(
-            context.launch_magic_scope().repository_root().map(matrix::identity),
+            context.launch_scope().repository_root().map(matrix::identity),
             Some(matrix::identity(&fixture.launch())),
             "launch `@` scope (opening {opening:?})",
         );
@@ -909,7 +909,7 @@ fn write_detection_document(cli: &CliProcessFixture, fixture: &CrossRepositoryFi
     std::fs::write(docs.join("beside.md"), "# Beside\n").unwrap();
     std::fs::write(source.join("target.md"), "# Target\n").unwrap();
     std::fs::write(cli.home().join("home.md"), "# Home\n").unwrap();
-    let absolute = to_portable_string(&source.join("target.md"));
+    let absolute = to_forward_slash_string(&source.join("target.md"));
     let document = docs.join("doc.md");
     std::fs::write(
         &document,
@@ -1036,7 +1036,7 @@ fn schema_detect_keeps_a_repository_free_document_context() {
     std::fs::write(home.join("parent.md"), "# Parent\n").unwrap();
     std::fs::write(home.join("home.md"), "# Home\n").unwrap();
     std::fs::write(home.join("absolute.md"), "# Absolute\n").unwrap();
-    let absolute = to_portable_string(&home.join("absolute.md"));
+    let absolute = to_forward_slash_string(&home.join("absolute.md"));
     let document = notes.join("doc.md");
     std::fs::write(
         &document,
@@ -1082,7 +1082,7 @@ use simplified_schema::SchemaRoot;
     let fixture = CrossRepositoryFixture::create(cli.workspace_path());
     let document = write_detection_document(&cli, &fixture);
     let request = MdRequest::new(RequestSnapshot::new(fixture.launch()).with_home(Some(cli.home().to_path_buf())));
-    let opening = FileReference::new(&to_portable_string(&document)).unwrap();
+    let opening = FileReference::new(&to_forward_slash_string(&document)).unwrap();
     let document_context = request.document_context(Some(&opening), &document).expect("document context");
     let launch_context = request.launch_context().expect("launch context").clone();
     let markdown = Markdown::try_from(document.as_path()).expect("document parses");

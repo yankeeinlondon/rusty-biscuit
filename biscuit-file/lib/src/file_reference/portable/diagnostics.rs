@@ -66,8 +66,8 @@ pub enum AttemptOutcome {
     },
     /// Looking a generated reference up failed for a reason other than
     /// absence (for example a regular file where a search root's directory
-    /// should be). Always the attempt's final outcome; evaluation stops with
-    /// [`PortablePathError::ProbeFailed`] carrying the same error.
+    /// should be). The attempt stops. A launch shadow probe failure allows
+    /// the next preference to run. Other probe failures end evaluation.
     ProbeFailed(ProbeError),
 }
 
@@ -78,6 +78,12 @@ pub enum NotApplicable {
     NoRepository,
     /// The target is outside the repository, or below none of the `^` roots.
     OutsideRepository,
+    /// The target is the launch repository directory itself.
+    LaunchRepositoryRoot,
+    /// The caller identified a different checkout containing the target.
+    ForeignCheckout,
+    /// Implicit launch lookup would plan this missing reference elsewhere.
+    UnplannedTarget,
     /// An in-tree relative preference for a target outside `base_dir`.
     OutsideBaseDir,
     /// [`ExternalRelativePath`](PortabilityPreference::ExternalRelativePath)
@@ -279,7 +285,8 @@ pub struct ProbeError {
 }
 
 impl ProbeError {
-    pub(crate) fn new(path: &Path, error: &std::io::Error) -> Self {
+    /// Capture the OS error at the path being checked.
+    pub fn new(path: &Path, error: &std::io::Error) -> Self {
         Self {
             path: path.to_path_buf(),
             kind: error.kind(),

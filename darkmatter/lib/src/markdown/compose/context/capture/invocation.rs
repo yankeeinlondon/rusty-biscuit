@@ -7,7 +7,7 @@ pub(super) fn populate_invocation(cap: &ContextCapture, values: &mut Map<String,
     values.insert(
         "cwd".into(),
         cap.invocation_cwd.as_ref().map_or(Value::Null, |path| {
-            Value::String(biscuit_file::to_portable_string(path))
+            Value::String(biscuit_file::to_forward_slash_string(path))
         }),
     );
 }

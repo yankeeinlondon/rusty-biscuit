@@ -180,7 +180,7 @@ fn package_lookups_miss_outside_the_repository_and_in_a_plain_repository() {
     write(&fixture.root.join("src/lib.rs"), "");
     fixture.commit("chore: solo", 0);
     let outside = tempfile::tempdir().unwrap();
-    let outside_path = biscuit_file::to_portable_string(&outside.path().join("zeta/lib/src/lib.rs"));
+    let outside_path = biscuit_file::to_forward_slash_string(&outside.path().join("zeta/lib/src/lib.rs"));
     let (path, document) = fixture.document(
         "prompt.md",
         &format!(

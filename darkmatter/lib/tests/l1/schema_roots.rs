@@ -752,7 +752,7 @@ fn assert_path_triggers_judge_directory_spelling(stored: &str, authored: &str, t
     let document = package.join(stored).join("guide.md");
     write(&document, "---\ntitle: x\n---\n");
     crate::fs_capability::probe_directory_alias(&package, stored, authored);
-    let package_text = biscuit_file::to_portable_string(&package);
+    let package_text = biscuit_file::to_forward_slash_string(&package);
     let env = [("PKG", package_text.as_str())];
     let document_context = fixture.context(&document, &env);
     let value_context = fixture.context(&package.join("value.md"), &env);

@@ -730,7 +730,7 @@ fn needs_grant(error: &SlotResolutionError) -> bool {
 /// that holds it (the first file the resolution read), else its identity.
 fn template_key(pending: &PendingSchema, template: &str) -> String {
     match pending.read_sources().first() {
-        Some((path, _)) => biscuit_file::to_portable_string(path),
+        Some((path, _)) => biscuit_file::to_forward_slash_string(path),
         None => template.to_string(),
     }
 }
@@ -839,7 +839,7 @@ pub(crate) fn resolve_contract_slots(
     }
     let template = slots
         .iter()
-        .find_map(|slot| slot.origin.as_deref().map(biscuit_file::to_portable_string))
+        .find_map(|slot| slot.origin.as_deref().map(biscuit_file::to_forward_slash_string))
         .unwrap_or_else(|| "load_data contract".to_string());
     if in_progress(session.id, &template) {
         return Some(Err(cycle_error(&slots, &template, None)));

@@ -195,7 +195,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
         ("MODEL".to_string(), "gpt-5".to_string()),
     ]);
     let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch_dir).unwrap();
-    let materialized_spec = biscuit_file::to_portable_string(&launch_dir.join("spec.md"));
+    let materialized_spec = biscuit_file::to_forward_slash_string(&launch_dir.join("spec.md"));
     let mut state = compose_state(
         &target,
         CallerInputLayers {
@@ -217,7 +217,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
                 .prompt
                 .contains(&format!(
                     "AREA=alpha CWD={} AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true",
-                    biscuit_file::to_portable_string(&launch_dir)
+                    biscuit_file::to_forward_slash_string(&launch_dir)
                 )),
             "entry {entry:?} lost launch or target identity: {}",
             materialized.prompt
@@ -231,7 +231,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
         assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
         assert_eq!(
             materialized.frontmatter["prepared_cwd"],
-            serde_json::json!(biscuit_file::to_portable_string(&launch_dir))
+            serde_json::json!(biscuit_file::to_forward_slash_string(&launch_dir))
         );
         assert_eq!(materialized.frontmatter["prepared_agent"], serde_json::json!("codex"));
         assert_eq!(materialized.frontmatter["prepared_model"], serde_json::json!("gpt-5"));
