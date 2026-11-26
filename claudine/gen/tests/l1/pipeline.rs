@@ -73,8 +73,8 @@ impl Fixture {
         copy("docs/providers.yaml");
         copy(&format!("docs/providers/facts/{slug}.yaml"));
         for topic in TOPICS {
-            copy(&format!("docs/research/{topic}/_schema.yaml"));
-            copy(&format!("docs/research/{topic}/{slug}.md"));
+            copy(&format!("docs/research/providers/{topic}/_schema.yaml"));
+            copy(&format!("docs/research/providers/{topic}/{slug}.md"));
         }
         // The agent-cli contract names its records in its own types file and
         // shares identifier/evidence types. Joined onto the manifest

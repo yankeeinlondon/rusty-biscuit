@@ -733,19 +733,19 @@ fn research_rows_with_provenance(research: &ResearchVocabulary) -> Vec<Provenanc
 
 /// Path to one provider's research document.
 fn research_doc_path(area: &Path, slug: &str) -> PathBuf {
-    area.join(format!("docs/research/{TOPIC}/{slug}.md"))
+    area.join(format!("docs/research/providers/{TOPIC}/{slug}.md"))
 }
 
 /// The default transient outcome-report path (never committed). Callers may
 /// override it via `--findings`.
 pub fn default_findings_path(area: &Path, slug: &str) -> PathBuf {
-    area.join(format!("docs/research/{TOPIC}/.findings/{slug}.md"))
+    area.join(format!("docs/research/providers/{TOPIC}/.findings/{slug}.md"))
 }
 
 /// Reads a provider's immutable Phase-A seed baseline, or `None` when the
 /// provider never had runtime vocabulary (currently Goose).
 pub fn read_seed(area: &Path, slug: &str) -> Result<Option<ErrorVocabulary>, GenError> {
-    let path = area.join(format!("docs/research/{TOPIC}/_seeds/{slug}.yaml"));
+    let path = area.join(format!("docs/research/providers/{TOPIC}/_seeds/{slug}.yaml"));
     if !path.is_file() {
         return Ok(None);
     }
@@ -796,7 +796,7 @@ pub fn check_provider(
     findings_path: &Path,
     context: &FileResolutionContext,
 ) -> Result<FindingsReport, GenError> {
-    let fixture_base = FixtureBase::new(context, &area.join(format!("docs/research/{TOPIC}")));
+    let fixture_base = FixtureBase::new(context, &area.join(format!("docs/research/providers/{TOPIC}")));
     let report = match read_seed(area, slug) {
         Err(error) => {
             FindingsReport::gate_error(slug, GateErrorScope::GateInput, error.to_string())

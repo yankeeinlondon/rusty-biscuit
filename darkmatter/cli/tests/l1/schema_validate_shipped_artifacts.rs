@@ -39,7 +39,7 @@ fn model_config_research_contract_enforces_required_and_nested_properties() {
 #[test]
 fn reasoning_level_research_contract_enforces_local_and_shared_types() {
     let process = CliProcessFixture::new();
-    let dir = process.cwd().join("reasoning-level");
+    let dir = process.cwd().join("providers/reasoning-level");
     write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/providers/reasoning-level/_schema.yaml"));
     write(&process.cwd().join("_types.yaml"), include_str!("../../../../claudine/docs/research/_types.yaml"));
     let valid = "\

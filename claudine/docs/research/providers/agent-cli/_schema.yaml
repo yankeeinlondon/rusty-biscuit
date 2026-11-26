@@ -11,16 +11,16 @@
 # revision change, copy this file to `_schema.r2.yaml`.
 $schema:
     schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is validated against that revision's frozen contract, and its switches generate as unknown
-    provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes
+    provider: identifier(required)@../../_types.yaml -> Roster slug of the provider this document describes
     created: date(required) -> Date this document was first written; kept unchanged on refresh
     last_updated: date(required) -> Date of the research run that produced this version
     contract_checked: date -> Date the fleet last confirmed this document satisfies the contract; written by the fleet after validation and never by the researcher
-    agent: research_agent(required)@../_types.yaml -> Agentic CLI that performed the research, which the fleet checks against its assignment
-    model: research_model(required)@../_types.yaml -> Model that performed the research, recorded so findings can be weighed by who produced them
-    reasoning_effort: research_effort(required)@../_types.yaml -> Reasoning effort the research itself ran with
+    agent: research_agent(required)@../../_types.yaml -> Agentic CLI that performed the research, which the fleet checks against its assignment
+    model: research_model(required)@../../_types.yaml -> Model that performed the research, recorded so findings can be weighed by who produced them
+    reasoning_effort: research_effort(required)@../../_types.yaml -> Reasoning effort the research itself ran with
     latest_version: string(required; pattern(^[0-9]+[.][0-9]+[.][0-9]+[0-9A-Za-z.+-]*$|^unknown$)) -> Newest released version found upstream, or unknown when no release channel states one
-    versions_examined: version[](required)@../_types.yaml -> Provider versions whose help output, documentation, or source the switch records were established from
-    evidence: evidence[](required)@../_types.yaml -> Every source a switch record rests on, cited by its evidence_ids
+    versions_examined: version[](required)@../../_types.yaml -> Provider versions whose help output, documentation, or source the switch records were established from
+    evidence: evidence[](required)@../../_types.yaml -> Every source a switch record rests on, cited by its evidence_ids
 
     homepage: url(required) -> The provider's product page for the CLI
     repo: url -> Source repository, absent when the CLI is closed source

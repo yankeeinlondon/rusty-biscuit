@@ -94,8 +94,8 @@ pub fn load(
     let mut research_authored = BTreeMap::new();
     let mut sidecars = BTreeMap::new();
     for topic in topics {
-        let doc_path = area.join(format!("docs/research/{topic}/{slug}.md"));
-        let sidecar = area.join(format!("docs/research/{topic}/_schema.yaml"));
+        let doc_path = area.join(format!("docs/research/providers/{topic}/{slug}.md"));
+        let sidecar = area.join(format!("docs/research/providers/{topic}/_schema.yaml"));
         if !sidecar.is_file() {
             return Err(GenError::SidecarMissing { path: sidecar });
         }

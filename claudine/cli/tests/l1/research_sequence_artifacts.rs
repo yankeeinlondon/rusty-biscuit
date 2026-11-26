@@ -78,16 +78,25 @@ fn shipped_research_sequence_corpus_uses_lexical_row_bindings() {
     ];
     let listed: std::collections::BTreeSet<_> = artifacts.iter().map(|(path, _)| *path).collect();
     let research = biscuit_test_harness::manifest_dir!().join("../../claudine/docs/research");
-    for entry in std::fs::read_dir(&research).unwrap() {
-        let path = entry.unwrap().path();
-        let name = path.file_name().unwrap().to_string_lossy();
-        for file in ["_fleet.md", "_research.md"] {
-            if path.join(file).is_file() {
-                let relative = format!("claudine/docs/research/{name}/{file}");
-                assert!(listed.contains(relative.as_str()), "uncovered research artifact: {relative}");
+    // A topic is a folder of the research tree or of one of its subject
+    // areas (`providers/`, `local-ai/`).
+    let folders = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().path()).filter(|path| path.is_dir()).collect()
+    };
+    let mut seen = 0;
+    for area in folders(&research) {
+        for path in std::iter::once(area.clone()).chain(folders(&area)) {
+            let name = path.strip_prefix(&research).unwrap().to_string_lossy().replace('\\', "/");
+            for file in ["_fleet.md", "_research.md"] {
+                if path.join(file).is_file() {
+                    seen += 1;
+                    let relative = format!("claudine/docs/research/{name}/{file}");
+                    assert!(listed.contains(relative.as_str()), "uncovered research artifact: {relative}");
+                }
             }
         }
     }
+    assert!(seen > 0, "the walk found no research artifact under {}", research.display());
     for entry in std::fs::read_dir(research.join("summary")).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|extension| extension == "md") {
@@ -161,13 +170,21 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
     for name in ["_provider-tasks.yaml", "_local-runner-tasks.yaml"] {
         std::fs::copy(directory.join(name), staged.join(name)).unwrap();
     }
-    for entry in std::fs::read_dir(&directory).unwrap() {
-        let topic = entry.unwrap().path();
-        if !topic.join("_fleet.md").is_file() { continue; }
-        let destination = staged.join(topic.file_name().unwrap());
-        std::fs::create_dir_all(&destination).unwrap();
-        for name in ["_fleet.md", "_research.md"] {
-            std::fs::copy(topic.join(name), destination.join(name)).unwrap();
+    // A topic is a folder of the research tree or of one of its subject
+    // areas (`providers/`, `local-ai/`); each is staged at the same path.
+    let folders = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().path()).filter(|path| path.is_dir()).collect()
+    };
+    let mut fleets = Vec::new();
+    for area in folders(&directory) {
+        for topic in std::iter::once(area.clone()).chain(folders(&area)) {
+            if !topic.join("_fleet.md").is_file() { continue; }
+            let destination = staged.join(topic.strip_prefix(&directory).unwrap());
+            std::fs::create_dir_all(&destination).unwrap();
+            for name in ["_fleet.md", "_research.md"] {
+                std::fs::copy(topic.join(name), destination.join(name)).unwrap();
+            }
+            fleets.push(destination.join("_fleet.md"));
         }
     }
     // Graph discovery follows includes; keep its internal prompt dependency frozen.
@@ -177,9 +194,7 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
     let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(fixture.cwd());
     let resolution = biscuit_file::FileResolutionContext::new(fixture.cwd());
     let mut count = 0;
-    for entry in std::fs::read_dir(staged).unwrap() {
-        let path = entry.unwrap().path().join("_fleet.md");
-        if !path.is_file() { continue; }
+    for path in fleets {
         count += 1;
         let markdown = darkmatter::markdown::Markdown::try_from(path.as_path()).unwrap();
         // The shared roster sees no property of the fleet, so the fleet's one

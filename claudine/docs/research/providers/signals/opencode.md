@@ -332,5 +332,5 @@ Initial OpenCode signal research document created on 2026-07-05.
 - [OpenCode default-branch session status schema, commit e0ec9be](https://github.com/anomalyco/opencode/blob/e0ec9be238a1495454e46426665323af25273b63/packages/schema/src/session-status-event.ts#L9-L41)
 - [OpenCode default-branch assistant token schema, commit e0ec9be](https://github.com/anomalyco/opencode/blob/e0ec9be238a1495454e46426665323af25273b63/packages/schema/src/session-message.ts#L164-L189)
 - [OpenCode v1.4.14 message-v2 schema, tag v1.4.14](https://github.com/anomalyco/opencode/blob/v1.4.14/packages/opencode/src/session/message-v2.ts#L253-L271)
-- [Claudine OpenCode stderr promoted event types](../../../lib/src/stream/logs/opencode/events.rs)
+- [Claudine OpenCode stderr promoted event types](../../../../lib/src/stream/logs/opencode/events.rs)
 - [Claudine OpenCode stderr classification](../../../lib/src/stream/logs/opencode/errors.rs)

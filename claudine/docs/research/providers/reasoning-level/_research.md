@@ -141,7 +141,7 @@ else. Each one names the property and what is wrong with it.
 ::end-block
 ## The Contract
 
-Read `./_schema.yaml`, `./_types.yaml`, and `../_types.yaml` before writing.
+Read `./_schema.yaml`, `./_types.yaml`, and `../../_types.yaml` before writing.
 They define every property, its allowed values, and what to record in it.
 
 The fleet runs two checks when you finish and rejects a document that fails

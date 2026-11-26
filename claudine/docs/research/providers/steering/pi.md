@@ -443,7 +443,7 @@ On 2026-09-08, real Pi 0.84.4 RPC passed the opt-in Rust harness on native macOS
 using a deterministic local model registered by an extension. The test retained
 normal resource discovery in an isolated project; it passed context, skill, and
 template sentinels without resource-disabling flags. Full assertions and sanitized
-event ordering are in [the verification artifact](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4.json).
+event ordering are in [the verification artifact](../../../../features/2026-09-08-steering/verification/pi-macos-0.84.4.json).
 
 Steering was acknowledged while a tool remained blocked and reached the next
 model request only after both tools completed. Duplicate correlation IDs did not
@@ -460,7 +460,7 @@ No production adapter or fallback was enabled.
 
 ## Abort and Input-Disconnect Verification
 
-The [second disposable pass](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json)
+The [second disposable pass](../../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json)
 passed four failure scenarios on Pi 0.84.4/macOS using the same local model and
 cooperative tool fixture. Abort canceled both waiting tools. Without prior queue
 clearing, the steering text was saved once in conversation history but was not
@@ -482,7 +482,7 @@ regression results do not enable a production adapter.
 
 ## Controlled Switch and Provider-Kill Verification
 
-The [third disposable pass](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json)
+The [third disposable pass](../../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json)
 held a session switch in a fixture extension. The old session remained observable,
 and steering was acknowledged while the switch was pending. Completing the
 switch discarded that steering without saving it or sending it to the model.
@@ -499,7 +499,7 @@ activated by these additional records.
 
 ## Built-In Bash Cleanup Verification
 
-The [external-process experiment](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-bash-cleanup.json)
+The [external-process experiment](../../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-bash-cleanup.json)
 uses the real built-in bash tool with a marked external process and a deterministic
 local model. After a 750 ms observation delay, normal RPC abort had removed the
 process, while SIGKILL of Pi had left it alive. The fixture then removed and

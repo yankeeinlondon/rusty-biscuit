@@ -95,7 +95,7 @@ fn full_fixture() -> Fixture {
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
     for topic in RESEARCH_TOPICS {
-        copy_dir(&format!("docs/research/{topic}"));
+        copy_dir(&format!("docs/research/providers/{topic}"));
     }
     // Signals corpus + committed tables (docs only — fixture existence is
     // not checked at generate time, so fixtures/ stays uncopied).
@@ -133,7 +133,7 @@ fn single_provider_fixture(slug: &str) -> Fixture {
     copy_dir_where(&area, "docs/providers/facts", keep);
     copy_dir_where(&area, "docs/providers/overrides", keep);
     for topic in RESEARCH_TOPICS {
-        copy_dir_where(&area, &format!("docs/research/{topic}"), keep);
+        copy_dir_where(&area, &format!("docs/research/providers/{topic}"), keep);
     }
     copy_area_file(&area, &format!("lib/src/provider/{slug}/data.rs"));
     copy_workspace_file(dir.path(), "unchained-ai/artifacts/models-catalog.json");

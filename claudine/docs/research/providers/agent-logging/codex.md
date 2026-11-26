@@ -492,7 +492,7 @@ Codex CLI does **not** publish a formal, versioned schema artifact (no JSON Sche
 
 Two open-source efforts already build typed schemas for this:
 
-1. **Claudine** (this monorepo) — [`claudine/lib/src/stream/protocol/codex.rs`](../../../lib/src/stream/protocol/codex.rs) models the `exec --json` JSONL event stream.
+1. **Claudine** (this monorepo) — [`claudine/lib/src/stream/protocol/codex.rs`](../../../../lib/src/stream/protocol/codex.rs) models the `exec --json` JSONL event stream.
 2. **Codex's own source** — The `codex-rs/rollout-trace/` and `codex-rs/core/` crates define the Rust types that serialize into the rollout files.
 
 ### Rollout Envelope Schema (Derived from Actual Log Files)
@@ -566,7 +566,7 @@ The payload discriminator and **observed** vocabulary (counts from a full scan o
 
 ### `exec --json` Event Stream Schema (from Claudine's Protocol Model)
 
-The `codex exec --json` output follows a tagged JSONL format with a `type` field. Claudine's existing protocol model in [`claudine/lib/src/stream/protocol/codex.rs`](../../../lib/src/stream/protocol/codex.rs) defines the typed schema. *(Re-verify against current CLI output before relying on field names — the rollout envelope has gained `compacted` and many new event_msg types since this model was last touched, and the exec stream may have drifted in parallel.)*
+The `codex exec --json` output follows a tagged JSONL format with a `type` field. Claudine's existing protocol model in [`claudine/lib/src/stream/protocol/codex.rs`](../../../../lib/src/stream/protocol/codex.rs) defines the typed schema. *(Re-verify against current CLI output before relying on field names — the rollout envelope has gained `compacted` and many new event_msg types since this model was last touched, and the exec stream may have drifted in parallel.)*
 
 ### SQLite Log Schema (from `logs_2.sqlite`)
 
@@ -800,7 +800,7 @@ graph TD
 - [Codex Source: codex-rs Directory](https://github.com/openai/codex/tree/main/codex-rs)
 - [Codex Source: Rollout Trace Crate](https://github.com/openai/codex/tree/main/codex-rs/rollout-trace)
 - [Codex Source: OTel Crate](https://github.com/openai/codex/tree/main/codex-rs/otel)
-- [Claudine Codex Protocol Model](../../../lib/src/stream/protocol/codex.rs)
+- [Claudine Codex Protocol Model](../../../../lib/src/stream/protocol/codex.rs)
 - Host evidence: `~/.codex/{logs_2.sqlite, state_5.sqlite, goals_1.sqlite, memories_1.sqlite, sqlite/codex-dev.db, history.jsonl, session_index.jsonl, version.json, update-check.json}`, `~/.codex/sessions/**/*.jsonl` (~1801 files), `~/Library/Logs/com.openai.codex/**` (observed 2026-07-01)
 
 ## Changelog

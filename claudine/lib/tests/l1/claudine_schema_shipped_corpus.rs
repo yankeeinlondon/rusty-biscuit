@@ -198,12 +198,19 @@ fn every_shipped_document_has_one_test() {
     let mut listed = markdown_below(manifest.join("../docs/examples"));
     listed.extend(markdown_below(manifest.join("tests/fixtures/frozen_prompts")));
     listed.extend(markdown_below(manifest.join("../cli/tests/fixtures/frozen_prompts")));
+    // A research topic is a folder of `docs/research/` or of one of its
+    // subject areas (`providers/`, `local-ai/`, …).
     let research = manifest.join("../docs/research");
-    for entry in std::fs::read_dir(&research).unwrap_or_else(|error| panic!("{}: {error}", research.display())) {
-        let topic = entry.expect("directory entry").path();
-        for name in ["_fleet.md", "_research.md"] {
-            if topic.join(name).is_file() {
-                listed.push(topic.join(name));
+    let children = |dir: &Path| -> Vec<PathBuf> {
+        let entries = std::fs::read_dir(dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
+        entries.map(|entry| entry.expect("directory entry").path()).filter(|path| path.is_dir()).collect()
+    };
+    for area in children(&research) {
+        for topic in std::iter::once(area.clone()).chain(children(&area)) {
+            for name in ["_fleet.md", "_research.md"] {
+                if topic.join(name).is_file() {
+                    listed.push(topic.join(name));
+                }
             }
         }
     }

@@ -116,6 +116,14 @@ const fn exception(
 
 /// Every shipped schema artifact that does not load through `$schema: ./file`.
 const EXCEPTIONS: &[Exception] = &[
+    // claudine/schemas: a master sheet of provider research, still a draft:
+    // its `$provider` header key is not part of the `kind: schema` envelope.
+    exception(
+        "claudine/schemas",
+        "provider-research.yaml",
+        Class::EnvelopeRejected,
+        "a draft master sheet whose `$provider` header the envelope does not admit",
+    ),
     // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
@@ -2205,9 +2213,9 @@ fn the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving() {
     let schema = simplified_schema::SimplifiedSchema::try_from_yaml(source).expect("the template is admitted");
     assert!(!schema.is_resolved(), "the schema holds a slot");
     let slots: Vec<&str> = schema.pending_slots().iter().map(|slot| slot.expression.as_str()).collect();
-    assert_eq!(slots, [r#"load_data("../../../os.yaml", "string[]")"#]);
+    assert_eq!(slots, [r#"load_data("../../../../os.yaml", "string[]")"#]);
     assert_eq!(
-        biscuit_file::canonicalize_simplified(&path.parent().unwrap().join("../../../os.yaml")).ok(),
+        biscuit_file::canonicalize_simplified(&path.parent().unwrap().join("../../../../os.yaml")).ok(),
         biscuit_file::canonicalize_simplified(&root.join("claudine/docs/os.yaml")).ok(),
         "the slot names the shipped OS list"
     );

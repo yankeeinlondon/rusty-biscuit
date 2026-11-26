@@ -60,7 +60,7 @@ pub fn check_provider(
     slug: &str,
     context: &FileResolutionContext,
 ) -> Result<SteeringValidation, GenError> {
-    let path = area.join(format!("docs/research/{TOPIC}/{slug}.md"));
+    let path = area.join(format!("docs/research/providers/{TOPIC}/{slug}.md"));
     let document = inputs::load_validated_frontmatter(&path, context)?;
     let mut result = evaluate(slug, &document);
     let execution_path = area.join(format!(
