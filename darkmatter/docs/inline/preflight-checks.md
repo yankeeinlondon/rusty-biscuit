@@ -548,6 +548,27 @@ that offers no exact choice approves the shape for the rest of the
 composition. `darkmatter_cli::approval::approve_with_io` runs one prompt
 session over any reader and writer, which is how the prompt is tested.
 
+## Dry runs
+
+A library caller that wants to see what a document composes, without running
+anything, builds its options with `ComposeOptions::with_dry_run()`. Under a
+dry run no document command runs and none is offered for approval: a
+`::shell` line, a frontmatter `$( … )` value, and the same in a transcluded
+document each fail with `ShellExpansionError::SkippedInDryRun`, which names
+the command and where it is written. The built-in blacklist still refuses a
+blacklisted command first, as a real run would.
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+
+let options = ComposeOptions::new().with_dry_run();
+assert!(options.is_dry_run());
+```
+
+A caller treats `SkippedInDryRun` as "this part could not be checked", not
+as a failure of the document. Claudine's passive document check does exactly
+that: the task's preview is reported as not checked.
+
 ## Timeouts
 
 - Default timeout: 10 seconds

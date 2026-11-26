@@ -160,6 +160,7 @@ schema `file` values too.
 | `--width N` | `with_output_width(renderable::output::Width)` |
 | `--disable baseline-schema` / explicit baseline | build options without `with_darkmatter_baseline_schema()`, or pass `with_baseline_schema(SchemaRoot)` |
 | skip a stage | `.disable(ComposeOperation::Normalization)` or `.only(&[…])` |
+| (no flag) a passive rehearsal | `with_dry_run()`: no document command runs and none is asked to be approved; each fails as `ShellExpansionError::SkippedInDryRun` |
 | `::map`/`::filter` limits | `with_max_iteration_visits(NonZeroU64)`, `with_max_expansion_bytes(NonZeroU64)` (defaults 100,000 and 16 MiB) |
 
 The `ComposeOperation` stages are `FrontmatterInterpolation`,

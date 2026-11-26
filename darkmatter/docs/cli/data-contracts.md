@@ -215,7 +215,10 @@ record this output prints.
 | `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, and for a `dm.schema.*` problem on a frontmatter property whose value one `load_data` call returned directly, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
 | `grants_needed` | for `dm.schema.slot_approval_required`, the approvals any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file` or `url`; `target` is the file's path or the exact URL; `scope` is `once`, allow for this run, or `persisted`, "always allow" a file by saving it to `permissions.file-read`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
 | `schema_default` | for a `dm.schema.*` problem with a value a schema default supplied (a required property the document left out, filled from its `default(...)`), where that default is declared, as `{ "path", "schema_location", "schema_file" }`: `path` is the dotted property path, `schema_location` the JSON Pointer of the `default` keyword (for example `/properties/doc/default`), and `schema_file` the schema file that declares the default (for a default inside a type imported with `Name@file`, that import's file, not the importing schema), omitted for the document's inline schema or a compiled-in one. No authored text holds such a value, so `source` names the document with a `null` line and column. Absent, not `null`, on every other diagnostic |
-| `related` | on a host registration conflict, an array of the other declarations as `{ "message", "source" }`. Each `source` carries its own file and coordinates. The field is omitted when the diagnostic has no other declaration. |
+| `related` | on a host registration conflict, an array of the other declarations as `{ "message", "source" }`. Each `source` carries its own file and coordinates. A `dm.check.not_checked` record names the finding that stopped its check here. The field is omitted when the diagnostic has no related location. |
+| `hint` | how to fix the problem, as one sentence, such as `"create renderers/_frontmatter.md before a real run, or correct the reference"`. Omitted when the producer has no fix to suggest |
+| `notes` | further lines a person reads under the message, in order, such as each link of a provider selection chain. Omitted when empty |
+| `trail` | how the problem was reached, outermost first. Each frame is tagged by `kind`: `{ "kind": "host", "host", "label", "property" }` for a host construct such as a Claudine task (`"host": "task"`, `"label": "metadata"`, `"property": "sequence[1].prompt"`), `{ "kind": "included", "file", "line" }` for a transclusion, and `{ "kind": "iteration", "collection", "position" }` for a `::map` or `::filter` item. Omitted when empty |
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
@@ -260,6 +263,10 @@ listed under [Data errors](#data-errors).
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
 | `included_via` | the transclusion trail, outermost first, as `{ "file", "line" }` steps; each `line` is the authored line of the `::file` or `::toc-linking` directive |
+| `base` | for a missing document (`dm.reference.missing_document`), the file or directory the reference was resolved against |
+| `resolved` | for a missing document, the one path the reference resolved to |
+| `searched` | for a missing document whose reference was looked for in more than one place, every path checked, in search order |
+| `suggestions` | up to three existing files near the reference's file name, from the searched directories, in search order. A file that differs only by case is never offered. A suggestion is shown, never used |
 
 ## Which diagnostics, in which order
 
@@ -395,6 +402,30 @@ warnings belong to the run's output rather than to composition:
 `dm.host.foreign_document` record with `"severity": "info"`, naming the
 host's own command (see
 [`md compose` of a host's document](../topics/host-registration.md#md-compose-of-a-hosts-document)).
+
+### Finding codes for checks that keep going
+
+A check that reports every problem instead of stopping at the first, such as
+Claudine's passive document check, uses three more codes from the library's
+`darkmatter::findings` module. `md compose` does not emit them yet
+(**planned**: its pre-composition check will).
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `dm.reference.missing_document` | `error` | a document-valued reference, such as a Claudine task's `prompt:`, names a file that does not exist; carries the [reference details](#reference-details) including `base`, `resolved`, `searched`, and `suggestions` |
+| `dm.compose.empty_body` | `error` or `warning` | a document composed to an empty body; `message` says why (an empty or whitespace-only body, or a body that rendered to nothing) |
+| `dm.check.not_checked` | `info` | a check could not run, and why, as `"not checked: provider (no executable)"`; `related` names the finding that stopped it, when it has a location |
+
+```json
+{
+  "code": "dm.check.not_checked",
+  "severity": "info",
+  "message": "not checked: provider (the prompt file could not be read)",
+  "source": null,
+  "related": [{ "message": "the prompt file does not exist",
+                "source": { "file": "/work/renderers/_fleet.yaml", "line": 12, "column": 15, "inserted": false } }]
+}
+```
 
 ### Style input errors
 

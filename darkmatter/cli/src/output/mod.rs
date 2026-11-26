@@ -166,6 +166,9 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: darkmatter::findings::Trail::default(),
     }
 }
 

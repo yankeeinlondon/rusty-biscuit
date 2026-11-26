@@ -884,6 +884,9 @@ impl ComposeWarning {
             grants_needed: None,
             schema_default: None,
             related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -948,6 +951,9 @@ impl ComposeWarning {
             grants_needed: None,
             schema_default: None,
             related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
         };
         Self {
             stage: "link_titles".to_string(),

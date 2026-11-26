@@ -182,11 +182,18 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
             reference: Some(issue.reference_display.clone()),
             failure: issue.resolution_failure().map(|failure| resolution_failure_name(failure).to_string()),
             included_via: Some(issue.included_via.clone()),
+            base: None,
+            resolved: None,
+            searched: None,
+            suggestions: None,
         }),
         data_location: None,
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: crate::findings::Trail::default(),
     }
 }
 
@@ -450,6 +457,9 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                             .default
                             .as_ref()
                             .map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
+                        hint: None,
+                        notes: Vec::new(),
+                        trail: crate::findings::Trail::default(),
                     }
                 })
                 .collect()
@@ -582,6 +592,10 @@ fn with_failed_fetch(record: Diagnostic, function: &str, reference: &str) -> Dia
         reference: Some(reference.to_string()),
         failure: Some(resolution_failure_name(biscuit_file::ResolutionFailure::Io).to_string()),
         included_via: None,
+        base: None,
+        resolved: None,
+        searched: None,
+        suggestions: None,
     });
     Diagnostic { reference_details: Some(details), ..record }
 }
@@ -607,6 +621,10 @@ fn file_reference_details(diagnostic: &FileReferenceDiagnostic) -> ReferenceDeta
         reference: Some(diagnostic.reference.clone()),
         failure: Some(resolution_failure_name(failure).to_string()),
         included_via: None,
+        base: None,
+        resolved: None,
+        searched: None,
+        suggestions: None,
     }
 }
 
@@ -980,6 +998,9 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: crate::findings::Trail::default(),
     }
 }
 
@@ -1532,5 +1553,8 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: crate::findings::Trail::default(),
     }
 }

@@ -82,6 +82,9 @@ fn a_record_with_no_reference_details_omits_those_fields() {
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: darkmatter::findings::Trail::default(),
     };
 
     assert_eq!(

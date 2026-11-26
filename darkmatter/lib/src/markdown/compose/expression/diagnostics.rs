@@ -114,6 +114,9 @@ impl ExpressionDiagnostic {
             grants_needed: None,
             schema_default: None,
             related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
         }
     }
 
@@ -162,9 +165,106 @@ pub struct Diagnostic {
     /// every other record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_default: Option<SchemaDefaultOrigin>,
-    /// The other declarations involved in a conflict.
+    /// The other declarations involved in a conflict, or the finding that
+    /// blocked a check (`dm.check.not_checked`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<DiagnosticRelated>,
+    /// The next step that fixes the problem; required for a new actionable
+    /// finding ([`Diagnostic::actionable`]) and optional for a projection of
+    /// an older one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// Facts the producer established that support the message, one per
+    /// line (such as each link of a provider chain), shown under it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    /// How the problem was reached, outermost first: host constructs (a
+    /// Claudine task), transclusions, and `::map` / `::filter` items.
+    #[serde(skip_serializing_if = "crate::findings::Trail::is_empty")]
+    pub trail: crate::findings::Trail,
+}
+
+impl Diagnostic {
+    /// A new actionable finding: what failed and why in `message`, the next
+    /// step in `hint`. Locate it with [`Self::with_source`] and give its
+    /// context with [`Self::with_trail`].
+    pub fn actionable(
+        code: impl Into<String>,
+        severity: Severity,
+        message: impl Into<String>,
+        hint: impl Into<String>,
+    ) -> Self {
+        Self::projected(code, severity, message, Some(hint.into()))
+    }
+
+    /// A finding projected from an older diagnostic, whose hint is optional.
+    pub fn projected(
+        code: impl Into<String>,
+        severity: Severity,
+        message: impl Into<String>,
+        hint: Option<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            severity,
+            message: message.into(),
+            source: None,
+            expected_type: None,
+            actual_type: None,
+            span: None,
+            iteration_path: IterationPath::empty(),
+            reference_details: None,
+            data_location: None,
+            grants_needed: None,
+            schema_default: None,
+            related: Vec::new(),
+            hint,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
+        }
+    }
+
+    /// This finding located at `source`.
+    #[must_use]
+    pub fn with_source(mut self, source: DiagnosticSource) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    /// This finding with the authored byte range `span` of `source.file`.
+    #[must_use]
+    pub fn with_span(mut self, span: std::ops::Range<usize>) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    /// This finding reached through `trail`.
+    #[must_use]
+    pub fn with_trail(mut self, trail: crate::findings::Trail) -> Self {
+        self.trail = trail;
+        self
+    }
+
+    /// This finding with one more related location.
+    #[must_use]
+    pub fn with_related(mut self, related: DiagnosticRelated) -> Self {
+        self.related.push(related);
+        self
+    }
+
+    /// This finding with one more supporting line.
+    #[must_use]
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
+    /// This finding with the reference it is about.
+    #[must_use]
+    pub fn with_reference_details(mut self, details: ReferenceDetails) -> Self {
+        self.reference_details = Some(details);
+        self
+    }
 }
 
 /// A secondary location of a diagnostic, with its own authored source.
@@ -307,6 +407,21 @@ pub struct ReferenceDetails {
     /// for the root document, `None` for a failure with no one reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub included_via: Option<Vec<ReferenceTrailStep>>,
+    /// The directory a relative reference was resolved against, as a
+    /// portable path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// The candidate the reference resolved to when resolution proposed one
+    /// (an explicit relative reference's joined path), as a portable path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<String>,
+    /// Every location the resolver actually checked, in its search order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub searched: Option<Vec<String>>,
+    /// Nearby files that might be the intended target, at most three; never
+    /// selected automatically.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<Vec<String>>,
 }
 
 /// The one-based line and character column of byte `offset` in `text`;

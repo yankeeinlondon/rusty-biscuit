@@ -336,6 +336,13 @@ pub struct ComposeOptions {
     /// [`Self::ignore_invalid_references`]: every other failure still fails.
     pub(crate) allow_missing_transclusions: bool,
 
+    /// When `true`, the composition is a passive diagnostic pass: no
+    /// document shell command (`$( … )`, `::shell`, a shell block) runs or is
+    /// read from the shell cache. Each one fails with
+    /// [`ShellExpansionError::SkippedInDryRun`](crate::markdown::compose::ShellExpansionError::SkippedInDryRun)
+    /// before it is spawned, so a caller can report what it skipped.
+    pub(crate) dry_run: bool,
+
     /// When `true`, a `::map` source with no iterable declaration is a
     /// warning instead of an error. Waives only the static source-typing
     /// requirement.
@@ -780,6 +787,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("allow_missing_transclusions", &self.allow_missing_transclusions)
+            .field("dry_run", &self.dry_run)
             .field("allow_untyped_map_variables", &self.allow_untyped_map_variables)
             .field("allow_untyped_filter_variables", &self.allow_untyped_filter_variables)
             .field("iteration_limits", &self.iteration_limits)
@@ -1113,6 +1121,7 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             allow_missing_transclusions: false,
+            dry_run: false,
             allow_untyped_map_variables: false,
             allow_untyped_filter_variables: false,
             iteration_limits: Default::default(),
@@ -1867,6 +1876,23 @@ impl ComposeOptions {
     pub fn with_max_expansion_bytes(mut self, bytes: std::num::NonZeroU64) -> Self {
         self.iteration_limits = self.iteration_limits.with_max_expansion_bytes(bytes);
         self
+    }
+
+    /// Makes this composition a passive diagnostic pass: no document shell
+    /// command runs or is read from the per-compose shell cache. Each one
+    /// fails with
+    /// [`ShellExpansionError::SkippedInDryRun`](crate::markdown::compose::ShellExpansionError::SkippedInDryRun)
+    /// before anything is spawned. The option survives every child,
+    /// transclusion, and callback composition that inherits these options.
+    #[must_use]
+    pub fn with_dry_run(mut self) -> Self {
+        self.dry_run = true;
+        self
+    }
+
+    /// Whether this composition is a passive dry run ([`Self::with_dry_run`]).
+    pub fn is_dry_run(&self) -> bool {
+        self.dry_run
     }
 
     /// Removes a transclusion whose target does not exist, with a warning,
@@ -3457,6 +3483,7 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             allow_missing_transclusions,
+            dry_run,
             allow_untyped_map_variables,
             allow_untyped_filter_variables,
             iteration_limits,
@@ -3676,6 +3703,8 @@ impl ComposeOptions {
 
         enc.field("allow_missing_transclusions");
         enc.bool(*allow_missing_transclusions);
+        enc.field("dry_run");
+        enc.bool(*dry_run);
         enc.field("allow_untyped_map_variables");
         enc.bool(*allow_untyped_map_variables);
         enc.field("allow_untyped_filter_variables");
@@ -4062,6 +4091,8 @@ impl ComposeOptions {
 
         cenc.field("allow_missing_transclusions");
         cenc.bool(*allow_missing_transclusions);
+        cenc.field("dry_run");
+        cenc.bool(*dry_run);
         cenc.field("allow_untyped_map_variables");
         cenc.bool(*allow_untyped_map_variables);
         cenc.field("allow_untyped_filter_variables");

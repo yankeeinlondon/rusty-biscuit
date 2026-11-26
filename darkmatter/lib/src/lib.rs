@@ -82,6 +82,7 @@ pub mod config;
 pub mod diff;
 pub mod editor;
 pub mod effects;
+pub mod findings;
 pub mod layout;
 pub mod lifecycle;
 pub mod markdown;

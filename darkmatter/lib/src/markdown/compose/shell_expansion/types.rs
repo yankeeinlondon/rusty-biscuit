@@ -726,6 +726,17 @@ pub enum ShellExpansionError {
         origin: ShellCommandOrigin,
     },
 
+    /// A dry run reached a command it never runs
+    /// ([`ComposeOptions::with_dry_run`](crate::markdown::compose::ComposeOptions::with_dry_run)).
+    /// Nothing was spawned and no cached outcome was read; whatever depends
+    /// on the command's output is unchecked.
+    #[error("Command skipped by the dry run: '{command}' at {origin}")]
+    SkippedInDryRun {
+        ctx: Box<SourceContext>,
+        command: String,
+        origin: ShellCommandOrigin,
+    },
+
     #[error(
         "Command '{command}' at {origin} was not pre-approved{source_desc}. \
          This is a bug in the pre-flight scanner -- please report it."
@@ -924,6 +935,7 @@ impl ShellExpansionError {
             | Self::Blacklisted { command, .. }
             | Self::ApprovalRequired { command, .. }
             | Self::Denied { command, .. }
+            | Self::SkippedInDryRun { command, .. }
             | Self::NotPreApproved { command, .. }
             | Self::MissingValue { command, .. }
             | Self::TemplateGrammar { command, .. }
@@ -950,6 +962,7 @@ impl ShellExpansionError {
             | Self::Blacklisted { ctx, .. }
             | Self::ApprovalRequired { ctx, .. }
             | Self::Denied { ctx, .. }
+            | Self::SkippedInDryRun { ctx, .. }
             | Self::NotPreApproved { ctx, .. }
             | Self::MissingValue { ctx, .. }
             | Self::TemplateGrammar { ctx, .. }
@@ -975,6 +988,7 @@ impl ShellExpansionError {
             | Self::Blacklisted { origin, .. }
             | Self::ApprovalRequired { origin, .. }
             | Self::Denied { origin, .. }
+            | Self::SkippedInDryRun { origin, .. }
             | Self::NotPreApproved { origin, .. }
             | Self::MissingValue { origin, .. }
             | Self::TemplateGrammar { origin, .. }
@@ -999,6 +1013,7 @@ impl ShellExpansionError {
             | Self::Blacklisted { ctx, origin, .. }
             | Self::ApprovalRequired { ctx, origin, .. }
             | Self::Denied { ctx, origin, .. }
+            | Self::SkippedInDryRun { ctx, origin, .. }
             | Self::NotPreApproved { ctx, origin, .. }
             | Self::MissingValue { ctx, origin, .. }
             | Self::TemplateGrammar { ctx, origin, .. }
@@ -1130,6 +1145,20 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("The user declined to approve this shell expansion."),
+
+            ShellExpansionError::SkippedInDryRun {
+                ctx,
+                command,
+                origin,
+            } => StatusBlock::new(StatusState::Warning)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command skipped by the dry run"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("A dry run runs no command; run without <cyan>--dry-run</cyan> to see its output."),
 
             ShellExpansionError::NotPreApproved {
                 ctx,

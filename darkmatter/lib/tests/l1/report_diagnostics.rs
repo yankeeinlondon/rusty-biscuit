@@ -129,6 +129,9 @@ fn a_warning_keeps_its_record_or_its_code() {
                 grants_needed: None,
                 schema_default: None,
                 related: Vec::new(),
+                hint: None,
+                notes: Vec::new(),
+                trail: darkmatter::findings::Trail::default(),
             }
         );
     }

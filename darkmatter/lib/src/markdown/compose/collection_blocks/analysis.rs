@@ -274,6 +274,9 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         grants_needed: None,
         schema_default: None,
         related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: crate::findings::Trail::default(),
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

@@ -713,6 +713,9 @@ mod shared_fields {
             grants_needed: None,
             schema_default: None,
             related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: darkmatter::findings::Trail::default(),
         }
     }
 
