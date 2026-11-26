@@ -163,7 +163,55 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/passive.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/findings/mod.rs
+- darkmatter/lib/tests/l1/passive_compose.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/guardrails.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/provider.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/sequence/preflight/check.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/lib/src/doctor/registration_tests.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/topics/caching.md
+- claudine/docs/cli/sequence.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- darkmatter/docs/use-skills/use-darkmatter/library.md
+- .claude/skills/claudine/SKILL.md
 source-code:
+- claudine/lib/src/doctor/registration_tests.rs
 - darkmatter/lib/src/findings/mod.rs
 - darkmatter/lib/src/findings/trail.rs
 - darkmatter/lib/src/findings/sink.rs
@@ -278,6 +326,30 @@ source-code:
 - claudine/cli/src/commands/document_check/tasks.rs
 - claudine/cli/src/commands/wrap/sequence/providers.rs
 - claudine/cli/tests/l1/sequence_preflight_baselines.rs
+- darkmatter/lib/src/markdown/compose/passive.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/passive_compose.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/guardrails.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/provider.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/cli/src/commands/compose/prep.rs
 documentation:
 - claudine/docs/cli/sequence.md
 - darkmatter/docs/cli/data-contracts.md
@@ -288,7 +360,8 @@ documentation:
 - darkmatter/docs/topics/schemas/dmls-schema-support.md
 - simplified-schema/docs/topics/diagnostics.md
 - simplified-schema/docs/topics/language/objects-and-named-types.md
-completed-phase: 3
+- darkmatter/docs/topics/caching.md
+completed-phase: 4
 packages:
     - darkmatter
     - darkmatter-cli
@@ -436,17 +509,82 @@ decisions-for-review:
       Phase 3: a task's preview is left unchecked only for its own missing inputs; an owner's missing value passed down
       through `with:` (the frozen-complete reproduction) still previews the nested prompt and adds its schema errors.
       Phase 4's placeholder marking settles this.
+    - |-
+      Phase 4: deferral is carried by authored text, not by a new value type. A deferred frontmatter value keeps its
+      authored text and the request's `PassiveSession` maps that text to its `DeferralReason`; a read of it raises
+      `ExpressionError::Unavailable`, which propagates like any evaluation error (lookups, conditions, collections,
+      arguments, paths, `with:`) and is never recovered by `try`/`||`. Alternative: a `Value::Deferred` variant in the
+      evaluator, which is exact per site but touches every value consumer and serializer. Trade-off: two values with
+      identical authored text in one request share deferral, which is harmless because identical text evaluates
+      identically. Redo if a case needs per-site identity: replace the text map with a site-keyed one in
+      `passive.rs::check_read`.
+    - |-
+      Phase 4: in a dry run the body shell stages (`ShellExpansion`, `ShellBlocks`) report as disabled
+      (`ComposeOptions::is_enabled`), and `pipeline/mod.rs` records each `::shell` / `::shell-block` site as a deferral
+      before skipping, instead of running the stage in a "skip" mode. Alternative: thread the session through the stage.
+      Trade-off: the stage's own approval and "did not run" internals are never reached, which is the point. Redo if a
+      stage gains effect-free work a dry run should still do.
+    - |-
+      Phase 4: the plan's network `ask` does not exist: `NetworkPermission` is `allow`/`deny` (plus invalid), so a dry
+      run fetches an allowed remote read with no persistent store and keeps a denied one's typed refusal; nothing asks.
+      The plan's `info` finding for a read needing approval is a `SchemaTemplate` deferral (the only read that asks is a
+      schema slot's), surfaced by Claudine as a `not checked` row. Redo if a network `ask` is added: map it to
+      `DeferralReason::ReadNeedsApproval` in `build_remote_fetch_runtime`.
+    - |-
+      Phase 4: provider-query functions (`pr`, `pr_list`, `cicd`, `cicd_list`) are deferred, like shell and ping probes,
+      rather than queried under the network policy. Alternative: treat them as allowed remote reads. Trade-off: a dry
+      run never reaches a provider's API, so it cannot preview a body that reads one. Redo in
+      `functions/mod.rs::passive_refusal` if previews should query providers.
+    - |-
+      Phase 4: `dm.compose.empty_body` is emitted by Claudine's preview (with the cause from
+      `ComposeReport.excluded_blocks`) and by the canonical preparer's `ComposedBodyEmpty { cause }`; `md compose` does
+      not yet emit it, which is Phase 6 "Combine Document Checks". Only top-level excluded blocks are recorded
+      (children's are not merged) and the cause claims nothing it did not observe. `composition.no_executable`
+      suppresses the empty-body finding structurally: the no-executable error path returns before any preview. Redo in
+      Phase 6 if `md` needs the finding.
+    - |-
+      Phase 4: an `Interpolation` deferral carries no line (the rewrite pass sees span text, not file positions);
+      `ShellDirective`, `ShellBlock`, and `BlockCondition` carry their file line, and a `FrontmatterValue` from a
+      command carries its line when the shell candidate knows it. Redo if Phase 6's shared report needs located spans:
+      thread `located()` through `interpolation/rewrite.rs`.
+    - |-
+      Phase 4: a dry run's schema-slot session is `SessionMode::ReferenceCheck` (resolves what it can without asking);
+      an unresolved template records a `SchemaTemplate` deferral whose `authored` is the slot error's text, since the
+      template has no single authored span. Redo if the report should show the slot reference itself.
+    - |-
+      Phase 4 (preview decision, settled): the canonical preparer has a passive mode (`PrepareOptions.passive`) and the
+      preview composes through `prepare_direct` / `prepare_inline`; the `fm_insert` of setters and `with:` and the
+      `compose_with` call in `preview.rs` are gone (its `composition_seams` allowlist entry removed), as is
+      `check_single`'s lifecycle stand-in, since the preparer makes those refusals plus the inline baseline rehearsal.
+      The inline guardrails are read without being created (`load_guardrails_passively`). The input check
+      (`prompt_inputs`) prepares passively too, so a command value no longer skips it. Alternative kept open by the
+      plan: a separate passive composer, rejected because it duplicates composition (R1). Redo only if the preparer
+      gains an effect a dry run cannot skip.
+    - |-
+      Phase 4: a nested prompt task's `with:` now reaches its preview as the real walk evaluates it:
+      `Loader::record_prompt_reference` notes the evaluated values and late keys on the open `CheckedTask`
+      (`with_evaluated`, `with_late`), and the preview passes them as data beneath the caller's setters (the task-turn
+      precedence). A task with late `with:` keys skips the input check and preview as before; a body task's `with:` is
+      split by whether it holds `{{`. A prompt whose owner misses an input (`inventory.prompts` with a `missing` owner)
+      is held: `inputs` and `preview` are not checked, instead of repeating the owner's missing input. Alternative:
+      evaluate `with:` again in the CLI, which would be a second evaluator. Redo if body tasks' `with:` should be
+      evaluated by the walk too.
+    - |-
+      Phase 4: the human preview marks each deferred construct by appending `[not evaluated in a dry run]` after a
+      deferred `{{ … }}` span and at the end of a deferred directive line (`::shell`, `::shell-block`, `::block`); the
+      JSON envelope carries no preview, so the rows are the machine-readable form. Rows sharing a reason are grouped by
+      the shared renderer (`not checked: \`::block\` condition, interpolation (…)`). Alternative: styled (dim) text,
+      which would be lost when stdout is piped. Redo in Phase 5/6 if the preview format is settled differently.
 message-to-agent: |-
-  Phase 3 is closed (see the log's Exit gate: zero kind (d) failures with the seam forced on; `just test` and `just
-  lint` in claudine pass without it). Phase 4 starts from the log's 14 kind (c) failures, which name the previews it
-  must mark: command- and launch-dependent previews (`ctx_per_run`, repository and launch-directory transclusion, a
-  shell-expanded root list), a nested preview whose owner's input is missing, and the inline baseline rehearsal the
-  preview does not run yet (see decisions: compose through the canonical preparer's passive mode and delete the
-  `check_single` lifecycle stand-in). The Phase 2 checkpoint **Integrate Schema Checks** stays unticked: items (1)
-  every walked file judged and (2) typed values checked passively are done in Phase 3; (3) the related declaration
-  location and (4) YAML kinds in DMLS's Claudine parity bundle are still open. The seam
-  `CLAUDINE_TEST_PASSIVE_DRY_RUN` remains until Phase 5. The working tree also holds the uncommitted Phase 1 and Phase
-  2 changes.
+    Phase 4 is closed: dry runs compose passively (`darkmatter::markdown::compose::passive`), and Claudine's preview
+    prepares through the canonical preparer's passive mode (`PrepareOptions.passive`), marking each deferral and
+    reporting it as its own not-checked row. With the seam forced on, 218 CLI L1 tests still fail: they assert the old
+    `--dry-run` preview's output (rendered shell tasks, `--perf` notes, provider-free previews, the old missing-input
+    wording), which is Phase 5's "Migrate Preview Suites". The only Phase 3 kind (c) failures still red there are
+    old-preview expectations only (the inline baseline refusal reads "Cannot edit frontmatter text safely"; the missing-input report is
+    a finding per input); a `$( … )` root list is reported as not checked by design. The seam
+    `CLAUDINE_TEST_PASSIVE_DRY_RUN` remains until Phase 5. The Phase 2 checkpoint **Integrate Schema Checks** is still
+    unticked (items 3 and 4). The working tree holds the uncommitted Phase 1–4 changes.
 ---
 
 # Implementation Log for 2026-11-22-better-errors-and-dry-run (3 phases)
@@ -834,3 +972,107 @@ Phase 3 closed: all four tasks ticked. The Phase 2 checkpoint **Integrate Schema
 Completion flags: `completed-phase: 3` and the cumulative `source-code`/`documentation` lists are set on the plan and
 this log; the spec gains `implemented-by: "claude/opus"` but not `implemented: true`, because the plan has eight
 phases and Phases 4–8 are unstarted (recorded in `decisions-for-review`).
+
+## Phase 4
+
+Started 2026-11-26. Phase 3's exit gate is met (log above: zero kind (d) failures); Phase 4 starts from its 14
+kind (c) failures.
+
+### Defer Unavailable Values
+
+- New `darkmatter::markdown::compose::passive` (`PassiveSession`, `Deferral`, `DeferredConstruct`,
+  `DeferralReason`). `ComposeOptions::with_dry_run()` now installs a session (shared by every
+  clone) and forces `CacheAccessMode::Off`; `dry_run: bool` is gone. A deferred value keeps its
+  authored text; a read of it raises `ExpressionError::Unavailable`, enforced at the shared variable
+  read (`expression/mod.rs`, the interpolation fast path) and at function dispatch for every
+  `SlotClass::Rejected` function except `as_markdown` (`functions/mod.rs::passive_refusal`).
+- Surfaces keep their text: `{{ }}` spans (`interpolation/rewrite.rs`), whole `::block` regions
+  (`page_blocks/engine.rs`), frontmatter values, which are deferred in turn
+  (`frontmatter_interpolation.rs`, `frontmatter_shell_expansion.rs`). Body `::shell` /
+  `::shell-block` stages report disabled in a dry run and their sites are recorded
+  (`inline/shell_expansion.rs::record_deferred_command_sites`).
+- Read policy: schema slots resolve in `SessionMode::ReferenceCheck` and an unresolved template is a
+  `SchemaTemplate` deferral; the remote runtime gets no persistent store; `deny` keeps its refusal.
+  No network `ask` exists (decision recorded).
+- Tests: `darkmatter/lib/tests/l1/passive_compose.rs` (11 tests: the exit-gate document with one
+  `$( … )` value, body shell, effectful vs pure functions, callback and fallback, a transcluded
+  child, blacklist, unapproved command, a rejected call, and wiremock `allow`/`deny`/remote include
+  with request counts and cache-folder control), `dynamic_schema_slot_positions.rs`
+  (`a_dry_run_leaves_an_unapproved_slot_read_unchecked_without_asking`), and the `passive.rs`
+  unit tests. The old `SkippedInDryRun` dry-run tests in `findings.rs` were removed.
+
+### Prove Empty Bodies
+
+- `EmptyBodyCause::ExcludedBlocks { blocks }` with `ExcludedBlock { line, condition }`, recorded
+  from page-block evaluation into `ComposeReport.excluded_blocks` (top-level, proven false only);
+  `EmptyBodyCause::classify_composed`. Claudine's `ComposedBodyEmpty` carries `cause` from both
+  `prepare.rs` sites; `render/provider.rs` explains it from the cause, and the guessed "every block
+  was stripped" text is gone.
+- Tests: `claudine/lib/src/composition/error/tests.rs`
+  (`composed_body_empty_names_each_excluded_block_and_claims_nothing_else`),
+  `prepare/tests.rs` (whitespace and excluded-block causes), and the CLI
+  `dry_run_check::an_empty_body_names_the_blocks_that_were_left_out`.
+
+### Mark Previews
+
+- `document_check/preview.rs` prepares through `composition::prepare_direct` /
+  `prepare_inline` with `PrepareOptions.passive`; the `fm_insert` of setters and `with:`, the
+  `compose_with` call (and its `composition_seams` allowlist entry), `skipped_command`, and
+  `check_single`'s lifecycle stand-in are deleted. Each deferral is a `not checked` row; the human
+  preview appends `[not evaluated in a dry run]` to each deferred span or directive line;
+  `ComposedBodyEmpty` becomes `dm.compose.empty_body`.
+- `prompt_inputs` prepares passively too, so a command value no longer skips the input check.
+- A prompt task's `with:` reaches the preview as the walk evaluated it
+  (`CheckedTask::{with_evaluated, with_late}`, recorded by `Loader::note_prepared_with`), as data
+  beneath the setters. A prompt whose owner misses an input is held (inputs and preview not
+  checked).
+- Tests: `dry_run_check::{commands_and_side_effects_never_run (updated),
+  a_preview_leaves_what_needs_an_effect_as_written_and_marks_it,
+  a_nested_task_previews_with_values_known_at_launch_and_waits_for_a_missing_input,
+  an_inline_preview_refuses_a_baseline_the_run_could_not_edit}` and the `preview.rs` unit test
+  `each_construct_left_as_written_is_marked_and_nothing_else_is`.
+- Seam forced on (temporary `enabled()` edit, reverted): 220 → 218 CLI L1 failures, none new. Of
+  Phase 3's kind (c) items, `frozen_complete_reproduction` setter-before/after now pass; the
+  `ctx_per_run`, repository-context, launch-directory, and inline-baseline tests now preview
+  correctly and fail only on old-preview expectations (`--perf` notes, exit status 2 for a
+  cycle, no provider requirement, the old refusal wording); a `$( … )` root list is not checked by
+  design. Those suites move in Phase 5 "Migrate Preview Suites".
+
+### Prove Passivity
+
+- Darkmatter fixtures cover each effect (frontmatter shell, body shell, effectful function,
+  approval-needing slot read, remote include/data reads under `allow`/`deny` with a counting
+  loopback responder, a transcluded child, a callback, and a refused call). Claudine's
+  `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it` asserts both marker files absent
+  and the fixture home unchanged.
+- Cross-OS: no `just cross-check`; the change adds no path comparison or OS-specific code (the
+  preview marker splits lines on `\n` and trims, so CRLF reads the same).
+
+### Exit gate
+
+- The exit-gate document is `passive_compose::one_command_value_defers_only_what_reads_it` and,
+  through Claudine, `a_preview_leaves_what_needs_an_effect_as_written_and_marks_it`.
+- `darkmatter`: `just test` 18390 passed, none at or above 5 s; `just lint` clean.
+- `claudine`: `just test` 13132 passed, none at or above 5 s; `just lint` clean;
+  `just check-tier-coverage claudine` clean.
+- `affected_scope.py` over the working tree: packages `claudine`, `claudine-cli`, `darkmatter`,
+  `darkmatter-cli`, `test-toolkit`; `cargo check --all-targets` of the 11 reverse dependencies is
+  clean. `just test test-toolkit` failed once on a pre-existing archive-path violation in
+  `claudine/lib/src/doctor/registration_tests.rs:1123` (committed in `cf255aa5d`, not this phase):
+  fixed to `biscuit_test_harness::manifest_dir!()`, then 591 passed.
+- Docs: `darkmatter/docs/inline/preflight-checks.md` ("Dry runs": what is left as written, how
+  deferral spreads, what is still refused), `darkmatter/docs/topics/caching.md`,
+  `claudine/docs/cli/sequence.md` (planned passive check: preview marking); skills:
+  `use-darkmatter` `library.md` (published with `just publish-skills`), `.claude/skills/claudine`.
+
+## Phase 5
+
+Started 2026-11-26. The Phase 4 exit gate is recorded as met (log above), so no earlier gate is open.
+
+### Route Dry Runs (switch)
+
+- `main.rs::dispatch` routes every `compose`/`inline-compose`/`sequence` `--dry-run` to
+  `commands/document_check::run`; `document_check::enabled()` and the `test-fixtures` seam
+  `CLAUDINE_TEST_PASSIVE_DRY_RUN` are deleted. `--json` is declared on `SharedComposeArgs` with
+  `requires = "dry_run"`; `--dry-run-shell` is hidden and refusal-only (no `requires`), refused in
+  `dispatch` right after the `--output` refusal, with or without `--dry-run`.

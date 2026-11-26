@@ -4,7 +4,7 @@ area: claudine
 total-phases: 8
 created: 2026-11-23
 status: planned
-phase: 4
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -167,7 +167,55 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/passive.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/findings/mod.rs
+- darkmatter/lib/tests/l1/passive_compose.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/findings.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/guardrails.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/provider.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/sequence/preflight/check.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/cli/src/commands/document_check/mod.rs
+- claudine/cli/src/commands/document_check/preview.rs
+- claudine/cli/src/commands/document_check/tasks.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/tests/l1/dry_run_check.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/lib/src/doctor/registration_tests.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/topics/caching.md
+- claudine/docs/cli/sequence.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- darkmatter/docs/use-skills/use-darkmatter/library.md
+- .claude/skills/claudine/SKILL.md
 source-code:
+- claudine/lib/src/doctor/registration_tests.rs
 - darkmatter/lib/src/findings/mod.rs
 - darkmatter/lib/src/findings/trail.rs
 - darkmatter/lib/src/findings/sink.rs
@@ -282,6 +330,30 @@ source-code:
 - claudine/cli/src/commands/document_check/tasks.rs
 - claudine/cli/src/commands/wrap/sequence/providers.rs
 - claudine/cli/tests/l1/sequence_preflight_baselines.rs
+- darkmatter/lib/src/markdown/compose/passive.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/passive_compose.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/guardrails.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/provider.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/cli/src/commands/compose/prep.rs
 documentation:
 - claudine/docs/cli/sequence.md
 - darkmatter/docs/cli/data-contracts.md
@@ -292,7 +364,8 @@ documentation:
 - darkmatter/docs/topics/schemas/dmls-schema-support.md
 - simplified-schema/docs/topics/diagnostics.md
 - simplified-schema/docs/topics/language/objects-and-named-types.md
-completed-phase: 3
+- darkmatter/docs/topics/caching.md
+completed-phase: 4
 packages:
 - darkmatter
 - darkmatter-cli
@@ -917,7 +990,7 @@ Darkmatter (Rules 6 and 7), consumed by Claudine's preview. Today any command in
 refuses the whole composition with `ShellExpansionError::SkippedInDryRun`, and remote reads
 follow the real run's policy.
 
-- [ ] **Defer Unavailable Values**
+- [x] **Defer Unavailable Values**
   - (Phase 1 "Guard Composition", Rule 6.) Replace the whole-document refusal with deferred
     values carried through evaluation: a typed reason and authored site, propagated through
     dependent lookups, conditions, collections, selector inputs, paths, and schema slots.
@@ -928,20 +1001,20 @@ follow the real run's policy.
     `info` finding and an unavailable value, with no prompt and no request; `deny` keeps its
     typed refusal; `allow` fetches without a persistent store. Use an in-memory data and read
     memo and write no compose, shell, or remote cache.
-- [ ] **Prove Empty Bodies**
+- [x] **Prove Empty Bodies**
   - (Rule 7.) Record `EmptyBodyCause` while evaluating page blocks, with authored positions and
     proven condition facts, and emit `dm.compose.empty_body`. A deferred contribution leaves
     emptiness unchecked. Carry the cause through both `prepare.rs` empty checks in Claudine and
     replace the guessed text in `render/provider.rs`. `composition.no_executable` suppresses
     the redundant empty-body finding on its subject.
-- [ ] **Mark Previews**
+- [x] **Mark Previews**
   - `document_check/preview.rs` consumes the partial Markdown: skipped constructs are shown as
     written and marked, a missing input keeps its placeholder, and each dependent check is its
     own `not checked` row instead of the whole preview. Settle the log's preview decision: give
     the canonical preparer a passive mode and compose through it, unless it cannot be made
     effect-free, and record the outcome. Stop inserting setters and `with:` into frontmatter if
     the canonical path replaces it.
-- [ ] **Prove Passivity**
+- [x] **Prove Passivity**
   - Use one fixture per effect: frontmatter shell, body shell, an effectful function, a file
     read needing approval, and remote include, data, and schema reads against a loopback
     responder counting requests under `allow`, `ask`, and `deny`. Include a nested document and
