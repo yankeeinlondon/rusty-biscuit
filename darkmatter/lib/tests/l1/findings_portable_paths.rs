@@ -123,9 +123,11 @@ fn an_at_miss_lists_its_search_roots_in_resolver_order() {
     assert_eq!(finding.notes, ["searched 3 locations"]);
 }
 
+type Position = (Option<usize>, Option<usize>);
+
 /// `(line, column)` of each reference issue `text` reports, as its data form
 /// and as the human report's `file:line:column`.
-fn transclusion_positions(root: &Path, name: &str, text: &str) -> (Vec<(Option<usize>, Option<usize>)>, String) {
+fn transclusion_positions(root: &Path, name: &str, text: &str) -> (Vec<Position>, String) {
     let path = root.join(name);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, text).unwrap();

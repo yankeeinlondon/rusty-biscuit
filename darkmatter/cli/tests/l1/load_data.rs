@@ -481,9 +481,8 @@ fn a_transcluded_childs_malformed_data_fails_the_reference_check() {
     assert_eq!(envelope["summary"], Value::Null, "the check stopped: {envelope:#}");
     let record = only_record(&envelope);
     assert_eq!(record["code"], "dm.data.malformed", "{record:#}");
-    // `source.file` is a native path, unlike the portable `data_location.file`.
     let child_path = biscuit_file::canonicalize_simplified(&child).expect("the file exists");
-    assert_eq!(record["source"]["file"], child_path.to_string_lossy().as_ref(), "{record:#}");
+    assert_eq!(record["source"]["file"], biscuit_file::to_forward_slash_string(&child_path), "{record:#}");
     assert_eq!(record["data_location"], json!({ "file": read_entry(&data), "line": 2, "column": 1 }), "{record:#}");
     assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
 }

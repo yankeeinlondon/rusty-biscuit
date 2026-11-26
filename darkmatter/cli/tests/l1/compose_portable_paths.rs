@@ -30,9 +30,7 @@ fn compose(fixture: &CliProcessFixture, args: &[&str]) -> (Option<i32>, String, 
     )
 }
 
-/// Every string in `value` that holds a `\`, by JSON pointer, skipping
-/// `source.file`, which Darkmatter's `DiagnosticSource` serializes in native
-/// spelling (already `/` on Linux and macOS).
+/// Every string in `value` that holds a `\`, by JSON pointer.
 fn backslashed(value: &Value, pointer: String, found: &mut Vec<String>) {
     match value {
         Value::String(text) if text.contains('\\') => found.push(format!("{pointer} = {text}")),
@@ -43,9 +41,6 @@ fn backslashed(value: &Value, pointer: String, found: &mut Vec<String>) {
         }
         Value::Object(map) => {
             for (key, item) in map {
-                if key == "file" && pointer.ends_with("/source") {
-                    continue;
-                }
                 backslashed(item, format!("{pointer}/{key}"), found);
             }
         }
@@ -75,9 +70,11 @@ fn a_missing_nested_transclusion_is_reported_with_slash_paths_and_crlf_keeps_its
     backslashed(&envelope, String::new(), &mut found);
     assert!(found.is_empty(), "JSON paths are written with `/`: {found:#?}\n{envelope:#}");
     let file = envelope["file"].as_str().unwrap();
-    assert!(file.ends_with("/cwd/docs/guide.md"), "{envelope:#}");
+    // `file` echoes the document argument as given.
+    assert_eq!(file, "docs/guide.md", "{envelope:#}");
     let missing = &envelope["diagnostics"][0];
     assert_eq!(missing["code"], "dm.reference.missing_transclusion", "{envelope:#}");
     assert_eq!(missing["reference"], "./parts/missing.md");
+    assert!(missing["resolved"].as_str().is_some_and(|path| path.ends_with("/cwd/docs/parts/missing.md")), "{envelope:#}");
     assert_eq!((&missing["source"]["line"], &missing["source"]["column"]), (&Value::from(9), &Value::from(1)), "{envelope:#}");
 }

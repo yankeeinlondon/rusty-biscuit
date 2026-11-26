@@ -91,7 +91,7 @@ fn a_composing_data_output_carries_the_notice_in_its_diagnostics() {
     assert_eq!(created[0]["severity"], "info");
     assert_eq!(
         created[0]["source"]["file"].as_str(),
-        Some(fixture.home().join(".darkmatter.yaml").to_str().unwrap())
+        Some(biscuit_file::to_forward_slash_string(&fixture.home().join(".darkmatter.yaml")).as_str())
     );
     assert_created(&fixture);
 }
@@ -159,7 +159,7 @@ fn a_user_file_that_does_not_load_stops_a_command_that_reads_it() {
     let error = &value["diagnostics"][0];
     assert_eq!(error["code"], "dm.config.invalid", "{value:#}");
     assert_eq!(error["severity"], "error");
-    assert_eq!(error["source"]["file"].as_str(), Some(config.to_str().unwrap()));
+    assert_eq!(error["source"]["file"].as_str(), Some(biscuit_file::to_forward_slash_string(&config).as_str()));
     assert_eq!(error["source"]["line"], 2, "{value:#}");
     assert!(error["source"]["column"].is_u64(), "{value:#}");
     assert!(unread.status.success(), "a command that reads no configuration runs: {}", stderr_of(&unread));

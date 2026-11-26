@@ -387,7 +387,10 @@ pub struct DataLocation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiagnosticSource {
     /// The authored file, or a remote document's URL; `None` for input with no
-    /// named origin.
+    /// named origin. Serialized with `/` separators on every OS
+    /// ([`biscuit_file::to_forward_slash_string`] on Windows), as every other
+    /// path of a published record is.
+    #[serde(serialize_with = "serialize_portable_file")]
     pub file: Option<PathBuf>,
     /// One-based authored line; `None` when no position in `file` is proven,
     /// such as a document built in memory or a line counted in rewritten text.
@@ -402,6 +405,19 @@ pub struct DiagnosticSource {
     /// An expression, a shell step, or a `replace:` value wrote the problem's
     /// text, so `line` and `column` name that construct.
     pub inserted: bool,
+}
+
+/// [`DiagnosticSource::file`] as published: a Windows path with `/`
+/// separators. Elsewhere the path is written as it is, so a `\` that is
+/// part of a Unix file name survives.
+fn serialize_portable_file<S: serde::Serializer>(file: &Option<PathBuf>, serializer: S) -> Result<S::Ok, S::Error> {
+    match file {
+        None => serializer.serialize_none(),
+        #[cfg(windows)]
+        Some(path) => serializer.serialize_some(&biscuit_file::to_forward_slash_string(path)),
+        #[cfg(not(windows))]
+        Some(path) => serializer.serialize_some(path),
+    }
 }
 
 impl DiagnosticSource {

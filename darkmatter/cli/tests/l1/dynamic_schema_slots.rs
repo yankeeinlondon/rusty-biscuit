@@ -177,7 +177,7 @@ fn compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed() {
     assert_eq!(report["document"], Value::Null, "{report:#}");
     assert_eq!(diagnostic_codes(&report["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
     let record = &report["diagnostics"][0];
-    assert_eq!(record["source"]["file"], canonical(&fixture, SCHEMA_FILE), "{record:#}");
+    assert_eq!(record["source"]["file"], read_entry(&fixture, SCHEMA_FILE), "{record:#}");
     assert_eq!(record["source"]["line"], 8, "the slot's line in the schema: {record:#}");
     assert_eq!(grants(record), data_file_grants(&fixture), "{record:#}");
     assert_eq!(report["read_set"], json!([]), "nothing unapproved was read: {report:#}");
@@ -291,7 +291,7 @@ fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() 
     assert_eq!(record["error"], "slots", "{report:#}");
     assert!(record.get("slots").is_none(), "{report:#}");
     assert_eq!(diagnostic_codes(&record["diagnostics"]), ["dm.schema.slot_failed"], "{report:#}");
-    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(canonical(&fixture, SCHEMA_FILE)), "{report:#}");
+    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(read_entry(&fixture, SCHEMA_FILE)), "{report:#}");
     assert_eq!(record["diagnostics"][0]["span"], first_slot_span(schema), "{report:#}");
 }
 
@@ -591,7 +591,7 @@ fn first_slot_span(text: &str) -> Value {
 fn assert_slot_record(fixture: &CliProcessFixture, records: &Value, code: &str, file: &str, (line, column): (u64, u64), text: &str) {
     assert_eq!(diagnostic_codes(records), [code], "{records:#}");
     let record = &records[0];
-    assert_eq!(record["source"]["file"], json!(canonical(fixture, file)), "{record:#}");
+    assert_eq!(record["source"]["file"], json!(read_entry(fixture, file)), "{record:#}");
     assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&json!(line), &json!(column)), "{record:#}");
     assert_eq!(record["span"], first_slot_span(text), "{record:#}");
 }
