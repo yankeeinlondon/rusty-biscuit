@@ -1549,11 +1549,16 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   into `ReferenceError::Compose(Transclusion(Located))` (`graph.rs` resolve and
   `load_inclusion(…, site)`, `mod.rs` local query, `validate.rs::inclusion_site`
   for `Transclusion` records only). Matchers read the cause with
-  `without_site()` (`transclusion_failure_is_fatal`, `removes_missing` runs
+  `without_site()` (`transclusion_failure_is_fatal`, `skips_unresolved` runs
   before wrapping, `report_diagnostics::transclusion_code`, Claudine's
   `is_missing_include`); the projection publishes the site as `source` and a
   `failure` in `reference_details`, and `tolerated_failure_warning` puts it,
-  and a registered code, on a tolerated child's warning. Its status block
+  and a registered code, on a tolerated child's warning, and on the warning
+  of an inclusion the engine removes because it did not resolve
+  (`engine.rs::skipped_transclusion_warning`: the body and frontmatter
+  `skips_unresolved` arms and both remote-disabled `ignore_invalid` arms
+  place the error at the directive's or value's `InclusionSite` first; never
+  build that warning from the message or `directive.line`). Its status block
   leads the cause's own block with `File:`/`Line:` rows
   (`StatusBlock::prepend_body_line`, `site_scope::line_row`). A link or
   image target whose `FileReference` fails (`[x](@)`) is never a

@@ -993,7 +993,7 @@ fn collect_document(
                 Ok(transclusion::ResolvedTarget::Url { url, .. }) => super::PreflightResolvedTarget::Url(url),
                 Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
                 // Composition removes it, so nothing of it can run.
-                Err(e) if removes_missing(options, &e) => continue,
+                Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
                 Err(e) => return Err(at_directive(e).into()),
             };
             targets.push(super::PreflightTargetEdge {
@@ -1020,8 +1020,9 @@ fn collect_document(
             // Remote transclusion disabled: the child cannot appear in the
             // composed output, so its commands can never execute.
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
-            // A missing target composition removes contributes no command.
-            Err(e) if removes_missing(options, &e) => continue,
+            // A target composition removes (absent under the recovery, or
+            // any failure under `ignore_invalid`) contributes no command.
+            Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
             Err(e) => return Err(at_directive(e).into()),
         };
 
@@ -1191,6 +1192,9 @@ fn collect_document(
         ) {
             Ok(r) => r,
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+            // An entry composition removes contributes nothing; its siblings
+            // are still walked.
+            Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
             Err(e) => return Err(at_value(e).into()),
         };
 
@@ -2442,12 +2446,6 @@ fn detect_dynamic_command_shape(
     }
 
     Ok(())
-}
-
-/// Whether composition removes the transclusion `err` failed to resolve
-/// (the missing-transclusion recovery), so preflight skips it.
-fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
-    options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
 }
 
 #[cfg(test)]

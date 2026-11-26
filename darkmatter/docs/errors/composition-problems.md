@@ -285,7 +285,7 @@ What each family reports:
 | A `::shell` command, or a `::shell-block` command, that fails while composing | the `::shell` directive's opener, or the block command's own line; the file alone when its position cannot be proven, and for a command the pre-flight approval check refuses |
 | A malformed `::block`, an `::end-block` with no opener, or a `::block` or `::shell-block` with no `::end-block` | the marker's line in the file as written; the file alone when its position cannot be proven |
 | A `prologue:` or `epilogue:` that is not a string or a list of strings | the file and the line of its key; the column is `null` |
-| A `::file`, `::code`, `::url`, `prologue:`, or `epilogue:` whose target is invalid (a bare `@`), refused by its directive (a `::file`, `prologue:`, or `epilogue:` file that is not Markdown, a `::url` that is not an absolute URL), missing, unreadable, or refused by the network policy | the directive's opener, or the value (each list entry its own), in the file that wrote it, which may be a child rather than the named document; the same from composition, its pre-flight check, `md graph`, and `md validate refs`, and on the warning when a `::file` tolerates a child's failure; the file alone when its position cannot be proven |
+| A `::file`, `::code`, `::url`, `prologue:`, or `epilogue:` whose target is invalid (a bare `@`), refused by its directive (a `::file`, `prologue:`, or `epilogue:` file that is not Markdown, a `::url` that is not an absolute URL), missing, unreadable, or refused by the network policy | the directive's opener, or the value (each list entry its own), in the file that wrote it, which may be a child rather than the named document; the same from composition, its pre-flight check, `md graph`, and `md validate refs`, on the warning when a `::file` tolerates a child's failure, and on the warning, under the same code, when composition leaves the inclusion out instead (an absent target with `--allow missing-transclusions`, or any of these in a document that sets `ignore_invalid: true`); the file alone when its position cannot be proven |
 | A `::shell-block` with an invalid option, or a block command that does not parse | the opener's line (an option) or the command's line in the file that holds the block, which may be a child rather than the named document, also when the pre-flight approval check finds it; the file alone when its position cannot be proven |
 | A transclusion cycle | the document holding the directive that closes the cycle, which may be a child rather than the named document |
 | A `::toc-linking` or `::file-links` directive that fails, or whose failure a `::file` tolerated as a warning | the directive's opener in the file that holds it, which may be a child rather than the named document; the file alone when its position cannot be proven. A `::toc-linking` target it selected that cannot be read (`dm.input.read_failure`, a warning when composing) is placed there too, and its message names the selected file |
@@ -420,6 +420,24 @@ bare `@` names no file:
 A `prologue: "@"` on line 3 is reported at its value, `line: 3` and
 `column: 11`. A target that does not exist keeps
 `dm.reference.missing_transclusion`, at the same place.
+
+When composition leaves such an inclusion out instead of failing (a missing
+`::code ./gone.rs` on line 6 under `--allow missing-transclusions`, or a
+`::file ./notes.txt` in a document that sets `ignore_invalid: true`), its
+warning has the code and the place the failure would have had:
+
+```json
+{
+  "code": "dm.reference.missing_transclusion",
+  "severity": "warning",
+  "message": "Transclusion error: /work/repo/doc.md:6:1: I/O error: File not found: ./gone.rs",
+  "source": { "file": "/work/repo/doc.md", "line": 6, "column": 1, "inserted": false }
+}
+```
+
+`md compose` also reports the same miss from its reference check, at the same
+place; that record has a `construct` field, and the composition warning has
+none.
 
 In a terminal, the error block for such a failure starts with the place,
 one row each for the file and, when it is known, the line:

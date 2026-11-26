@@ -297,9 +297,9 @@ fn an_unreadable_target_names_its_directive_line() {
     std::fs::write(repo.path().join("bin.txt"), b"\xff\xfe bin").unwrap();
     std::fs::write(repo.path().join("bad.md"), b"\xff\xfe bad").unwrap();
     let graph_readers = [Reader::Compose, Reader::Preflight, Reader::ReferenceGraph, Reader::TransclusionGraph, Reader::Validation];
-    // An unregistered code stays off a tolerated warning, as before.
+    // A tolerated warning keeps its failure's code.
     for (directive, code, readers) in [
-        ("::code ./bin.txt", "dm.compose.warning", &[Reader::Compose][..]),
+        ("::code ./bin.txt", "dm.transclusion.failure", &[Reader::Compose][..]),
         ("::file ./bad.md", "dm.input.read_failure", &graph_readers[..]),
     ] {
         let (content, line) = after_removed_block(directive);

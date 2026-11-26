@@ -1870,7 +1870,10 @@ impl ComposeOptions {
     }
 
     /// Removes a transclusion whose target does not exist, with a warning,
-    /// instead of failing the document.
+    /// instead of failing the document: a `::file` or `::code` directive, or
+    /// one `prologue`/`epilogue` entry (the others are still included). Pre-flight skips the same targets. Only an absent target
+    /// (failure class `NoMatch`) is removed; a malformed, unreadable, or
+    /// unsupported one still fails.
     #[must_use]
     pub fn with_allow_missing_transclusions(mut self, allow: bool) -> Self {
         self.allow_missing_transclusions = allow;

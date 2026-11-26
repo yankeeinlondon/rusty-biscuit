@@ -17,7 +17,7 @@ pub use conditions::evaluate_condition;
 pub use engine::{find_preceding_heading_level, relevel_with_overflow};
 pub(crate) use engine::{
     ApplyTarget, PreparedTransclusion, ResolvedTransclusion, SectionSlot, TransclusionEngine, apply_directive_set_overlay,
-    build_resolution_cache, inherited_child_options, markdown_child_options, remote_child_options,
+    build_resolution_cache, inherited_child_options, markdown_child_options, remote_child_options, skips_unresolved,
 };
 pub use parser::{parse_directives, parse_frontmatter_refs};
 pub use resolver::frontmatter_value_is_inline;
