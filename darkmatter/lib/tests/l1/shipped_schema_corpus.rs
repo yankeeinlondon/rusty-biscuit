@@ -2196,9 +2196,9 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
 /// it reports the slot unresolved rather than producing a schema.
 #[test]
 fn the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving() {
-    let text = include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let text = include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml");
     let root = repo_root();
-    let path = root.join("claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let path = root.join("claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml");
     let source = simplified_schema::SchemaSource::from(path.as_path())
         .bound(FileResolutionContext::new(path.parent().expect("the schema's folder")))
         .with_text(text);

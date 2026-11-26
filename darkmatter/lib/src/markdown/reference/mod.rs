@@ -37,8 +37,30 @@ fn resolve_transclusion_target(
     source: &ComposeSource,
     options: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Option<PathBuf>, ReferenceError> {
+    lookup_local_target(raw_target, source, options).map(|lookup| match lookup {
+        TargetLookup::Found(path) => Some(path),
+        TargetLookup::Missing(_) => None,
+    })
+}
+
+/// A local target's lookup: its file, or no file.
+enum TargetLookup {
+    Found(PathBuf),
+    /// No file: the resolver's evidence for a confirmed no-match, `None` for
+    /// a document with no file or a remote target, which have no local
+    /// candidate.
+    Missing(Option<Box<biscuit_file::DetailedResolution>>),
+}
+
+/// [`resolve_transclusion_target`], keeping the resolver's evidence when the
+/// target is missing.
+fn lookup_local_target(
+    raw_target: &str,
+    source: &ComposeSource,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> Result<TargetLookup, ReferenceError> {
     let ComposeSource::File(source_path) = source else {
-        return Ok(None);
+        return Ok(TargetLookup::Missing(None));
     };
     let context = crate::markdown::compose::context::options::source_file_context(
         options.resolution_context(),
@@ -47,11 +69,19 @@ fn resolve_transclusion_target(
         options.source_opening.as_ref(),
     );
     let reference = biscuit_file::FileReference::new(raw_target)?;
-    match reference.resolve_detailed(&context).into_convenience() {
+    let detailed = reference.resolve_detailed(&context);
+    if matches!(detailed.outcome(), biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch)) {
+        return Ok(TargetLookup::Missing(Some(Box::new(detailed))));
+    }
+    match detailed.into_convenience() {
+        Ok(Some(path)) => Ok(TargetLookup::Found(path)),
+        Ok(None) => Ok(TargetLookup::Missing(None)),
         // A remote target has no local file to follow; the validator checks it
         // as a URL.
-        Err(error) if error.resolution_failure() == biscuit_file::ResolutionFailure::UnsupportedRemote => Ok(None),
-        resolved => Ok(resolved?),
+        Err(error) if error.resolution_failure() == biscuit_file::ResolutionFailure::UnsupportedRemote => {
+            Ok(TargetLookup::Missing(None))
+        }
+        Err(error) => Err(error.into()),
     }
 }
 

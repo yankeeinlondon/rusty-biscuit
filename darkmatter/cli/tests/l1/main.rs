@@ -25,6 +25,8 @@ mod claudine_schema_bundle;
 mod collection_blocks;
 mod compose_collection_controls;
 mod compose_combined_report;
+mod compose_inclusion_failure_findings;
+mod compose_portable_paths;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;

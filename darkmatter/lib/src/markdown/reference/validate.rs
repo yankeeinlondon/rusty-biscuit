@@ -172,6 +172,11 @@ pub struct ReferenceIssue {
     /// The file-reference failure class of a target that failed to resolve,
     /// when the issue reports one; see [`resolution_failure`](Self::resolution_failure).
     pub failure: Option<biscuit_file::ResolutionFailure>,
+    /// The resolver's evidence for a [`ReferenceIssueCode::MissingLocalTarget`]
+    /// (the directory it resolved against, every candidate it probed), from
+    /// which its record names the resolved path and the file to create.
+    /// `None` for every other issue. Not serialized.
+    pub resolution: Option<std::sync::Arc<biscuit_file::DetailedResolution>>,
 }
 
 impl ReferenceIssue {
@@ -493,7 +498,7 @@ fn validate_graph_contents(
         if matches!(ref_source, ComposeSource::File(_))
             && record.attributes.contains_key(super::graph::TOC_UNRESOLVED_ATTRIBUTE)
         {
-            report.issues.push(missing_local_target(record.target.raw().unwrap_or_default(), record, trail));
+            report.issues.push(missing_local_target(record.target.raw().unwrap_or_default(), record, trail, None));
             if options.fail_fast && report.error_count() > 0 {
                 return Ok(report);
             }
@@ -577,6 +582,7 @@ fn validate_graph_contents(
                         included_via: trail.to_vec(),
                         detail: Some(e.to_string()),
                         failure: None,
+                        resolution: None,
                     });
                 } else if options.validate_remote {
                     // Remote validation will be done in a batch below
@@ -607,6 +613,7 @@ fn validate_graph_contents(
                                 included_via: trail.to_vec(),
                 detail: None,
                 failure: None,
+                resolution: None,
                             });
                         } else {
                             report.references_valid += 1;
@@ -636,6 +643,7 @@ fn validate_graph_contents(
                     included_via: trail.to_vec(),
                 detail: None,
                 failure: None,
+                resolution: None,
                 });
                 report.references_valid += 1;
             }
@@ -683,6 +691,7 @@ fn validate_graph_contents(
                             included_via: trail.clone(),
                             detail: Some(detail),
                             failure: None,
+                            resolution: None,
                         });
                     }
                 }
@@ -865,8 +874,8 @@ fn validate_local_path(
                 ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
                 _ => unreachable!("file source matched above"),
             };
-            let resolved = match super::resolve_transclusion_target(raw, source, &compose_options) {
-                Ok(resolved) => resolved,
+            let lookup = match super::lookup_local_target(raw, source, &compose_options) {
+                Ok(lookup) => lookup,
                 // A link or image target that is no usable file reference is
                 // that one reference's issue, at its authored position.
                 Err(ReferenceError::FileReference(error)) if record.kind != ReferenceKind::Transclusion => {
@@ -875,12 +884,16 @@ fn validate_local_path(
                 }
                 Err(error) => return Err(super::at_inclusion(error, inclusion_site(record))),
             };
-            if let Some(resolved) = resolved {
-                report.references_valid += 1;
-                return Ok(Some(resolved));
+            match lookup {
+                super::TargetLookup::Found(resolved) => {
+                    report.references_valid += 1;
+                    Ok(Some(resolved))
+                }
+                super::TargetLookup::Missing(resolution) => {
+                    report.issues.push(missing_local_target(raw, record, trail, resolution));
+                    Ok(None)
+                }
             }
-            report.issues.push(missing_local_target(raw, record, trail));
-            Ok(None)
         }
         ComposeSource::Unknown => {
             report.issues.push(ReferenceIssue {
@@ -894,6 +907,7 @@ fn validate_local_path(
                 included_via: trail.to_vec(),
                 detail: None,
                 failure: None,
+                resolution: None,
             });
             Ok(None)
         }
@@ -923,7 +937,12 @@ fn inclusion_site(record: &ReferenceRecord) -> Option<crate::markdown::compose::
 }
 
 /// The issue for `record`, whose local target `raw` names no file.
-fn missing_local_target(raw: &str, record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> ReferenceIssue {
+fn missing_local_target(
+    raw: &str,
+    record: &ReferenceRecord,
+    trail: &[ReferenceTrailStep],
+    resolution: Option<Box<biscuit_file::DetailedResolution>>,
+) -> ReferenceIssue {
     // A link inside data (text an expression inserted) is content, not
     // authored structure: a missing target warns rather than failing.
     let in_data = record
@@ -945,6 +964,7 @@ fn missing_local_target(raw: &str, record: &ReferenceRecord, trail: &[ReferenceT
         included_via: trail.to_vec(),
         detail: None,
         failure: None,
+        resolution: resolution.map(std::sync::Arc::from),
     }
 }
 
@@ -975,6 +995,7 @@ fn invalid_local_target(
         included_via: trail.to_vec(),
         detail: Some(error.to_string()),
         failure: Some(failure),
+        resolution: None,
     }
 }
 
@@ -1014,6 +1035,7 @@ fn empty_target(record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> Refer
         included_via: trail.to_vec(),
         detail: None,
         failure: None,
+        resolution: None,
     }
 }
 
@@ -1173,6 +1195,7 @@ fn validate_cross_doc_fragment(
                 included_via: trail.to_vec(),
                 detail: None,
                 failure: None,
+                resolution: None,
             });
             return;
         }
@@ -1202,6 +1225,7 @@ fn missing_cross_doc_fragment(
         included_via: trail.to_vec(),
         detail: None,
         failure: None,
+        resolution: None,
     }
 }
 
@@ -1739,6 +1763,7 @@ mod tests {
             }],
             detail: None,
             failure: None,
+            resolution: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,
@@ -1811,6 +1836,7 @@ mod tests {
             included_via: Vec::new(),
             detail: None,
             failure: None,
+            resolution: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,

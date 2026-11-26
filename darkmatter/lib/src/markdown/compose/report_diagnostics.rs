@@ -147,7 +147,42 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
 /// `source` is never `None`. A document with no authored positions (built in
 /// memory or fetched) reports its name, or its URL, with a null line and
 /// column.
+///
+/// A missing local target has a hint naming the file to create; where the
+/// issue kept the resolver's evidence it also names the directory the target
+/// was resolved against, the resolved path (or every searched location), and
+/// nearby files, as [`missing_target`](crate::findings::reference::missing_target)
+/// builds them. Listing those nearby files reads the searched directories.
 pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
+    let mut record = reference_issue_record(issue);
+    if issue.code != ReferenceIssueCode::MissingLocalTarget {
+        return record;
+    }
+    let construct = issue.origin.syntax.construct_phrase().trim_start_matches("in ");
+    let built = issue.resolution.as_deref().and_then(|resolution| {
+        let mut memo = crate::findings::reference::ListingMemo::new();
+        crate::findings::reference::missing_target(&record.code, construct, resolution, &mut memo)
+    });
+    match built {
+        Some(built) => {
+            if let (Some(details), Some(evidence)) = (record.reference_details.as_mut(), built.reference_details) {
+                details.base = evidence.base;
+                details.resolved = evidence.resolved;
+                details.searched = evidence.searched;
+                details.suggestions = evidence.suggestions;
+            }
+            record.hint = built.hint;
+            record.notes = built.notes;
+        }
+        None => {
+            let target = issue.reference_display.strip_prefix("./").unwrap_or(&issue.reference_display);
+            record.hint = Some(format!("create {target}, or correct the reference"));
+        }
+    }
+    record
+}
+
+fn reference_issue_record(issue: &ReferenceIssue) -> Diagnostic {
     let code = match issue.code {
         ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget => {
             super::policy::missing_reference_code(issue.kind).unwrap_or(REFERENCE_FAILURE_CODE)
@@ -1005,7 +1040,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         MarkdownError::Normalization(inner) => (normalization_code(inner), None),
         _ => (COMPOSE_FAILURE_CODE, None),
     };
-    Diagnostic {
+    let record = Diagnostic {
         code: code.to_string(),
         severity: Severity::Error,
         message,
@@ -1030,6 +1065,35 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         hint: None,
         notes: Vec::new(),
         trail: crate::findings::Trail::default(),
+    };
+    match error {
+        MarkdownError::Transclusion(inner) => with_missing_target(record, inner),
+        _ => record,
+    }
+}
+
+/// `record`, of an inclusion whose target `error` proved missing, worded and
+/// detailed by the shared missing-target builder: the construct, the written
+/// and resolved reference, the directory it was resolved against, nearby
+/// files, and the file to create. Any other failure, or a missing target
+/// whose construct is unknown, is unchanged.
+fn with_missing_target(record: Diagnostic, error: &TransclusionError) -> Diagnostic {
+    let Some(missing) = error.target_not_found_details() else {
+        return record;
+    };
+    let (Some(construct), Some(resolution)) = (missing.construct, missing.resolution.as_deref()) else {
+        return record;
+    };
+    let mut memo = crate::findings::reference::ListingMemo::new();
+    let Some(built) = crate::findings::reference::missing_target(&record.code, construct, resolution, &mut memo) else {
+        return record;
+    };
+    Diagnostic {
+        message: built.message,
+        reference_details: built.reference_details,
+        hint: built.hint,
+        notes: built.notes,
+        ..record
     }
 }
 

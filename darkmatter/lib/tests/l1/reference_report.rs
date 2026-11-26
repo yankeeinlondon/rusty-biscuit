@@ -100,6 +100,7 @@ fn issue(code: ReferenceIssueCode, severity: ReferenceSeverity, source: ComposeS
         included_via: Vec::new(),
         detail: None,
         failure: None,
+        resolution: None,
     }
 }
 

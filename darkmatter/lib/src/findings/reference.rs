@@ -170,8 +170,88 @@ pub fn missing_document(
     missing_document_admitted(construct, resolution, memo, |_| true)
 }
 
+/// The error for a Darkmatter inclusion or link whose local target
+/// `resolution` confirmed missing, under `code` (the reference family's
+/// missing-target code, such as `dm.reference.missing_transclusion`, so its
+/// recovery still applies), or `None` unless the outcome is a confirmed
+/// no-match.
+///
+/// `construct` is what the author wrote, as the reference report names it
+/// (`::file`, `prologue:`, `hyperlink`). The record carries the same
+/// evidence as [`missing_document`]; its message is the reference report's
+/// row (`file not found in `::file``), and its hint names the file to create
+/// relative to the directory the reference was resolved against.
+pub fn missing_target(
+    code: &str,
+    construct: &str,
+    resolution: &DetailedResolution,
+    memo: &mut ListingMemo,
+) -> Option<Diagnostic> {
+    missing_target_listing(code, construct, resolution, memo, true)
+}
+
+/// [`missing_target`] with no nearby-file suggestions, so no directory is
+/// read: for a rendering that names only the resolved path and the fix.
+pub(crate) fn missing_target_unlisted(code: &str, construct: &str, resolution: &DetailedResolution) -> Option<Diagnostic> {
+    missing_target_listing(code, construct, resolution, &mut ListingMemo::new(), false)
+}
+
+fn missing_target_listing(
+    code: &str,
+    construct: &str,
+    resolution: &DetailedResolution,
+    memo: &mut ListingMemo,
+    list: bool,
+) -> Option<Diagnostic> {
+    let wording = Wording {
+        code,
+        message: reference_message("file not found", construct),
+        create: |path| format!("create {path}, or correct the reference"),
+        shown_from: Some(resolution.cwd()),
+    };
+    missing_finding(construct, wording, resolution, memo, |_| list)
+}
+
+/// A reference problem's row text, as the reference report words it:
+/// `reason` in the `construct` the author wrote, a directive as code
+/// (`file not found in `::file``), any other construct as words
+/// (`file not found in hyperlink`).
+pub fn reference_message(reason: &str, construct: &str) -> String {
+    if construct.starts_with("::") {
+        format!("{reason} in `{construct}`")
+    } else {
+        format!("{reason} in {construct}")
+    }
+}
+
+/// How a missing-target builder words its record.
+struct Wording<'a> {
+    code: &'a str,
+    message: String,
+    /// The hint for one resolved candidate, given its shown path.
+    create: fn(&str) -> String,
+    /// The directory a hint's path is shown relative to, when under it.
+    shown_from: Option<&'a Path>,
+}
+
 fn missing_document_admitted(
     construct: DocumentConstruct<'_>,
+    resolution: &DetailedResolution,
+    memo: &mut ListingMemo,
+    may_list: impl FnMut(&Path) -> bool,
+) -> Option<Diagnostic> {
+    let wording = Wording {
+        code: MISSING_DOCUMENT_CODE,
+        message: format!("the {} does not exist", construct.noun),
+        create: |path| format!("create {path} before a real run, or correct the reference"),
+        shown_from: construct.launch_dir,
+    };
+    missing_finding(construct.construct, wording, resolution, memo, may_list)
+}
+
+fn missing_finding(
+    construct: &str,
+    wording: Wording<'_>,
     resolution: &DetailedResolution,
     memo: &mut ListingMemo,
     may_list: impl FnMut(&Path) -> bool,
@@ -190,21 +270,13 @@ fn missing_document_admitted(
 
     let hint = match (&resolved, resolution.glob_hint()) {
         (_, Some(glob)) => glob.to_string(),
-        (Some(path), None) => format!(
-            "create {} before a real run, or correct the reference",
-            shown(path, construct.launch_dir)
-        ),
+        (Some(path), None) => (wording.create)(&shown(path, wording.shown_from)),
         (None, None) => "correct the reference, or create the file in one of the searched locations".to_string(),
     };
-    let mut finding = Diagnostic::actionable(
-        MISSING_DOCUMENT_CODE,
-        Severity::Error,
-        format!("the {} does not exist", construct.noun),
-        hint,
-    )
+    let mut finding = Diagnostic::actionable(wording.code, Severity::Error, wording.message, hint)
     .with_reference_details(ReferenceDetails {
         reason: Some("file not found".to_string()),
-        construct: Some(construct.construct.to_string()),
+        construct: Some(construct.to_string()),
         reference: Some(resolution.raw().to_string()),
         failure: Some("no-match".to_string()),
         reports_inclusion: true,

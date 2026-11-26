@@ -374,10 +374,13 @@ pub(crate) fn at_line(line: usize) -> String {
 /// Carried by [`TransclusionError::Located`] so every reader of that file's
 /// inclusion (composition, its pre-flight walk, the reference graph and
 /// validation) reports the same place, a nested child's included.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct InclusionSite {
     file: PathBuf,
     authored: Option<crate::markdown::types::AuthoredSpan>,
+    /// The frontmatter key that wrote the inclusion (`prologue:`), when it
+    /// is one; a body directive names its own.
+    construct: Option<&'static str>,
 }
 
 impl InclusionSite {
@@ -391,9 +394,9 @@ impl InclusionSite {
         match site {
             DirectiveSite::Body => None,
             DirectiveSite::Authored(context, opener) => {
-                Some(Self { file: context.display.clone(), authored: Some(opener.clone()) })
+                Some(Self { file: context.display.clone(), authored: Some(opener.clone()), construct: None })
             }
-            DirectiveSite::Unproven => file_of(markdown).map(|file| Self { file, authored: None }),
+            DirectiveSite::Unproven => file_of(markdown).map(|file| Self { file, authored: None, construct: None }),
         }
     }
 
@@ -412,12 +415,17 @@ impl InclusionSite {
             let range = frontmatter_value_range(&loaded.text, key, in_list.then_some(index), value)?;
             crate::markdown::types::AuthoredSpan::locate(&loaded.text, range)
         });
-        Some(Self { file, authored })
+        let construct = match key {
+            "prologue" => Some("prologue:"),
+            "epilogue" => Some("epilogue:"),
+            _ => None,
+        };
+        Some(Self { file, authored, construct })
     }
 
     /// `file`, at `authored` when it is proven.
     pub fn new(file: PathBuf, authored: Option<crate::markdown::types::AuthoredSpan>) -> Self {
-        Self { file, authored }
+        Self { file, authored, construct: None }
     }
 
     /// The file that wrote the inclusion.
@@ -425,10 +433,23 @@ impl InclusionSite {
         &self.file
     }
 
+    /// The frontmatter construct that wrote the inclusion (`prologue:`,
+    /// `epilogue:`); `None` for a body directive.
+    pub(crate) fn construct(&self) -> Option<&'static str> {
+        self.construct
+    }
+
     /// The inclusion's authored position in [`file`](Self::file); `None` when
     /// it is not proven (a body the file no longer describes).
     pub fn authored(&self) -> Option<&crate::markdown::types::AuthoredSpan> {
         self.authored.as_ref()
+    }
+}
+
+/// A site is its file and position; the construct only words it.
+impl PartialEq for InclusionSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.file == other.file && self.authored == other.authored
     }
 }
 
@@ -621,6 +642,16 @@ pub enum TransclusionError {
     Json(#[from] serde_json::Error),
 }
 
+/// `text` as a status block's hint reads: a capitalized sentence.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    let mut sentence: String = chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default();
+    if !sentence.ends_with(['.', ')']) {
+        sentence.push('.');
+    }
+    sentence
+}
+
 /// The payload of the [`TransclusionError::Io`] a file reference raises when
 /// no candidate resolved to a file.
 ///
@@ -631,6 +662,13 @@ pub enum TransclusionError {
 #[derive(Debug)]
 pub(crate) struct TargetNotFound {
     pub(crate) reference: String,
+    /// What wrote the reference: the directive (`::file`, `::code`), or the
+    /// key (`prologue:`) once the failure is placed at a frontmatter value's
+    /// [`InclusionSite`].
+    pub(crate) construct: Option<&'static str>,
+    /// The resolver's evidence: the directory it resolved against and every
+    /// candidate it probed.
+    pub(crate) resolution: Option<Box<biscuit_file::DetailedResolution>>,
 }
 
 impl std::fmt::Display for TargetNotFound {
@@ -650,8 +688,34 @@ impl TransclusionError {
     pub(crate) fn target_not_found(reference: impl Into<String>) -> Self {
         Self::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            TargetNotFound { reference: reference.into() },
+            TargetNotFound { reference: reference.into(), construct: None, resolution: None },
         ))
+    }
+
+    /// The no-match error of the `kind` directive whose reference
+    /// `resolution` resolved to no file, keeping the resolver's evidence.
+    pub(crate) fn target_missing(kind: DirectiveKind, resolution: biscuit_file::DetailedResolution) -> Self {
+        let construct = match kind {
+            DirectiveKind::File => "::file",
+            DirectiveKind::Code => "::code",
+            DirectiveKind::Url => "::url",
+        };
+        Self::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            TargetNotFound {
+                reference: resolution.raw().to_string(),
+                construct: Some(construct),
+                resolution: Some(Box::new(resolution)),
+            },
+        ))
+    }
+
+    /// The no-match evidence of a missing target, past any inclusion site.
+    pub(crate) fn target_not_found_details(&self) -> Option<&TargetNotFound> {
+        match self.without_site() {
+            Self::Io(source) => source.get_ref()?.downcast_ref::<TargetNotFound>(),
+            _ => None,
+        }
     }
 
     /// The file-reference failure class, when a file reference raised this
@@ -693,7 +757,16 @@ impl TransclusionError {
     pub(crate) fn at_inclusion(self, site: Option<InclusionSite>) -> Self {
         match (self, site) {
             (located @ Self::Located { .. }, _) | (located, None) => located,
-            (source, Some(site)) => Self::Located { site: Box::new(site), source: Box::new(source) },
+            (mut source, Some(site)) => {
+                // A `prologue`/`epilogue` value resolves as a `::file` would;
+                // a missing target names the key that wrote it.
+                if let (Some(construct), Self::Io(io)) = (site.construct(), &mut source)
+                    && let Some(missing) = io.get_mut().and_then(|inner| inner.downcast_mut::<TargetNotFound>())
+                {
+                    missing.construct = Some(construct);
+                }
+                Self::Located { site: Box::new(site), source: Box::new(source) }
+            }
         }
     }
 
@@ -987,10 +1060,34 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 let mut body =
                     vec![Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard)];
                 body.extend(self.resolution_failure().map(crate::markdown::errors::resolution_failure_row));
+                if self.resolution_failure() != Some(biscuit_file::ResolutionFailure::NoMatch) {
+                    return StatusBlock::new(StatusState::Error)
+                        .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))
+                        .body(body)
+                        .hint("Check file existence and permissions.");
+                }
+                // A proven no-match: the resolver's evidence names the
+                // resolved file and the one to create.
+                let missing = self.target_not_found_details();
+                let built = missing.and_then(|missing| {
+                    let resolution = missing.resolution.as_deref()?;
+                    crate::findings::reference::missing_target_unlisted("", missing.construct.unwrap_or("::file"), resolution)
+                });
+                let details = built.as_ref().and_then(|built| built.reference_details.as_ref());
+                if let Some(resolved) = details.and_then(|details| details.resolved.as_deref()) {
+                    body.insert(1, Prose::new(format!("<dim>Resolved:</dim> {}", Prose::escape_text(resolved))));
+                }
+                let header = match missing.and_then(|missing| missing.construct) {
+                    Some(construct) => format!("file not found in {construct}"),
+                    None => "file not found".to_string(),
+                };
+                let hint = built
+                    .and_then(|built| built.hint)
+                    .unwrap_or_else(|| "create the file, or correct the reference".to_string());
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))
+                    .error_header(ErrorHeader::new("TransclusionError", &header))
                     .body(body)
-                    .hint("Check file existence and permissions.")
+                    .hint(Prose::escape_text_outside_code_spans(&capitalized(&hint)))
             }
 
             TransclusionError::UrlParse(source) => StatusBlock::new(StatusState::Error)

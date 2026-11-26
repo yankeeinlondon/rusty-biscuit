@@ -110,6 +110,9 @@ host OS input and take focus.
     - [Context Variables provided to Composition](docs/topics/state-management/context-variables.md) — date/time, repo/monorepo, file changes, OS, hardware, and document discovery via `sniff`
     - [Error Rendering Conventions](./docs/errors/README.md) — `BlockError` body
       contract, `SourceContext`, snapshot tests
+    - [The Error-Message Standard](./docs/errors/message-standard.md) — what every
+      error and finding states (what, where, why, and how to fix it), shared with
+      Claudine, and the tests that enforce it
 
 ## License
 

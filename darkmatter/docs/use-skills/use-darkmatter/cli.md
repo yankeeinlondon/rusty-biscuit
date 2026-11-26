@@ -70,6 +70,18 @@ Host registration conflicts in `diagnostics` include `related` entries with
 the other declaration's `message` and `source`. Read
 `.related[]?.source` to extract those positions from a data report.
 
+Every record in `diagnostics` (from `md`, DMLS, or Claudine's `--dry-run
+--json`) has `code`, `severity` (`error`, `warning`, `info`), `message`, and
+`source` (`file`, one-based `line` and `column`, `null` when no authored
+position is proven). Optional fields, omitted when empty: `hint` (the next
+step), `related` (other locations, as `message` + `source`), `notes`
+(supporting lines with no location), and `trail` (how a host reached the
+problem, outermost first; `md` itself never writes it). `iteration_path` and
+`included_via` are kept for compatibility and are projections of the same
+trail. Match on `code`, never on `message` text. A `--deny` or `--allow`
+changes whether a run fails, not a record's `severity` (except that a
+`style` key `--deny` made blocking on `md render` is reported as `error`).
+
 | Exit | Meaning |
 |---|---|
 | 0 | ran and succeeded |

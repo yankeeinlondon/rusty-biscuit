@@ -65,7 +65,7 @@ and the repository's default `file-read` list (`&**/*.yaml` among others)
 committed:
 
 ```sh
-md schema validate claudine/docs/research/sandboxing/providers/sandboxing.yaml
+md schema validate claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml
 # ✔ … valid …  (os.yaml is pre-approved by permissions.file-read; the resolved schema was checked)
 md schema validate provider.md            # resolves os.yaml: the document is checked
 # with a user `file-read` entry "!&claudine/docs/os.yaml", nothing pre-approves the read:
@@ -1040,7 +1040,7 @@ file to `permissions.file-read` and running again:
 ```json
 {
   "code": "dm.schema.slot_approval_required",
-  "source": { "file": "/repo/claudine/docs/research/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
+  "source": { "file": "/repo/claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
   "grants_needed": [
     { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
     { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }

@@ -229,6 +229,40 @@ for deferral in session.deferrals() {
   not run. An allowed remote read is fetched without being stored.
 - A blacklisted command and a denied remote read are still refused.
 
+### Collecting findings
+
+`darkmatter::findings` is what a host uses to report many problems at once
+instead of stopping at the first, with the same `Diagnostic` record `md
+--output json` prints:
+
+```rust
+use darkmatter::findings::{Diagnostic, DiagnosticSource, FindingSink, Severity, Subject};
+
+let mut sink = FindingSink::new();
+let doc = sink.register_subject(Subject::document("notes.md", None));
+let found = sink.push(doc, Diagnostic::actionable(
+    "my.code", Severity::Error,
+    "the template file does not exist",           // what failed, and why
+    "create template.md, or correct the reference", // the next step, required
+).with_source(DiagnosticSource::at(Some("notes.md".into()), 4, 1)));
+sink.not_checked(doc, "inputs", "the template could not be read", Some(found));
+let report = sink.finish();   // counts(), has_problems(), diagnostics(), render_human(..)
+```
+
+- Subjects keep the order they were registered in; equivalent findings for
+  one subject collapse.
+- `not_checked` records one `dm.check.not_checked` `info` finding, with the
+  blocking finding as `related` when it has a location.
+- `findings::reference::check_document` turns a confirmed no-match of a
+  document-valued reference into `dm.reference.missing_document`, with the
+  resolved path, searched locations, and up to three suggestions.
+- `EmptyBodyCause` says why a body is empty: `AuthoredEmpty`, `Whitespace`,
+  `ExcludedBlocks` (each block's line and condition), or `EmptyRendered`.
+- Write messages to the four-part standard in
+  `darkmatter/docs/errors/message-standard.md`: what failed (the author's
+  construct), where (a proven position, else the file alone), why (only the
+  cause that applies), and how to fix it (the hint).
+
 ## Evaluate one expression
 
 ```rust

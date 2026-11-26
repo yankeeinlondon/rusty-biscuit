@@ -3,7 +3,7 @@
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::compose::context::options::{SourceOpening, source_file_context};
-use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind};
+use biscuit_file::{DetailedOutcome, FileReference, FileReferenceError, FileReferenceKind, ResolutionFailure};
 use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
@@ -169,9 +169,11 @@ fn resolve_file_reference(
         None => snapshot.clone(),
     };
 
-    let path = file_ref
-        .resolve_in_context(&resolution_ctx)?
-        .ok_or_else(|| TransclusionError::target_not_found(raw_target))?;
+    let detailed = file_ref.resolve_detailed(&resolution_ctx);
+    if matches!(detailed.outcome(), DetailedOutcome::Failed(ResolutionFailure::NoMatch)) {
+        return Err(TransclusionError::target_missing(kind, detailed));
+    }
+    let path = detailed.into_convenience()?.ok_or_else(|| TransclusionError::target_not_found(raw_target))?;
     // Canonicalize only for transclusion identity (macOS `/var` versus
     // `/private/var`); the child's own context keeps `path`'s spelling, which
     // is the one its tree root uses.

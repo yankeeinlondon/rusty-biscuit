@@ -11,6 +11,7 @@ description: Conventions for implementing rich, source-aware diagnostics in dark
 - Escape User-Supplied Tokens
 - SourceContext for File-Origin Errors
 - Origin Attribution
+- Findings and the Message Standard
 - Standard Structural Layout
 - Snapshot Tests
 - Adding a New Error Variant
@@ -121,6 +122,37 @@ A value the document did not author must not be blamed on the document.
   value or replace the whole token with ordinary text. It is
   authoring-fatal, so a lenient policy cannot downgrade it.
 
+## Findings and the Message Standard
+
+A report that collects many problems (`md compose`'s combined report,
+Claudine's `--dry-run` and preflight reports) is built from `findings::*`,
+not from `BlockError`s:
+
+- **Record.** `Diagnostic` (re-exported as `findings::Diagnostic`) with the
+  additive `hint`, `related`, `notes`, and `trail` fields. `iteration_path`
+  and `included_via` are JSON projections of the `Trail`
+  (`Included`/`Iteration`/`Host` frames); keep their existing shape (`[]`
+  versus omitted).
+- **Builder.** `Diagnostic::actionable(code, severity, message, hint)` for a
+  new finding (hint required); `Diagnostic::projected(…, Option<hint>)` only
+  for projecting an older diagnostic. Add context with `with_source`,
+  `with_trail`, `with_related`, `with_note`, never by formatting it into
+  `message`.
+- **Sink.** `FindingSink::register_subject` (authored order), `push`
+  (dedups equivalent findings per subject), `not_checked` (one
+  `dm.check.not_checked` info row, `related` = the blocking finding when
+  located), `finish` → `FindingReport` (`counts`, `has_problems`,
+  `render_human`, `presentation`). Severity is the producer's; policy and
+  exit codes read it and never rewrite it.
+- **Codes.** A code `md compose` emits goes in `COMPOSE_DIAGNOSTIC_CODES`; a
+  host-only code (`dm.reference.missing_document`) in `findings::FINDING_CODES`;
+  `findings.rs::every_finding_code_is_declared_once_across_the_two_catalogs`
+  guards it. Empty bodies carry `EmptyBodyCause` and render only that cause.
+- **Message.** Every new message follows `docs/errors/message-standard.md`:
+  what (the author's construct noun, supplied by the construct's owner),
+  where (`SourceRef::OnDiskSpan` only when proven, else the file), why (only
+  the established cause), fix (the hint).
+
 ## Standard Structural Layout
 
 Errors with a file origin follow this layout (rendered from top to
@@ -196,6 +228,7 @@ output fails the build.
 
 ## See Also
 
+- `docs/errors/message-standard.md` — the four-part message standard
 - Error rendering reference
 - biscuit-terminal/SKILL.md — Prose grammar
   and `StatusBlock` mechanics.

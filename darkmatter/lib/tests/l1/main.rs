@@ -184,6 +184,7 @@ mod compose_call_precheck;
 #[cfg(feature = "effects-instrumentation")]
 mod shared_diagnostics;
 mod findings;
+mod findings_portable_paths;
 mod reference_suggestions;
 mod passive_compose;
 #[cfg(feature = "effects-instrumentation")]
@@ -232,6 +233,7 @@ mod mermaid_syntax_highlighting;
 mod mermaid_text_line_numbers;
 mod meta_schema_repo_schemas;
 mod missing_ctx_capture;
+mod missing_inclusion_findings;
 mod more_is_more_literals_and_indexes;
 mod not_empty_frontmatter;
 mod numeric_admission;

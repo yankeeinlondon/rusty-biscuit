@@ -41,7 +41,7 @@ use darkmatter::markdown::compose::report_diagnostics::{error_diagnostics, refer
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeWarning};
 use darkmatter::markdown::reference::types::ReferenceKind;
 use darkmatter::markdown::reference::validate::{
-    ReferenceIssue, ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport,
+    ReferenceIssue, ReferenceSeverity, ReferenceValidationReport,
 };
 use darkmatter::markdown::{Markdown, MarkdownError};
 
@@ -225,22 +225,13 @@ fn reported_issues(report: &ReferenceValidationReport) -> Vec<Diagnostic> {
 }
 
 /// `issue` as a finding, worded as the reference report words its row
-/// (`file not found in `::file``), with the next step for a missing target.
+/// (`file not found in `::file``).
 fn reference_finding(issue: &ReferenceIssue) -> Diagnostic {
     let mut finding = reference_issue_diagnostic(issue);
     if let Some(details) = &finding.reference_details
         && let (Some(reason), Some(construct)) = (&details.reason, &details.construct)
     {
-        // A directive is code, as the reference report shows it.
-        finding.message = if construct.starts_with("::") {
-            format!("{reason} in `{construct}`")
-        } else {
-            format!("{reason} in {construct}")
-        };
-    }
-    if matches!(issue.code, ReferenceIssueCode::MissingLocalTarget) && finding.hint.is_none() {
-        let target = issue.reference_display.strip_prefix("./").unwrap_or(&issue.reference_display);
-        finding.hint = Some(format!("create {target}, or correct the reference"));
+        finding.message = darkmatter::findings::reference::reference_message(reason, construct);
     }
     finding
 }

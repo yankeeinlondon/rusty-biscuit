@@ -25,6 +25,8 @@
       "reference": "./missing.md",
       "failure": "no-match",
       "included_via": [],
+      "base": "<WS>/cwd",
+      "resolved": "<WS>/cwd/missing.md",
       "hint": "create missing.md, or correct the reference"
     },
     {

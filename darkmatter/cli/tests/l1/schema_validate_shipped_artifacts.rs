@@ -24,7 +24,7 @@ type Case = (&'static str, String, bool, Option<&'static str>);
 fn model_config_research_contract_enforces_required_and_nested_properties() {
     let process = CliProcessFixture::new();
     let dir = process.cwd();
-    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/model-config/_schema.yaml"));
+    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/providers/model-config/_schema.yaml"));
     let valid = "$schema: ./_schema.yaml\nlast_updated: 2026-10-29\nagent: codex\nmodel: gpt-6.1-sol\nhas_official_schema: none\nmerge_semantics: merge\nrequires_claudine_update: false\n";
     let cases: Vec<Case> = vec![
         ("valid.md", valid.into(), true, None),
@@ -40,7 +40,7 @@ fn model_config_research_contract_enforces_required_and_nested_properties() {
 fn reasoning_level_research_contract_enforces_local_and_shared_types() {
     let process = CliProcessFixture::new();
     let dir = process.cwd().join("reasoning-level");
-    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/reasoning-level/_schema.yaml"));
+    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/providers/reasoning-level/_schema.yaml"));
     write(&process.cwd().join("_types.yaml"), include_str!("../../../../claudine/docs/research/_types.yaml"));
     let valid = "\
 $schema: ./_schema.yaml

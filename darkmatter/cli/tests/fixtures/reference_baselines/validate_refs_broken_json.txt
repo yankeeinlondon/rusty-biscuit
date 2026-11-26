@@ -88,7 +88,10 @@ exit: 1
       "construct": "hyperlink",
       "reference": "./gone.md",
       "failure": "no-match",
-      "included_via": []
+      "included_via": [],
+      "base": "<WS>/cwd/docs",
+      "resolved": "<WS>/cwd/docs/gone.md",
+      "hint": "create gone.md, or correct the reference"
     },
     {
       "code": "dm.reference.missing_hyperlink",
@@ -117,7 +120,10 @@ exit: 1
           "file": "<WS>/cwd/docs/root.md",
           "line": 5
         }
-      ]
+      ],
+      "base": "<WS>/cwd/docs",
+      "resolved": "<WS>/cwd/docs/child-gone.md",
+      "hint": "create child-gone.md, or correct the reference"
     },
     {
       "code": "dm.reference.missing_image",
@@ -141,7 +147,10 @@ exit: 1
       "construct": "image",
       "reference": "./image.png",
       "failure": "no-match",
-      "included_via": []
+      "included_via": [],
+      "base": "<WS>/cwd/docs",
+      "resolved": "<WS>/cwd/docs/image.png",
+      "hint": "create image.png, or correct the reference"
     }
   ]
 }

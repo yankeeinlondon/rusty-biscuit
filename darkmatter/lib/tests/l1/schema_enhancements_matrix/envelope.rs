@@ -124,7 +124,7 @@ const TAGGED_CELLS: &[Cell] = &[
 const SLASH_VALID: &str = "last_updated: 2026-10-21\nagent: a\nmodel: m\nsupport: partial\nrequires_claudine_update: false";
 const SLASH_BAD_SUPPORT: &str = "last_updated: 2026-10-21\nagent: a\nmodel: m\nsupport: bogus\nrequires_claudine_update: false";
 
-/// `claudine/docs/research/slash-commands/_schema.yaml`: the pure envelope's
+/// `claudine/docs/research/providers/slash-commands/_schema.yaml`: the pure envelope's
 /// root `$schema` mapping.
 const PURE_CELLS: &[Cell] = &[
     cell("control", Control, Validates(&[(SLASH_VALID, true), (SLASH_BAD_SUPPORT, false)])),

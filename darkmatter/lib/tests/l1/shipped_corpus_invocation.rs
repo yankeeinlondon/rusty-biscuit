@@ -39,9 +39,9 @@ fn a_shipped_sidecar_judges_its_document_alike_in_darkmatter_and_the_library() {
     let root = canonicalize_simplified(dir.path()).expect("canonical temp dir");
     let research = root.join("research");
     write(&research.join("_types.yaml"), include_str!("../../../../claudine/docs/research/_types.yaml"));
-    write(&research.join("agent-cli/_types.yaml"), include_str!("../../../../claudine/docs/research/agent-cli/_types.yaml"));
-    write(&research.join("agent-cli/_schema.yaml"), include_str!("../../../../claudine/docs/research/agent-cli/_schema.yaml"));
-    let authored = include_str!("../../../../claudine/docs/research/agent-cli/kimi.md");
+    write(&research.join("agent-cli/_types.yaml"), include_str!("../../../../claudine/docs/research/providers/agent-cli/_types.yaml"));
+    write(&research.join("agent-cli/_schema.yaml"), include_str!("../../../../claudine/docs/research/providers/agent-cli/_schema.yaml"));
+    let authored = include_str!("../../../../claudine/docs/research/providers/agent-cli/kimi.md");
     assert!(authored.contains("\nschema_revision: 2\n"), "the control document is revision 2");
     let page = research.join("agent-cli/kimi.md");
     let broken_page = research.join("agent-cli/broken.md");

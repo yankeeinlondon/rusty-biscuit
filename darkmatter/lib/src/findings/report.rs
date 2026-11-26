@@ -185,7 +185,14 @@ pub(super) fn finding_details(launch_dir: Option<&Path>, diagnostic: &Diagnostic
             details.push(format!("{construct} {written}"));
         }
         if let Some(resolved) = &reference.resolved {
-            match &reference.base {
+            // A path shown relative to the launch directory needs no base
+            // when the base is that directory.
+            let base = reference.base.as_ref().filter(|base| {
+                launch_dir.is_none_or(|launch| {
+                    biscuit_file::PathIdentity::new(Path::new(base.as_str())) != biscuit_file::PathIdentity::new(launch)
+                })
+            });
+            match base {
                 Some(base) => details.push(format!(
                     "resolved to {} (relative to {})",
                     display_path(launch_dir, resolved),
