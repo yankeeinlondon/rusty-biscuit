@@ -187,18 +187,6 @@ pub(super) fn run_sequence_steps(
             &claudine::composition::sequence::build_step_overlay(run.plan, step_index), Vec::new(),
         ).to_value());
 
-        // Dry-run: separate each document's rendered metadata block with a
-        // full-width horizontal rule on stderr. The per-document render happens
-        // inside the executor; the rule sits *between* documents, so it precedes
-        // docs 2..M. `--quiet` / `--silent` have no effect on dry-run output.
-        if run.shared.dry_run && step_index > 0 {
-            let hr = HorizontalRule::new()
-                .style(RuleStyle::Dashes)
-                .alignment(RuleAlignment::Full)
-                .weight(RuleWeight::Medium)
-                .render(&log::terminal());
-            log::message(&hr);
-        }
 
         let _step_span = info_span!(
             "sequence_step",
@@ -304,7 +292,7 @@ pub(super) fn run_sequence_steps(
         if !run.silent && skipped {
             emit_step_skipped(step_index, total_steps);
         } else if !run.silent {
-            emit_step_status(run, step_index, total_steps, success, &error, &providers);
+            emit_step_status(step_index, total_steps, success, &error, &providers);
             let subject = format!("step {}/{}", step_index + 1, total_steps);
             for info in &secondary {
                 claudine::composition::lifecycle::report::report_container_failure(
@@ -355,14 +343,12 @@ fn run_one_step(
         Err(error) => return StepOutcome::failed(&error),
     };
 
-    // Dry-run composes against the *initial* state so late-binding references
-    // render exactly as a first-step composition would see them.
-    let snapshot = (!run.shared.dry_run).then(|| runtime_state.snapshot());
+    let snapshot = runtime_state.snapshot();
     let mut set_overrides = jit::step_set_overrides(
         run.plan,
         step_index,
         run.user_set_overrides.as_ref(),
-        snapshot.as_ref(),
+        Some(&snapshot),
     );
 
     // A step declaring an executable never sends the document body, so a
@@ -449,8 +435,8 @@ fn run_one_step(
             None => None,
         };
         let guarded = match &declaring {
-            Some(values) => task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, values, &set_overrides, runtime_state),
-            None => task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, live.markdown.frontmatter().as_map().iter(), &set_overrides, runtime_state),
+            Some(values) => task_run::root_step_guard(run, task, values, &set_overrides, runtime_state),
+            None => task_run::root_step_guard(run, task, live.markdown.frontmatter().as_map().iter(), &set_overrides, runtime_state),
         };
         match guarded {
             Ok(true) => {}
@@ -728,7 +714,6 @@ fn build_body_request(
         operation: shared.operation.clone(),
         sandbox: shared.sandbox,
         repo: shared.repo,
-        dry_run: shared.dry_run,
         mcp: shared.mcp,
         mcp_use: shared.mcp_use.clone(),
         strict: shared.strict,
@@ -814,7 +799,6 @@ fn emit_step_skipped(step_index: usize, total_steps: usize) {
 }
 
 fn emit_step_status(
-    run: &SequenceRunContext<'_>,
     step_index: usize,
     total_steps: usize,
     success: bool,
@@ -828,11 +812,6 @@ fn emit_step_status(
             total_steps,
             provider,
             attempt_chain(providers),
-        ),
-        (true, None) if run.shared.dry_run => format!(
-            "step <b><yellow>{}/{}</yellow></b> rendered (<dim><i>dry-run</i></dim>)",
-            step_index + 1,
-            total_steps,
         ),
         (true, None) => format!(
             "step <b><yellow>{}/{}</yellow></b> succeeded",

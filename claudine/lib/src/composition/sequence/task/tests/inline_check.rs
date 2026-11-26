@@ -118,32 +118,6 @@ fn a_defaulted_or_converted_validation_copy_never_changes_the_enclosing_values()
     assert!(!mutations.contains_key("level"), "a default is never committed: {mutations:?}");
 }
 
-/// A preview runner: containers compose without running their events.
-struct DryRun;
-
-impl PromptTaskRunner for DryRun {
-    fn is_dry_run(&self) -> bool {
-        true
-    }
-    fn run(&self, _request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
-        unreachable!("the fixture launches no prompt")
-    }
-}
-
-#[test]
-fn a_dry_run_names_the_check_without_judging_it() {
-    let dir = TempDir::new().unwrap();
-    let source = one_step_source(dir.path(), outer(json!([checked(json!({ "reviewer": "string(required)" }))])));
-    let fixture = Fixture::build(dir, &source).unwrap();
-    let recorder = Recorder::default();
-    let shell = FakeTaskShell::default();
-    let runtime = Arc::new(RuntimeState::new_sequence());
-    let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), prompt: &DryRun, ..Wiring::new(&recorder, &shell) });
-    assert!(outcome.succeeded(), "{}", failure_message(&outcome));
-    let notes: Vec<_> = recorder.events().into_iter().filter(|event| event.contains("checks its `$schema`")).collect();
-    assert_eq!(notes, vec!["info:`tasks[0].sequence[0]` checks its `$schema` at its turn (not evaluated in a dry run)".to_string()]);
-}
-
 /// Each loop pass enters through the existing `start` preparation, which
 /// judges the check again against that pass's values; no check runs between
 /// the children of one pass.

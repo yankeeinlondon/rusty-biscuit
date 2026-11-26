@@ -14,6 +14,7 @@ use claudine::composition::{
     SiteFrame, TaskSite, check_sequence_tree,
 };
 use darkmatter::findings::TrailFrame;
+use darkmatter::markdown::compose::passive::PassiveSession;
 
 use super::*;
 
@@ -89,7 +90,39 @@ fn site_trail(site: &TaskSite) -> Trail {
     Trail::new(frames)
 }
 
+/// The selection hints `frontmatter` holds, when they name an `agent`.
+fn hints_of(path: &Path, frontmatter: &Map<String, Value>) -> Option<(PathBuf, claudine::composition::EffectiveSelectionHints)> {
+    crate::commands::wrap::sequence::providers::hints_from_map(frontmatter)
+        .ok()
+        .filter(claudine::composition::EffectiveSelectionHints::names_agent)
+        .map(|hints| (path.to_path_buf(), hints))
+}
+
 impl Check {
+    /// The root's selection hints under the caller's setters, as the real
+    /// run's `collect_sites` reads them, when they name an `agent`.
+    fn root_hints(&self) -> Option<(PathBuf, claudine::composition::EffectiveSelectionHints)> {
+        let root = self.root_ref();
+        let mut frontmatter: Map<String, Value> =
+            root.markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+        frontmatter.extend(self.setters.clone());
+        hints_of(&root.resolved_path, &frontmatter)
+    }
+
+    /// A `prompt:` task's prediction and its enclosing sequence documents,
+    /// nearest first, ending with the root, as `collect_sites` gathers them.
+    fn task_hints(&self, task: &CheckedTask) -> selection::TaskHints {
+        let documents: Vec<_> = task.site.frames.iter().rev()
+            .filter_map(|frame| self.sequence_documents.get(frame.identity.as_str()))
+            .collect();
+        let mut enclosing: Vec<_> =
+            documents.iter().filter_map(|(path, frontmatter)| hints_of(path, frontmatter)).collect();
+        enclosing.extend(self.root_hints());
+        let mut consulted: Vec<_> = documents.into_iter().map(|(path, _)| path.clone()).collect();
+        consulted.push(self.root_ref().resolved_path.clone());
+        selection::TaskHints::Task { prediction: task.provider.clone().map(Box::new), enclosing, consulted }
+    }
+
     pub(super) fn check_sequence(&mut self) {
         let root = self.root_ref().clone();
         let mut removed = HashSet::new();
@@ -167,6 +200,20 @@ impl Check {
                 blocker.get_or_insert(id);
             }
         }
+        // A prompt task whose owner is missing an input waits for it, as the
+        // real run's discovery leaves its reference pending.
+        self.waiting_prompts = match &check.inventory {
+            Ok(inventory) => inventory
+                .prompts
+                .iter()
+                .filter(|prompt| inventory.owners.get(prompt.owner).is_some_and(|owner| owner.missing.is_some()))
+                .map(|prompt| (prompt.source_path.clone(), prompt.property.clone()))
+                .collect(),
+            Err(_) => HashSet::new(),
+        };
+        self.sequence_documents = check.tasks.iter()
+            .filter_map(|task| Some((task.site.identity.as_str().to_string(), task.sequence_document.clone()?)))
+            .collect();
         let mut rows = Vec::new();
         match check.list {
             RootList::Body => {
@@ -188,8 +235,13 @@ impl Check {
                         subject: root_subject,
                         trail: Trail::default(),
                         prompt: &root,
-                        with: Map::new(),
+                        with_evaluated: Map::new(),
+                        with_late: Vec::new(),
                         step_agent: None,
+                        selection: selection::TaskHints::Body { document: self.root_hints() },
+                        label: self.root_label(),
+                        task_path: root.resolved_path.clone(),
+                        seq: None,
                     };
                     self.check_prompt_task(&task);
                 }
@@ -208,6 +260,22 @@ impl Check {
         }
         self.owner_inputs(&check, &mut rows);
         self.push_missing_rows(rows);
+        self.container_schemas(&check);
+    }
+
+    /// An inline container's `$schema` judges the values it sees at its
+    /// turn, which a dry run never reaches: one `not checked` row each.
+    fn container_schemas(&mut self, check: &SequenceCheck) {
+        let Ok(inventory) = &check.inventory else { return };
+        for container in inventory.inline_containers.iter().filter(|container| container.checks) {
+            let task = check.tasks.iter().find(|task| {
+                task.site.file == container.source_path && task.site.property == container.property
+            });
+            let subject = task
+                .and_then(|task| self.task_subjects.get(task.site.identity.as_str()).copied())
+                .unwrap_or_else(|| self.root_subject());
+            self.sink.not_checked(subject, "`$schema`", "an inline container's schema judges the values at its turn", None);
+        }
     }
 
     /// The key findings of Claudine's shipped schemas on `file` as
@@ -461,7 +529,37 @@ impl Check {
             (None, _) => self.check_body_task(task, subject, trail, step, step_agent, rows),
             (_, Some(prompt)) => {
                 let Some(document) = self.load_document(subject, prompt, &trail) else { return };
-                let prompt_task = PromptTask { subject, trail, prompt: &document, with: task.with.clone(), step_agent };
+                if self.waiting_prompts.contains(&(site.file.clone(), site.property.clone())) {
+                    let prompt_task = PromptTask {
+                        subject,
+                        trail,
+                        prompt: &document,
+                        with_evaluated: Map::new(),
+                        with_late: Vec::new(),
+                        step_agent,
+                        selection: self.task_hints(task),
+                        label: site.name.clone(),
+                        task_path: site.file.clone(),
+                        seq: task.seq.clone(),
+                    };
+                    self.check_selection(&prompt_task);
+                    let reason = "it waits for an input its sequence has no value for";
+                    self.sink.not_checked(subject, "inputs", reason, None);
+                    self.sink.not_checked(subject, "preview", reason, None);
+                    return;
+                }
+                let prompt_task = PromptTask {
+                    subject,
+                    trail,
+                    prompt: &document,
+                    with_evaluated: task.with_evaluated.clone(),
+                    with_late: task.with_late.clone(),
+                    step_agent,
+                    selection: self.task_hints(task),
+                    label: site.name.clone(),
+                    task_path: site.file.clone(),
+                    seq: task.seq.clone(),
+                };
                 self.check_task_prompt(&prompt_task, rows);
             }
             (Some(ExecutableField::Shell), None) => {
@@ -498,10 +596,14 @@ impl Check {
             }
         };
         let label = shown(&document.resolved_path, self.launch_dir.as_deref());
-        let bodyless = composition::is_yaml_source(&document.resolved_path)
-            || darkmatter::markdown::render_tree::embedded::without_embedded_metadata(document.markdown.content())
-                .trim()
-                .is_empty();
+        // A string `prompt:` makes the step an inline composition of it,
+        // which needs no body.
+        let inline = matches!(document.markdown.frontmatter().as_map().get("prompt"), Some(Value::String(_)));
+        let bodyless = !inline
+            && (composition::is_yaml_source(&document.resolved_path)
+                || darkmatter::markdown::render_tree::embedded::without_embedded_metadata(document.markdown.content())
+                    .trim()
+                    .is_empty());
         if bodyless {
             let why = if composition::is_yaml_source(&document.resolved_path) {
                 "and a YAML file has no body"
@@ -533,13 +635,45 @@ impl Check {
             Diagnostic::projected(
                 NO_EXECUTABLE,
                 Severity::Info,
-                format!("this task has no executable, so it composes the body of {label}"),
+                if inline {
+                    format!("this task has no executable, so it composes the `prompt` of {label}")
+                } else {
+                    format!("this task has no executable, so it composes the body of {label}")
+                },
                 None,
             )
             .with_trail(trail.clone()),
         );
         let with = step.get("with").and_then(Value::as_object).cloned().unwrap_or_default();
-        let prompt_task = PromptTask { subject, trail, prompt: &document, with, step_agent };
+        // A body task's `with:` is not evaluated by the walk: a literal value
+        // is data, and a template is known only at the task's turn.
+        let (with_late, with_evaluated): (Vec<_>, Map<_, _>) = {
+            let (late, known): (Vec<_>, Vec<_>) =
+                with.iter().partition(|(_, value)| value.as_str().is_some_and(|text| text.contains("{{")));
+            (late.into_iter().map(|(key, _)| key.clone()).collect(), known.into_iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        };
+        // A body step composes the document that declares it, whose `agent`
+        // is its own: the root's under the caller's setters, a referenced
+        // sequence document's as written.
+        let own = if is_root {
+            self.root_hints()
+        } else {
+            let frontmatter: Map<String, Value> = document.markdown.frontmatter().as_map().iter()
+                .map(|(key, value)| (key.clone(), value.clone())).collect();
+            hints_of(&document.resolved_path, &frontmatter)
+        };
+        let prompt_task = PromptTask {
+            subject,
+            trail,
+            prompt: &document,
+            with_evaluated,
+            with_late,
+            step_agent,
+            selection: selection::TaskHints::Body { document: own },
+            label: site.name.clone(),
+            task_path: site.file.clone(),
+            seq: task.seq.clone(),
+        };
         // The root's own inputs are the root owner's, reported once.
         if is_root {
             self.check_prompt_task(&prompt_task);
@@ -578,32 +712,13 @@ impl Check {
     /// The missing inputs of a prompt task's document, prepared passively
     /// under the caller's setters and the task's `with:`.
     fn prompt_inputs(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
-        let authored = task.prompt.markdown.frontmatter().as_map();
-        if authored.values().any(|value| value.as_str().is_some_and(|text| text.contains("$("))) {
-            self.sink.not_checked(task.subject, "inputs", "a value comes from a command a dry run skips", None);
-            return;
-        }
-        if task.with.values().any(|value| value.as_str().is_some_and(|text| text.contains("{{"))) {
+        if !task.with_late.is_empty() {
             self.sink.not_checked(task.subject, "inputs", "a `with:` value is known only when the task runs", None);
             return;
         }
-        let Some(invocation) = self.invocation.clone() else { return };
-        let mut overrides = self.setters.clone();
-        overrides.extend(task.with.clone());
-        let layers = CallerInputLayers::from_caller_overrides(
-            Some(Value::Object(overrides)),
-            invocation.launch_file_resolution_context().clone(),
-        );
-        let context = match invocation.derive_composition_source(task.prompt) {
-            Ok(source) => source.file_resolution_context().clone(),
-            Err(error) => {
-                self.push_error(task.subject, &error, task.trail.clone());
-                return;
-            }
-        };
-        let mut options = layers.apply_to(composition::PrepareOptions::new(context));
-        options.prepared_context =
-            Some(invocation.capture_launch_context(&ContextRequirements::for_document(&task.prompt.markdown)));
+        // A value that comes from a command stays as written; an input it
+        // would supply still counts as given.
+        let Some(options) = self.passive_prepare_options(task, PassiveSession::new()) else { return };
         match composition::sequence::document::prepare_sequence_document_values(
             task.prompt,
             options,
@@ -630,8 +745,16 @@ impl Check {
     /// The missing inputs of every owning sequence document: the root's
     /// under the root, a referenced document's under the task that
     /// references it.
+    ///
+    /// A real run discovers inputs after the root's `initialize` fires and
+    /// reads its writes as setters for every owner, so an input that stack
+    /// may write is `not checked` rather than missing.
     fn owner_inputs(&mut self, check: &SequenceCheck, rows: &mut Vec<MissingRow>) {
         let Ok(inventory) = &check.inventory else { return };
+        let mut initialized = std::collections::HashSet::new();
+        if let Some(initialize) = self.root_ref().markdown.frontmatter().as_map().get("initialize") {
+            claudine::composition::collect_written_keys(initialize, &mut initialized);
+        }
         for owner in &inventory.owners {
             let Some(entry) = &owner.missing else { continue };
             let (subject, trail) = match owner.role {
@@ -651,6 +774,10 @@ impl Check {
                 }
             };
             for property in &entry.missing {
+                if initialized.contains(&property.name) {
+                    self.sink.not_checked(subject, &format!("input `{}`", property.name), "the root's `initialize` writes it when it runs", None);
+                    continue;
+                }
                 rows.push(MissingRow {
                     subject,
                     trail: trail.clone(),
@@ -668,11 +795,10 @@ impl Check {
         if rows.is_empty() {
             return;
         }
-        // The user's `prompt_for_missing` is read with the passive
-        // configuration projection the switch brings; until then the
-        // default (ask) stands.
+        // As `resolve_interactive_options` does, an unreadable configuration
+        // leaves the default (ask).
         let interactive = claudine::composition::schema::InteractiveSchemaOptions {
-            prompt_for_missing: true,
+            prompt_for_missing: self.config.as_ref().is_none_or(|config| config.prompt_for_missing),
             stdin_is_tty: std::io::stdin().is_terminal(),
             stderr_is_tty: self.stderr_is_tty,
             silent: false,

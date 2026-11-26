@@ -16,6 +16,7 @@ pub(crate) mod system_prompt;
 pub(crate) mod wire_io;
 
 pub(crate) mod composition;
+pub(crate) mod selection_trace;
 pub(crate) mod selection_ui;
 pub(crate) mod sequence;
 

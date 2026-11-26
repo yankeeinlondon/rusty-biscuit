@@ -557,7 +557,7 @@ exit 1
 }
 
 /// `--quiet` and `--silent` have no effect on `inline-compose --dry-run`
-/// output: the composed prompt still lands on stdout, the metadata on stderr,
+/// output: the composed prompt still lands on stdout, the report on stderr,
 /// and the source file is left byte-identical.
 #[cfg(unix)]
 #[test]
@@ -604,8 +604,9 @@ fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
 }
 
 /// Error surface (inline-compose): an unsatisfied `$schema` required property
-/// under `--dry-run` renders to **stderr**, exits **non-zero**, leaves stdout
-/// clean, and never mutates the source file.
+/// under `--dry-run` is a finding on **stderr** (`dm.schema.missing_required`
+/// in the JSON report), exits 2, leaves stdout clean, and never mutates the
+/// source file.
 #[cfg(unix)]
 #[test]
 fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
@@ -632,10 +633,7 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
         .output()
         .unwrap();
 
-    assert!(
-        !output.status.success(),
-        "schema-error dry-run must exit non-zero"
-    );
+    assert_eq!(output.status.code(), Some(2), "schema-error dry-run must exit 2");
     assert!(
         output.stdout.is_empty(),
         "stdout must stay clean on error; stdout was:\n{}",
@@ -643,9 +641,17 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
-        stderr.to_lowercase().contains("missing properties") && stderr.contains("topic"),
-        "missing-properties error naming `topic` must appear on stderr; stderr was:\n{stderr}"
+        stderr.contains("\"topic\" is a required property"),
+        "the finding naming `topic` must appear on stderr; stderr was:\n{stderr}"
     );
+
+    let json = fixture
+        .command()
+        .args(["inline-compose", "--goose", "--dry-run", "--json", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(envelope["diagnostics"][0]["code"], "dm.schema.missing_required", "{envelope}");
     assert_eq!(
         fs::read_to_string(&md_file).unwrap(),
         original,

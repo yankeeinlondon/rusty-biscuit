@@ -793,10 +793,20 @@ fn a_required_root_input_nothing_writes_is_still_reported_missing() {
     assert_who_reported_missing("kind: sequence\n$schema:\n  who: string(required)\nsequence:\n  - { name: work, shell: echo NOT_RUN }\n", &[]);
 }
 
-// A dry run fires no `initialize`, so the value it would write is missing.
+// A dry run fires no `initialize`: the input it would write is `not
+// checked`, never missing, since the real run reads it before collecting.
 #[test]
-fn a_dry_run_reports_an_input_only_initialize_writes_as_missing() {
-    assert_who_reported_missing(&format!("{INITIALIZED_ROOT}sequence:\n  - {{ name: work, shell: echo NOT_RUN }}\n"), &["--dry-run"]);
+fn a_dry_run_leaves_an_input_only_initialize_writes_not_checked() {
+    let fixture = CliProcessFixture::named("sequence-initialize-input-dry-run");
+    fs::write(fixture.cwd().join("root.yaml"), format!("{INITIALIZED_ROOT}sequence:\n  - {{ name: work, shell: echo NOT_RUN }}\n")).unwrap();
+    let output = fixture.command().args(["sequence", "--goose", "--dry-run", "--json"]).arg(fixture.cwd().join("root.yaml")).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let diagnostics = envelope["diagnostics"].as_array().unwrap();
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic["code"] == "composition.missing_properties"), "{stdout}");
+    assert!(stdout.contains("input `who`"), "{stdout}");
+    assert!(!fixture.audio_spool().exists());
 }
 
 // ============================================================================

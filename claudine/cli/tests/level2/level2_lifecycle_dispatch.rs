@@ -397,10 +397,8 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
     );
 }
 
-/// `--dry-run` fires no lifecycle event and traverses no dynamic proxy route
-/// (`2026-07-13-proxy-with/spec.md`: "Existing dry-run behavior remains
-/// side-effect-free: dry run does not fire lifecycle events and therefore does
-/// not traverse a dynamic proxy route").
+/// `--dry-run` is a passive check: it fires no lifecycle event and traverses
+/// no dynamic proxy route.
 ///
 /// The staged document is a router: every event carries an `append_line` side
 /// effect, `start` list carries a blacklisted `rm` that a live composition
@@ -410,8 +408,9 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
 /// event stack, the preflight-blocked pair, and a proxied target's stack — is
 /// armed against the same `events.log`.
 ///
-/// The run must exit clean having written no marker at all, and the pane must
-/// name the router rather than the hand-off target.
+/// The check must report the router clean, having written no marker at all,
+/// and its preview must be the router's body rather than the hand-off
+/// target's.
 ///
 /// Completion is polled on process exit, not on a marker: the whole point is
 /// that no marker is ever written.
@@ -450,11 +449,12 @@ fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
     let pane = run_compose_in_tmux_with_args(&staged, None, "--dry-run");
 
     // Anti-vacuity: an early abort would also leave `events.log` unwritten, so
-    // first prove the dry run actually rendered the router's composed body.
+    // first prove the check ran to its end and previewed the router's body.
     assert!(
-        pane.contains("ROUTER-BODY"),
-        "the dry run must have rendered the router body (otherwise the \
-         no-side-effect assertions below are vacuous); pane:\n{pane}"
+        pane.contains("Dry run found 0 errors and 0 warnings") && pane.contains("ROUTER-BODY"),
+        "the dry run must have reported the router clean and previewed its \
+         body (otherwise the no-side-effect assertions below are vacuous); \
+         pane:\n{pane}"
     );
 
     let lines = event_lines(&staged);
@@ -469,10 +469,7 @@ fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
     );
     // `events.log` staying empty already rules out traversal — the target's
     // `initialize` stack would have appended `target-initialize`. The pane check
-    // is the user-visible half: dry run renders the document it was given.
-    // (The target's *path* legitimately appears in the rendered frontmatter,
-    // since it is the router's own `proxy:` argument; only its *body* would
-    // mean the target was composed.)
+    // is the user-visible half: the dry run previews the document it was given.
     assert!(
         !pane.contains("TARGET-BODY"),
         "a dry run must report the document it was given, never compose the \

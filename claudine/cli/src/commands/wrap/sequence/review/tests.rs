@@ -90,7 +90,6 @@ fn select_with_model(
             favorite: None,
             environment,
             silent: true,
-            dry_run: false,
         },
     )
 }

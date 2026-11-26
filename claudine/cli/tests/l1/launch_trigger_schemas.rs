@@ -982,10 +982,11 @@ fn no_error_does_not_suppress_a_binding_failure() {
     assert!(!marker.exists(), "{}", result.stderr);
 }
 
-/// The dry run shows the operand as authored and reports it deferred to its
-/// event; nothing is dispatched or launched.
+/// The dry run accepts a deferred operand without binding or dispatching it:
+/// the check exits 0, previews the body, creates no file, and launches
+/// nothing.
 #[test]
-fn dry_run_shows_the_deferred_operand_as_authored() {
+fn dry_run_dispatches_no_deferred_operand() {
     let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-dry-run");
     let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
 
@@ -996,14 +997,10 @@ fn dry_run_shows_the_deferred_operand_as_authored() {
         .output()
         .unwrap();
 
-    let text = normalize(&strip_ansi(&format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )));
-    assert_eq!(output.status.code(), Some(0), "{text}");
-    assert!(text.contains("ensure_file: '{{ target }}'"), "the operand is shown as authored:\n{text}");
-    assert!(text.contains("interpolated at event-time: start"), "{text}");
-    assert!(!fixture.cwd().join("notes.md").exists(), "{text}");
-    assert!(!marker.exists(), "{text}");
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = normalize(&strip_ansi(&String::from_utf8_lossy(&output.stderr)));
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(stdout.trim(), "Body", "{stderr}");
+    assert!(!fixture.cwd().join("notes.md").exists(), "{stderr}");
+    assert!(!marker.exists(), "{stderr}");
 }

@@ -161,7 +161,9 @@ fn a_proxy_target_launches_with_the_tail_exactly_once() {
 
 /// The resumed attempt targets Codex's resume entrypoint and still carries the
 /// authored tail once: repeated switches kept in order, and a user `--json`
-/// neither dropped nor doubled by the transport allowlist.
+/// neither dropped nor doubled by the transport allowlist. `--json` is
+/// Claudine's own switch before the first `--`, so the provider's is written
+/// after it.
 #[test]
 fn a_resume_carries_the_tail_exactly_once() {
     let fixture = CliProcessFixture::named("tail-launch-resume");
@@ -180,8 +182,7 @@ fn a_resume_carries_the_tail_exactly_once() {
     );
     let tail = ["--add-dir", "a", "--add-dir", "a", "--json"];
 
-    let mut args = vec!["compose", file.as_str(), "--codex"];
-    args.extend(tail);
+    let args = ["compose", file.as_str(), "--codex", "--add-dir", "a", "--add-dir", "a", "--", "--json"];
     let (code, _, stderr) = run(&fixture, &args);
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
@@ -266,9 +267,19 @@ fn a_proxy_to_a_provider_that_types_the_tail_differently_fails_before_its_spawn(
 
 // ── Secrets (criteria 9, 28) ──
 
+/// Everything a run displayed: stdout (a dry run's preview) then stderr.
+fn shown(output: &std::process::Output) -> String {
+    strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
 /// A secret-shaped tail reaches the provider unchanged and appears on no
-/// display surface: the notice, dry run, debug traces, `AGENT_PARAMS`, or the
-/// correlated report (whose provider diagnostic echoes it).
+/// display surface: the notice, the dry-run check's report and preview, debug
+/// traces, `AGENT_PARAMS`, or the correlated report (whose provider diagnostic
+/// echoes it).
 #[test]
 fn secrets_reach_the_child_and_no_display_surface() {
     let fixture = CliProcessFixture::named("tail-launch-secrets");
@@ -307,10 +318,11 @@ fn secrets_reach_the_child_and_no_display_surface() {
     assert_eq!(output.status.code(), Some(2), "stderr:\n{rejected}");
     assert_eq!(count(&rejected, "likely caused by the forwarded arguments"), 1, "{rejected}");
     assert!(rejected.contains("unexpected argument '****' found"), "masked, not dropped: {rejected}");
-    // The dry run's "Provider args" row.
+    // The dry-run check: its report (stderr) and its preview (stdout).
     let output = fixture.command().args(with(&["--dry-run"])).output().unwrap();
-    let dry_run = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    assert!(dry_run.contains("Provider args"), "{dry_run}");
+    let dry_run = shown(&output);
+    assert!(output.status.success(), "{dry_run}");
+    assert!(dry_run.contains("Plan body"), "the preview is shown: {dry_run}");
 
     for (surface, text) in [("notice/debug", &stderr), ("correlated", &rejected), ("dry run", &dry_run)] {
         for secret in secrets {
@@ -339,7 +351,9 @@ const FLAG_SEPARATE: &str = "sk-proj-flagseparate0123456789";
 /// assignment value or a long attached value — is masked like the shapes the
 /// sensitive-flag and short-attachment rules cover, on every surface of all
 /// three composition commands and the direct wrapper, while the child gets
-/// the original tokens.
+/// the original tokens. The direct wrapper's dry run prints its masked command
+/// line; a composition command's dry-run check shows no provider arguments at
+/// all.
 mod embedded_credentials_reach_the_child_and_no_display_surface {
     use super::*;
 
@@ -421,17 +435,15 @@ mod embedded_credentials_reach_the_child_and_no_display_surface {
         };
 
         let output = fixture.command().args(with(&["--dry-run"])).output().unwrap();
-        let dry_run = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        let dry_run = shown(&output);
         assert!(output.status.success(), "{command} dry run:\n{dry_run}");
-        // The dry-run table wraps cells anywhere and the direct command line
-        // is shell-quoted, so compare without whitespace, borders, or quotes.
-        let compact: String = dry_run
-            .chars()
-            .filter(|ch| !ch.is_whitespace() && !matches!(ch, '│' | '\''))
-            .collect();
-        let shown_masked = if command == "codex" { "--api-key=****" } else { "--api-key****" };
-        for masked in ["-capi_key=****", "--config=****", "-c****", "--token=****", shown_masked] {
-            assert!(compact.contains(masked), "{command} dry run lacks {masked}:\n{dry_run}");
+        if command == "codex" {
+            // The direct command line wraps anywhere and is shell-quoted, so
+            // compare without whitespace or quotes.
+            let compact: String = dry_run.chars().filter(|ch| !ch.is_whitespace() && *ch != '\'').collect();
+            for masked in ["-capi_key=****", "--config=****", "-c****", "--token=****", "--api-key=****"] {
+                assert!(compact.contains(masked), "{command} dry run lacks {masked}:\n{dry_run}");
+            }
         }
 
         let output = fixture

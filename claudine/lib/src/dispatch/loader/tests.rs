@@ -1013,3 +1013,106 @@ fn tts_object_round_trips_without_materializing_defaults() {
         }
     }
 }
+
+/// The names in `dir`, sorted, so a test can prove a passive load wrote,
+/// renamed, and removed nothing.
+fn listing(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+mod passive {
+    use super::*;
+
+    fn value(config: &ClaudineConfig) -> serde_json::Value {
+        serde_json::to_value(config).unwrap()
+    }
+
+    fn config_dir() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        (dir, config_dir)
+    }
+
+    #[test]
+    fn an_absent_user_file_reads_as_its_defaults_and_is_not_created() {
+        let (_dir, config_dir) = config_dir();
+        let loaded = load_claudine_config_passive(Some(&config_dir.join("config.yaml")), None).unwrap();
+        assert_eq!(value(&loaded.config), value(&ClaudineConfig::default()));
+        assert!(loaded.notes.iter().any(|note| note.contains("does not exist")), "{:?}", loaded.notes);
+        assert!(listing(&config_dir).is_empty());
+    }
+
+    #[test]
+    fn a_yaml_file_reads_as_the_real_load_reads_it() {
+        let (_dir, config_dir) = config_dir();
+        let path = config_dir.join("config.yaml");
+        std::fs::write(&path, "preferred_agent: codex\n").unwrap();
+        let passive = load_claudine_config_passive(Some(&path), None).unwrap();
+        assert_eq!(value(&passive.config), value(&load_claudine_config(Some(&path), None).unwrap()));
+        assert_eq!(passive.config.preferred_agent, Some(Provider::Codex));
+        assert!(passive.notes.is_empty(), "{:?}", passive.notes);
+    }
+
+    #[test]
+    fn a_legacy_only_file_reads_as_its_conversion_and_is_not_converted() {
+        let (_dir, config_dir) = config_dir();
+        std::fs::write(config_dir.join("config.json"), "{ preferred_agent: 'gemini', logging: true, }").unwrap();
+        let loaded = load_claudine_config_passive(Some(&config_dir.join("config.yaml")), None).unwrap();
+        assert_eq!(loaded.config.preferred_agent, Some(Provider::Gemini));
+        assert!(loaded.config.logging);
+        assert!(loaded.notes.iter().any(|note| note.contains("a real run converts it")), "{:?}", loaded.notes);
+        assert_eq!(listing(&config_dir), ["config.json"]);
+    }
+
+    #[test]
+    fn a_retired_legacy_file_reads_as_absent_and_is_not_backed_up() {
+        let (_dir, config_dir) = config_dir();
+        std::fs::write(config_dir.join("config.json"), r#"{"version":"1.0","settings":{},"providers":{}}"#).unwrap();
+        let loaded = load_claudine_config_passive(Some(&config_dir.join("config.yaml")), None).unwrap();
+        assert_eq!(value(&loaded.config), value(&ClaudineConfig::default()));
+        assert!(loaded.notes.iter().any(|note| note.contains("retired")), "{:?}", loaded.notes);
+        assert_eq!(listing(&config_dir), ["config.json"]);
+    }
+
+    #[test]
+    fn a_legacy_file_beside_yaml_is_ignored() {
+        let (_dir, config_dir) = config_dir();
+        let path = config_dir.join("config.yaml");
+        std::fs::write(&path, "preferred_agent: codex\n").unwrap();
+        std::fs::write(config_dir.join("config.json"), "{ preferred_agent: 'gemini' }").unwrap();
+        let loaded = load_claudine_config_passive(Some(&path), None).unwrap();
+        assert_eq!(loaded.config.preferred_agent, Some(Provider::Codex));
+        assert_eq!(listing(&config_dir), ["config.json", "config.yaml"]);
+    }
+
+    #[test]
+    fn an_invalid_file_is_the_located_error_of_the_real_load() {
+        let (_dir, config_dir) = config_dir();
+        let path = config_dir.join("config.yaml");
+        std::fs::write(&path, "preferred_agnt: codex\n").unwrap();
+        let error = load_claudine_config_passive(Some(&path), None).unwrap_err();
+        let ClaudineError::ConfigInvalid { problems } = &error else { panic!("{error:?}") };
+        assert_eq!(problems[0].line, Some(1), "{problems:?}");
+        assert_eq!(problems[0].unknown_key().as_deref(), Some("preferred_agnt"));
+    }
+
+    #[test]
+    fn a_repo_override_applies_and_an_absent_one_is_no_override() {
+        let (dir, config_dir) = config_dir();
+        let path = config_dir.join("config.yaml");
+        std::fs::write(&path, "logging: true\n").unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+        let bare = load_claudine_config_passive(Some(&path), Some(&repo)).unwrap();
+        assert!(bare.config.logging);
+        std::fs::write(repo.join(".claudine/config.yaml"), "canonical_provider: codex\n").unwrap();
+        let merged = load_claudine_config_passive(Some(&path), Some(&repo)).unwrap();
+        assert_eq!(value(&merged.config), value(&load_claudine_config(Some(&path), Some(&repo)).unwrap()));
+    }
+}

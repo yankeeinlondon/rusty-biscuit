@@ -265,7 +265,7 @@ fn run_sequence_inner(
 
     // One TTS pre-warm worker for the whole sequence, shared by every step and
     // task; dropping it on return cancels unfinished preparation.
-    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(false);
     let invocation = crate::request::with_darkmatter_config(claudine::invocation_context::InvocationContext::capture(request)?)
         .with_environment_source(documents)
         .with_prewarm(prewarm.handle());
@@ -374,7 +374,6 @@ fn run_sequence_inner(
             &invocation,
             source_context.file_resolution_context(),
         )),
-        false,
         shared.yolo,
     );
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
@@ -488,6 +487,7 @@ mod tests {
             repo: false,
             dry_run: false,
             dry_run_shell: false,
+            json: false,
             quiet: false,
             silent: true,
             set: None,

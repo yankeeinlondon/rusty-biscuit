@@ -66,15 +66,6 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
                  hook between frontmatter and body",
     },
     AllowedSite {
-        site: "document_check::preview::compose_passively",
-        calls: 1,
-        reason: "the passive document check's preview: one compose under \
-                 `ComposeOptions::with_dry_run()` that runs no command, reads no \
-                 cache, and fires no lifecycle; the canonical composer cannot be \
-                 used because its staged initialize and shell approval are effects \
-                 a dry run must not reach",
-    },
-    AllowedSite {
         site: "composition::prepare::read_selection_hints",
         calls: 1,
         reason: "the shell-free selection read: the same option assembly as the \

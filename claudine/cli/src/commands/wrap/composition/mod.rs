@@ -44,7 +44,6 @@ use super::{
 };
 use crate::log;
 
-pub(crate) mod dry_run;
 pub(crate) mod launch;
 mod pipeline;
 mod preflight;
@@ -60,13 +59,15 @@ pub(crate) use selection::{
     SelectionConfig, load_selection_config, load_selection_config_for_repo,
 };
 pub(crate) use target::{
-    ModelResolveMode, agent_prompt_message, composition_dispatch_context,
+    ModelResolveMode, TargetDecision, TargetInputs, agent_prompt_message, decide_target, composition_dispatch_context,
     eagerly_resolve_target, install_agent_env_for_composition, provider_for_state_non_tty,
     refresh_for_model_validation, resolve_document_model,
     resolve_execution_target, scoped_picker_plan_for_state,
 };
 #[cfg(test)]
-pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
+pub(crate) use target::picker_scope_for_state;
+#[cfg(test)]
+pub(crate) use target::resolve_live_target_with_tty;
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,
     frontmatter_timeout_duration, resolve_single_timeout, resolve_stall_timeout, resolve_timeouts,
@@ -93,10 +94,8 @@ pub(crate) struct SingleCompositionOutcome {
     /// Iteration-level summary signals lifted from the structured stream
     /// for consumption by the `compose --loop` orchestrator.
     ///
-    /// Non-dry-run composition carries the harness loop's terminal-attempt
-    /// structured summary signals when available (the rate-limit trailer or
-    /// watchdog `error_kind`). `None` for the dry-run path, which never
-    /// launches a provider.
+    /// The harness loop's terminal-attempt structured summary signals when
+    /// available (the rate-limit trailer or watchdog `error_kind`).
     pub iteration_signals: Option<IterationSummarySignals>,
     /// Terminal lifecycle signal emitted by the harness loop, if known.
     ///
@@ -110,7 +109,7 @@ pub(crate) struct SingleCompositionOutcome {
     /// invalid-byte policy as every other wrapped execution and stripped of one
     /// trailing transport newline. Terminal status rendering, stderr, lifecycle
     /// messages, and protocol records are never part of it. `None` for a
-    /// dry-run, a `skip`, or a failed run — a failure commits no entry.
+    /// `skip` or a failed run — a failure commits no entry.
     pub final_output: Option<String>,
     /// A proxy handoff this run's lifecycle raised, surfaced to the command
     /// coordinator that owns the document instead of being run inside the
@@ -118,8 +117,8 @@ pub(crate) struct SingleCompositionOutcome {
     ///
     /// Every route arrives here: the document's `initialize`, its `start`,
     /// `success`, `failure`, or `finalize` stack, and a proxied target's own
-    /// `initialize` chain. `None` on every ordinary run. Populated on any live
-    /// (non-dry-run) run that carries a command-owned coordinator ledger:
+    /// `initialize` chain. `None` on every ordinary run. Populated on any run
+    /// that carries a command-owned coordinator ledger:
     /// `compose`/`inline-compose`, each `--loop` iteration, and each `sequence`
     /// step or `prompt:` task, which contains the handoff within its own scope.
     /// The owner re-prepares the target as a fresh document and decides
@@ -143,7 +142,7 @@ pub(crate) struct SingleCompositionOutcome {
     pub stabilized_source: Option<crate::commands::wrap::harness_orch::RetainedLoopSource>,
     /// The preparation the run's last executed attempt installed, which the
     /// owning loop's gate and condition read. `None` when the harness never
-    /// installed one (dry run, a run ended before its provider attempt).
+    /// installed one (a run ended before its provider attempt).
     pub pass_preparation: Option<crate::commands::wrap::harness_orch::LoopPassPreparation>,
 }
 

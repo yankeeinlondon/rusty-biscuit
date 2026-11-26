@@ -380,6 +380,15 @@ fn published_and_registered(prefix: &str) -> CliProcessFixture {
 fn configured_startup_never_reads_the_published_bundle(#[case] args: &[&str]) {
     let fixture = published_and_registered("passive-startup-read");
     std::fs::write(fixture.cwd().join("prompt.md"), "---\nagent: goose\n---\nSay hi.\n").unwrap();
+    // The compose dry-run check fails when the document's provider is not on
+    // `PATH`; it only looks the binary up, so an inert stub is enough.
+    let goose = fixture.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&goose, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&goose, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let before = snapshot(&registrations_dir(fixture.home()));
 
     let stderr = run_passive(&fixture, args);

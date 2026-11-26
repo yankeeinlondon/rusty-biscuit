@@ -121,6 +121,13 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     load_or_create_guardrails_with(repo_root, crate::config::atomic::atomic_write)
 }
 
+/// [`load_or_create_guardrails`] without writing: a missing file reads as the
+/// shipped default and a historical shipped copy is not migrated. For a dry
+/// run, which writes nothing.
+pub(super) fn load_guardrails_passively(repo_root: Option<&Path>) -> String {
+    load_or_create_guardrails_with(repo_root, |_, _| Ok(()))
+}
+
 /// Identify a customized guardrail file that still directs the agent to use
 /// the retired response-harvesting workflow.
 pub(super) fn retired_custom_guardrails_path(

@@ -966,7 +966,9 @@ fn direct_composition_empty_body_returns_composed_body_empty() {
             source_path,
             mode,
             provided_overrides,
+            cause,
         } => {
+            assert_eq!(cause, darkmatter::findings::EmptyBodyCause::Whitespace);
             assert_eq!(source_path, source.resolved_path);
             assert_eq!(mode, CompositionMode::ChainedDocument);
             let keys: std::collections::HashSet<String> =
@@ -999,6 +1001,7 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
     let CompositionError::ComposedBodyEmpty {
         mode,
         provided_overrides,
+        cause,
         ..
     } = err
     else {
@@ -1006,6 +1009,13 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
     };
     assert_eq!(mode, CompositionMode::ChainedDocument);
     assert_eq!(provided_overrides, vec!["spec".to_string()]);
+    // The cause is the proven one: the block left out because `review` was
+    // false, not a guess.
+    let darkmatter::findings::EmptyBodyCause::ExcludedBlocks { blocks } = cause else {
+        panic!("expected excluded blocks, got {cause:?}");
+    };
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].condition, "review");
 }
 
 /// Regression: a `@`-resolved prompt physically lives outside the repo

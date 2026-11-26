@@ -250,22 +250,12 @@ pub(super) fn run_step_task(
 #[allow(clippy::result_large_err)]
 pub(super) fn root_step_guard<'a>(
     run: &SequenceRunContext<'_>,
-    step_name: &str,
     task: &PreflightTask,
     authored: impl IntoIterator<Item = (&'a String, &'a Value)>,
     overrides: &composition::LayeredOverrides,
     runtime_state: &std::sync::Arc<RuntimeState>,
 ) -> Result<bool, CompositionError> {
-    let Some(condition) = &task.when else {
-        return Ok(true);
-    };
-    // A preview shows the guard instead of predicting it.
-    if run.shared.dry_run {
-        use claudine::composition::lifecycle::LifecycleEmitter as _;
-        DefaultLifecycleEmitter.emit_info(
-            &format!("`{step_name}` runs when `{condition}` (not evaluated in a dry run)"),
-            &crate::log::terminal(),
-        );
+    if task.when.is_none() {
         return Ok(true);
     }
     let frontmatter: darkmatter::markdown::compose::SharedFrontmatter =
@@ -728,8 +718,7 @@ impl<'a> WrapperPromptRunner<'a> {
                 document.document_environment(),
             )));
         }
-        // A predicted task with no planned target (a dry run's "no provider")
-        // stays without one until its document names an `agent`.
+        // A predicted task with no planned target stays without one until its document names an `agent`.
         if explicit || (!at_launch && !composed.names_agent()) {
             return Ok(planned);
         }
@@ -820,8 +809,6 @@ fn identity_env(
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
-    fn is_dry_run(&self) -> bool { self.run.shared.dry_run }
-    fn dry_run_shell(&self) -> bool { self.run.shared.dry_run_shell }
     fn loop_cap_override(&self, source: &std::path::Path) -> Result<Option<usize>, CompositionError> {
         // The flag outranks the variable, which is read only when the flag is
         // absent, so a malformed value fails only a loop that would use it.
@@ -870,7 +857,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             super::super::build_harness_shell_options_with_cache(
                 claudine::harness::CapturedPermissions::for_source(context.invocation, context.file_resolution_context),
                 Some(Arc::clone(&context.approval_cache)),
-            ), context.shared.dry_run, context.shared.yolo,
+            ), context.shared.yolo,
         );
         let mut approval_options = approval_options;
         approval_options.closed_approvals = Some(self.run.approved.clone());
@@ -1086,7 +1073,6 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             operation: request.operation.clone().or_else(|| shared.operation.clone()),
             sandbox: shared.sandbox,
             repo: shared.repo,
-            dry_run: shared.dry_run,
             mcp: shared.mcp,
             mcp_use: shared.mcp_use.clone(),
             strict: shared.strict,

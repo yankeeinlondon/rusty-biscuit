@@ -3,9 +3,11 @@
 //!
 //! A dry run reports every problem it can observe without mutating anything
 //! (see `claudine/docs/cli/sequence.md#dry-run`): it reads documents and the
-//! read-only `PATH` snapshot, composes each prompt with Darkmatter's dry-run
-//! options (no command runs, nothing is cached), and records each failure as a
-//! finding in one [`FindingSink`] instead of stopping. Nothing here reaches the
+//! read-only `PATH` snapshot, prepares each prompt through the canonical
+//! preparer in its passive mode (no command runs, nothing is cached, nothing
+//! asks; what needs one of those is left as written and reported as not
+//! checked), and records each failure as a finding in one [`FindingSink`]
+//! instead of stopping. Nothing here reaches the
 //! standard error report: the human report goes to stderr, previews to stdout,
 //! and `--json` replaces both with one envelope on stdout.
 //!
@@ -23,13 +25,10 @@ use claudine::invocation_context::InvocationContext;
 use claudine::provider::{Provider, provider_info};
 use darkmatter::findings::reference::{DocumentConstruct, ListingMemo, missing_document};
 use darkmatter::findings::{
-    Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, EmptyBodyCause, FindingId, FindingReport, FindingSink, HumanLayout,
+    Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, FindingId, FindingReport, FindingSink, HumanLayout,
     NOT_CHECKED_CODE, Severity, Subject, SubjectId, Trail,
 };
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{CacheAccessMode, ContextRequirements};
-use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
-use darkmatter::markdown::MarkdownError;
+use darkmatter::markdown::compose::ContextRequirements;
 use serde_json::{Map, Value};
 
 use super::compose::SharedComposeArgs;
@@ -64,51 +63,9 @@ pub(crate) const INVALID_ARGUMENTS: &str = "composition.invalid_arguments";
 /// An error no projector classifies: a defect in Claudine.
 pub(crate) const INTERNAL_BUG: &str = "internal.bug";
 
-/// Every code this module emits itself, beside the Darkmatter finding codes
-/// and the projected codes of the errors it catches.
-#[cfg(test)]
-pub(crate) const CHECK_CODES: &[&str] = &[
-    SELECTION_KEY_AS_DATA,
-    NO_EXECUTABLE,
-    MULTIPLE_EXECUTABLES,
-    SEQUENCE_SHAPE,
-    PROVIDER_UNRESOLVED,
-    PROVIDER_UNKNOWN,
-    PROVIDER_NOT_INSTALLED,
-    MODEL_REQUIRED,
-    INVALID_ARGUMENTS,
-    INTERNAL_BUG,
-];
-
 const BUG_HINT: &str = "this is a defect in Claudine; please report it with the command you ran";
 
-/// Whether the passive check handles a document `--dry-run`.
-///
-/// Not yet in production: `--dry-run` keeps the task-runner preview until the
-/// check walks the task tree through the library's preflight loader, because
-/// today's preview validates dynamic sources, nested groups, task files, and
-/// catalog entries that this walker reports as not checked. A
-/// `test-fixtures` build turns it on with `CLAUDINE_TEST_PASSIVE_DRY_RUN`:
-/// `1` for the human report, `json` for the JSON report the planned `--json`
-/// flag will select.
-pub(crate) fn enabled() -> Option<Format> {
-    #[cfg(feature = "test-fixtures")]
-    {
-        match std::env::var_os("CLAUDINE_TEST_PASSIVE_DRY_RUN")?.to_str()? {
-            "1" => Some(Format::Human),
-            "json" => Some(Format::Json),
-            _ => None,
-        }
-    }
-    #[cfg(not(feature = "test-fixtures"))]
-    {
-        None
-    }
-}
-
 /// Which report the passive check writes.
-// Only the `test-fixtures` seam selects a format until `--dry-run` routes here.
-#[cfg_attr(not(feature = "test-fixtures"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Format {
     /// The human report on stderr and the previews on stdout.
@@ -120,6 +77,17 @@ pub(crate) enum Format {
 /// The usage error for `--dry-run-shell` under the passive check, which runs
 /// no command.
 pub(crate) const DRY_RUN_SHELL_REMOVED: &str = "error: `--dry-run-shell` was removed. Dry runs skip commands.\n  hint: use `--dry-run` to check and preview, or run the command without it";
+
+/// Whether `command` is a document command spelling the removed
+/// `--dry-run-shell`, with or without `--dry-run`.
+pub(crate) fn asks_for_dry_run_shell(command: &Commands) -> bool {
+    match command {
+        Commands::Compose(args) => args.shared.dry_run_shell,
+        Commands::InlineCompose(args) => args.shared.dry_run_shell,
+        Commands::Sequence(args) => args.shared.dry_run_shell,
+        _ => false,
+    }
+}
 
 /// Which document command is being rehearsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,11 +110,8 @@ pub(crate) fn dry_run_request(command: &Commands) -> Option<(Mode, &SharedCompos
 
 /// Runs the dry run and writes its output; returns the exit status: `2` when
 /// any finding is an error or a warning, else `0`.
-pub(crate) fn run(mode: Mode, format: Format, shared: &SharedComposeArgs, args: &[String]) -> i32 {
-    if shared.dry_run_shell {
-        crate::log::message(DRY_RUN_SHELL_REMOVED);
-        return crate::args::EXIT_USAGE;
-    }
+pub(crate) fn run(mode: Mode, shared: &SharedComposeArgs, args: &[String]) -> i32 {
+    let format = if shared.json { Format::Json } else { Format::Human };
     let stderr_is_tty = std::io::stderr().is_terminal();
     let mut check = Check::new(mode, shared.clone(), stderr_is_tty);
     check.run(args);
@@ -177,10 +142,21 @@ struct PromptTask<'a> {
     subject: SubjectId,
     trail: Trail,
     prompt: &'a ResolvedCompositionSource,
-    /// The task's `with:` overlay, empty outside a sequence.
-    with: Map<String, Value>,
+    /// The `with:` values known before the run, evaluated as the task's turn
+    /// will see them.
+    with_evaluated: Map<String, Value>,
+    /// The `with:` keys known only at the task's turn.
+    with_late: Vec<String>,
     /// The task's step-level `agent:` as written, which it reads as data.
     step_agent: Option<String>,
+    /// Where its provider hints come from.
+    selection: selection::TaskHints,
+    /// The label provider errors name the task by.
+    label: String,
+    /// The document that wrote the task.
+    task_path: PathBuf,
+    /// The `seq` binding a sequence step's document reads at its turn.
+    seq: Option<Value>,
 }
 
 struct Check {
@@ -196,10 +172,20 @@ struct Check {
     root: Option<ResolvedCompositionSource>,
     setters: Map<String, Value>,
     invocation: Option<InvocationContext>,
+    /// The user configuration, read passively; `None` when it is invalid
+    /// (the finding is recorded) or not yet read.
+    config: Option<claudine::config::claudine_config::ClaudineConfig>,
+    selection_env: Option<selection::SelectionEnv>,
     previews: Vec<String>,
     tasks: usize,
     /// Each walked task's subject, by its identity.
     task_subjects: std::collections::HashMap<String, SubjectId>,
+    /// Each `sequence:` task's sequence document and frontmatter, by its
+    /// identity.
+    sequence_documents: std::collections::HashMap<String, (PathBuf, Map<String, Value>)>,
+    /// The `(file, property)` of each prompt task whose owner is missing an
+    /// input.
+    waiting_prompts: std::collections::HashSet<(PathBuf, String)>,
 }
 
 impl Check {
@@ -215,9 +201,13 @@ impl Check {
             root: None,
             setters: Map::new(),
             invocation: None,
+            config: None,
+            selection_env: None,
             previews: Vec::new(),
             tasks: 0,
             task_subjects: std::collections::HashMap::new(),
+            sequence_documents: std::collections::HashMap::new(),
+            waiting_prompts: std::collections::HashSet::new(),
         }
     }
 
@@ -283,6 +273,7 @@ impl Check {
         };
         let context = invocation.launch_file_resolution_context().clone();
         self.launch_dir = Some(invocation.launch_cwd().to_path_buf());
+        self.read_config(&invocation);
         self.invocation = Some(invocation);
         let Some(root) = self.load_root(&file, &context) else { return };
         // Arguments after the file are owned against the document as
@@ -373,14 +364,19 @@ impl Check {
 
     /// Records `error` as findings for `subject`: through Darkmatter's
     /// projection, then Claudine's diagnostic code, else as `internal.bug`.
+    /// Darkmatter's catch-all `dm.compose.failure` record means it classified
+    /// nothing, so Claudine's code is preferred over it. A file-reference
+    /// failure carries its class (`failure`), as a real run's `failure:` row.
     fn push_error(
         &mut self,
         subject: SubjectId,
         error: &(dyn std::error::Error + 'static),
         trail: Trail,
     ) -> Option<FindingId> {
-        let projected = darkmatter::markdown::compose::report_diagnostics::error_diagnostics(error);
-        if !projected.is_empty() {
+        use darkmatter::markdown::compose::report_diagnostics::{COMPOSE_FAILURE_CODE, error_diagnostics};
+        let projected = error_diagnostics(error);
+        let unclassified = matches!(projected.as_slice(), [only] if only.code == COMPOSE_FAILURE_CODE);
+        if !projected.is_empty() && !(unclassified && claudine::diagnostics::as_diagnostic(error).is_some()) {
             let mut first = None;
             for diagnostic in projected {
                 let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail.clone()) };
@@ -389,10 +385,16 @@ impl Check {
             }
             return first;
         }
-        let diagnostic = match claudine::diagnostics::as_diagnostic(error) {
+        let mut diagnostic = match claudine::diagnostics::as_diagnostic(error) {
             Some(known) => Diagnostic::projected(known.code(), Severity::Error, error.to_string(), None),
             None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
         };
+        if let Some(failure) = error.downcast_ref::<CompositionError>().and_then(CompositionError::resolution_failure) {
+            diagnostic.reference_details = Some(darkmatter::findings::ReferenceDetails {
+                failure: Some(darkmatter::markdown::errors::resolution_failure_name(failure).to_string()),
+                ..Default::default()
+            });
+        }
         let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail) };
         Some(self.sink.push(subject, diagnostic))
     }
@@ -441,17 +443,18 @@ impl Check {
         self.tasks = 1;
         let subject = self.root_subject();
         let root = self.root_ref().clone();
-        // The document's lifecycle and its literals, which its preparation
-        // refuses before any provider starts.
-        let frontmatter = Value::Object(
-            root.markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
-        );
-        if let Err(error) = composition::lifecycle::parse_lifecycle_config(&frontmatter, &root.resolved_path) {
-            self.push_error(subject, &error, Trail::default());
-        } else if let Err(error) = composition::validate_lifecycle_literals(&root.markdown, &root.resolved_path) {
-            self.push_error(subject, &error, Trail::default());
-        }
-        let task = PromptTask { subject, trail: Trail::default(), prompt: &root, with: Map::new(), step_agent: None };
+        let task = PromptTask {
+            subject,
+            trail: Trail::default(),
+            prompt: &root,
+            with_evaluated: Map::new(),
+            with_late: Vec::new(),
+            step_agent: None,
+            selection: selection::TaskHints::Document,
+            label: self.root_label(),
+            task_path: root.resolved_path.clone(),
+            seq: None,
+        };
         self.check_prompt_task(&task);
     }
 
@@ -464,9 +467,34 @@ impl Check {
     /// The provider and model checks of one prompt task.
     fn check_selection(&mut self, task: &PromptTask<'_>) {
         match self.select_provider(task) {
-            Some(provider) => self.check_model(task, provider),
+            Some(target) => self.check_model(task, &target),
             None => {
                 self.sink.not_checked(task.subject, "model requirement", "no provider", None);
+            }
+        }
+    }
+
+    /// Reads the user configuration passively (nothing is created,
+    /// converted, or backed up), recording an invalid one as a root finding.
+    /// Its notes (a missing file read as its defaults, a legacy file read as
+    /// its conversion) are context, not findings.
+    fn read_config(&mut self, invocation: &InvocationContext) {
+        let repository = invocation.launch_repository();
+        match claudine::dispatch::loader::load_claudine_config_passive(None, repository.repo_root()) {
+            Ok(loaded) => self.config = Some(loaded.config),
+            Err(error) => {
+                let subject = self.root_subject();
+                let source = config_source(&error);
+                let finding = match claudine::diagnostics::as_diagnostic(&error) {
+                    Some(known) => Diagnostic::actionable(
+                        known.code(),
+                        Severity::Error,
+                        error.to_string(),
+                        "fix the configuration file; a real run refuses it before it starts",
+                    ),
+                    None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
+                };
+                self.sink.push(subject, finding.with_source(source));
             }
         }
     }
@@ -485,6 +513,23 @@ fn frontmatter_of(path: &Path, text: &str) -> (String, usize) {
     };
     let end = rest.find("\n---").map_or(rest.len(), |index| index + 1);
     (rest[..end].to_string(), 2)
+}
+
+/// The first located problem of a configuration error, else its file.
+fn config_source(error: &claudine::error::ClaudineError) -> DiagnosticSource {
+    use claudine::error::ClaudineError;
+    match error {
+        ClaudineError::ConfigInvalid { problems } | ClaudineError::ConfigConversion { problems } => {
+            match problems.first() {
+                Some(problem) => match problem.line {
+                    Some(line) => DiagnosticSource::at(problem.file.clone(), line, problem.column.unwrap_or(1)),
+                    None => DiagnosticSource::file_only(problem.file.clone()),
+                },
+                None => DiagnosticSource::file_only(None),
+            }
+        }
+        _ => DiagnosticSource::file_only(None),
+    }
 }
 
 fn file_name(path: &Path) -> String {

@@ -40,32 +40,39 @@ use claudine::provider::Provider;
 use serde_json::{Map, Value};
 
 use super::super::composition::{ModelResolveMode, resolve_document_model};
+use super::super::selection_trace::{self, LinkState, SelectionTrace};
 
 /// One provider-launching unit of the graph: a `prompt:` task, or a step
 /// that composes its sequence document's body.
 #[derive(Debug, Clone)]
-pub(super) struct SelectionSite {
-    pub(super) identity: TaskIdentity,
+pub(crate) struct SelectionSite {
+    pub(crate) identity: TaskIdentity,
     /// The zero-based root step the site belongs to, which its review row is
     /// labeled with.
-    pub(super) step: usize,
+    pub(crate) step: usize,
     /// The row label: the task's name, or its generated label.
-    pub(super) name: String,
+    pub(crate) name: String,
     /// The label diagnostics locate the task with.
-    pub(super) label: String,
+    pub(crate) label: String,
     /// The document that authored the task.
-    pub(super) task_path: PathBuf,
+    pub(crate) task_path: PathBuf,
+    /// The prompt document a `prompt:` task composes.
+    pub(crate) prompt: Option<PathBuf>,
     /// The enclosing containers, outermost first.
-    pub(super) containers: Vec<String>,
-    pub(super) own: OwnHints,
+    pub(crate) containers: Vec<String>,
+    pub(crate) own: OwnHints,
     /// Enclosing sequence documents' hints, nearest first, each with the
     /// document that wrote it.
-    pub(super) enclosing: Vec<(PathBuf, EffectiveSelectionHints)>,
+    pub(crate) enclosing: Vec<(PathBuf, EffectiveSelectionHints)>,
+    /// Every enclosing sequence document, nearest first, whether or not it
+    /// writes an `agent`: the fallback reads each in turn, and the selection
+    /// record names each one it read.
+    pub(crate) consulted: Vec<PathBuf>,
 }
 
 /// Where a site's own `agent` comes from.
 #[derive(Debug, Clone)]
-pub(super) enum OwnHints {
+pub(crate) enum OwnHints {
     /// A `prompt:` task's prediction.
     Task(ProviderPrediction),
     /// A body step composes its sequence document, so that document's hints
@@ -80,7 +87,7 @@ pub(super) enum OwnHints {
 
 /// How a task's provider is decided.
 #[derive(Debug, Clone)]
-pub(super) enum TaskTarget {
+pub(crate) enum TaskTarget {
     /// The task's own provider, or the one `--<provider>` pins.
     Own(ResolvedExecutionTarget),
     /// No provider of its own: an enclosing document's, or the review choice.
@@ -102,7 +109,7 @@ pub(super) enum TaskTarget {
 
 impl TaskTarget {
     /// The target the task prepares under, before its turn decides anything.
-    pub(super) fn planned(&self) -> Option<&ResolvedExecutionTarget> {
+    pub(crate) fn planned(&self) -> Option<&ResolvedExecutionTarget> {
         match self {
             Self::Own(target) | Self::Fallback(target) => Some(target),
             Self::AtLaunch(fallback) => fallback.as_ref(),
@@ -113,17 +120,17 @@ impl TaskTarget {
 
 /// One site and how its provider is decided.
 #[derive(Debug, Clone)]
-pub(super) struct TaskSelection {
-    pub(super) site: SelectionSite,
-    pub(super) target: TaskTarget,
+pub(crate) struct TaskSelection {
+    pub(crate) site: SelectionSite,
+    pub(crate) target: TaskTarget,
     /// The hints its model is re-selected from when its document captures
     /// its own environment.
-    pub(super) hints: EffectiveSelectionHints,
+    pub(crate) hints: EffectiveSelectionHints,
 }
 
 /// Every task's selection, keyed by its graph identity.
 #[derive(Debug, Clone, Default)]
-pub(super) struct TaskSelections {
+pub(crate) struct TaskSelections {
     selections: Vec<TaskSelection>,
     index: HashMap<TaskIdentity, usize>,
 }
@@ -138,16 +145,16 @@ impl TaskSelections {
         Self { selections, index }
     }
 
-    pub(super) fn get(&self, identity: &TaskIdentity) -> Option<&TaskSelection> {
+    pub(crate) fn get(&self, identity: &TaskIdentity) -> Option<&TaskSelection> {
         self.index.get(identity).map(|position| &self.selections[*position])
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = &TaskSelection> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &TaskSelection> {
         self.selections.iter()
     }
 
     /// The first site no rule resolved.
-    pub(super) fn first_unresolved(&self) -> Option<&TaskSelection> {
+    pub(crate) fn first_unresolved(&self) -> Option<&TaskSelection> {
         self.selections
             .iter()
             .find(|selection| matches!(selection.target, TaskTarget::Unresolved { .. }))
@@ -155,7 +162,7 @@ impl TaskSelections {
 
     /// Replace each reviewed site's target with the choice made for it: a
     /// fallback, never an authored `agent`.
-    pub(super) fn apply_review(&mut self, reviewed: Vec<(TaskIdentity, ResolvedExecutionTarget)>) {
+    pub(crate) fn apply_review(&mut self, reviewed: Vec<(TaskIdentity, ResolvedExecutionTarget)>) {
         for (identity, target) in reviewed {
             if let Some(position) = self.index.get(&identity) {
                 self.selections[*position].target = TaskTarget::Fallback(target);
@@ -166,29 +173,27 @@ impl TaskSelections {
     /// The planned target of root step `index`, for the step's own
     /// composition: its body site's, or its task's when the task is a
     /// `prompt:` task. A container step plans per child.
-    pub(super) fn root_target(&self, index: usize) -> Option<ResolvedExecutionTarget> {
+    pub(crate) fn root_target(&self, index: usize) -> Option<ResolvedExecutionTarget> {
         self.get(&TaskIdentity::root(index))
             .and_then(|selection| selection.target.planned().cloned())
     }
 }
 
 /// What resolving a hint reads.
-pub(super) struct SelectionInputs<'a> {
-    pub(super) snapshot: &'a InstalledProviderSnapshot,
-    pub(super) catalog: &'a ModelCatalogService,
-    pub(super) cli_model: Option<&'a str>,
-    pub(super) explicit_provider: Option<Provider>,
-    pub(super) favorite: Option<Provider>,
-    pub(super) environment: &'a DocumentEnvironment,
-    pub(super) silent: bool,
-    /// A preview renders an unusable hint instead of failing on it.
-    pub(super) dry_run: bool,
+pub(crate) struct SelectionInputs<'a> {
+    pub(crate) snapshot: &'a InstalledProviderSnapshot,
+    pub(crate) catalog: &'a ModelCatalogService,
+    pub(crate) cli_model: Option<&'a str>,
+    pub(crate) explicit_provider: Option<Provider>,
+    pub(crate) favorite: Option<Provider>,
+    pub(crate) environment: &'a DocumentEnvironment,
+    pub(crate) silent: bool,
 }
 
 /// Every provider-launching site of `graph`, in launch order. `root_hints`
 /// are the sequence document's hints with the caller's `--set` applied;
 /// `caller_sets_agent` is whether that `--set` names `agent`.
-pub(super) fn collect_sites(
+pub(crate) fn collect_sites(
     graph: &PreflightGraph,
     plan: &composition::SequencePlan,
     root_path: &Path,
@@ -205,12 +210,15 @@ pub(super) fn collect_sites(
                 name: plan.steps.get(index).map_or_else(|| step.name.clone(), |s| s.name.clone()),
                 label: format!("step {} (`{}`)", index + 1, step.id),
                 task_path: root_path.to_path_buf(),
+                prompt: None,
                 containers: Vec::new(),
                 own: OwnHints::Body(root_document.clone()),
                 enclosing: Vec::new(),
+                consulted: Vec::new(),
             }),
             Some(task) => {
-                visit(task, index, &step.name, &[], root_document.as_slice(), caller_sets_agent, &mut sites);
+                let root = [root_path.to_path_buf()];
+                visit(task, index, &step.name, &[], (root_document.as_slice(), &root), caller_sets_agent, &mut sites);
             }
         }
     }
@@ -218,19 +226,21 @@ pub(super) fn collect_sites(
 }
 
 /// `step_name` names a task that sits directly in a sequence step; a group
-/// leg is named by its own `name:`.
+/// leg is named by its own `name:`. `outer` is the enclosing documents'
+/// hints that name an `agent`, and every enclosing document, nearest first.
 fn visit(
     task: &PreflightTask,
     root_step: usize,
     step_name: &str,
     containers: &[String],
-    enclosing: &[(PathBuf, EffectiveSelectionHints)],
+    outer: (&[(PathBuf, EffectiveSelectionHints)], &[PathBuf]),
     caller_sets_agent: bool,
     sites: &mut Vec<SelectionSite>,
 ) {
     let name = task.name.clone().unwrap_or_else(|| step_name.to_string());
+    let (enclosing, consulted) = outer;
     match &task.action {
-        PreflightAction::Prompt { .. } => {
+        PreflightAction::Prompt { path, .. } => {
             let Some(prediction) = &task.provider else { return };
             sites.push(SelectionSite {
                 identity: task.identity.clone(),
@@ -238,9 +248,11 @@ fn visit(
                 name,
                 label: task.label.clone(),
                 task_path: task.origin_path.clone(),
+                prompt: Some(path.clone()),
                 containers: containers.to_vec(),
                 own: OwnHints::Task(prediction.clone()),
                 enclosing: enclosing.to_vec(),
+                consulted: consulted.to_vec(),
             });
         }
         PreflightAction::Sequence(sequence) => {
@@ -261,6 +273,13 @@ fn visit(
                     .is_some_and(Vec::is_empty);
             let inner: Vec<(PathBuf, EffectiveSelectionHints)> =
                 own.into_iter().chain(enclosing.iter().cloned()).collect();
+            let inner_consulted: Vec<PathBuf> = sequence
+                .frontmatter
+                .is_some()
+                .then(|| sequence.origin_path.clone())
+                .into_iter()
+                .chain(consulted.iter().cloned())
+                .collect();
             let mut nested = containers.to_vec();
             nested.push(format!("sequence `{name}`"));
             for (index, step) in sequence.steps.iter().enumerate() {
@@ -272,6 +291,7 @@ fn visit(
                         name: step.name.clone(),
                         label: format!("{} → {}", task.label, step.name),
                         task_path: sequence.origin_path.clone(),
+                        prompt: None,
                         containers: nested.clone(),
                         own: if empty_agent_list {
                             OwnHints::BodyEmptyAgentList(sequence.origin_path.clone())
@@ -279,8 +299,11 @@ fn visit(
                             OwnHints::Body(inner.first().cloned())
                         },
                         enclosing: Vec::new(),
+                        consulted: Vec::new(),
                     }),
-                    Some(child) => visit(child, root_step, &step.name, &nested, &inner, caller_sets_agent, sites),
+                    Some(child) => {
+                        visit(child, root_step, &step.name, &nested, (&inner, &inner_consulted), caller_sets_agent, sites);
+                    }
                 }
             }
         }
@@ -288,7 +311,7 @@ fn visit(
             let mut nested = containers.to_vec();
             nested.push(format!("group `{}`", group.name));
             for leg in &group.tasks {
-                visit(leg, root_step, &leg.label, &nested, enclosing, caller_sets_agent, sites);
+                visit(leg, root_step, &leg.label, &nested, outer, caller_sets_agent, sites);
             }
         }
         PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
@@ -311,17 +334,30 @@ fn visit(
 /// source decides its key. The other failures stand under any override: the
 /// task's prompt still evaluates the hint when it composes.
 #[allow(clippy::result_large_err)]
-pub(super) fn select(
+pub(crate) fn select(
     sites: Vec<SelectionSite>,
     inputs: &SelectionInputs<'_>,
 ) -> Result<TaskSelections, CompositionError> {
     let mut warned: BTreeSet<Provider> = BTreeSet::new();
     let mut selections = Vec::with_capacity(sites.len());
     for site in sites {
-        let (target, hints) = select_one(&site, inputs, &mut warned)?;
+        let (target, hints) = select_one(&site, inputs, &mut warned, &mut SelectionTrace::default())?;
         selections.push(TaskSelection { site, target, hints });
     }
     Ok(TaskSelections::new(selections))
+}
+
+/// One site's selection exactly as [`select`] decides it, with the sources
+/// it consulted, for a dry run that reports each site's outcome (a failure
+/// included) instead of stopping at the first.
+#[allow(clippy::result_large_err)]
+pub(crate) fn select_traced(
+    site: &SelectionSite,
+    inputs: &SelectionInputs<'_>,
+) -> (Result<TaskTarget, CompositionError>, SelectionTrace) {
+    let mut trace = SelectionTrace::default();
+    let result = select_one(site, inputs, &mut BTreeSet::new(), &mut trace).map(|(target, _)| target);
+    (result, trace)
 }
 
 #[allow(clippy::result_large_err)]
@@ -329,6 +365,7 @@ fn select_one(
     site: &SelectionSite,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
+    trace: &mut SelectionTrace,
 ) -> Result<(TaskTarget, EffectiveSelectionHints), CompositionError> {
     let mut own = own_hints(site)?;
     // Provider and model precedence apply separately: a circular hint blocks
@@ -339,7 +376,7 @@ fn select_one(
         return Err(circular.error(site));
     }
     let circular_model = own.circular_model.take();
-    let (target, hints) = select_target(site, own, inputs, warned)?;
+    let (target, hints) = select_target(site, own, inputs, warned, trace)?;
     if let Some(circular) = circular_model
         && !model_decided_above_hints(&target, inputs)
     {
@@ -372,14 +409,21 @@ fn select_target(
     own: OwnSelection,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
+    trace: &mut SelectionTrace,
 ) -> Result<(TaskTarget, EffectiveSelectionHints), CompositionError> {
     if let Some(provider) = inputs.explicit_provider {
+        trace.push("--provider flag", LinkState::Chose(provider.as_slug().to_string()));
         let target = target_for(provider, ProviderResolutionReason::ExplicitFlag, &own.hints, inputs, warned);
         return Ok((TaskTarget::Own(target), own.hints));
     }
+    trace.push("--provider flag", LinkState::NotGiven);
+    let decisive = trace_own_layers(site, trace);
     match own.class {
         TaskProviderClass::Predicted => {
             let state = composition::classify_agent_resolution(&own.hints, inputs.snapshot);
+            if let Some((source, value)) = decisive {
+                trace.push(source, selection_trace::classified(&value, &state));
+            }
             if let Some(provider) = auto_selected(&state) {
                 let reason = provider_reason(&own.hints);
                 let target = target_for(provider, reason, &own.hints, inputs, warned);
@@ -387,10 +431,9 @@ fn select_target(
             }
             // A body step's hints are its sequence document's: an unusable
             // `agent` there is the document's to review or to fail with, as it
-            // is for a document composed directly. So is an ambiguous list,
-            // and every hint a preview only renders.
+            // is for a document composed directly. So is an ambiguous list.
             let body = matches!(site.own, OwnHints::Body(_));
-            if body || inputs.dry_run || matches!(state, AgentResolutionState::ListMultipleInstalled { .. }) {
+            if body || matches!(state, AgentResolutionState::ListMultipleInstalled { .. }) {
                 let plan = picker_plan(&state, &own.hints, inputs);
                 return Ok((TaskTarget::Unresolved { state, plan, own_hint: !body }, own.hints));
             }
@@ -400,22 +443,80 @@ fn select_target(
             }))
         }
         TaskProviderClass::DecidedAtLaunch => {
-            let fallback = enclosing_target(site, &own.hints, inputs, warned);
+            if let Some((source, value)) = decisive {
+                trace.push(source, LinkState::AtLaunch(selection_trace::hint_text(&value)));
+            }
+            let fallback = enclosing_target(site, &own.hints, inputs, warned, trace);
             Ok((TaskTarget::AtLaunch(fallback.map(|(target, _)| target)), own.hints))
         }
-        TaskProviderClass::Missing => match enclosing_target(site, &own.hints, inputs, warned) {
-            Some((target, hints)) => Ok((TaskTarget::Fallback(target), hints)),
-            None => {
-                let state = site
-                    .enclosing
-                    .first()
-                    .map_or(AgentResolutionState::NoAgent, |(_, hints)| {
-                        composition::classify_agent_resolution(hints, inputs.snapshot)
-                    });
-                let plan = picker_plan(&state, &own.hints, inputs);
-                Ok((TaskTarget::Unresolved { state, plan, own_hint: false }, own.hints))
+        TaskProviderClass::Missing => {
+            if let Some((source, value)) = decisive {
+                trace.push(source, LinkState::Unusable { value: selection_trace::hint_text(&value), why: "names no provider".into() });
             }
-        },
+            match enclosing_target(site, &own.hints, inputs, warned, trace) {
+                Some((target, hints)) => Ok((TaskTarget::Fallback(target), hints)),
+                None => {
+                    let state = site
+                        .enclosing
+                        .first()
+                        .map_or(AgentResolutionState::NoAgent, |(_, hints)| {
+                            composition::classify_agent_resolution(hints, inputs.snapshot)
+                        });
+                    let plan = picker_plan(&state, &own.hints, inputs);
+                    Ok((TaskTarget::Unresolved { state, plan, own_hint: false }, own.hints))
+                }
+            }
+        }
+    }
+}
+
+/// Records each of `site`'s own layers above the one that writes its
+/// `agent` as not set, and returns that one's source and value for the
+/// caller to classify; `None` when no own layer writes it. A task's layers
+/// are, highest first, the caller's setter, its `with:`, and its prompt's
+/// frontmatter; a body step's only layer is its document's frontmatter.
+fn trace_own_layers(site: &SelectionSite, trace: &mut SelectionTrace) -> Option<(String, Value)> {
+    let file = |path: &Path| path.file_name().map_or_else(
+        || biscuit_file::to_forward_slash_string(path),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    match &site.own {
+        OwnHints::Task(prediction) => {
+            use providers::HintLayer;
+            let winner = state_source(&prediction.agent).map(|(source, value)| (source.layer, value));
+            let prompt = site.prompt.as_deref().map_or_else(|| "prompt".to_string(), file);
+            let layers = [
+                (HintLayer::CallerSetter, "agent= setter".to_string(), LinkState::NotGiven),
+                (HintLayer::With, "with.agent".to_string(), LinkState::NotSet),
+                (HintLayer::Document, format!("{prompt} frontmatter agent"), LinkState::NotSet),
+            ];
+            for (layer, source, unset) in layers {
+                match &winner {
+                    Some((chosen, value)) if *chosen == layer => return Some((source, value.clone())),
+                    _ => trace.push(source, unset),
+                }
+            }
+            None
+        }
+        OwnHints::Body(Some((path, hints))) => {
+            Some((format!("{} agent", file(path)), selection_trace::hints_agent_value(hints)))
+        }
+        OwnHints::Body(None) | OwnHints::BodyEmptyAgentList(_) => {
+            trace.push(format!("{} agent", file(&site.task_path)), LinkState::NotSet);
+            None
+        }
+    }
+}
+
+/// The source and value of a hint state that wrote one.
+fn state_source(state: &HintState) -> Option<(&providers::HintSource, Value)> {
+    match state {
+        HintState::Absent => None,
+        HintState::Static { value, source } => Some((source, value.clone())),
+        HintState::DecidedAtLaunch { source, .. } | HintState::Circular { source, .. } | HintState::Failed { source, .. } => {
+            Some((source, Value::String("{{ … }}".into())))
+        }
+        HintState::EmptyAgentList { source } => Some((source, Value::Array(Vec::new()))),
     }
 }
 
@@ -542,7 +643,7 @@ fn state_location(state: &HintState) -> Option<(PathBuf, String)> {
 
 /// The typed failure for a task whose `agent`, decided at launch, selects no
 /// provider when its document is prepared.
-pub(super) fn launch_error(selection: &TaskSelection, problem: SequenceTaskProviderProblem) -> CompositionError {
+pub(crate) fn launch_error(selection: &TaskSelection, problem: SequenceTaskProviderProblem) -> CompositionError {
     let (hint_path, property) = match &selection.site.own {
         OwnHints::Task(prediction) => hint_location(prediction, &selection.site),
         OwnHints::Body(_) | OwnHints::BodyEmptyAgentList(_) => (selection.site.task_path.clone(), "agent".into()),
@@ -573,9 +674,19 @@ fn enclosing_target(
     own: &EffectiveSelectionHints,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
+    trace: &mut SelectionTrace,
 ) -> Option<(ResolvedExecutionTarget, EffectiveSelectionHints)> {
-    site.enclosing.iter().find_map(|(_, document)| {
+    site.consulted.iter().find_map(|path| {
+        let source = format!(
+            "{} agent",
+            path.file_name().map_or_else(|| biscuit_file::to_forward_slash_string(path), |name| name.to_string_lossy().into_owned())
+        );
+        let Some((_, document)) = site.enclosing.iter().find(|(written, _)| written == path) else {
+            trace.push(source, LinkState::NotSet);
+            return None;
+        };
         let state = composition::classify_agent_resolution(document, inputs.snapshot);
+        trace.push(source, selection_trace::classified(&selection_trace::hints_agent_value(document), &state));
         let provider = auto_selected(&state)?;
         let hints = EffectiveSelectionHints {
             model: own.model.clone().or_else(|| document.model.clone()),
@@ -590,7 +701,7 @@ fn enclosing_target(
 /// [`AgentResolutionState::Selected`] and
 /// [`AgentResolutionState::ListOneInstalled`] do; every other state prompts on
 /// a terminal and fails without one.
-pub(super) fn auto_selected(state: &AgentResolutionState) -> Option<Provider> {
+pub(crate) fn auto_selected(state: &AgentResolutionState) -> Option<Provider> {
     match state {
         AgentResolutionState::Selected { provider } => Some(*provider),
         AgentResolutionState::ListOneInstalled { selected, .. } => Some(*selected),
@@ -639,7 +750,7 @@ fn picker_plan(
 
 /// Parse a frontmatter-shaped mapping's selection hints.
 #[allow(clippy::result_large_err)]
-fn hints_from_map(map: &Map<String, Value>) -> Result<EffectiveSelectionHints, CompositionError> {
+pub(crate) fn hints_from_map(map: &Map<String, Value>) -> Result<EffectiveSelectionHints, CompositionError> {
     let mut frontmatter = darkmatter::markdown::Frontmatter::new();
     for key in ["agent", "model"] {
         if let Some(value) = map.get(key) {
@@ -657,7 +768,7 @@ fn hints_from_map(map: &Map<String, Value>) -> Result<EffectiveSelectionHints, C
 /// decides), in [`TaskSelections::iter`] order. A row is labeled with its
 /// root step's position ([`SequenceStepDraft::step_index`]); it maps back by
 /// its position in that order, never by label or name.
-pub(super) fn review_drafts(selections: &TaskSelections) -> Vec<SequenceStepDraft> {
+pub(crate) fn review_drafts(selections: &TaskSelections) -> Vec<SequenceStepDraft> {
     selections
         .iter()
         .map(|selection| {
@@ -696,9 +807,9 @@ pub(super) fn review_drafts(selections: &TaskSelections) -> Vec<SequenceStepDraf
         .collect()
 }
 
-/// One line per site for a preflight or dry-run listing: its name and the
+/// One line per site for the verbose provider plan: its name and the
 /// provider it is predicted to run, or how its provider is decided.
-pub(super) fn plan_rows(selections: &TaskSelections) -> Vec<String> {
+pub(crate) fn plan_rows(selections: &TaskSelections) -> Vec<String> {
     selections
         .iter()
         .map(|selection| {

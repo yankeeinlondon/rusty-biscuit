@@ -741,11 +741,10 @@ The command reports task outcomes and returns `0` on success, `1` on an
 unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
 `--silent` suppresses per-step status messages.
 
-`--dry-run` performs preflight and composes against initial state without
-provider launches, lifecycle dispatch, or inline write-back. `shell:` and
-`side_effect:` tasks are rendered, not run (`--dry-run-shell` runs the
-`shell:` tasks once); composition shell expansions still run with real
-effects.
+`--dry-run` never reaches this executor: it is the passive check, which
+reads the tree as preflight does, composes each prompt against initial state
+with every command withheld, and runs no task, lifecycle event, or provider.
+See [Sequences — Dry run](flow-control/sequences.md#dry-run).
 
 ### Per-step runtime bindings
 

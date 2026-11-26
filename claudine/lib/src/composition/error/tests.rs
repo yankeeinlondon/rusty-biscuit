@@ -1074,6 +1074,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         config_snapshot: None,
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
+        passive: None,
         invocation_context: None,
         document_epoch: None,
         loop_values: None,
@@ -3378,9 +3379,39 @@ fn composed_body_empty_lists_each_override_on_its_own_row() {
         source_path: PathBuf::from("prompts/run.md"),
         mode: super::super::types::CompositionMode::ChainedDocument,
         provided_overrides: vec!["topic".into(), "tone".into()],
+        cause: darkmatter::findings::EmptyBodyCause::EmptyRendered,
     };
     let rows = display_rows(&err);
     assert_rows_follow(&rows, "Provided overrides:", &["- `topic`", "- `tone`"]);
+}
+
+/// The block names what the composition proved, never a guess: each excluded
+/// block by its line and condition, and the cause's own next step.
+#[test]
+fn composed_body_empty_names_each_excluded_block_and_claims_nothing_else() {
+    let err = CompositionError::ComposedBodyEmpty {
+        source_path: PathBuf::from("prompts/run.md"),
+        mode: super::super::types::CompositionMode::ChainedDocument,
+        provided_overrides: Vec::new(),
+        cause: darkmatter::findings::EmptyBodyCause::ExcludedBlocks {
+            blocks: vec![darkmatter::findings::ExcludedBlock { line: 4, condition: "review".into() }],
+        },
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "Every block of the body was left out because its condition was false:",
+        &["- line 4: `review`"],
+    );
+    let whitespace = CompositionError::ComposedBodyEmpty {
+        source_path: PathBuf::from("prompts/run.md"),
+        mode: super::super::types::CompositionMode::ChainedDocument,
+        provided_overrides: Vec::new(),
+        cause: darkmatter::findings::EmptyBodyCause::Whitespace,
+    };
+    let rows = display_rows(&whitespace);
+    assert!(rows.iter().any(|row| row.contains("contains only whitespace")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("when")), "{rows:#?}");
 }
 
 #[test]

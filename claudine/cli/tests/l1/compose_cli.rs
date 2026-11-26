@@ -5,7 +5,7 @@
 
 use std::fs;
 use crate::common;
-use common::{CliProcessFixture, init_git_repo, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, init_git_repo, strip_ansi, write, write_dry_run_provider_stub, write_executable};
 
 #[test]
 fn compose_dry_run_file_links_exports_both_listings_without_render_metadata() {
@@ -16,8 +16,10 @@ fn compose_dry_run_file_links_exports_both_listings_without_render_metadata() {
         &fixture.cwd().join("fleet.md"),
         "### Modes Standards\n\n::file-links ./modes/*.md\n\n### OSC Standards\n\n::file-links ./osc/*.md\n\n## After\n\nKeep **this** text.\n",
     );
+    // A clean check needs a provider on `PATH`; the check never runs it.
+    write_dry_run_provider_stub(fixture.bin_dir(), "goose");
     let output = fixture.command()
-        .args(["compose", "fleet.md", "--dry-run"])
+        .args(["compose", "fleet.md", "--goose", "--dry-run"])
         .assert()
         .success()
         .get_output()
@@ -113,9 +115,9 @@ fn compose_direct_produces_expected_stdout_body() {
 // ============================================================================
 
 /// A frontmatter value that is exactly one malformed `{{ … }}` interpolation is
-/// executable state, not text. Composition must abort during preparation with a
-/// parse error that names the offending key — and must never leak the raw
-/// template through `--dry-run` as a successful effective-frontmatter result.
+/// executable state, not text. The dry run reports a parse error located at
+/// the offending key's line (`dm.expression.parse_failure`), exits 2, and never
+/// leaks the raw template to stdout as a composed result.
 ///
 /// `{{ dirname(review) + '/spec.md') }}` carries an unbalanced paren: the exact
 /// malformed shape shipped in `prompts/implement-suggestions.md` that motivated
@@ -146,35 +148,34 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
         ),
     );
 
-    let assert = fixture
+    let output = fixture
         .command()
-        .args([
-            "compose",
-            "--goose",
-            md_file.to_str().unwrap(),
-            "--dry-run",
-        ])
-        .assert()
-        .failure();
-
-    let output = assert.get_output();
+        .args(["compose", "--goose", md_file.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
     let plain_err = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    assert_eq!(output.status.code(), Some(2), "stderr:\n{plain_err}");
     assert!(
-        plain_err.contains("spec_path"),
-        "error must name the offending key; stderr:\n{plain_err}"
-    );
-    assert!(
-        plain_err.contains("parse error"),
-        "error must report the typed interpolation parse failure; stderr:\n{plain_err}"
+        plain_err.contains("parse error") && plain_err.contains("plan.md:3:"),
+        "the finding reports the parse failure at the `spec_path` line; stderr:\n{plain_err}"
     );
     // The original leak: the raw malformed template surfacing as a successful
-    // effective-frontmatter result on stdout. It must be gone.
+    // composed result on stdout. It must be gone.
     assert!(
         !stdout.contains("dirname(review)"),
         "raw malformed template leaked to stdout; stdout:\n{stdout}"
     );
+
+    let json = fixture
+        .command()
+        .args(["compose", "--goose", md_file.to_str().unwrap(), "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(envelope["diagnostics"][0]["code"], "dm.expression.parse_failure", "{envelope}");
+    assert_eq!(envelope["diagnostics"][0]["source"]["line"], 3, "{envelope}");
     assert!(
         !count_path.exists(),
         "no provider session should have been launched; stub recorded a call"

@@ -283,17 +283,6 @@ pub struct PromptRunOutcome {
 ///
 /// The wrapper implements this; the library never owns provider launch.
 pub trait PromptTaskRunner: Sync {
-    /// Whether containers should compose recursively without dispatching lifecycle events.
-    fn is_dry_run(&self) -> bool {
-        false
-    }
-
-    /// Whether a dry run runs `shell:` tasks (`--dry-run-shell`). Without it a
-    /// dry run renders each one instead.
-    fn dry_run_shell(&self) -> bool {
-        false
-    }
-
     /// Check the document's late shell inputs before this task's setup runs.
     fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
         Ok(())
@@ -546,13 +535,6 @@ impl TaskExecution<'_> {
     /// [`CompositionError::TaskWhenEvaluationFailed`], located at the guard,
     /// when it raises.
     pub fn guard(&self) -> Result<bool, CompositionError> {
-        // A preview shows the guard instead of predicting it: the values it
-        // reads may come from tasks a dry run does not run.
-        if self.prompt.is_dry_run() && let Some(condition) = &self.task.when {
-            let name = self.task.name.as_deref().unwrap_or(&self.task.label);
-            self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
-            return Ok(true);
-        }
         // An unguarded task reads no `seq`, so it copies no outputs.
         if self.task.when.is_none() { return Ok(true); }
         let seq = self.sequence_binding();
@@ -920,9 +902,7 @@ impl TaskExecution<'_> {
     }
 
     /// Allocate a looping container's frame before its `initialize`, or
-    /// `None` when it does not loop. A dry run allocates it too, so its one
-    /// previewed pass reads pass 1's `loop` values, and says that the loop's
-    /// repetition is not evaluated.
+    /// `None` when it does not loop.
     ///
     /// A templated `max` resolves once, here, against `state` (the
     /// container's values under the runtime writes made so far), and the
@@ -951,9 +931,6 @@ impl TaskExecution<'_> {
         let frame = crate::composition::looping::LoopFrame::new(
             &config, cap, kind, &preflight.location.source_path, &preflight.location.property,
         )?;
-        if self.prompt.is_dry_run() {
-            self.dry_run_note(&crate::composition::looping::dry_run_loop_note(&preflight.location.property, &config, frame.max()));
-        }
         Ok(Some(frame))
     }
 
@@ -1043,17 +1020,6 @@ impl TaskExecution<'_> {
                 ));
             }
         };
-        // A preview renders each command as approved (exact bytes, or the
-        // template of a template-mode command) and runs none of them; its
-        // `timeout:` is still validated. The empty result reaches only the
-        // preview, never `seq.outputs`.
-        if self.prompt.is_dry_run() && !self.prompt.dry_run_shell() {
-            for command in commands {
-                self.dry_run_note(&format!("rendered (dry-run): would run `{command}`"));
-            }
-            return PrimaryOutcome::withheld();
-        }
-
         // A document's commands start from its own environment.
         let document_shell = self
             .document
@@ -1185,13 +1151,6 @@ impl TaskExecution<'_> {
 
     /// Dispatch a `side_effect:` action and capture its textual return.
     fn run_side_effect(&self, action: &Value, authored_set_order: Option<&[String]>) -> PrimaryOutcome {
-        // A preview never writes a file or a runtime value, with or without
-        // `--dry-run-shell`: it shows the action and its arguments as
-        // authored, templates unresolved.
-        if self.prompt.is_dry_run() {
-            self.dry_run_note(&format!("rendered (dry-run): would run `{action}`"));
-            return PrimaryOutcome::withheld();
-        }
         // A task's action comes from the sequence data as written; no schema
         // completed it, so it is its own authored value.
         let parsed = match parse_single_action_with_order(
@@ -1617,11 +1576,6 @@ impl TaskExecution<'_> {
         }
     }
 
-    /// One line of a dry run's preview, on the status channel.
-    fn dry_run_note(&self, text: &str) {
-        self.stack.emitter.emit_info(text, self.stack.term);
-    }
-
     fn interrupted(&self) -> bool {
         self.interrupt
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
@@ -1771,11 +1725,6 @@ impl PrimaryOutcome {
 
     fn interrupted(stdout: String) -> Self {
         Self::new(stdout, PrimaryResult::Interrupted)
-    }
-
-    /// A success with nothing to publish: a dry run's rendered task.
-    fn withheld() -> Self {
-        Self { withheld: true, ..Self::succeeded(String::new()) }
     }
 
     fn new(stdout: String, result: PrimaryResult) -> Self {

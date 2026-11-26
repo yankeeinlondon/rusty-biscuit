@@ -124,8 +124,6 @@ pub struct InvocationInputsDraft {
     pub env_overrides: std::collections::BTreeMap<String, String>,
     /// Host installation snapshot taken during prep.
     pub installed_snapshot: Option<InstalledProviderSnapshot>,
-    /// Show what would run without launching a child.
-    pub dry_run: bool,
 }
 
 impl InvocationInputsDraft {
@@ -164,7 +162,6 @@ impl InvocationInputsDraft {
             operation: None,
             env_overrides: std::collections::BTreeMap::new(),
             installed_snapshot: None,
-            dry_run: false,
         }
     }
 

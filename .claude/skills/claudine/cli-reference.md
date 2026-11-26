@@ -360,18 +360,25 @@ Full user contract: [Sequences](topics/flow-control/sequences.md).
 
 ### `--dry-run`
 
-Runs composition through provider/model resolution, then emits the composed result before launch wiring begins. Available on all three commands and suitable for CI rehearsal.
+A passive check, available on all three commands and suitable for CI: it
+reads the document (or the whole sequence tree, recovering past each bad
+task), composes each prompt with every effect withheld, and reports every
+problem. Nothing runs or is written, even with `--yolo`: no `$( … )`,
+`::shell`, `shell:`/`side_effect:` task, lifecycle event, proxy, `prep`,
+provider, picker, missing-input prompt, configuration creation or
+migration, cache, or `inline-compose` edit.
 
-- Schema validation, shell-command execution (real side effects), and the shell-audit pre-flight all run normally.
-- Selected-executable availability validation and path resolution do not run;
-  the selected provider need not be installed or present on `PATH`. Claudine
-  may still inventory installed providers when automatic selection or the
-  rendered agent-resolution breakdown requires it.
-- The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
-- **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
-- `--quiet` / `--silent` have **no effect** under `--dry-run`.
-- **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `seq.outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No lifecycle events fire, no `prep` target runs (literal targets are listed), no provider launches, and no inline-compose write-back occurs. `shell:` and `side_effect:` tasks are rendered as `rendered (dry-run): would run …` and publish nothing; loops preview one pass with pass 1's `loop.*`; task guards are shown, not evaluated; the summary reads `Sequence previewed (dry-run): N step(s) rendered, none run`. `$( … )` composition expansions still execute for real. `--dry-run --dry-run-shell` runs each `shell:` task once (mutating; never a provider, never a `side_effect:`); `--dry-run-shell` alone is a usage error.
+- **stderr** = the report (findings per document/task, `not checked` rows,
+  summary line); **stdout** = each composed preview, with withheld
+  constructs marked `[not evaluated in a dry run]`.
+- `--json` (requires `--dry-run`) = one envelope (`file`, `outcome`,
+  `diagnostics`, `summary`) on stdout and nothing on stderr.
+- Exit `2` when any finding is an error or warning, else `0`; never `1`.
+- The provider is chosen by the real selectors and must be on `PATH`; with
+  no terminal, a choice the run would ask for is an error, on a terminal a
+  warning. The finding lists each source consulted.
+- `--quiet` / `--silent` / `--perf` have no effect; `--dry-run-shell` is a
+  usage error with or without `--dry-run`.
 
 See [Composition — Dry Run](topics/composition.md#dry-run) for the full reference.
 

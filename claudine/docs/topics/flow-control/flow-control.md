@@ -133,7 +133,7 @@ failure:
 
 **Some directives need something that may not exist yet.** An event can accept a directive and still be unable to carry it out. `resume` needs a live agent session, so it fails in `initialize`, where no agent has started. `break` needs an enclosing loop, which a document cannot know about until it runs, since the loop may belong to the group or sequence that placed it. `defer` needs the scheduler. The [Flow Control Reference](flow-control-reference.md#what-each-event-can-do-at-runtime) lists these cases. When they happen you get a clear, typed error at the moment the directive fires instead of a silent no-op.
 
-**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive and never runs a `prep` target. It does parse and validate every event, so a malformed directive is still reported. Composition `$( … )` expansions still run with real effects, and so do sequence `shell:` tasks under `--dry-run-shell`; dry-run is not a filesystem sandbox. See [Sequences — Dry run](sequences.md#dry-run).
+**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive and never runs a `prep` target. It does parse and validate every event, so a malformed directive is still reported. No command runs either: `$( … )` expansions, `::shell` lines, and `shell:`/`side_effect:` tasks are withheld and reported as not checked. See [Sequences — Dry run](sequences.md#dry-run).
 
 ## Writing a directive
 

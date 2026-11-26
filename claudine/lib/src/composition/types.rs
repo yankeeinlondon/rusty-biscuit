@@ -472,8 +472,8 @@ pub enum AgentHint {
 /// Classified outcome of resolving a frontmatter `agent` value against the
 /// known provider catalog and the installed-provider snapshot.
 ///
-/// This is the data model for both the dry-run metadata table and the live
-/// execution path: every variant corresponds to a specific user-facing
+/// This is the data model for both the dry-run check and the live execution
+/// path: every variant corresponds to a specific user-facing
 /// message and a specific TTY/no-TTY behavior.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentResolutionState {
@@ -874,15 +874,6 @@ pub struct PreparedComposition {
     /// Non-fatal warnings emitted by Darkmatter during composition,
     /// including parser-aware `ctx.*` typo diagnostics.
     pub warnings: Vec<ComposeWarning>,
-    /// Lifecycle event keys that Darkmatter intentionally deferred from
-    /// compose-time resolution (DM1 metadata).
-    ///
-    /// Sorted, and limited to keys actually present in the source
-    /// frontmatter. These keys keep their authored `{{ }}` spans in
-    /// `effective_frontmatter` because they interpolate at event-time, not
-    /// during the initial compose. Dry-run output consumes this so a raw
-    /// span reads as intentional rather than as an unresolved-variable bug.
-    pub deferred_lifecycle_keys: Vec<String>,
     /// The caller's input layers, retained so a later canonical preparation of
     /// this or a proxied document reapplies exactly them.
     pub input_layers: CallerInputLayers,
@@ -1033,8 +1024,6 @@ pub struct CompositionExecutionRequest {
     pub sandbox: bool,
     /// Use only repo-scoped resources via a provider overlay.
     pub repo: bool,
-    /// Show what would be executed without launching the child.
-    pub dry_run: bool,
     /// Enable Claudine-managed MCP session composition.
     pub mcp: bool,
     /// Explicit MCP server IDs or aliases to activate.
@@ -1097,7 +1086,7 @@ pub struct CompositionExecutionRequest {
     /// when ambiguous) and render the execution line *before* the
     /// expensive prepare/compose work, so the user sees it immediately.
     /// When `true`, the executor must not re-emit the header. When
-    /// `false` (the dry-run-unresolved corner and sequence steps) the
+    /// `false` (sequence steps) the
     /// executor emits it after resolving the target itself.
     pub header_emitted: bool,
 

@@ -116,6 +116,23 @@ pub struct CheckedTask {
     pub prompt: Option<PathBuf>,
     /// The task's `with:` inputs, as authored.
     pub with: Map<String, Value>,
+    /// The `with:` values known before the run, evaluated against the
+    /// step's early-binding values as the task's turn will see them; the
+    /// document reads them as data. A key absent here is in
+    /// [`Self::with_late`] or failed to evaluate.
+    pub with_evaluated: Map<String, Value>,
+    /// The `with:` keys whose values read a value known only at the task's
+    /// turn (a prior task's output, `seq.*`, …), sorted.
+    pub with_late: Vec<String>,
+    /// A `prompt:` task's provider prediction, as the real run's selector
+    /// reads it.
+    pub provider: Option<super::providers::ProviderPrediction>,
+    /// A `sequence:` task's sequence document and its frontmatter, whose
+    /// `agent` its children fall back to; `None` for an inline list.
+    pub sequence_document: Option<(PathBuf, Map<String, Value>)>,
+    /// The `seq` binding a sequence step's document reads at its turn
+    /// (position, neighbors, `run_id`; outputs empty); `None` for a group leg.
+    pub seq: Option<Value>,
     /// Why the task could not be read; empty when it was.
     pub failures: Vec<CheckFailure>,
 }
@@ -173,6 +190,7 @@ pub(super) struct SiteSeed<'s> {
     pub(super) property: String,
     pub(super) item: &'s Value,
     pub(super) executable: Option<ExecutableField>,
+    pub(super) seq: Option<Value>,
 }
 
 impl CheckState {
@@ -217,6 +235,11 @@ impl CheckState {
             executable: seed.executable,
             prompt: None,
             with: Map::new(),
+            with_evaluated: Map::new(),
+            with_late: Vec::new(),
+            provider: None,
+            sequence_document: None,
+            seq: seed.seq,
             failures: Vec::new(),
         });
         self.tasks.len() - 1
@@ -238,6 +261,15 @@ impl Loader<'_> {
     /// Whether this walk records failures instead of returning them.
     pub(super) fn checking(&self) -> bool {
         self.check.is_some()
+    }
+
+    /// In check mode, records the open task's evaluated and late `with:`
+    /// values.
+    pub(super) fn note_prepared_with(&mut self, evaluated: &Map<String, Value>, late: &[String]) {
+        let Some(check) = self.check.as_mut() else { return };
+        let Some(&slot) = check.open.last() else { return };
+        check.tasks[slot].with_evaluated = evaluated.clone();
+        check.tasks[slot].with_late = late.to_vec();
     }
 
     /// In check mode, record `error` as the root's and continue; otherwise
@@ -300,6 +332,7 @@ impl Loader<'_> {
             let seed = SiteSeed {
                 slot: Slot::Root(index), name: item_name(&item, index), file: origin,
                 property: format!("sequence[{index}]"), item: &item, executable: item_executable(&item),
+                seq: None,
             };
             self.record_item_failure(seed, error);
         }
@@ -345,9 +378,15 @@ impl Loader<'_> {
             Ok(task) => {
                 if let Some(task) = &task {
                     let record = &mut check.tasks[slot];
-                    if let PreflightAction::Prompt { path, .. } = &task.action {
-                        record.prompt = Some(path.clone());
+                    match &task.action {
+                        PreflightAction::Prompt { path, .. } => record.prompt = Some(path.clone()),
+                        PreflightAction::Sequence(sequence) => {
+                            record.sequence_document = sequence.frontmatter.clone()
+                                .map(|frontmatter| (sequence.origin_path.clone(), frontmatter));
+                        }
+                        _ => {}
                     }
+                    record.provider = task.provider.clone();
                     record.with = task.with.clone();
                 }
                 Ok(task)

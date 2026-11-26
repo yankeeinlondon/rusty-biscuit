@@ -210,7 +210,7 @@ Composition commands resolve whether a session runs interactive via `SharedCompo
 3. `interactive: true` / `false` frontmatter → that value (`SessionInteractivitySource::Frontmatter`)
 4. Otherwise → non-interactive (`SessionInteractivitySource::Default`)
 
-`--interactive` and `--no-interactive` are mutually exclusive at the clap level. The resolved value and its source are stored on `CompositionExecutionRequest` (`session_interactive` and `session_interactive_source`) so downstream diagnostics and dry-run metadata can attribute the mode. `claudine sequence` rejects `interactive: true` frontmatter because a sequence is serial automation; use the explicit `--interactive` flag when an interactive sequence step is required.
+`--interactive` and `--no-interactive` are mutually exclusive at the clap level. The resolved value and its source are stored on `CompositionExecutionRequest` (`session_interactive` and `session_interactive_source`) so downstream diagnostics can attribute the mode. `claudine sequence` rejects `interactive: true` frontmatter because a sequence is serial automation; use the explicit `--interactive` flag when an interactive sequence step is required.
 
 ## Provider Adapters
 
@@ -515,7 +515,7 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 Darkmatter's `render_tree::embedded::without_embedded_metadata` before storing
 the provider prompt. Keep Markdown fallbacks and portable links; internal
 component metadata belongs to Darkmatter's terminal/browser document folds,
-not provider delivery or dry-run stdout.
+not provider delivery or a dry-run preview.
 
 The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
 points and public re-exports in `mod.rs`. `pipeline.rs` owns one
@@ -524,8 +524,8 @@ argv/system-prompt, lifecycle-runtime, initialize-routing, and provider-handoff
 phases. Each phase returns `CompositionPhaseResult`, so completed early
 outcomes, blocked lifecycle routing, preparation failures, and normal
 progression stay explicit without flattening attempt state into the entry
-module. Composition dry-runs return before these launch phases and never
-validate or resolve the selected executable path.
+module. A composition `--dry-run` never reaches it: `main.rs::dispatch` sends
+it to the passive check (`commands/document_check/`).
 
 Other concerns remain split by responsibility:
 
@@ -534,8 +534,9 @@ Other concerns remain split by responsibility:
 - `preflight.rs` — blocked/finalize lifecycle routing before provider launch
 - `runner.rs` — the named per-iteration `run_composition_body` runner and its
   `CompositionRunCtx`
-- `dry_run.rs`, `prep_context.rs`, `target.rs`, and `timeouts.rs` — rendering,
-  shared discovery context, execution-target resolution, and timeout resolution
+- `prep_context.rs`, `target.rs`, and `timeouts.rs` — shared discovery
+  context, execution-target resolution (`decide_target`, shared with the dry
+  run's provider check), and timeout resolution
 
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
@@ -930,8 +931,8 @@ again. The loop route seeds from the bootstrap
 (`build_loop_seed_from_bootstrap`), the engine emits `initialize`, and iteration
 1 composes the stabilized reread. A harness-adopted target (a sequence task has
 no command ledger) takes `bootstrap_harness_prompt` for boot stages 1-3
-(`BootstrapStage::TargetInitialized`). A dry run and a document without
-`initialize` keep eager discovery.
+(`BootstrapStage::TargetInitialized`). A document without `initialize` keeps
+eager discovery.
 
 Sequences do not stage (OQ1 Option A): static preflight
 (`approve_preflight_graph`) composes every referenced prompt document before

@@ -187,6 +187,12 @@ pub struct PrepareOptions {
     /// caller leaves this `false`, because an empty prompt reaching a provider
     /// is otherwise a bug the provider would report far less usefully.
     pub allow_empty_body: bool,
+    /// Prepare as a passive dry run recording into this session: no command
+    /// runs, no approval is asked for, no cache or guardrails file is
+    /// written, and work that needs an effect keeps its authored text (see
+    /// [`darkmatter::markdown::compose::passive`]). `None` for a real
+    /// preparation.
+    pub passive: Option<darkmatter::markdown::compose::passive::PassiveSession>,
     /// Compose without reaching this document's schema verdict.
     ///
     /// Set by the stages that read a document they do not judge: the
@@ -301,6 +307,7 @@ impl PrepareOptions {
             config_snapshot: None,
             name_coercion_keys: Vec::new(),
             allow_empty_body: false,
+            passive: None,
             defer_schema_verdict: false,
             loop_values: None,
         }
@@ -517,6 +524,9 @@ fn canonical_compose_options(
     }
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(session) = &options.passive {
+        compose_opts = compose_opts.with_passive_session(session.clone());
     }
     compose_opts
         .with_deferred_shell_roots(options.deferred_shell_roots.clone())
@@ -1053,6 +1063,17 @@ use super::types::{
     LaunchSchema, PreparedComposition, ResolvedCompositionSource,
 };
 use simplified_schema::SchemaPhase;
+/// Why a composed prompt is empty, from its `authored` text, the `rendered`
+/// result, and the blocks the composition left out.
+fn empty_body_cause(
+    authored: &str,
+    rendered: &str,
+    report: &darkmatter::markdown::compose::ComposeReport,
+) -> darkmatter::findings::EmptyBodyCause {
+    darkmatter::findings::EmptyBodyCause::classify_composed(authored, rendered, &report.excluded_blocks)
+        .unwrap_or(darkmatter::findings::EmptyBodyCause::EmptyRendered)
+}
+
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -1365,7 +1386,6 @@ pub(super) fn prepare_values_on(
         closure: CompositionClosurePlan::Direct,
         launch_schema,
         lifecycle: super::lifecycle::LifecycleConfig::default(),
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
@@ -1478,6 +1498,7 @@ fn prepare_direct_on(
                     source_path: source.resolved_path.clone(),
                     mode: CompositionMode::ChainedDocument,
                     provided_overrides: override_keys,
+                    cause: empty_body_cause(source.markdown.content(), &prompt, &report),
                 });
             }
             prompt
@@ -1515,7 +1536,6 @@ fn prepare_direct_on(
         closure: CompositionClosurePlan::Direct,
         launch_schema,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: lifecycle_warnings.into_iter().chain(report.warnings.iter().cloned()).collect(),
@@ -1637,10 +1657,12 @@ fn prepare_inline_on(
         composed.content(),
     );
     if body.trim().is_empty() && !options.allow_empty_body {
+        // The prompt is the body here: its own text is what was authored.
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::InlineFrontmatterPrompt,
             provided_overrides: override_keys,
+            cause: empty_body_cause(temp_md.content(), &body, &report),
         });
     }
 
@@ -1662,7 +1684,12 @@ fn prepare_inline_on(
         launch_schema.as_ref(),
         &effective_frontmatter,
     );
-    let guardrails_template = load_or_create_guardrails(source_repo_root.as_deref());
+    // A dry run reads the guardrails but never creates or migrates the file.
+    let guardrails_template = if options.passive.is_some() {
+        super::guardrails::load_guardrails_passively(source_repo_root.as_deref())
+    } else {
+        load_or_create_guardrails(source_repo_root.as_deref())
+    };
     let retired_guardrails =
         retired_custom_guardrails_path(source_repo_root.as_deref(), &guardrails_template);
     let guardrails = render_guardrails(&guardrails_template, &source.resolved_path);
@@ -1706,7 +1733,6 @@ fn prepare_inline_on(
         }),
         launch_schema,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings,
@@ -1918,7 +1944,7 @@ pub(super) fn compose_bootstrap(
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) =
+    let (composed, _report) =
         recording_triggers(source.markdown.compose_with_warnings(&compose_request), &source.resolved_path, &options)?;
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
@@ -1933,7 +1959,6 @@ pub(super) fn compose_bootstrap(
         effective_frontmatter,
         selection_hints,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_context: ctx,
         document_epoch: options.document_epoch,
     })
@@ -2007,17 +2032,6 @@ pub(super) fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> se
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
-}
-
-/// Collect Darkmatter's intentionally-deferred (DM1) lifecycle keys from a
-/// compose report into a stable, sorted list for dry-run labeling (C5).
-///
-/// The report already limits the set to keys present in the source
-/// frontmatter; sorting makes the dry-run output deterministic.
-fn sorted_deferred_keys(report: &darkmatter::markdown::compose::ComposeReport) -> Vec<String> {
-    let mut keys: Vec<String> = report.deferred_frontmatter_keys.iter().cloned().collect();
-    keys.sort();
-    keys
 }
 
 /// Extract the top-level keys from a `set_overrides` JSON object, in the

@@ -219,8 +219,12 @@ so earlier body and frontmatter edits are available to them. A step-level
 ## Previewing
 
 ```bash
-claudine compose @review.md target=lib --dry-run > composed.md   # body on stdout; frontmatter + table on stderr
+claudine compose @review.md target=lib --dry-run > composed.md   # composed prompt on stdout; report on stderr
+claudine compose @review.md --dry-run --json                     # one JSON report: file, outcome, diagnostics, summary
 ```
 
-No agent starts and no lifecycle event fires, but `$(…)` expansions do
-run.
+Nothing runs: no agent, lifecycle event, `$(…)` expansion, `::shell`, or
+question, and nothing is written. What needs a command stays as written,
+marked `[not evaluated in a dry run]`. The provider is chosen as a real run
+chooses it, so name one (`--claude`, `agent:`) for a clean report. Exit `2`
+when any finding is an error or warning, else `0`.

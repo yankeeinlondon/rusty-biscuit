@@ -46,8 +46,6 @@ pub struct BootstrapPreparation {
     pub selection_hints: EffectiveSelectionHints,
     /// Parsed lifecycle stacks with C3-resolved shell commands.
     pub lifecycle: LifecycleConfig,
-    /// Lifecycle keys Darkmatter deferred, sorted.
-    pub deferred_lifecycle_keys: Vec<String>,
     /// The early-binding snapshot this read composed against; the stabilized
     /// reread extends it rather than recapturing launch state.
     pub compose_context: ComposeContext,

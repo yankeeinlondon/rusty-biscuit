@@ -295,29 +295,49 @@ fn a_retry_that_switches_provider_reports_every_attempt() {
     );
 }
 
-/// Preflight's dry-run rows show each task's prediction, or that its turn
-/// decides it, and a preview reports no provider as having run.
+/// A dry run judges each task's predicted provider without launching any: a
+/// task's own `agent` and the sequence's are resolved, a `with.agent` read
+/// from an earlier output is named as decided when the task runs, and
+/// removing the Goose stub makes only the task whose own `agent` is Goose an
+/// error.
 #[test]
-fn a_dry_run_lists_each_tasks_predicted_provider() {
-    let (fixture, record) = stage(
-        "seq-task-providers-dry-run",
-        &[
-            ("plain.md", "Token PLAIN.\n"),
-            ("own.md", "---\nagent: goose\n---\nToken OWN.\n"),
-            (
-                "seq.md",
-                "---\nagent: claude\nsequence:\n  - name: own\n    prompt: own.md\n  - name: inherits\n    prompt: plain.md\n  - name: pick\n    shell: echo goose\n  - name: dynamic\n    prompt: plain.md\n    with:\n      agent: \"{{ seq.outputs[2] }}\"\n---\n",
-            ),
-        ],
-        &["claude", "goose"],
-    );
+fn a_dry_run_judges_each_tasks_predicted_provider() {
+    let files = [
+        ("plain.md", "Token PLAIN.\n"),
+        ("own.md", "---\nagent: goose\n---\nToken OWN.\n"),
+        (
+            "seq.md",
+            "---\nagent: claude\nsequence:\n  - name: own\n    prompt: own.md\n  - name: inherits\n    prompt: plain.md\n  - name: pick\n    shell: echo goose\n  - name: dynamic\n    prompt: plain.md\n    with:\n      agent: \"{{ seq.outputs[2] }}\"\n---\n",
+        ),
+    ];
+    let (fixture, record) = stage("seq-task-providers-dry-run", &files, &["claude", "goose"]);
     let run = run(&fixture, &record, &["--dry-run"]);
     assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
-    assert!(run.launches.is_empty(), "a preview launched: {:?}", run.launches);
-    for row in ["own → Goose", "inherits → Claude (from the sequence)", "dynamic → decided at launch"] {
-        assert!(run.stderr.contains(row), "missing `{row}`; stderr:\n{}", run.stderr);
+    assert!(run.launches.is_empty(), "a dry run launched: {:?}", run.launches);
+    assert!(
+        run.stderr.contains("task dynamic (sequence[3]) ℹ not checked: provider (the task's `agent` is decided when it runs)"),
+        "stderr:\n{}",
+        run.stderr
+    );
+    for resolved in ["task own", "task inherits"] {
+        assert!(!run.stderr.contains(resolved), "`{resolved}` resolves with no finding; stderr:\n{}", run.stderr);
     }
-    assert!(!run.stderr.contains("succeeded (via"), "a preview claimed a provider:\n{}", run.stderr);
+
+    let (fixture, record) = stage("seq-task-providers-dry-run-no-goose", &files, &["claude"]);
+    let output = fixture.command().args(["sequence", "seq.md", "--yolo", "--dry-run", "--json"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2), "stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+    assert!(launch_recorder::launches(&record).is_empty(), "a dry run launched");
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let errors: Vec<(String, String)> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .map(|diagnostic| (diagnostic["code"].as_str().unwrap().to_string(), diagnostic["trail"].to_string()))
+        .collect();
+    assert_eq!(errors.len(), 1, "{envelope:#}");
+    assert_eq!(errors[0].0, "composition.provider_not_installed", "{envelope:#}");
+    assert!(errors[0].1.contains("own"), "{envelope:#}");
 }
 
 /// Acceptance 8, concurrent legs: a leg's `agent` decided at launch reads the

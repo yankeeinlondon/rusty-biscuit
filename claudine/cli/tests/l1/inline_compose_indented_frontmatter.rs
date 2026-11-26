@@ -196,8 +196,11 @@ fn an_indented_baseline_is_refused_by_a_dry_run_too() {
     assert_eq!(inline.launches(), 0);
     assert_eq!(inline.text(), INDENTED);
     assert!(!inline.command_ran(), "the frontmatter command ran");
-    run.assert_mentions("inline baseline not editable");
+    assert!(!inline.guardrails_written(), "the guardrail file was written");
+    run.assert_mentions("Cannot edit frontmatter text safely");
     run.assert_mentions("indented by 2 spaces");
+    run.assert_mentions("md clean --save <file>");
+    run.assert_mentions("Dry run found 1 error");
 }
 
 /// The refusal's recovery path, and the control that makes its absences

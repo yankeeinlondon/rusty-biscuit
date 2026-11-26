@@ -71,7 +71,7 @@ pub fn detect_installed_providers(clients: &sniff::programs::InstalledAiClients)
 /// snapshot and return the corresponding [`AgentResolutionState`].
 ///
 /// This function is pure: it does not prompt, emit output, or consult
-/// `--silent`. The caller (dry-run renderer or live execution gate) decides
+/// `--silent`. The caller (the dry-run check or the live execution gate) decides
 /// what to do with each variant.
 pub fn classify_agent_resolution(
     hints: &EffectiveSelectionHints,

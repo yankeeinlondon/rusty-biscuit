@@ -98,7 +98,7 @@ fn assert_composition_help(command: &str, help: &HelpRun) {
         "--provider",
         "--set",
         "--dry-run",
-        "--dry-run-shell",
+        "--json",
         "--max-iterations",
         "--on-rate-limit",
     ] {
@@ -108,6 +108,11 @@ fn assert_composition_help(command: &str, help: &HelpRun) {
             help.stdout
         );
     }
+    assert!(
+        !tokens.contains(&"--dry-run-shell"),
+        "`{command}` help must not list the removed `--dry-run-shell`; got: {}",
+        help.stdout
+    );
     for root_heading in ["Shared Resources:", "Composition:"] {
         assert!(
             !help.stdout.contains(root_heading),
@@ -188,181 +193,128 @@ fn headline_compose_with_trailing_help_renders_help() {
     assert_composition_help("compose", &help);
 }
 
+/// Run `args` against recording stubs for `providers` and require exit 0;
+/// returns each launch's argv (binary first) and the prompts they received.
+///
+/// The passive `--dry-run` check shows neither the chosen provider nor its
+/// argv, so these cases prove the parse with a real launch. The stubs are
+/// shell scripts, so the launch cases are Unix-only; normalization itself is
+/// platform-neutral.
+#[cfg(unix)]
+fn launch(cli: &CliProcessFixture, providers: &[&str], args: &[&str]) -> (Vec<Vec<String>>, Vec<String>) {
+    use common::launch_recorder::{install, launches, prompts};
+
+    let mut log = None;
+    for provider in providers {
+        log = Some(install(cli, provider, "exit 0"));
+    }
+    let log = log.expect("at least one provider stub");
+    // The default minimal `PATH`: the stubs need the system's `mkdir` and
+    // `cat`, and it carries no provider of its own.
+    let output = cli
+        .command()
+        .args(args)
+        .write_stdin("")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "`claudine {}` must exit 0; stderr: {}",
+        args.join(" "),
+        strip_ansi(&String::from_utf8_lossy(&output.stderr))
+    );
+    (launches(&log), prompts(&log))
+}
+
 /// Rule 2 fuzzy match: `--provider cl` should canonicalise to `claude`
-/// before clap parses, so the dry-run command completes successfully and
-/// reports Claude as the selected provider.
+/// before clap parses, so the run launches Claude with the composed body.
+#[cfg(unix)]
 #[test]
 fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "fuzzy.md");
 
-    let output = cli
-        .command()
-        .args([
-            "compose",
-            "--provider",
-            "cl",
-            fixture.to_str().unwrap(),
-            "--dry-run",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let combined = format!("{stderr}{stdout}");
-
-    assert!(
-        combined.contains("Claude"),
-        "dry-run should resolve to Claude after fuzzy match \
-         (`cl` → `claude`); got: {combined}"
+    let (launches, prompts) = launch(
+        &cli,
+        &["claude", "gemini"],
+        &["compose", "--provider", "cl", fixture.to_str().unwrap()],
     );
-    // The composed body on stdout is the defining dry-run marker.
-    assert!(
-        stdout.contains("Hello."),
-        "dry-run should render the composed body to stdout; got: {combined}"
-    );
+
+    assert_eq!(launches.len(), 1, "{launches:?}");
+    assert_eq!(launches[0][0], "claude", "`cl` resolves to Claude: {launches:?}");
+    assert_eq!(prompts[0].trim(), "Hello.");
 }
 
 /// Common case (no flags between positional + setter) must remain
 /// behaviorally identical — Rule 3 does not fire, Rule 1/2 rewrite nothing.
+#[cfg(unix)]
 #[test]
 fn headline_compose_with_plain_setter_behaves_as_before() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "plain.md");
 
-    let output = cli
-        .command()
-        .args([
-            "compose",
-            fixture.to_str().unwrap(),
-            "key=val",
-            "--provider",
-            "claude",
-            "--dry-run",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let combined = format!("{stderr}{stdout}");
-
-    assert!(
-        combined.contains("Claude"),
-        "plain setter path should still route to the chosen provider; \
-         got: {combined}"
+    let (launches, prompts) = launch(
+        &cli,
+        &["claude", "gemini"],
+        &["compose", fixture.to_str().unwrap(), "key=val", "--provider", "claude"],
     );
-    // The composed body on stdout is the defining dry-run marker.
-    assert!(
-        stdout.contains("Hello."),
-        "dry-run should render the composed body to stdout; got: {combined}"
-    );
+
+    assert_eq!(launches.len(), 1, "{launches:?}");
+    assert_eq!(launches[0][0], "claude", "the setter path still routes to the chosen provider: {launches:?}");
+    assert!(!launches[0].iter().any(|arg| arg == "key=val"), "the setter is not forwarded: {launches:?}");
+    assert_eq!(prompts[0].trim(), "Hello.");
+}
+
+/// What the Gemini launch shows of the trailing `-y` and `-i`: `-y` is
+/// Claudine's YOLO switch (Gemini's `--approval-mode yolo`), and `-i` is its
+/// interactive switch (`--prompt-interactive`, carrying the composed body).
+/// A `-i` that failed to normalize would be read as a second file reference
+/// and abort before any launch.
+#[cfg(unix)]
+fn assert_gemini_yolo_interactive(launches: &[Vec<String>]) {
+    use common::launch_recorder::occurrences;
+
+    assert_eq!(launches.len(), 1, "{launches:?}");
+    let launch = &launches[0];
+    assert_eq!(launch[0], "gemini", "provider selection survives the ordering: {launch:?}");
+    assert_eq!(occurrences(launch, &["--approval-mode", "yolo"]), 1, "`-y` stays a Claudine flag: {launch:?}");
+    assert_eq!(occurrences(launch, &["--prompt-interactive", "Hello."]), 1, "`-i` stays a Claudine flag: {launch:?}");
+    assert!(!launch.iter().any(|arg| arg == "-y" || arg == "-i"), "neither switch is forwarded raw: {launch:?}");
 }
 
 /// Mixed-order regression from `just clarify`: provider flag before the
 /// setter, then more boolean flags after the setter. The command should
-/// still parse all flags and succeed under `--dry-run`.
+/// still parse all flags.
+#[cfg(unix)]
 #[test]
 fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "clarify.md");
-    let output = cli
-        // Escape: fake-only PATH. The dry run must not find a host `gemini`,
-        // whose real path would then reach the assertions below.
-        .command_builder()
-        .fake_only_path()
-        .build()
-        .args([
-            "compose",
-            fixture.to_str().unwrap(),
-            "--gemini",
-            "doc=@pkg/feature/spec.md",
-            "-y",
-            "-i",
-            "--dry-run",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
 
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let combined = format!("{stderr}{stdout}");
+    let (launches, _) = launch(
+        &cli,
+        &["gemini"],
+        &["compose", fixture.to_str().unwrap(), "--gemini", "doc=@pkg/feature/spec.md", "-y", "-i"],
+    );
 
-    assert!(
-        combined.contains("Gemini"),
-        "expected provider selection to survive mixed ordering; got: {combined}"
-    );
-    // `-y` surfaces in the dry-run metadata table's YOLO row.
-    assert!(
-        combined.contains("YOLO") && combined.contains("true"),
-        "expected trailing `-y` to remain a Claudine flag; got: {combined}"
-    );
-    // `-i` is not surfaced in the dry-run output, but a `-i` that failed to
-    // normalize would be misclassified as a second positional file reference
-    // and abort before any output. The rendered dry-run body therefore proves
-    // `-i` was parsed as the interactive flag, not swallowed as a positional.
-    assert!(
-        stdout.contains("Hello."),
-        "expected trailing `-i` to parse as a flag and the dry-run body to \
-         render to stdout; got: {combined}"
-    );
+    assert_gemini_yolo_interactive(&launches);
 }
 
 /// Setter-first form should also work: later flags must be hoisted ahead of
 /// the setter rather than disappearing into the positional bucket.
+#[cfg(unix)]
 #[test]
 fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "setter-first.md");
-    let output = cli
-        // Escape: fake-only PATH. The dry run must not find a host `gemini`,
-        // whose real path would then reach the assertions below.
-        .command_builder()
-        .fake_only_path()
-        .build()
-        .args([
-            "compose",
-            fixture.to_str().unwrap(),
-            "doc=@pkg/feature/spec.md",
-            "--gemini",
-            "-y",
-            "-i",
-            "--dry-run",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
 
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let combined = format!("{stderr}{stdout}");
+    let (launches, _) = launch(
+        &cli,
+        &["gemini"],
+        &["compose", fixture.to_str().unwrap(), "doc=@pkg/feature/spec.md", "--gemini", "-y", "-i"],
+    );
 
-    assert!(
-        combined.contains("Gemini"),
-        "expected provider selection to survive setter-first ordering; got: {combined}"
-    );
-    // `-y` surfaces in the dry-run metadata table's YOLO row.
-    assert!(
-        combined.contains("YOLO") && combined.contains("true"),
-        "expected `-y` after a setter to remain a Claudine flag; got: {combined}"
-    );
-    // `-i` is not surfaced in the dry-run output, but a `-i` that failed to
-    // normalize would be misclassified as a second positional file reference
-    // and abort before any output. The rendered dry-run body therefore proves
-    // `-i` was parsed as the interactive flag, not swallowed as a positional.
-    assert!(
-        stdout.contains("Hello."),
-        "expected `-i` after a setter to parse as a flag and the dry-run body \
-         to render to stdout; got: {combined}"
-    );
+    assert_gemini_yolo_interactive(&launches);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -555,40 +507,24 @@ fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
 /// error so the user sees a diagnostic that points at the token they
 /// actually typed instead of a silent rewrite. This closes the
 /// acceptance-criterion loop end-to-end.
+#[cfg(unix)]
 #[test]
 fn non_owned_flag_after_file_is_forwarded_to_agent() {
     // With provider-argument forwarding, a switch Claudine does not own —
     // including a near-miss like `--claud` — placed *after* the composition
     // file starts the agent tail and is forwarded verbatim rather than
-    // rejected by clap. The dry-run "Provider args" row audits the tail.
+    // rejected by clap; `launch` fails on any non-zero exit.
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "near-miss.md");
 
-    let assert = cli
-        .command()
-        .args([
-            "compose",
-            fixture.to_str().unwrap(),
-            "--codex",
-            "--dry-run",
-            "--claud",
-        ])
-        .assert()
-        .success();
+    let (launches, _) = launch(&cli, &["codex"], &["compose", fixture.to_str().unwrap(), "--codex", "--claud"]);
 
-    let output = assert.get_output().clone();
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let combined = format!("{stderr}{stdout}");
-
-    assert!(
-        combined.contains("Provider args") && combined.contains("--claud"),
-        "a non-owned flag after the file must be forwarded to the agent and \
-         shown in the dry-run Provider args row; got: {combined}"
-    );
-    assert!(
-        !combined.contains("unexpected argument"),
-        "clap must not reject a forwarded non-owned flag; got: {combined}"
+    assert_eq!(launches.len(), 1, "{launches:?}");
+    assert_eq!(launches[0][0], "codex", "{launches:?}");
+    assert_eq!(
+        launches[0].iter().filter(|arg| *arg == "--claud").count(),
+        1,
+        "a non-owned flag after the file reaches the agent once: {launches:?}"
     );
 }
 

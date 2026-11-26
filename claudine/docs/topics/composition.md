@@ -215,9 +215,9 @@ makes no claim about whether the agent accepts a forwarded switch, so a genuinel
 invalid one may be rejected by the agent at startup (see
 [When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
 
-`--dry-run` shows the forwarded tail in its metadata table, with secret-shaped
-values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
-to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
+Wherever Claudine shows the forwarded tail, secret-shaped values
+(`--api-key ****`, `--token=****`, `-c****` for a credential attached to a
+short switch) are masked, so a launch can be audited. The `AGENT_PARAMS`
 variable the agent's environment carries is masked the same way. The agent
 itself receives the original tokens. An argument after the file that is not
 valid UTF-8 is refused before anything runs, because Claudine will not change
@@ -344,7 +344,7 @@ Direct composition takes a Markdown file, composes it through Darkmatter, and se
 
 Prepared direct and inline prompts use plain Markdown. Generated components
 such as `::file-links` retain their Markdown lists and portable links; internal
-render-tree metadata is removed before dry-run output or provider delivery.
+render-tree metadata is removed before a dry-run preview or provider delivery.
 For example, two directives produce two independent listings:
 
 ```markdown
@@ -568,7 +568,7 @@ failing after the agent has run. Replace or delete the value, then run
 again.
 
 The check applies wherever inline preparation happens: an ordinary run,
-`--dry-run` (which therefore refuses before its composition shell work runs),
+`--dry-run` (which reports the refusal as an error without editing anything),
 loop iterations, sequence steps run inline, and `retry`, `resume`, and
 `proxy` re-entry. `compose` and `sequence` documents composed directly never
 stamp their source and are not checked.
@@ -948,7 +948,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way without printing the warning.
 
 ### Model Resolution
 
@@ -990,8 +990,7 @@ native YOLO mode, subject to their supported session modes.
 
 `--yolo` (or `CLAUDINE_YOLO=true`) takes precedence; `yolo: false`, `null`,
 or an absent property does not enable bypass. Other types are rejected.
-The active document's setting is re-read for retry, resume, and proxy launches,
-and dry-run output reports the resolved intent.
+The active document's setting is re-read for retry, resume, and proxy launches.
 
 This property controls the provider session. Claudine's own shell preflight
 still requires approval or an explicit `--yolo` / `CLAUDINE_YOLO=true`.
@@ -1017,61 +1016,87 @@ Session interactivity is resolved from (highest to lowest precedence):
 
 ## Dry Run
 
-`--dry-run` runs the **composition pipeline through provider/model resolution**, then emits the composed result instead of sending it to an agentic CLI. It is available on `compose`, `inline-compose`, and `sequence`, and lets you inspect the composed result before launching a provider. Shell work still has real effects.
+`--dry-run` checks a document and previews what it composes, without
+running anything. It is available on `compose`, `inline-compose`, and
+`sequence`. Use it before a real run, or in CI, to see every problem at
+once:
 
-### Pipeline Scope
-
-Everything up to the seam runs normally:
-
-- Schema validation (including the interactive missing-property prompt under a TTY).
-- Shell commands in the document graph are **executed for real** — they produce actual side effects and their output is interpolated into the frontmatter and body.
-- Shell-command approval and writability checks run normally.
-- Provider and model resolution run normally.
-- Selected-executable availability validation and path resolution are skipped;
-  the selected agent does not need to be installed or present on `PATH`.
-
-The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, provider-overlay planning and materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
-
-**Dry run fires no lifecycle events.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
-
-Turning dry run into lifecycle simulation is an explicit non-goal. **Composition shell work runs for real:** `::shell` directives and `$( … )` expansions can edit files, send messages, or perform other external work. Sequence `shell:` tasks are rendered, not run, unless `--dry-run-shell` is also given (see [Sequence Dry Run](#sequence-dry-run)). Use a disposable directory and commands safe to execute when inspecting a document.
-
-### Output Split
-
-Dry-run output follows Unix stream conventions so `claudine compose --dry-run doc.md > body.md` captures only the body:
-
-- **stdout** — the composed document body as plain Markdown, matching the prompt sent to the provider.
-- **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
-
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set, and shown exactly as authored: Markdown such as `**bold**` or `_emphasis_` in it is not interpreted, so a file name like `_pr/open.md` keeps every character), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
-
-`--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
-
-### Non-TTY Shell-Approval Gate
-
-In a TTY, an unapproved shell command triggers the same interactive approval prompt as a normal run. In a non-TTY environment (e.g. CI) there is no way to prompt, so the dry-run **fails fast**: it exits non-zero with
-
-```
-Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.
+```sh
+claudine compose release.md --dry-run             # report on stderr, preview on stdout
+claudine compose release.md --dry-run > body.md   # keep only the preview
+claudine sequence plan.md --dry-run --json        # one JSON report for a script
 ```
 
-This is the gate working correctly — if production would prompt, the dry-run fails. Bypass it with `--yolo` (auto-approve) or by pre-approving the command in configuration.
+### What it does not do
 
-### Sequence Dry Run
+A dry run is passive. Even with `--yolo` it:
 
-`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a horizontal rule before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately, exiting non-zero without launching any provider.
+- runs no command: `$( … )` values, `::shell` lines and blocks, and sequence
+  `shell:` and `side_effect:` tasks are skipped, and no approval is asked for;
+- fires no lifecycle event, follows no `proxy`, and runs no `prep` target or
+  loop pass;
+- launches no provider and asks no question (no agent picker, no
+  missing-input prompt, no provider review screen);
+- writes nothing: no configuration file is created or migrated, no cache or
+  approval record is stored, and `inline-compose` never edits the file.
 
-A sequence dry run never executes its tasks or its control flow:
+Whatever needs one of those effects is left as written in the preview,
+marked `[not evaluated in a dry run]`, and reported as a not-checked row,
+while everything that does not depend on it is composed as usual. Anything
+else that reads such a value (a `::block` condition, an interpolation) is
+marked the same way:
 
-- `shell:` tasks report `` rendered (dry-run): would run `<command>` `` with the approved bytes, or the template of a template-mode command, and publish nothing. `side_effect:` tasks are rendered with their authored action and arguments, templates unresolved, and never write a file or apply a runtime `set`.
-- Each loop body is visited once, with pass 1's `loop.*` values; no gate, condition, or action is evaluated.
-- Task `when:` guards are shown, not evaluated, and the task is rendered.
-- No lifecycle event fires and no `prep` target runs; a literal target is listed as `prep target @helper.md (not run in a dry run)`.
-- The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
+```text
+release.md
+  ℹ not checked: frontmatter value (needs the output of `git branch
+    --show-current`, which a dry run does not run)
+```
 
-`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`) runs each `shell:` task once during that single preview pass. Its commands have real effects (a `git add` stages), but no provider launches, no `side_effect:` task runs, and no loop repetition or lifecycle event is turned back on. [Sequences — Dry run](flow-control/sequences.md#dry-run) shows each rendered line.
+### What it checks
 
-Any composition error (schema validation failure, missing file, denied shell command, writability failure) is rendered to **stderr** and exits the process non-zero, leaving stdout clean.
+Each prompt is prepared exactly as the real command prepares it: references,
+`$schema` and missing inputs, removed or misspelled keys, the provider, and
+a model the provider requires. The provider is chosen by the same rules a
+real run uses, and its finding lists each source it read, in order:
+
+```text
+release.md
+  ✗ no provider for this document; a non-interactive run fails here
+      1. --provider flag   not given
+      2. release.md agent  not set
+      hint: add `agent: <provider>` to release.md, or run with `--provider
+            <provider>`
+```
+
+On a terminal, a choice a real run would ask for (no provider, several
+listed providers installed, a missing input it can prompt for) is a warning;
+without a terminal it is an error, since the real run fails there. An
+invalid configuration file is reported as an error, and the check goes on
+with the defaults.
+
+A sequence is read the way its preflight reads it, and a problem in one task
+does not hide the problems in the others. See
+[Sequences — Dry run](flow-control/sequences.md#dry-run) for what happens to
+each kind of task.
+
+### Output and exit status
+
+- **stderr**: the report, one block per document or task, ending with a
+  summary such as `Dry run found 1 error and 0 warnings; 1 check not run.
+  Previewed 1 of 1 task.`
+- **stdout**: each composed preview, the prompt the provider would receive.
+- `--json` (only with `--dry-run`) prints one JSON report (`file`,
+  `outcome`, `diagnostics`, `summary`) on stdout instead, and nothing on
+  stderr. Each diagnostic carries its `code`, `severity`, `message`, and
+  `source` location, so a script can tell findings apart without reading
+  message text.
+- The exit status is `2` when any finding is an error or a warning, else
+  `0`.
+
+`--quiet`, `--silent`, and `--perf` do not change a dry run.
+
+`--dry-run-shell` was removed; it is a usage error with or without
+`--dry-run`. To see what a command does, run the document.
 
 ## Schema Validation
 
@@ -1476,7 +1501,7 @@ an unconditional include or by nested `file_exists(log)` / `phase > 1` blocks.
 The full audit remains condition-blind and reuses prior approvals. A surviving
 missing include blocks launch through the existing typed diagnostic.
 
-`--dry-run` does not initialize or follow dynamic proxies, so a dependency that
+`--dry-run` fires no `initialize` and follows no proxy, so a dependency that
 only initialization creates can still fail discovery. Sequences retain their
 separate static-preflight boundary: create required includes **before starting
 the sequence**. A prior task in that sequence cannot satisfy preflight. A task's
@@ -1856,7 +1881,7 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
     - the task publishes one `seq.outputs` entry after successful finalization: the final target's. A target that fails fails the task and propagates to the enclosing container's failure handler; an unhandled failure stops the sequence;
     - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
     - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
-- **`--dry-run`** never traverses a dynamic proxy route, and this follows structurally rather than from a per-route check: the dry-run seam returns *before* the lifecycle runtime is constructed, so `initialize` never fires and no `proxy` control can be produced. A dry run always reports the document named on the command line. See [Dry Run](#dry-run).
+- **`--dry-run`** never traverses a dynamic proxy route: the check fires no lifecycle event, so `initialize` never runs and no `proxy` control can be produced. A dry run always reports the document named on the command line. See [Dry Run](#dry-run).
 
 ### Backward compatibility
 
@@ -2185,7 +2210,7 @@ The model and its invariants:
 - **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
 - **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).
 - **Run counts** (`×N`) appear on a composition stage that ran more than once.
-- **Dry runs** render `agent execution` as an `—` leaf annotated `(dry run)`; the agent never launches.
+- **A provider wrapper's dry run** (`claudine claude --dry-run …`) renders `agent execution` as an `—` leaf annotated `(dry run)`; the agent never launches.
 
 For `sequence`, the report is aggregated across all steps: launches and total execution time are summed, first-response latencies are averaged (with the minimum shown in a note), and composition metrics are merged. The report appears exactly once at the end of the run, after the sequence summary.
 

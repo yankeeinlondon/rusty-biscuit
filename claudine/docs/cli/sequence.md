@@ -359,7 +359,7 @@ say), that wins.
 - `Ctrl+S` accepts every row and starts the run.
 - `Esc` or Ctrl+C leaves the screen, starts no task, and exits `130`.
 - Shell commands are approved before the screen opens, and `--dry-run` never
-  opens it.
+  opens it; it reports each task the screen would ask about instead.
 
 ## Failures and exit codes
 
@@ -397,40 +397,10 @@ Each step's provider session gets these variables:
 
 ## Dry run
 
-`--dry-run` runs the full preflight and then composes every step against the
-starting state, without launching a provider. It runs no lifecycle event and
-no `prep` target, previews each loop body once with pass 1's `loop` values,
-and shows each task guard, and each inline container's `$schema` check,
-instead of evaluating it. Missing inputs, document `$schema` values, and
-`$state` are still judged. `shell:` and
-`side_effect:` tasks are rendered, not run:
-
-```text
-ℹ rendered (dry-run): would run `git add .`
-ℹ rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}`
-ℹ `tasks[1]` checks its `$schema` at its turn (not evaluated in a dry run)
-```
-
-Before the steps, a preview lists each provider-launching task and its
-predicted provider (`--verbose` lists them for a live run too):
-
-```text
-ℹ Providers:
-ℹ implement → Codex
-ℹ notes → Claude (from the sequence)
-ℹ review → decided at launch
-```
-
-**Composition still runs its `$( … )` expansions**, so their side effects
-happen. `--dry-run --dry-run-shell` also runs each `shell:` task once during
-the preview, for real (`git add` stages); it never launches a provider, runs
-no `side_effect:` task, and turns no loop or lifecycle event back on.
-`--dry-run-shell` without `--dry-run` is a usage error.
-
-### Passive check (planned)
-
-`--dry-run` will become a passive check that runs nothing at all and reports
-every problem in one pass, instead of stopping at the first:
+`--dry-run` checks the sequence and previews what composes, without running
+anything: no provider, shell command, lifecycle event, prompt for input, or
+write. It reports every problem in one pass instead of stopping at the
+first:
 
 ```text
 Dry run of renderers/_fleet.yaml (no commands run)
@@ -447,16 +417,34 @@ task metadata (sequence[1])
 Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.
 ```
 
-**Planned** behavior, not yet what `--dry-run` does:
+What the check does:
 
 - No command runs, even with `--yolo`: `$( … )` values, `::shell` lines, and
-  `shell:` tasks are skipped and reported as not checked, and no approval is
-  asked for. `--dry-run-shell` is removed.
+  `shell:` and `side_effect:` tasks are skipped and reported as not checked,
+  no approval is asked for, and no cache is read or written. A remote read
+  the configuration allows is fetched without being stored; one it denies is
+  refused. No lifecycle event, `prep` target, or loop pass runs.
 - Each task is checked for a step-level `agent:`/`model:` (step data, not the
   provider), a missing executable over a body-less document, a missing
   `prompt:` file (with the resolved path and up to three nearby files), the
-  provider chain and whether the provider is on `PATH`, and a model the
-  provider requires.
+  provider, and a model the provider requires.
+- The provider is chosen by the same rules a real run uses, and the finding
+  lists each source it read, in order, up to the one that decided:
+
+  ```text
+  task find (sequence[0])
+    ✗ no provider for this task; a non-interactive run fails here
+        1. --provider flag             not given
+        2. agent= setter               not given
+        3. with.agent                  not set (see `agent:` above)
+        4. _find.md frontmatter agent  not set
+        5. _fleet.yaml agent           not set
+        hint: add `with: { agent: opencode }`, or run with `--provider opencode`
+  ```
+
+  On a terminal the same finding is a warning, because a real run opens the
+  provider review screen and asks. An unknown provider name, or a provider
+  whose program is not on `PATH`, is an error either way.
 - The whole tree is read the way a real run's preflight reads it: every root
   task, group leg, nested or referenced sequence, `task:` file, and selected
   catalog entry. A problem is reported under the task or leg it belongs to,
@@ -483,14 +471,69 @@ Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.
   any of them.
 - Each missing required input is one `composition.missing_properties` finding
   under its task: a warning when an interactive run could ask for every
-  missing value, otherwise an error, since a run that cannot ask fails there.
-  A value that depends on a skipped command is not checked.
-- The report goes to stderr and the previews to stdout; `--json` prints one
-  report (`file`, `outcome`, `diagnostics`, `summary`) on stdout. The exit
-  status is `2` when any finding is an error or a warning, else `0`.
-- No configuration, cache, or other file is created.
+  missing value (`prompt_for_missing` is on and both stdin and stderr are
+  terminals), otherwise an error, since a run that cannot ask fails there.
+  A value that comes from a skipped command still counts as given. A task
+  whose sequence is missing an input waits for it: its inputs and preview
+  are reported as not checked instead of naming the same input again.
+- Each prompt is prepared exactly as the real command prepares it, including
+  `inline-compose`'s check that it could edit the file, but without any
+  effect. Whatever needs an effect is left as written in the preview, marked
+  `[not evaluated in a dry run]`, and reported as its own not-checked row,
+  while everything that does not depend on it is composed as usual:
 
-Until then, `--json` is refused with a usage error.
+  ```text
+  doc.md
+    ℹ not checked: frontmatter value (needs the output of `git branch
+      --show-current`, which a dry run does not run)
+    ℹ not checked: `::block` condition, interpolation (reads `branch`, which is
+      not known until the document runs)
+  ```
+
+  ```text
+  # Release
+  On {{ branch }} [not evaluated in a dry run].
+  ::block when="branch == 'main'" [not evaluated in a dry run]
+  ...
+  ```
+
+  This covers a `$( … )` value and anything that reads it, a body `::shell`
+  line or `::shell-block`, a `::block` whose condition reads such a value, a
+  function that would start the login shell, send network packets, or query
+  a provider's API (`has_alias`, `ping`, `pr`, …), and a `$schema` slot whose
+  read would need approval. A task's `with:` values known at launch are
+  passed to its prompt as its turn would pass them. A prompt that composes
+  to nothing is an error that says why: no body, only whitespace, or each
+  `::block` left out by a false condition, with its line.
+- An invalid configuration file is reported as an error, and the check goes
+  on with the defaults.
+- No configuration, cache, or other file is created, and nothing is
+  migrated.
+
+The report goes to stderr and each composed preview to stdout, so
+`claudine sequence plan.md --dry-run > previews.md` keeps only the previews.
+With `--json`, stdout holds one JSON report and nothing else, and stderr is
+empty:
+
+```json
+{
+  "file": "/work/renderers/_fleet.yaml",
+  "outcome": "failure",
+  "diagnostics": [{ "code": "composition.provider_unresolved", "severity": "error", "...": "..." }],
+  "summary": { "errors": 1, "warnings": 0, "info": 1 }
+}
+```
+
+The exit status is `2` when any finding is an error or a warning, else `0`.
+`--json` without `--dry-run` is a usage error.
+
+`--dry-run-shell` was removed. It is a usage error, with or without
+`--dry-run`:
+
+```text
+error: `--dry-run-shell` was removed. Dry runs skip commands.
+  hint: use `--dry-run` to check and preview, or run the command without it
+```
 
 ## Flags
 
@@ -506,7 +549,7 @@ Flags shared with `compose`:
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
 | Output | `-q`/`--quiet`, `--silent`, `--perf` (`-o`/`--output` is refused; see [What Claudine Writes](../topics/output.md)) |
 | Values | `--set <JSON>`, `--operation`/`--op <OP>` |
-| Rehearsal | `--dry-run`, `--dry-run-shell` |
+| Rehearsal | `--dry-run`, `--json` (with `--dry-run`) |
 
 `-y` is `--yolo`, not "answer yes". It turns on each provider's own
 auto-approval mode, and it approves every shell command during preflight

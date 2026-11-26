@@ -156,6 +156,48 @@ pub(crate) fn prepare_scope(yaml_path: &Path, scope: ConfigScope, notices: &mut 
     convert(&value, &bytes, &json_path, yaml_path, &backup_path, scope, notices)
 }
 
+/// What a legacy file beside a missing canonical file reads as, without
+/// converting, backing up, or finishing anything: a dry run's view of what
+/// the next real load would convert.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum LegacyProjection {
+    /// No legacy file.
+    Absent,
+    /// The values the conversion would write, defaults applied.
+    Values(Value),
+    /// A pre-2026 per-provider file, which a real load backs up and ignores.
+    Retired,
+}
+
+/// Reads the legacy `config.json` in `dir` as [`prepare_scope`] would
+/// convert it, writing nothing.
+///
+/// ## Errors
+///
+/// [`ClaudineError::ConfigConversion`] naming the legacy file when it cannot
+/// be read, parsed, or judged.
+pub(crate) fn project_legacy(dir: &Path, scope: ConfigScope) -> Result<LegacyProjection> {
+    let json_path = dir.join(LEGACY_FILE_NAME);
+    let bytes = match std::fs::read(&json_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(LegacyProjection::Absent),
+        Err(error) => {
+            return Err(conversion_error(vec![ConfigProblem::whole(Some(&json_path), ConfigProblemKind::InvalidSetting, format!("cannot be read: {error}"))]));
+        }
+    };
+    let mut value = parse_legacy(&bytes, &json_path).map_err(conversion_error)?;
+    if migration::is_old_format(&value) {
+        return Ok(LegacyProjection::Retired);
+    }
+    super::wire::upgrade_flat(&mut value);
+    super::load::project_value(scope, &value).map(LegacyProjection::Values).map_err(|error| match error {
+        ClaudineError::ConfigInvalid { problems } => conversion_error(
+            problems.into_iter().map(|problem| ConfigProblem { file: Some(json_path.clone()), ..problem }).collect(),
+        ),
+        other => other,
+    })
+}
+
 /// Whether a migration receipt waits beside `yaml_path`.
 fn receipt_pending(yaml_path: &Path) -> bool {
     receipt_path(yaml_path).is_ok_and(|receipt| std::fs::symlink_metadata(receipt).is_ok())

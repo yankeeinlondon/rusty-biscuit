@@ -4,10 +4,10 @@
 //! (retry, resume, proxy target), while the switch and its own value still
 //! reach the provider token for token.
 //!
-//! The dry-run reproduction and the ordering errors need no provider and run
-//! on every OS. The launch tests record argv with shell-stub providers, so
-//! they are Unix-only; the behavior under test is platform-neutral argv
-//! handling.
+//! The dry-run reproduction (the passive check's preview) and the ordering
+//! errors launch no provider and run on every OS. The launch tests record argv
+//! with shell-stub providers, so they are Unix-only; the behavior under test
+//! is platform-neutral argv handling.
 
 use std::fs;
 
@@ -36,19 +36,15 @@ const REPRODUCTION: &str = "---\nphase: 1\n---\nPhase {{ phase }}\n";
 /// value and must reach the provider unchanged.
 const EFFORT: &str = r#"model_reasoning_effort="medium""#;
 
-/// The tokens of the dry run's "Provider args" row, read from the cell
-/// rather than the table's spacing.
-fn provider_args_row(stderr: &str) -> Vec<String> {
-    let line = stderr
-        .lines()
-        .find(|line| line.contains("Provider args"))
-        .unwrap_or_else(|| panic!("no Provider args row:\n{stderr}"));
-    let cell = line
-        .split(['│', '|'])
-        .map(str::trim)
-        .rfind(|cell| !cell.is_empty())
-        .unwrap();
-    cell.split_whitespace().map(str::to_owned).collect()
+/// A `codex` on the fixture `PATH`, which the dry-run check only looks up.
+fn install_codex_binary(fixture: &CliProcessFixture) {
+    let path = fixture.bin_dir().join(format!("codex{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 // ── The reproduction (every OS, no provider installed) ──
@@ -56,6 +52,7 @@ fn provider_args_row(stderr: &str) -> Vec<String> {
 #[test]
 fn the_reproduction_applies_a_setter_after_the_switch_in_a_dry_run() {
     let fixture = CliProcessFixture::named("setter-after-switch-repro");
+    install_codex_binary(&fixture);
     let file = doc(&fixture, "plan.md", REPRODUCTION);
 
     for (label, args) in [
@@ -65,8 +62,7 @@ fn the_reproduction_applies_a_setter_after_the_switch_in_a_dry_run() {
         let (code, stdout, stderr) = run(&fixture, &args);
 
         assert_eq!(code, 0, "{label}: {stderr}");
-        assert!(stdout.contains("Phase 2") && !stdout.contains("Phase 1"), "{label}: {stdout}");
-        assert_eq!(provider_args_row(&stderr), ["-c", EFFORT], "{label}: {stderr}");
+        assert_eq!(stdout.trim(), "Phase 2", "{label}: {stdout}");
     }
     assert_eq!(fs::read_to_string(&file).unwrap(), REPRODUCTION, "a dry run never writes the file");
 }
@@ -138,6 +134,31 @@ mod launched {
         assert_eq!(launches[0][3], "x=y", "{launches:?}");
         assert_only_the_switch_was_forwarded(&launches[0]);
         assert_eq!(prompts(&log)[0].trim(), "Phase 2");
+    }
+
+    /// The reproduction's quoted config value reaches Codex token for token
+    /// whichever side of the switch the setter is written on.
+    #[test]
+    fn the_reproductions_quoted_switch_value_reaches_the_provider_unchanged() {
+        let fixture = CliProcessFixture::named("setter-after-switch-quoted");
+        let log = install(&fixture, "codex", "exit 0");
+        let file = doc(&fixture, "plan.md", REPRODUCTION);
+
+        for args in [
+            ["compose", &file, "phase=2", "--codex", "-c", EFFORT],
+            ["compose", &file, "--codex", "-c", EFFORT, "phase=2"],
+        ] {
+            let (code, _, stderr) = run(&fixture, &args);
+            assert_eq!(code, 0, "{args:?}: {stderr}");
+        }
+
+        let launches = launches(&log);
+        assert_eq!(launches.len(), 2, "{launches:?}");
+        for launch in &launches {
+            assert_eq!(occurrences(launch, &["-c", EFFORT]), 1, "{launch:?}");
+            assert!(!contains(launch, "phase=2"), "{launch:?}");
+        }
+        assert!(prompts(&log).iter().all(|prompt| prompt.trim() == "Phase 2"));
     }
 
     #[test]

@@ -1,68 +1,54 @@
-//! Level 2 real-terminal capture test for the shell-approval prompt under
-//! `--dry-run`.
+//! Level 2: `compose --dry-run` in a real terminal asks no shell approval.
 //!
-//! Closes the spec acceptance criterion:
+//! `--dry-run` on `compose` is a passive check: it runs no command, so an
+//! unapproved `::shell` directive is reported as `not checked` and left
+//! unevaluated in the preview instead of raising the approval prompt. The L1
+//! tests in `dry_run_check.rs` prove that with piped stdio, where no prompt
+//! could appear anyway. This file proves it where the prompt *would* appear:
+//! in a real terminal (`tmux`), against a document that does raise the prompt
+//! in a real run.
 //!
-//! > Interactive approval prompts for unapproved shell commands appear
-//! > exactly as in normal mode.
-//!
-//! The sibling `level2_dry_run_pty.rs` proves the same parity by injecting
-//! bytes into a raw pseudo-terminal (`/dev/ptmx`) and reading the child's
-//! output back. That establishes the *handler* fires identically in both
-//! modes, but it never routes the prompt through a real terminal emulator's
-//! render-and-capture path. This file does: it drives
-//! `claudine compose [--dry-run]` inside a real terminal (`tmux`), captures
-//! the *pane* the emulator actually displayed, and compares the rendered
-//! approval-prompt surface between normal mode and `--dry-run` mode.
-//!
-//! Why this is the L2 complement: the value here is the emulator's own
-//! re-rendering. Shell approval runs in the prepare phase *before* the
-//! dry-run seam and is served by the same `CliShellApprovalHandler` in both
-//! modes (`dry_run` only rewrites the non-interactive *no-handler* branch), so
-//! the captured surface must be identical. A `FORCE_COLOR=1` run routes the
-//! prompt through an optimistic terminal so the styling is emitted, and the
-//! proof is then the emulator's capture (`frame.raw` / `frame.plain`).
+//! - A real run of the document shows `Shell Approval Required` (the control
+//!   that keeps the dry-run assertion from passing vacuously); the test
+//!   denies it so nothing runs.
+//! - A dry run of the same document in the same kind of pane exits 0 without
+//!   any prompt, prints its report and the marked preview, and the command
+//!   never runs.
 //!
 //! Skip-clean: checks `TmuxHarness::available()` first and returns early when
 //! the backend is absent (no `#[ignore]`). `BISCUIT_TEST_LEVEL_REQUIRED=2`
-//! flips a missing harness into a hard failure.
-//!
-//! Run via the canonical recipe:
-//!
-//! ```text
-//! just test-l2
-//! ```
+//! flips a missing harness into a hard failure. Run via
+//! `just test-l2 dry_run_approval`.
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use test_toolkit::{Backend, Level, require_level};
 
 use crate::common;
-use common::{TestWorkspace, augmented_path, sh_quote, write_executable};
+use common::{TestWorkspace, augmented_path, claudine_bin, sh_quote, write_executable};
 
-/// A document whose body holds one unapproved `::shell` command, so composing
-/// it surfaces the approval prompt. The `echo` marker also lets the
-/// `appears_and_allows` PTY sibling assert the command ran; here we always
-/// deny, so it is only the prompt surface that matters.
+/// A document whose body holds one unapproved `::shell` command. Running the
+/// command would create `shell-ran`, so its absence proves it never ran.
 const FIXTURE_DOC: &str = "\
 ---
 title: dry-run approval
 ---
-::shell echo tty-approved-marker
+::shell touch shell-ran
 ";
 
+const APPROVAL_HEADER: &str = "Shell Approval Required";
+
 /// A staged workspace: a minimal config (so the first-run wizard does not
-/// intercept), a `goose` provider stub (present for resolution, never launched
-/// under `--dry-run`), and the approval fixture document.
+/// intercept), a `goose` provider stub (looked up, never launched here), and
+/// the fixture document.
 struct Staged {
     workspace: TestWorkspace,
-    bin_dir: std::path::PathBuf,
-    doc: std::path::PathBuf,
+    bin_dir: PathBuf,
+    doc: PathBuf,
 }
 
 fn stage() -> Staged {
@@ -86,174 +72,117 @@ fn stage() -> Staged {
     }
 }
 
-/// Poll the pane until `marker` (after escape stripping) appears, returning the
-/// frame that first contains it. Panics on timeout.
-///
-/// The handler renders the whole prompt with a single forward write, so once
-/// the last static option (`Deny for this run`) is visible the surface is
-/// complete and safe to snapshot.
-fn wait_for_pane_marker<H: TerminalHarness>(
-    harness: &mut H,
-    marker: &str,
+/// Writes a launcher that clears the pane, runs `claudine compose --goose
+/// [--dry-run] doc.md` from the workspace, and prints `{marker}:0` or
+/// `{marker}:1`. The marker is printed by the script, never typed, so the
+/// echoed command line cannot satisfy a wait on it.
+fn write_launcher(staged: &Staged, dry_run: bool, marker: &str) -> PathBuf {
+    let path = augmented_path(&staged.bin_dir);
+    let quoted_path = sh_quote(&path.to_string_lossy());
+    let flag = if dry_run { " --dry-run" } else { "" };
+    let script = format!(
+        "#!/bin/sh\nprintf '\\033[3J\\033[2J\\033[H'\ncd {cwd} || exit 1\n\
+         if HOME={home} PATH={quoted_path} COLUMNS=80 {claudine} compose --goose{flag} {doc}; then\n  \
+         printf '\\n{marker}:0\\n'\nelse\n  printf '\\n{marker}:1\\n'\nfi\n",
+        cwd = sh_quote(&staged.workspace.path().display().to_string()),
+        home = sh_quote(&staged.workspace.path().display().to_string()),
+        claudine = sh_quote(claudine_bin()),
+        doc = sh_quote(&staged.doc.display().to_string()),
+    );
+    let launcher = staged
+        .workspace
+        .path()
+        .join(if dry_run { "dry-run.sh" } else { "real-run.sh" });
+    write_executable(&launcher, &script);
+    launcher
+}
+
+/// Polls the pane until `done` returns true for a frame, panicking with the
+/// last frame after `deadline`.
+fn wait_for_frame(
+    harness: &mut TmuxHarness,
     deadline: Duration,
+    what: &str,
+    mut done: impl FnMut(&CapturedFrame) -> bool,
 ) -> CapturedFrame {
     let stop = Instant::now() + deadline;
     loop {
         let frame = harness.capture().expect("capture pane");
-        if frame.plain.contains(marker) {
+        if done(&frame) {
             return frame;
         }
-        if Instant::now() >= stop {
-            panic!(
-                "marker {marker:?} did not appear within {deadline:?}.\nplain:\n{}",
-                frame.plain
-            );
-        }
-        harness.settle();
+        assert!(Instant::now() < stop, "{what} did not appear within {deadline:?}.\nplain:\n{}", frame.plain);
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-/// Extract the approval-prompt block — the lines from the
-/// `Shell Approval Required` header through the final `Deny for this run`
-/// option — from a captured frame.
-///
-/// Returns the plain (escape-stripped) lines and the index-aligned raw
-/// (escape-bearing) lines. `CapturedFrame` strips `raw` into `plain`
-/// line-for-line, so the same `start..=end` indices select both. Starting at
-/// the header excludes the echoed command line — which differs by `--dry-run`
-/// between the two runs — so only the handler-rendered surface is compared.
-fn prompt_region(frame: &CapturedFrame) -> (Vec<String>, Vec<String>) {
-    let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    let start = plain_lines
-        .iter()
-        .position(|l| l.contains("Shell Approval Required"));
-    let end = plain_lines
-        .iter()
-        .position(|l| l.contains("Deny for this run"));
-    match (start, end) {
-        (Some(s), Some(e)) if e >= s => {
-            let plain = plain_lines[s..=e]
-                .iter()
-                .map(|l| l.trim_end().to_string())
-                .collect();
-            let raw = raw_lines
-                .get(s..=e)
-                .map(|sl| sl.iter().map(|l| l.to_string()).collect())
-                .unwrap_or_default();
-            (plain, raw)
-        }
-        _ => (Vec::new(), Vec::new()),
-    }
-}
-
-/// Run `claudine compose [--dry-run] --goose <doc>` in the pane, wait for the
-/// approval prompt to render, snapshot it, then deny (option 4) so the run
-/// aborts before any provider launch and the shell prompt returns. Returns the
-/// captured frame.
-///
-/// `clear` runs first so the shared pane shows only this run — otherwise a
-/// prior run's prompt (still on screen) would be the one `prompt_region`
-/// extracts.
-fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: bool) -> CapturedFrame {
-    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
-    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`. The unset,
-    // the clear, and the `cd` share one command line so the pane is waited on
-    // once rather than three times.
-
-    let home = staged.workspace.path().to_string_lossy().into_owned();
-    let path = augmented_path(&staged.bin_dir);
-    let path = path.to_string_lossy().into_owned();
-    let claudine = cargo_bin("claudine").display().to_string();
-
-    harness
-        .send_text(
-            format!(
-                "unset NO_COLOR; clear; cd {}\n",
-                sh_quote(&staged.workspace.path().display().to_string())
-            )
-            .as_bytes(),
-        )
-        .expect("prepare the pane");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-
-    let mut cmd = format!("{claudine} compose --goose");
-    if dry_run {
-        cmd.push_str(" --dry-run");
-    }
-    cmd.push(' ');
-    cmd.push_str(&staged.doc.display().to_string());
-
-    harness
-        .send_command_with_env(
-            &cmd,
-            &[
-                ("HOME", home.as_str()),
-                ("PATH", path.as_str()),
-                ("FORCE_COLOR", "1"),
-                // Deterministic width so both runs render the prompt identically.
-                ("COLUMNS", "80"),
-            ],
-        )
-        .expect("send compose");
-
-    let frame = wait_for_pane_marker(harness, "Deny for this run", Duration::from_secs(15));
-
-    // Deny so the composition aborts before any provider launch and the shell
-    // prompt returns, leaving the pane ready for the next run.
-    harness.send_text(b"4\n").expect("send deny choice");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-
+fn exit_status(frame: &CapturedFrame, marker: &str) -> Option<String> {
+    let prefix = format!("{marker}:");
     frame
+        .plain
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix).map(|status| status.trim().to_string()))
 }
 
-/// The approval prompt rendered through a real terminal is identical in normal
-/// mode and `--dry-run` mode.
-///
-/// One shared fixture keeps the prompt's `Source:` line (the document path)
-/// identical across both runs; denying persists nothing, so the second run
-/// sees the same state as the first.
+/// The same document raises the approval prompt in a real run and none under
+/// `--dry-run`, where the report and the marked preview render and the
+/// command never runs.
 #[test]
 #[serial(level2_terminal)]
-fn level2_dry_run_approval_prompt_matches_normal_mode_in_tmux() {
+fn level2_dry_run_asks_no_shell_approval_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage();
+    let shell_ran = staged.workspace.path().join("shell-ran");
 
-    let normal = capture_prompt_in_mode(&mut harness, &staged, false);
-    // A fresh pane prevents the second capture from matching the first
-    // invocation's approval prompt while its clear command is still queued.
-    drop(harness);
+    // Control: a real run in a terminal asks. Deny so nothing runs.
     let mut harness = TmuxHarness::new();
-    harness.spawn_shell().expect("isolated dry-run approval pane");
-    let dry_run = capture_prompt_in_mode(&mut harness, &staged, true);
-
-    let (normal_plain, _) = prompt_region(&normal);
-    let (dry_plain, dry_raw) = prompt_region(&dry_run);
-
+    harness.spawn_shell().expect("real-run pane");
+    let marker = format!("DRYRUN_APPROVAL_REAL_{}", std::process::id());
+    let launcher = write_launcher(&staged, false, &marker);
+    harness
+        .send_text(format!("/bin/sh {}\n", sh_quote(&launcher.display().to_string())).as_bytes())
+        .expect("send real run");
+    let prompt = wait_for_frame(&mut harness, Duration::from_secs(15), "the approval prompt", |frame| {
+        frame.plain.contains("Deny for this run")
+    });
     assert!(
-        normal_plain
-            .iter()
-            .any(|l| l.contains("Shell Approval Required"))
-            && normal_plain.iter().any(|l| l.contains("tty-approved-marker"))
-            && normal_plain.iter().any(|l| l.contains("Allow once")),
-        "normal-mode capture did not contain the expected approval prompt; got:\n{normal_plain:#?}\nplain:\n{}",
-        normal.plain,
+        prompt.plain.contains(APPROVAL_HEADER) && prompt.plain.contains("touch shell-ran"),
+        "a real run must ask before running the command:\n{}",
+        prompt.plain
     );
+    harness.send_text(b"4\n").expect("deny");
+    wait_for_frame(&mut harness, Duration::from_secs(15), "the real run's exit", |frame| {
+        exit_status(frame, &marker).is_some()
+    });
+    drop(harness);
+    assert!(!shell_ran.exists(), "a denied command must not run");
 
-    assert_eq!(
-        dry_plain, normal_plain,
-        "the --dry-run approval prompt must render exactly as in normal mode \
-         through a real terminal.\nnormal:\n{normal_plain:#?}\ndry-run:\n{dry_plain:#?}",
-    );
+    // The dry run, in a fresh pane so the control's prompt is not on screen.
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("dry-run pane");
+    let marker = format!("DRYRUN_APPROVAL_DRY_{}", std::process::id());
+    let launcher = write_launcher(&staged, true, &marker);
+    harness
+        .send_text(format!("/bin/sh {}\n", sh_quote(&launcher.display().to_string())).as_bytes())
+        .expect("send dry run");
+    let frame = wait_for_frame(&mut harness, Duration::from_secs(15), "the dry run's exit", |frame| {
+        // A prompt would block the run until the deadline; fail at once instead.
+        assert!(
+            !frame.plain.contains(APPROVAL_HEADER),
+            "a dry run must not ask for shell approval:\n{}",
+            frame.plain
+        );
+        exit_status(frame, &marker).is_some()
+    });
 
-    // The comparison would still pass on plain text alone; assert the emulator
-    // actually displayed a *styled* prompt (the bold/yellow header carries SGR)
-    // so this is a genuine real-terminal capture, not an L1 byte comparison.
+    let plain = &frame.plain;
+    assert_eq!(exit_status(&frame, &marker).as_deref(), Some("0"), "the dry run must exit 0:\n{plain}");
+    assert!(plain.contains("Dry run of"), "the report header must render:\n{plain}");
+    assert!(plain.contains("not checked"), "the command must be reported as not checked:\n{plain}");
     assert!(
-        dry_raw.iter().any(|l| l.contains('\u{1b}')),
-        "expected the captured approval prompt to carry styling (SGR escapes) \
-         through the real terminal.\nraw region:\n{dry_raw:#?}",
+        plain.contains("[not evaluated in a dry run]"),
+        "the preview must mark the unevaluated directive:\n{plain}"
     );
+    assert!(!shell_ran.exists(), "a dry run must not run the command:\n{plain}");
 }

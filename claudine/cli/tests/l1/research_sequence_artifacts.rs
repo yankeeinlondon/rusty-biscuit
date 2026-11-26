@@ -113,20 +113,25 @@ fn shipped_research_sequence_corpus_uses_lexical_row_bindings() {
     }
 }
 
+/// A real run of the shipped component sequence, on a Goose stub that
+/// records the prompt it receives, renders the row's `seq.name`.
 #[test]
 fn shipped_component_sequence_renders_rows_through_the_normal_cli() {
     let fixture = CliProcessFixture::named("shipped-component-sequence");
+    crate::common::provenance::install_goose(&fixture);
     let document = include_str!("../../../../biscuit-tui/docs/components/_build.md");
     let source = fixture.cwd().join("components.md");
     std::fs::write(&source, document.replace("@biscuit-tui/components.yaml", "components.yaml")).unwrap();
     std::fs::write(fixture.cwd().join("components.yaml"), "- name: contract-component\n").unwrap();
     let output = fixture.command()
-        .args(["sequence", "--dry-run", "--goose", "--silent"])
-        .arg(&source).assert().success().get_output().clone();
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    assert!(stdout.contains("documenting the \"contract-component\" component"), "{stdout}");
-    assert!(stdout.contains("biscuit-tui/docs/components/contract-component"), "{stdout}");
-    assert!(!stdout.contains("seq.name"), "{stdout}");
+        .args(["sequence", "--goose", "--yolo", "--silent"])
+        .arg(&source).output().unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{stderr}");
+    let prompt = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap_or_default();
+    assert!(prompt.contains("documenting the \"contract-component\" component"), "{prompt}\n{stderr}");
+    assert!(prompt.contains("biscuit-tui/docs/components/contract-component"), "{prompt}");
+    assert!(!prompt.contains("seq.name"), "{prompt}");
     assert!(!fixture.audio_spool().exists());
 }
 

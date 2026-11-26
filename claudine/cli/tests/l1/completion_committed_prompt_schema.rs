@@ -241,6 +241,15 @@ fn committed_prompt_directory_walks_the_launch_directory_first() {
         "{candidates:?}",
     );
 
+    // The check needs a chosen, installed provider for a clean preview; it
+    // never runs the stub.
+    let claude = topology.fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    write_file(&claude, "#!/bin/sh\nexit 0\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     for (token, marker) in [
         ("prompts/local.md", "PACKAGE_LOCAL_PROMPT"),
         ("prompts/shared.md", "PACKAGE_SHARED_PROMPT"),
@@ -251,7 +260,7 @@ fn committed_prompt_directory_walks_the_launch_directory_first() {
             // The package launch decides which `prompts/` wins.
             .ambient_context(&package)
             .build()
-            .args(["compose", "--dry-run", token])
+            .args(["compose", token, "--claude", "--dry-run"])
             .output()
             .expect("run claudine compose --dry-run");
         let stdout = String::from_utf8_lossy(&output.stdout);

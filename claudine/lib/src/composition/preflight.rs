@@ -492,14 +492,8 @@ fn approve_discovered_commands_with(
                         property: location.property(),
                     });
                 }
-                // No handler -- cannot get approval. Under `--dry-run` the
-                // CI/non-TTY gate names the offending command and points at
-                // the two ways to proceed (spec: Non-TTY Behavior).
-                let failure = if approval_options.dry_run {
-                    ShellApprovalFailure::DryRun
-                } else {
-                    ShellApprovalFailure::NoHandler
-                };
+                // No handler -- cannot get approval.
+                let failure = ShellApprovalFailure::NoHandler;
                 return Err(CompositionError::ShellApprovalUnavailable {
                     command,
                     source_file: source_file.clone(),
@@ -567,11 +561,7 @@ fn audit_failure(
             source_file: source_file.to_path_buf(),
             line,
             property,
-            failure: if approval_options.dry_run {
-                ShellApprovalFailure::DryRun
-            } else {
-                ShellApprovalFailure::NoHandler
-            },
+            failure: ShellApprovalFailure::NoHandler,
         },
         HarnessError::ShellCommandBlacklisted { reason, .. } => CompositionError::ShellApprovalUnavailable {
             command,

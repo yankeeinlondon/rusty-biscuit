@@ -1,0 +1,5 @@
+sequence:
+  - name: ask
+    agent: claude
+    prompt: ./ask.md
+    with: { agent: claude }

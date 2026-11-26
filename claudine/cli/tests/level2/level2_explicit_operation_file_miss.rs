@@ -4,6 +4,10 @@
 //! and assert the same typed diagnostic content. The sequence case protects its
 //! separate source-resolution seam. Every case must terminate without opening
 //! the operation-file picker.
+//!
+//! Each case is a real run: the reference misses before any provider starts,
+//! so no provider is installed. A `--dry-run` reports a missing document as a
+//! check finding instead (covered at L1 by `dry_run_check.rs`).
 
 use std::fs;
 use std::path::Path;
@@ -54,8 +58,8 @@ fn write_fixture(root: &Path, relative: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-fn command_args<'a>(subcommand: &'a str, reference: &'a str) -> [&'a str; 4] {
-    [subcommand, "--goose", "--dry-run", reference]
+fn command_args<'a>(subcommand: &'a str, reference: &'a str) -> [&'a str; 3] {
+    [subcommand, "--goose", reference]
 }
 
 fn run_without_pty(workspace: &TestWorkspace, subcommand: &str, reference: &str) -> Output {

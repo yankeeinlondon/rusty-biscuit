@@ -480,23 +480,52 @@ chain `enter_call`, one cycle domain with proxies); the CLI runner
 re-enters `run_composition_inner`/`run_sequence_target` in process with the
 overlay as data setters. A failed call is `LifecyclePrepFailed` (a dispatch
 failure `no_error` tolerates). Not built: `kind: group` targets and static
-approval inventory of `prep` targets. `--dry-run` renders `shell:` and
-`side_effect:` tasks (`PrimaryOutcome::withheld`), shows guards unevaluated,
-previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
-literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
-`--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
-The passive document check that will replace this preview lives in
-`cli/src/commands/document_check/`: dispatched from `main.rs::dispatch`
-before tracing, `request::darkmatter_config()`, the wrapper, and
-`ensure_config_exists`, but only when `document_check::enabled()` (today a
-`test-fixtures` build with `CLAUDINE_TEST_PASSIVE_DRY_RUN=1`; `--json` is a
-hidden flag refused otherwise). It reads the tree through the library's
+approval inventory of `prep` targets.
+**Dry run.** `--dry-run` on compose/inline-compose/sequence is the passive
+document check in `cli/src/commands/document_check/`; no other dry-run path
+exists for them (the old sequence and compose previews, their seam, and
+`--dry-run-shell` are gone; `--dry-run-shell` is declared hidden only so
+`main.rs::dispatch` can refuse it with `DRY_RUN_SHELL_REMOVED`, exit 2, with or
+without `--dry-run`). Provider wrappers keep their own `--dry-run`
+(`wrap/mod.rs`, `output::log_dry_run`). `dispatch` runs the check (unless
+help) right after the `--output` refusal, before tracing, telemetry,
+`request::darkmatter_config()`, migration, registration refresh, and
+`ensure_config_exists`; `--json` (`SharedComposeArgs`, clap `requires =
+"dry_run"`) selects one envelope on stdout, else the human report on stderr
+then previews on stdout; exit 0 or `EXIT_USAGE` (2), never 1. Configuration
+is read with `dispatch::loader::load_claudine_config_passive` (YAML, else the
+legacy `config.json` projected by `json_conversion::project_legacy`, else
+defaults with a note; never writes, converts, or backs up); a load error is a
+root finding and the check continues on defaults. Provider findings come from
+the real selectors: `wrap/sequence/providers.rs::select_traced` for sequence
+sites (`SelectionSite.consulted` lists every enclosing document, so the trace
+names one with no `agent`) and `wrap/composition/target.rs::decide_target`
+(`TargetDecision::{Chosen, Picker, Refused}`) for compose; each pushes a
+`wrap/selection_trace.rs` link in the branch that consults a source, and the
+check renders `SelectionTrace::lines()` (values through `mask_secrets`) as the
+finding's notes. The check's own codes (`composition.provider_*`,
+`no_executable`, `model_required`, …) are rows of
+`lib/src/diagnostics/registry.rs`. It reads the tree through the library's
 recovering walk, `composition::check_sequence_tree`
 (`sequence/preflight/check.rs`), and reports each `CheckedTask` as its own
 subject in `document_check/tasks.rs` into a
-`darkmatter::findings::FindingSink`; it previews prompts with
-`ComposeOptions::with_dry_run()`, under which Darkmatter skips every document
-command before approval (`ShellExpansionError::SkippedInDryRun`).
+`darkmatter::findings::FindingSink`. It previews each prompt through the
+canonical preparer (`prepare_direct` / `prepare_inline`, so the inline
+baseline rehearsal and lifecycle refusals are the real ones) with
+`PrepareOptions.passive = Some(PassiveSession)`; `canonical_compose_options`
+turns that into Darkmatter's `with_passive_session` (no command, shell probe,
+packet, provider query, approval, or cache), and the inline guardrails are
+read with `guardrails::load_guardrails_passively` (never created).
+`document_check/preview.rs` turns each `session.deferrals()` entry into a
+`not checked` row and marks the construct in the human preview
+(`[not evaluated in a dry run]`); `ComposedBodyEmpty { cause }` becomes
+`dm.compose.empty_body` with `EmptyBodyCause::phrase`/`hint`. The input
+check (`tasks.rs::prompt_inputs`) prepares passively too. A prompt task's
+`with:` reaches the preview as `CheckedTask::with_evaluated` (data, beneath
+the setters), recorded by `Loader::note_prepared_with` from the walk's own
+`record_prompt_reference`; `with_late` keys skip the input check and
+preview. A prompt whose owner misses an input (`inventory.prompts` whose
+owner has `missing`) is held: inputs and preview are not checked.
 The walk is the real preflight `Loader` with `check: Some(CheckState)`:
 `check_task` records a task before its children and turns its failure into a
 record instead of an early return; lists normalize through
@@ -516,10 +545,8 @@ each prompt task's document is judged by `validate_lifecycle_literals`, the
 per-document half of `PreflightGraph::validate_prompt_lifecycle_literals`. A real run never sets `check`, so its fail-fast order and
 errors are unchanged (`cli/tests/l1/sequence_preflight_baselines.rs` pins
 them). Missing inputs are one `composition.missing_properties` row per value,
-graded by `tasks.rs::missing_input_severity` (Rule 10's cohort). The old
-preview's L1 suites (`sequence_sources_cli`, `sequence_errors_cli`,
-`entry_point_parity`, …) read its output and migrate when the check becomes
-`--dry-run`. Tests: `cli/tests/l1/dry_run_check.rs`,
+graded by `tasks.rs::missing_input_severity` (Rule 10's cohort) with the
+configuration's `prompt_for_missing`. Tests: `cli/tests/l1/dry_run_check.rs`,
 `lib/src/composition/sequence/preflight/tests/check_tree.rs`, fixtures
 `cli/tests/fixtures/check/`.
 
@@ -805,7 +832,7 @@ Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
 after provider selection. The root's own missing inputs are left to Phase 1c
 (step headings) unless another owner is missing, a reference is pending, or
 the root is empty. Phase 1c's per-step probes compose against the root's
-`RuntimeState` snapshot (its `initialize` writes; `None` in a dry run), as
+`RuntimeState` snapshot (its `initialize` writes), as
 the first step does at its turn, so an `initialize` write satisfies a
 required root input on every route. An inline container's `$schema` is judged in
 `TaskExecution::run_validated` (`task/sequence.rs::admit_inline_container`;
@@ -817,7 +844,7 @@ and again at each `start` reread (including the first, after `initialize`);
 a container proxy judges the approved check (a whole-document target has
 none); a refusal at admission is an unstarted
 failure (no container event runs), one at a `start` reread blocks the started
-container, and a dry run only names it. User docs:
+container. User docs:
 [Sequences → Sequence documents](topics/flow-control/sequences.md#sequence-documents-schema-state-and-template).
 A whole referenced document is prepared at run time, never read as authored:
 `task/sequence.rs::referenced_owner_values` (its events' and children's base
@@ -828,7 +855,7 @@ by `build_preflight_graph_after_discovery`; bare `user_setters` otherwise)
 plus runtime writes as data. Before `initialize` the verdict is deferred; at
 each `start` reread (nested, leg, task file, loop pass, retry, container
 proxy) the document's `$schema` judges, and a refusal blocks the started
-container; a dry run only prepares. A root `sequence: child.yaml` is judged
+container. A root `sequence: child.yaml` is judged
 at each root step after the step composes
 (`cli/.../iterate.rs::judge_referenced_root_document`, the step's
 `input_layers` and `compose_context`), where the direct control is judged;

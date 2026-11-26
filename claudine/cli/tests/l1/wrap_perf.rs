@@ -454,52 +454,6 @@ fn inline_compose_perf_stdout_matches_non_perf() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn compose_dry_run_perf_renders_report_without_agent_execution() {
-    let fixture = CliProcessFixture::named("compose-perf-dry-run");
-    fixture.seed_user_config();
-
-    let md_file = fixture.cwd().join("test.md");
-    fs::write(&md_file, "---\ntitle: dry run perf\n---\n# Hello\n").unwrap();
-
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        "#!/bin/sh\necho 'should not run'\nexit 0\n",
-    );
-
-    let assert = fixture
-        .command()
-        .args([
-            "compose",
-            "--goose",
-            "--perf",
-            "--dry-run",
-            md_file.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-
-    assert!(
-        plain.contains("Performance"),
-        "stderr should contain Performance section; got: {plain}"
-    );
-    assert!(
-        plain.contains("dry run"),
-        "perf report should note dry run; got: {plain}"
-    );
-
-    // Provider should NOT have run in dry-run mode.
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.contains("should not run"),
-        "provider should not execute in dry-run mode"
-    );
-}
-
 /// Verifies that the `arg parsing:` timing in the perf report captures
 /// the full pipeline including `argv::normalize` and `parse_cli_from`.
 /// This is a smoke test: the exact duration is environment-dependent, but

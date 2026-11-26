@@ -642,7 +642,7 @@ fn contains_expression(value: &Value) -> bool {
 /// Every key a lifecycle `set` (or a `side_effect`'s `set`) in `value` writes,
 /// at any depth, with an `fm.` prefix removed. Over-collects on purpose: a
 /// mapping named `set` that is plain data only moves a hint to the launch.
-pub(crate) fn collect_written_keys(value: &Value, written: &mut HashSet<String>) {
+pub fn collect_written_keys(value: &Value, written: &mut HashSet<String>) {
     match value {
         Value::Object(map) => {
             if let Some(Value::Object(set)) = map.get("set") {

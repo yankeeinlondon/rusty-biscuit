@@ -65,19 +65,13 @@ impl darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler for Yo
     }
 }
 
-/// Apply composition `--dry-run` / `--yolo` overrides to freshly built
-/// shell-approval options.
-///
-/// `dry_run` flips the non-TTY unapproved-command failure to the dry-run
-/// CI gate message. `yolo` installs an auto-approving handler so every
-/// (non-blacklisted) command clears preflight without prompting, matching
-/// the spec guidance that `--yolo` auto-approves all shell commands.
+/// Apply the composition `--yolo` override to freshly built shell-approval
+/// options: an auto-approving handler, so every (non-blacklisted) command
+/// clears preflight without prompting.
 pub(crate) fn apply_composition_shell_overrides(
     mut opts: claudine::harness::ShellApprovalOptions,
-    dry_run: bool,
     yolo: bool,
 ) -> claudine::harness::ShellApprovalOptions {
-    opts.dry_run = dry_run;
     if yolo {
         opts.approval_handler = Some(Arc::new(YoloApprovalHandler));
     }

@@ -25,7 +25,7 @@
 //!
 //! Every failure raised here is abort-all: `fail_fast` governs *execution*
 //! outcomes, and preflight happens before execution exists. `--dry-run` runs
-//! this identical walk.
+//! its recovering form (`check.rs`), which reports every problem.
 //!
 //! See `claudine/features/2026-07-11-sequence-plus/spec.md` → *Phase 1 — Static
 //! Preflight*.
@@ -1386,6 +1386,7 @@ impl<'a> Loader<'a> {
                 slot: check::Slot::Root(ordinal), name: step.name.clone(), file: &rows_origin,
                 property: format!("sequence[{ordinal}]"), item: &step.raw_state,
                 executable: step.executable.as_ref().map(|executable| executable.field),
+                seq: self.step_frontmatter.get("seq").cloned(),
             };
             let task = self.check_task(seed, |loader| {
                 let state = reapproval::early_binding_state(&loader.step_frontmatter, loader.context.clone())?;
@@ -1884,6 +1885,8 @@ impl<'a> Loader<'a> {
                 slot: check::Slot::SequenceChild(ordinal), name: step.name.clone(), file: child_origin,
                 property: child_property.clone(), item: &step.raw_state,
                 executable: step.executable.as_ref().map(|executable| executable.field),
+                seq: self.checking().then(|| super::build_step_overlay(plan, index).as_set_overrides(None)
+                    .get("seq").cloned()).flatten(),
             };
             let task = self.check_task(seed, |loader| step.executable.as_ref().map(|executable| loader.load_step_task(
                 executable, child_origin, &child_label, &child_property,
@@ -1906,6 +1909,7 @@ impl<'a> Loader<'a> {
         let seed = check::SiteSeed {
             slot: check::Slot::SequenceChild(index), name: check::item_name(item, index), file: origin,
             property: property(index), item, executable: check::item_executable(item),
+            seq: None,
         };
         self.record_item_failure(seed, error);
     }
@@ -2171,6 +2175,7 @@ impl<'a> Loader<'a> {
             let seed = check::SiteSeed {
                 slot: check::Slot::Leg(index), name: check::item_name(raw, index), file: origin,
                 property: task_property.clone(), item: raw, executable: check::item_executable(raw),
+                seq: None,
             };
             // A check records a bad leg at the leg and reads its siblings.
             let leg = self.check_task(seed, |loader| {
@@ -3026,6 +3031,7 @@ impl<'a> Loader<'a> {
             bucket.push(self.graph.prompt_references.len());
             self.graph.prompt_references.push(reference);
         }
+        self.note_prepared_with(&evaluated, &deferred);
         PreparedWith { evaluated, deferred, failed }
     }
 

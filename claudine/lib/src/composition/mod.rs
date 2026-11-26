@@ -178,6 +178,7 @@ pub use sequence::preflight::{
     build_preflight_graph_after_discovery, reread_preflight_graph_with_invocation, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
     InputOwner, InputOwnerRole, InputPrompt, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots, validate_lifecycle_literals,
+    providers::collect_written_keys,
     CheckFailure, CheckedTask, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use sequence::task::{

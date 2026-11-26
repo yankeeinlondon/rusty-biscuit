@@ -372,6 +372,89 @@ pub const CODES: &[CodeSpec] = &[
         severity_override: None,
         detail: &["source_path", "property", "target", "reason"],
     },
+    // Reported by the passive dry-run check (`claudine … --dry-run`); a real
+    // run reports the same conditions under the error that stops it.
+    // A step-level `agent:`/`model:` a task reads as data.
+    CodeSpec {
+        code: "composition.selection_key_as_data",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // A task with no executable over a document with no body.
+    CodeSpec {
+        code: "composition.no_executable",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // A task naming more than one executable.
+    CodeSpec {
+        code: "composition.multiple_executables",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // A `sequence` value or item of the wrong shape.
+    CodeSpec {
+        code: "composition.sequence_shape",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // No source of the selection chain chose a provider.
+    CodeSpec {
+        code: "composition.provider_unresolved",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // A provider name no provider answers to.
+    CodeSpec {
+        code: "composition.provider_unknown",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // A chosen provider whose binary is not on `PATH`.
+    CodeSpec {
+        code: "composition.provider_not_installed",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Environment,
+        severity_override: None,
+        detail: &[],
+    },
+    // A provider that needs a model for this launch, with none found.
+    CodeSpec {
+        code: "composition.model_required",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &[],
+    },
+    // Command-line positionals that do not parse.
+    CodeSpec {
+        code: "composition.invalid_arguments",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Caller,
+        severity_override: None,
+        detail: &[],
+    },
     CodeSpec {
         code: "composition.failed",
         category: Category::Composition,

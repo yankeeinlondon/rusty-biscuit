@@ -136,14 +136,42 @@ fn a_prompt_whose_initialize_would_create_its_include_fails_sequence_preflight()
     case.assert_no_side_effects(&output);
 }
 
+/// The dry run reports the same missing include as a finding on the prompt
+/// task, with nothing run.
 #[test]
 fn a_dry_run_reports_the_same_preflight_failure_without_side_effects() {
     let case = Case::new("sequence-generated-include-dry");
+    // The check only looks the provider up, so a stub keeps its report to
+    // the include.
+    let claude = case.fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
-    let (success, output, code) = case.run_sequence(&["--dry-run", "--claude"]);
+    let output = case
+        .fixture
+        .command()
+        .args(["sequence", case.sequence.to_str().unwrap(), "--dry-run", "--json", "--claude"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert_missing_include_failure(success, &output, code.as_deref());
-    case.assert_no_side_effects(&output);
+    assert_eq!(output.status.code(), Some(2), "{stdout}");
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let errors: Vec<&serde_json::Value> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .collect();
+    assert_eq!(errors.len(), 1, "{stdout}");
+    assert_eq!(errors[0]["code"], "dm.reference.missing_transclusion", "{stdout}");
+    assert!(errors[0]["message"].as_str().unwrap().contains(&format!("File not found: {GENERATED}")), "{stdout}");
+    assert_eq!(errors[0]["trail"][0]["label"], "one", "{stdout}");
+    case.assert_no_side_effects(&stdout);
 }
 
 /// The note is scoped to sequence preflight: direct `compose` of a document

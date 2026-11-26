@@ -19,12 +19,22 @@ use common::{CliProcessFixture, strip_ansi};
 
 /// Run `claudine sequence --dry-run` against `file` and return flattened stderr.
 ///
-/// Errors render through `Prose`, which wraps to the terminal width and
+/// The dry run is the passive check: it reports every problem it finds and
+/// exits non-zero when any is an error or a warning. Errors render through `Prose`, which wraps to the terminal width and
 /// prefixes continuation lines. Flattening to single-spaced text lets an
 /// assertion name the message rather than the wrap points, which are a
 /// function of the host's width and would make these tests width-sensitive.
 fn run_and_flatten(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> String {
-    let mut args: Vec<&str> = vec!["sequence", "--dry-run"];
+    let mut args: Vec<&str> = vec!["--dry-run"];
+    args.extend_from_slice(extra_args);
+    run_live_and_flatten(workspace, file, &args)
+}
+
+/// Run `claudine sequence` for real against `file` and return flattened
+/// stderr; for a rejection only a run observes, such as shell approval or a
+/// task's timeout, which the dry run neither asks for nor parses.
+fn run_live_and_flatten(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> String {
+    let mut args: Vec<&str> = vec!["sequence"];
     args.extend_from_slice(extra_args);
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
@@ -82,15 +92,15 @@ fn a_step_declaring_two_executables_names_both_fields() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("declares multiple executable fields"),
+        stderr.contains("this task names more than one executable"),
         "expected the exclusivity rejection; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("prompt") && stderr.contains("shell"),
+        stderr.contains("`prompt`") && stderr.contains("`shell`"),
         "the error must name both offending fields; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("index 0"),
+        stderr.contains("task alpha (sequence[0])"),
         "the error must locate the step; stderr:\n{stderr}"
     );
 }
@@ -155,7 +165,7 @@ fn a_malformed_task_with_is_the_with_family_error_at_the_task() {
         ("whole.md", "'{{ payload }}'", "whole-mapping"),
         ("list.md", "[1]", "must be a mapping"),
         ("null.md", "null", "must be a mapping"),
-        ("dynamic.md", "{ '{{ key }}': 1 }", "with` keys must be static"),
+        ("dynamic.md", "{ '{{ key }}': 1 }", "keys must be static"),
     ] {
         let doc = write(
             &workspace,
@@ -538,16 +548,17 @@ fn a_reference_cycle_reports_every_hop() {
 fn a_shell_command_depending_on_outputs_needs_a_template_approval() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
     // `outputs` does not exist at preflight, so the command can be approved
-    // only by its shape; `--dry-run` cannot prompt for that.
+    // only by its shape; a non-interactive run has no one to ask. The dry run
+    // asks for no approval at all, so only a real run observes this.
     let doc = write(
         &workspace,
         "seq.md",
         "---\nsequence:\n  - name: one\n    shell: \"echo {{ last(seq.outputs) }}\"\n---\nBody.\n",
     );
 
-    let stderr = run_and_flatten(&workspace, &doc, &[]);
+    let stderr = run_live_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("echo {{ last(seq.outputs) }}") && stderr.contains("approval"),
+        stderr.contains("echo {{ last(seq.outputs) }}") && stderr.contains("requires approval"),
         "stderr:\n{stderr}"
     );
 }
@@ -574,9 +585,10 @@ fn a_parallel_write_back_collision_is_rejected() {
 // ============================================================================
 // Shell task timeouts
 //
-// `--yolo` is required to get past preflight approval; the rejection below
-// happens while *parsing* the duration, before any process is spawned, so
-// these cases stay cross-platform.
+// A real run: the dry run does not parse a shell task's `timeout`. `--yolo`
+// is required to get past preflight approval; the rejection below happens
+// while *parsing* the duration, before any process is spawned, so these cases
+// stay cross-platform.
 // ============================================================================
 
 #[test]
@@ -588,7 +600,7 @@ fn a_zero_shell_timeout_is_rejected() {
         "---\nsequence:\n  - name: t\n    shell: printf ok\n    timeout: 0s\n---\nBody\n",
     );
 
-    let stderr = run_and_flatten(&workspace, &doc, &["--yolo"]);
+    let stderr = run_live_and_flatten(&workspace, &doc, &["--yolo"]);
     assert!(
         stderr.contains("is not a valid duration") && stderr.contains("greater than zero"),
         "`0s` is rejected rather than read as unbounded; stderr:\n{stderr}"
@@ -604,7 +616,7 @@ fn a_unitless_shell_timeout_is_rejected() {
         "---\nsequence:\n  - name: t\n    shell: printf ok\n    timeout: 30\n---\nBody\n",
     );
 
-    let stderr = run_and_flatten(&workspace, &doc, &["--yolo"]);
+    let stderr = run_live_and_flatten(&workspace, &doc, &["--yolo"]);
     assert!(
         stderr.contains("is not a valid duration") && stderr.contains("missing unit"),
         "the unit is part of the grammar; stderr:\n{stderr}"
@@ -719,7 +731,8 @@ macro_rules! sequence_rename_error {
             let path = write(&fixture, "seq.md", &format!(
                 "---\nsequence: [alpha]\n---\nOriginal read: {{{{ {} }}}}.\n", $old));
             let stderr = run_and_flatten(&fixture, &path, &[]);
-            assert!(stderr.contains("removed grammar") && stderr.contains($new), "{stderr}");
+            assert!(stderr.contains("grammar") && stderr.contains(concat!("use `", $new, "`")), "{stderr}");
+            assert!(stderr.contains("removed `"), "{stderr}");
             assert!(!fixture.audio_spool().exists());
         }
     };
@@ -751,6 +764,7 @@ fn a_rename_error_precedes_dynamic_sequence_source_effects() {
     let fixture = CliProcessFixture::named("sequence-rename-before-source");
     let path = write(&fixture, "seq.md", "---\nsequence: '$(must-not-run)'\n---\n{{ outputs }}\n");
     let stderr = run_and_flatten(&fixture, &path, &[]);
-    assert!(stderr.contains("removed grammar") && stderr.contains("seq.outputs"), "{stderr}");
+    assert!(stderr.contains("uses the removed `outputs` grammar") && stderr.contains("use `seq.outputs`"), "{stderr}");
+    assert!(stderr.contains("not checked: tasks"), "the source command is never run; stderr:\n{stderr}");
     assert!(!stderr.contains("command not found"), "{stderr}");
 }

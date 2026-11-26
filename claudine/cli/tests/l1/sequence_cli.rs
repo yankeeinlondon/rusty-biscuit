@@ -1212,7 +1212,7 @@ fn preflight_statuses_bracket_phase_1c() {
     )
     .unwrap();
 
-    let (stderr, _) = run_preflight(&fixture, &md_file, &["--dry-run"]);
+    let (stderr, _) = run_preflight(&fixture, &md_file, &[]);
     let starting = stderr
         .find("Starting pre-flight checks")
         .unwrap_or_else(|| panic!("no starting status; stderr:\n{stderr}"));

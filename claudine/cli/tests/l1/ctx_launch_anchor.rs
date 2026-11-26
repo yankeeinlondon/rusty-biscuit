@@ -84,7 +84,9 @@ fn launched_spelling(path: &Path) -> PathBuf {
 
 /// Escape: ambient context. Every test in this file is *about* the launch
 /// directory, so each run is pinned to a directory the test built itself.
+/// The check requires the chosen provider on `PATH` and never runs it.
 fn run_dry_run(fixture: &CliProcessFixture, launch_dir: &Path, doc: &Path) -> String {
+    write_command_stub(fixture.bin_dir(), "claude", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n");
     let output = fixture
         .command_builder()
         .ambient_context(launch_dir)
@@ -542,43 +544,41 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
 
 /// AC5/AC11: the real compose CLI constructs exactly one launch capture per
 /// document epoch with zero ambient fallbacks — asserted through the `--perf`
-/// work note, which projects the invocation owner's counters.
+/// work note's per-epoch breakdown, which projects the invocation owner's
+/// counters. The run's total also counts captures outside the document epoch.
 #[test]
 fn perf_reports_one_launch_capture_and_zero_ambient_fallbacks() {
     let (fixture, root) = staged_fixture("ctx-anchor-perf");
     let launch_dir = root.join("alpha/lib");
     let at_root = root.join("probe-root.md");
     write_probe(&at_root);
+    // `--perf` reports on a real run; the passive dry run prints no perf note.
+    write_command_stub(fixture.bin_dir(), "claude", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n");
 
     // Escape: ambient context — the launch capture is the subject.
     let output = fixture
         .command_builder()
         .ambient_context(&launch_dir)
         .build()
-        .args([
-            "compose",
-            "--claude",
-            "--dry-run",
-            "--perf",
-            &at_root.to_string_lossy(),
-        ])
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .args(["compose", "--claude", "--perf", &at_root.to_string_lossy()])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&output.get_output().stderr);
-    let plain = common::strip_ansi(&stderr);
+    // The note hard-wraps behind a gutter; compare it as one line.
+    let plain = common::strip_ansi(&stderr).replace('▌', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        plain.contains("launch captures 1 (extensions 0)"),
+        plain.contains("document epochs [0: captures 1 (extensions 0), fallbacks 0,"),
         "one document epoch must construct exactly one launch capture with no \
-         extension; perf note:\n{plain}"
+         extension and no fallback; perf note:\n{plain}"
     );
     assert!(
         plain.contains("ambient fallbacks 0"),
         "no stage may fall through to darkmatter's ambient capture; perf note:\n{plain}"
     );
     assert!(
-        plain.contains("prepared consumers")
-            && plain.contains("[body, effective-frontmatter, preflight]"),
-        "the direct dry-run route must report its exact prepared-context consumer set; \
+        plain.contains("prepared consumers [body (2), effective-frontmatter (2), lifecycle, preflight]"),
+        "the direct route must report its exact prepared-context consumer set; \
          perf note:\n{plain}"
     );
 }

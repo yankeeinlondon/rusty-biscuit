@@ -65,8 +65,6 @@ pub enum ShellApprovalFailure {
     /// Approval was required, but no approval handler was available — a
     /// non-interactive run with an unwhitelisted command.
     NoHandler,
-    /// `--dry-run` cannot obtain the interactive approval the command needs.
-    DryRun,
 }
 
 impl ShellApprovalFailure {
@@ -75,7 +73,6 @@ impl ShellApprovalFailure {
         match self {
             ShellApprovalFailure::Blacklisted(_) => "blacklisted",
             ShellApprovalFailure::NoHandler => "no_handler",
-            ShellApprovalFailure::DryRun => "dry_run",
         }
     }
 
@@ -96,11 +93,6 @@ impl ShellApprovalFailure {
             ShellApprovalFailure::NoHandler => format!(
                 "Shell command '{command}' at {location} requires approval but no approval \
                  handler is available. Add to whitelist or run interactively."
-            ),
-            ShellApprovalFailure::DryRun => format!(
-                "Cannot dry-run: shell command '{command}' requires interactive approval. \
-                 Run with --yolo to auto-approve, or pre-approve the command in your \
-                 configuration."
             ),
         }
     }
@@ -3118,8 +3110,7 @@ pub enum CompositionError {
     /// Composition succeeded but produced an empty body.
     ///
     /// The Markdown composed cleanly (no transclusion or shell-expansion
-    /// failures), but every block in the body evaluated to falsy or the
-    /// document had no body to begin with. Sending the result to a provider
+    /// failures), but the prompt is empty; `cause` says why. Sending the result to a provider
     /// CLI would surface as `"Input must be provided ..."` from the provider
     /// rather than naming the real cause, so the composition layer short-
     /// circuits here with an actionable error.
@@ -3142,6 +3133,8 @@ pub enum CompositionError {
         /// which variables were actually visible to `::block when=…`
         /// conditions when the body collapsed to nothing.
         provided_overrides: Vec<String>,
+        /// Why the body is empty, as far as the composition proved it.
+        cause: darkmatter::findings::EmptyBodyCause,
     },
 
     /// A frontmatter-rooted error carrying a captured source excerpt for

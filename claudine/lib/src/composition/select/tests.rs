@@ -30,7 +30,6 @@ fn make_prepared_composition(
         compose_perf: None,
         dropped_optionals: Vec::new(),
         warnings: Vec::new(),
-        deferred_lifecycle_keys: Vec::new(),
         input_layers: crate::composition::CallerInputLayers::new(crate::test_support::context()),
         entry: crate::composition::DocumentEntryReason::Direct,
         compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(

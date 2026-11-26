@@ -1680,40 +1680,34 @@ An unhandled step failure stops the sequence. Document `fail_fast:` and the
 
 ### Dry run
 
-`--dry-run` performs the **full preflight**, then just-in-time-composes every
-step against the *initial* state — empty `seq.outputs`, no runtime mutations —
-without launching a provider and without inline-compose write-back.
-Late-binding references render exactly as a first-step composition would see
-them. Static validation and shell approval are the same as in a live run.
+`--dry-run` checks the whole sequence and previews each prompt that
+composes, without running anything. It reads the tree the way a real run's
+preflight does, reports every problem in one pass under the task it belongs
+to, and composes each prompt task against the *initial* state (empty
+`seq.outputs`, no runtime writes). The report goes to stderr, the previews
+to stdout, and the exit status is `2` when any finding is an error or a
+warning, else `0`. `--json` replaces both with one JSON report on stdout.
+See [claudine sequence — Dry run](claudine/docs/cli/sequence.md#dry-run) for the
+report's layout.
 
-What a dry run shows instead of doing:
+Nothing runs, even with `--yolo`:
 
 | Element | In a dry run |
 |---|---|
-| `shell:` task | Rendered, not run: `` rendered (dry-run): would run `<command>` `` with the approved bytes (or the template of a template-mode command). It publishes nothing. |
-| `side_effect:` task | Rendered with its authored action and arguments, templates unresolved: `` rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}` ``. It never writes a file or applies a runtime `set`. |
-| `loop:` | The body is visited once with pass 1's `loop.*` values: `` `loop` previews one pass (dry-run); repetition is not evaluated: until `<expr>`, max N ``. No gate, condition, or action is evaluated. |
-| Task `when:` | Shown, not evaluated: `` `<name>` runs when `<expr>` (not evaluated in a dry run) ``; the task is rendered. |
-| Inline container `$schema` | Shown, not evaluated: `` `<container>` checks its `$schema` at its turn (not evaluated in a dry run) ``. Its syntax is still checked, and the root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
-| Lifecycle events | None fire. |
-| `prep` | Targets do not run; a literal target is listed as `prep target @helper.md (not run in a dry run)`. |
+| `shell:` task | Not run. Reported as not checked; its command is not approved. |
+| `side_effect:` task | Not run. Reported as not checked; no file is written and no runtime `set` is applied. |
+| `$( … )` value, `::shell` line, `::shell-block` | Not run. Left as written in the preview, marked `[not evaluated in a dry run]`, and reported as not checked, together with anything that reads its value. |
+| A list built by `$( … )` | Not run, so its tasks are reported as not checked. |
+| `loop:` | No pass runs and no gate, condition, or action is evaluated. |
+| Task `when:` | Not evaluated; the task is checked as if it runs. |
+| Inline container `$schema` | Its syntax is checked; the values it judges at its turn are not. The root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
+| Lifecycle events | None fire, so a value an event would `set` is not there (supply it as a setter to preview with it). |
+| `prep` | Targets do not run. |
+| Provider | Chosen by the same rules as a real run, and never launched. The finding lists each source it read; see [claudine sequence — Choosing providers](claudine/docs/cli/sequence.md#choosing-providers). |
+| Files | Nothing is written: no configuration, cache, approval record, or `inline-compose` write-back. |
 
-The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
-
-> **Composition shell work still runs.** `$( … )` expansions in step documents
-> execute for real, because their output is what composition needs, so their
-> side effects happen. Dry-run does not provide filesystem isolation.
-
-`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`)
-additionally runs each `shell:` task once, during the single preview pass:
-
-```sh
-claudine sequence --dry-run --dry-run-shell release.md
-```
-
-Those commands have their real effects (a `git add` stages), but no provider
-launches, no `side_effect:` task runs, and no loop repetition or lifecycle
-event is turned back on.
+`--dry-run-shell` was removed; it is a usage error with or without
+`--dry-run`. To see what a `shell:` task does, run the sequence.
 
 ## Requiring caller input
 
@@ -1888,10 +1882,8 @@ flowchart TD
     S -->|unrecovered; finalize| E[Propagate outward; root exits 1]
 ```
 
-Dry-run fires no lifecycle events recursively and launches no provider or
-inline write-back. It renders shell tasks rather than running them (unless
-`--dry-run-shell` is given), but composition shell expansions still run against
-initial state and can have real effects. See [Dry run](#dry-run).
+A dry run fires no lifecycle events, at any depth, and runs no command or
+provider. See [Dry run](#dry-run).
 
 
 ## Cancellation

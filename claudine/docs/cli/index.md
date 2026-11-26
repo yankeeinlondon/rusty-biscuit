@@ -96,6 +96,6 @@ claudine --plain inline-compose --help
 claudine inline-compose --help --plain
 ```
 
-A help request after the command is answered before any other argument is checked. An unknown provider, a missing option value, malformed `--set` JSON, `--dry-run-shell` without `--dry-run`, or conflicting switches next to `--help` still print the reference and exit 0, with nothing on stderr. Nothing is composed, no configuration is created, no lifecycle action runs, and no provider launches. Only the first literal `--` changes this: everything after it belongs to the provider, so a `--help` there is forwarded instead of answered.
+A help request after the command is answered before any other argument is checked. An unknown provider, a missing option value, malformed `--set` JSON, `--json` without `--dry-run`, the removed `--dry-run-shell`, or conflicting switches next to `--help` still print the reference and exit 0, with nothing on stderr. Nothing is composed, no configuration is created, no lifecycle action runs, and no provider launches. Only the first literal `--` changes this: everything after it belongs to the provider, so a `--help` there is forwarded instead of answered.
 
 Shell completion is unaffected: completing a command line that contains `--help` lists candidates rather than printing help.

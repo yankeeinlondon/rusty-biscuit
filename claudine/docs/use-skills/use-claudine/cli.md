@@ -99,8 +99,8 @@ They take every wrapper switch above, plus:
 | `--exclude <P>` | remove a provider from automatic selection (repeatable) |
 | `--no-interactive` | force non-interactive |
 | `--set '<JSON5 object>'` | override frontmatter (once; setters beat it) |
-| `--dry-run` | print the composed body to stdout, and the resolved frontmatter plus a summary table to stderr. Launches nothing and fires no lifecycle event, but **`$(…)` expansions still run** |
-| `--dry-run-shell` | with `--dry-run`, also run sequence `shell:` tasks for real |
+| `--dry-run` | check the document and print each composed prompt to stdout, with every problem found on stderr. Runs nothing (no provider, command, lifecycle event, question, or write); exits `2` on any error or warning, else `0` |
+| `--json` | with `--dry-run`, print one JSON report (`file`, `outcome`, `diagnostics`, `summary`) on stdout instead |
 | `--max-iterations <N>` | loop cap override |
 | `--on-rate-limit pause\|abort\|continue` | rate-limit policy for loops (`abort` exits 75) |
 

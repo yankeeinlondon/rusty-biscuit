@@ -68,8 +68,7 @@ pub(super) struct SequencePreflight {
 /// is returned so the user can fix the full sequence in one edit.
 ///
 /// `runtime` is the root's runtime state as the first step will compose
-/// against it (its `initialize` writes; `None` for a dry run, which fires
-/// no lifecycle), so a value `initialize` wrote is never reported missing.
+/// against it (its `initialize` writes), so a value `initialize` wrote is never reported missing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_phase_1c_with_schema(
     source: &ResolvedCompositionSource,

@@ -195,23 +195,22 @@ pub struct SharedComposeArgs {
     #[arg(long)]
     pub repo: bool,
 
-    /// Show the composed result without launching a provider; composition
-    /// `$( … )` shell expansions still run.
+    /// Check the document and preview what composes, without running
+    /// anything: no provider, command, lifecycle event, prompt, or write.
     ///
-    /// A sequence previews each loop body once and runs no lifecycle event,
-    /// `prep` target, `shell:` task, or `side_effect:` task: each task is
-    /// reported as `rendered (dry-run): would run …`. The provider executable
-    /// need not be installed.
+    /// Every problem found is reported (stderr), then each preview that
+    /// composed (stdout). Exits 2 when any error or warning is found, else 0.
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Run each `shell:` task for real once during the preview; requires
-    /// `--dry-run`.
-    ///
-    /// The commands have real effects (a `git add` stages). It never
-    /// launches a provider, runs no `side_effect:` task, and turns no loop or
-    /// lifecycle event back on.
+    /// Emit the dry-run report as one JSON envelope on stdout, with no
+    /// preview; requires `--dry-run`.
     #[arg(long, requires = "dry_run")]
+    pub json: bool,
+
+    /// Removed: dry runs skip commands. Declared only so the run is refused
+    /// with a targeted usage error rather than clap's "unexpected argument".
+    #[arg(long, hide = true)]
     pub dry_run_shell: bool,
 
     /// Suppress env details and info messages, but still show the system prompt when set.

@@ -93,10 +93,6 @@ pub(super) struct CompositionRunCtx<'a> {
 /// Execute a single composition iteration: harness-plan parse, pre-flight
 /// shell approval, env/prompt output, and the harness loop.
 ///
-/// Live runs only — `--dry-run` returns at the seam in
-/// [`super::pipeline::execute_composition_request_inner_with_guard`], before the
-/// lifecycle runtime this body depends on is constructed.
-///
 /// This is the promoted form of the former inline `run_body` closure. `guard` and
 /// `perf_collector` are passed separately because they are mutable and vary per
 /// call; everything else is bundled in `ctx`.
@@ -326,10 +322,6 @@ pub(super) fn run_composition_body(
         }
     }
 
-    // No dry-run seam here. `--dry-run` returns from
-    // `pipeline::execute_composition_request_inner_with_guard` before the
-    // lifecycle runtime is even constructed, so this body — and every lifecycle
-    // event it can reach — is live-run-only.
 
     // Plan is validated; the harness loop re-parses from the materialized
     // frontmatter, so the live path no longer needs this copy.

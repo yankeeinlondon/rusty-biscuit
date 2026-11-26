@@ -140,35 +140,8 @@ status: \"{{ frontmatter('does-not-exist.md', 'ready') }}\"\n\
 }
 
 #[test]
-fn dry_run_no_handler_emits_cannot_dry_run_message() {
-    // Non-TTY dry-run gate: an unapproved command with no approval
-    // handler surfaces the spec's `Cannot dry-run: …` message naming
-    // the offending command and pointing at `--yolo` / pre-approval.
-    let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
-    let compose_options = ComposeOptions::new();
-    let dir = tempfile::TempDir::new().unwrap();
-    let options = ShellApprovalOptions {
-        permissions: user_permissions(dir.path(), &[]),
-        approval_handler: None,
-        dry_run: true,
-        ..Default::default()
-    };
-
-    let err = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None)
-        .unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("Cannot dry-run: shell command 'curl https://example.com' requires \
-                      interactive approval."),
-        "expected dry-run gate message naming the command; got: {msg}"
-    );
-    assert!(msg.contains("--yolo"), "message should mention --yolo; got: {msg}");
-}
-
-#[test]
-fn non_dry_run_no_handler_keeps_generic_message() {
-    // Without `--dry-run` the no-handler path keeps the generic
-    // provenance-bearing message (unchanged behavior).
+fn no_handler_keeps_generic_message() {
+    // The no-handler path keeps the generic provenance-bearing message.
     let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
     let compose_options = ComposeOptions::new();
     let (_dir, options) = approval_options_with_whitelist(&[]);
@@ -179,10 +152,6 @@ fn non_dry_run_no_handler_keeps_generic_message() {
     assert!(
         msg.contains("no approval handler"),
         "expected generic no-handler message; got: {msg}"
-    );
-    assert!(
-        !msg.contains("Cannot dry-run"),
-        "non-dry-run path must not use the dry-run framing; got: {msg}"
     );
 }
 
@@ -242,7 +211,6 @@ fn approval_failures_project_a_matchable_reason() {
             "blacklisted",
         ),
         (ShellApprovalFailure::NoHandler, "no_handler"),
-        (ShellApprovalFailure::DryRun, "dry_run"),
     ];
 
     for (failure, expected_reason) in cases {

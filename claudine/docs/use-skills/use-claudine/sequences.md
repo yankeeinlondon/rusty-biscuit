@@ -134,8 +134,8 @@ sequence:
   values, each `start` again with every write so far), and pre-flight binds
   `shell: "echo {{{ who }}}"` under `who: string(default(ada))` as `echo ada`.
 - An empty `sequence: []` still validates its `$schema` and `$state`.
-- A dry run judges inputs, `$schema`, and `$state`, and names each inline
-  container check instead of evaluating it.
+- A dry run judges inputs, `$schema`, and `$state`; an inline container's
+  `$schema` is judged only at its turn in a real run.
 
 ## Results
 
@@ -193,11 +193,16 @@ An unusable hint fails before any task starts.
 ## Previewing
 
 ```bash
-claudine sequence workflow.md --dry-run              # one loop pass; no events; shell/side_effect tasks only rendered
-claudine sequence workflow.md --dry-run --dry-run-shell   # also run shell: tasks for real
+claudine sequence workflow.md --dry-run          # report on stderr, each composed prompt on stdout
+claudine sequence workflow.md --dry-run --json   # one JSON report on stdout
 ```
 
-`$(…)` composition expansions run for real even in a dry run.
+A dry run runs nothing: no provider, `shell:`/`side_effect:` task, `$(…)`
+expansion, lifecycle event, loop pass, or question. It reads the whole tree
+and reports every problem under its task (`composition.provider_unresolved`,
+`composition.no_executable`, a missing `prompt:` file, a missing input, …),
+then exits `2` if any is an error or warning, else `0`. On a terminal a
+choice the run would ask about is a warning; without one it is an error.
 
 ## Removed spellings
 
@@ -211,6 +216,7 @@ claudine sequence workflow.md --dry-run --dry-run-shell   # also run shell: task
 | task `teardown:` | a group's `finalize:` (a group of one for a single task) |
 | `state`, `outputs`, `step`, `total_steps` | `seq.*` |
 | `interactive: true` in a sequence document | `-i` |
+| `--dry-run-shell` | run the sequence; a dry run runs no command |
 
 These are declared `removed(…)` in Claudine's schemas, so the editor, `md
 schema validate`, a dry run, and a run all refuse them, `null` included, with

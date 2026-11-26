@@ -129,31 +129,34 @@ fn silent_suppresses_the_catalog_notice_but_not_the_model() {
     assert!(!stderr.contains(CATALOG_NOTICE), "stderr:\n{stderr}");
 }
 
+/// The dry run counts a frontmatter model the catalog does not know as
+/// OpenCode's model, so the check is clean, while the same document without
+/// a model is the `composition.model_required` error. Neither run launches
+/// the provider or refreshes its model listing.
 #[test]
-fn dry_run_reports_the_launch_model_and_the_notice_without_a_refresh() {
+fn dry_run_accepts_the_frontmatter_model_without_a_launch_or_refresh() {
     let fixture = CliProcessFixture::named("compose-fm-model-dry-run");
     let launch_file = stage_recording_opencode(&fixture);
     let prompt = write_prompt(&fixture, UNRECOGNIZED_MODEL);
 
-    let (ok, stderr) = run(
-        &fixture,
-        &launch_file,
-        &["compose", "--dry-run", prompt.to_str().unwrap()],
-    );
-
+    let (ok, stderr) = run(&fixture, &launch_file, &["compose", "--dry-run", prompt.to_str().unwrap()]);
     assert!(ok, "dry-run should succeed; stderr:\n{stderr}");
-    let model_row = stderr
-        .lines()
-        .find(|line| line.contains("Model"))
-        .unwrap_or_default();
-    assert!(
-        model_row.contains(UNRECOGNIZED_MODEL),
-        "the Model row must show the launch model; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains(CATALOG_NOTICE),
-        "dry-run must print the same notice as the live run; stderr:\n{stderr}"
-    );
+    assert!(!stderr.contains("needs a model"), "stderr:\n{stderr}");
+
+    let bare = fixture.cwd().join("bare.md");
+    write(&bare, "---\nagent: opencode\n---\n\nSay hi.\n");
+    let output = fixture
+        .command()
+        .env("CLAUDINE_LAUNCH_FILE", &launch_file)
+        .env_remove("MODEL")
+        .env_remove("OPENCODE_MODEL")
+        .args(["compose", "--dry-run", "--json", bare.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(2), "{envelope}");
+    assert_eq!(envelope["diagnostics"][0]["code"], "composition.model_required", "{envelope}");
+
     assert!(!launch_file.exists(), "dry-run must not launch the provider");
     assert!(
         !launch_file.with_extension("txt.models").exists(),

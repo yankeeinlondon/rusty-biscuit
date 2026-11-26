@@ -128,95 +128,66 @@ fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
         .stderr(contains("agent resolution failed"));
 }
 
-/// End-to-end (Finding 1): a frontmatter `agent` list resolving to exactly one
-/// installed provider must render the **auto-select header** in the dry-run
-/// `Agent` cell — not collapse to a bare provider name. Before the fix the
-/// resolved target masked the list state at the dry-run seam.
+/// The `--json` dry-run report of `claudine compose doc.md` with only
+/// `installed` providers on a fake-only `PATH`, as `(exit code, codes,
+/// envelope)`.
 #[cfg(unix)]
-#[test]
-fn compose_dry_run_list_one_installed_renders_auto_select_header() {
-    let fixture = CliProcessFixture::named("compose-dry-run-list-one");
+fn compose_dry_run_report(frontmatter: &str, installed: &[&str]) -> (Option<i32>, Vec<String>, serde_json::Value) {
+    let fixture = CliProcessFixture::named("compose-dry-run-agent-list");
     fixture.seed_user_config();
-
-    // Suggest two agents; install only `claude` so the list resolves to a
-    // single installed provider (ListOneInstalled).
     let md_file = fixture.cwd().join("doc.md");
-    fs::write(
-        &md_file,
-        "---\nname: one-installed\nagent: [claude, gemini]\n---\nBODY\n",
-    )
-    .unwrap();
-    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
+    fs::write(&md_file, format!("---\n{frontmatter}---\nBODY\n")).unwrap();
+    for slug in installed {
+        write_executable(&fixture.bin_dir().join(slug), "#!/bin/sh\nexit 0\n");
+    }
 
-    // fake-only PATH: the assertion is that `gemini` was *not* found, so the
-    // fixture bin must be the only place a provider can come from.
+    // fake-only PATH: the assertions depend on which providers are *not*
+    // found, so the fixture bin must be the only place a provider can come
+    // from.
     let output = fixture
         .command_builder()
         .fake_only_path()
         .build()
-        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .args(["compose", "--dry-run", "--json", md_file.to_str().unwrap()])
         .output()
         .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let codes = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["code"].as_str().unwrap().to_string())
+        .collect();
+    (output.status.code(), codes, envelope)
+}
 
-    assert!(
-        output.status.success(),
-        "dry-run should succeed; stderr was:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    // `prompting` only appears in the auto-select header ("…without the need
-    // for interactive prompting"); it is the single-token proof that the cell
-    // is the list auto-select state, not a bare `Selected` provider name.
-    assert!(
-        stderr.contains("prompting"),
-        "list-with-one-installed dry-run must render the auto-select header; stderr was:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("Claude"),
-        "the auto-selected provider must still be named; stderr was:\n{stderr}"
-    );
+/// End-to-end (Finding 1): a frontmatter `agent` list resolving to exactly one
+/// installed provider selects that provider without prompting. A list whose
+/// one installed entry is OpenCode is judged as OpenCode, which needs a model,
+/// proving the list resolved rather than staying unresolved.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_list_one_installed_selects_that_provider() {
+    let (code, codes, envelope) = compose_dry_run_report("agent: [claude, gemini]\n", &["claude"]);
+    assert_eq!(code, Some(0), "{envelope}");
+    assert!(codes.is_empty(), "{envelope}");
+
+    let (code, codes, envelope) = compose_dry_run_report("agent: [opencode, gemini]\n", &["opencode"]);
+    assert_eq!(code, Some(2), "{envelope}");
+    assert_eq!(codes, ["composition.model_required"], "{envelope}");
 }
 
 /// End-to-end (Finding 2): a single-entry all-invalid `agent` list
-/// (`agent: [not-real]`) must render the **zero-installed-list** state, not the
-/// single-invalid scalar cell. Before the fix the lost list-ness collapsed it
-/// to `Invalid Agent(…)`.
+/// (`agent: [not-real]`) is a list with no installed provider, not the
+/// single-invalid scalar finding.
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
-    let fixture = CliProcessFixture::named("compose-dry-run-invalid-list");
-    fixture.seed_user_config();
-
-    let md_file = fixture.cwd().join("doc.md");
-    fs::write(&md_file, "---\nname: zero\nagent: [not-real]\n---\nBODY\n").unwrap();
-    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
-
-    let output = fixture
-        .command()
-        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "dry-run should succeed; stderr was:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    // `installed/valid` is the single-token signature of the zero-installed
-    // header; it survives table word-wrap.
-    assert!(
-        stderr.contains("installed/valid"),
-        "single-entry invalid list must render the zero-installed-list state; stderr was:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("not-real"),
-        "the invalid suggestion must appear in the NOT-valid list; stderr was:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("Invalid Agent"),
-        "must NOT render the single-invalid scalar cell; stderr was:\n{stderr}"
-    );
+    let (code, codes, envelope) = compose_dry_run_report("agent: [not-real]\n", &["goose"]);
+    assert_eq!(code, Some(2), "{envelope}");
+    assert!(codes.iter().any(|code| code == "composition.provider_not_installed"), "{envelope}");
+    assert!(!codes.iter().any(|code| code == "composition.provider_unknown"), "{envelope}");
+    assert!(envelope.to_string().contains("not-real"), "the listed suggestion is named: {envelope}");
 }
 
 /// End-to-end (Findings 3/4): `--silent` governs status verbosity only — it

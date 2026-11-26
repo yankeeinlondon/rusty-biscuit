@@ -3,15 +3,15 @@
 //! The L1 unit tests in `perf/tests/` and the CLI integration tests assert the
 //! report's *semantics* after stripping escape codes, so they cannot catch
 //! broken glyph emission, column alignment, or SGR styling in a real terminal.
-//! These tests drive the real `claudine compose --perf --dry-run` binary inside
-//! a terminal emulator and assert against the bytes the terminal actually
+//! These tests drive a real `claudine compose --perf` run, against a `goose`
+//! stub that exits at once, inside a terminal emulator and assert against the bytes the terminal actually
 //! displayed (`frame.raw` / `frame.plain`):
 //!
 //! - box-drawing connector hierarchy (`├─`, `│`, `└─`) — P-1
 //! - the unit-aligned duration column — P-4
 //! - the visible share-of-wall-clock percent column (`100%`, `<1%`, …) — P-2
 //! - the single `▇ HOT` marker on the dominant leaf, rendered bold — P-3
-//! - the dry-run `—` agent placeholder — P-5
+//! - the measured `agent execution` leaf
 //! - the yellow `▌ ` block-quote frame — Presentation
 //!
 //! The fixture contains a measurable `::shell sleep 0.3` directive (`--yolo`
@@ -61,12 +61,13 @@ struct PerfCapture {
     _workspace: TestWorkspace,
 }
 
-/// Stage a workspace and run `claudine compose --goose --perf --dry-run --yolo
-/// doc.md` inside `harness`, returning the captured pane frame.
+/// Stage a workspace and run `claudine compose --goose --perf --yolo doc.md`
+/// inside `harness`, returning the captured pane frame.
 ///
-/// `--goose` resolves the Agent (stubbed on `PATH`, never launched under
-/// `--dry-run`); `--yolo` auto-approves the `::shell` directive so the compose
-/// pass executes it and the perf tree carries a measured shell-expansion leaf.
+/// `--goose` launches the stub on `PATH`, which exits 0 at once; `--yolo`
+/// auto-approves the `::shell` directive so the compose pass executes it and
+/// the perf tree carries a measured shell-expansion leaf. (`--dry-run` runs
+/// nothing and prints no perf tree.)
 fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     let workspace = TestWorkspace::named("claudine-perf-l2");
     let bin_dir = workspace.path().join("bin");
@@ -97,7 +98,7 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     // Clear shared-pane history as well as its viewport so a complete report
     // capture cannot include an earlier command's durations or HOT marker.
     let script = format!(
-        "printf '\\033[3J\\033[2J\\033[H'; {} compose --goose --perf --dry-run --yolo {} \
+        "printf '\\033[3J\\033[2J\\033[H'; {} compose --goose --perf --yolo {} \
          && printf '\\n{marker}:ok\\n' || printf '\\n{marker}:failed\\n'",
         common::sh_quote(&claudine),
         common::sh_quote(&doc.to_string_lossy()),
@@ -114,7 +115,7 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
                 ("COLUMNS", "80"),
             ],
         )
-        .expect("send compose --perf --dry-run");
+        .expect("send compose --perf");
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let prefix = format!("{marker}:");
     let frame = loop {
@@ -230,7 +231,7 @@ fn has_bold(line: &str) -> bool {
 /// instead. Callers capture with scrollback because host load can put HOT above
 /// that viewport. The shared structural assertions cover the
 /// connector hierarchy, the unit-aligned value column, the percent column, the
-/// unique `HOT` marker, the shell directive, and the dry-run placeholder.
+/// unique `HOT` marker, the shell directive, and the agent execution leaf.
 fn assert_tree_structure(frame: &CapturedFrame) {
     let plain = &frame.plain;
 
@@ -265,14 +266,14 @@ fn assert_tree_structure(frame: &CapturedFrame) {
         "shell directive must carry a duration and share; got: {shell:?}",
     );
 
-    // Dry-run agent placeholder (P-5): an `—` leaf annotated `(dry run)`.
+    // The provider ran, so its leaf carries a measured duration and share.
     let agent = plain
         .lines()
         .find(|l| l.contains("agent execution"))
         .unwrap_or_else(|| panic!("expected an `agent execution` row.\nplain:\n{plain}"));
     assert!(
-        agent.contains('—') && agent.contains("(dry run)"),
-        "dry-run agent must render as an `—` leaf annotated `(dry run)`; got: {agent:?}",
+        agent.contains('%') && !agent.contains('—') && !agent.contains("(dry run)"),
+        "the agent execution leaf must carry a measured share; got: {agent:?}",
     );
 
     // The percent column is visible beyond just the root (P-2): at least one

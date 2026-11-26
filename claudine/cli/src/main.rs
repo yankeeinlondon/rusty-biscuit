@@ -509,6 +509,10 @@ async fn dispatch(
         log::message(&refusal);
         return Ok(args::EXIT_USAGE);
     }
+    if cli.command.as_ref().is_some_and(commands::document_check::asks_for_dry_run_shell) {
+        log::message(commands::document_check::DRY_RUN_SHELL_REMOVED);
+        return Ok(args::EXIT_USAGE);
+    }
     let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
         claudine::child_environment::LaunchDirectoryMode::ProviderHook
     } else {
@@ -522,15 +526,13 @@ async fn dispatch(
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
-    // The passive document check is dispatched before tracing, the
-    // Darkmatter configuration load (which can create or migrate files), the
-    // wrapper, and first-run setup, and it reports every failure itself. It
-    // does not yet replace `--dry-run` (see `document_check::enabled`).
+    // A document dry run is the passive check, dispatched before tracing,
+    // the Darkmatter configuration load (which can create or migrate files),
+    // the wrapper, and first-run setup; it reports every failure itself.
     if !cli.help
         && let Some((mode, shared, args)) = cli.command.as_ref().and_then(commands::document_check::dry_run_request)
-        && let Some(format) = commands::document_check::enabled()
     {
-        return Ok(commands::document_check::run(mode, format, shared, args));
+        return Ok(commands::document_check::run(mode, shared, args));
     }
 
     let tracing_start = std::time::Instant::now();
@@ -887,12 +889,13 @@ mod composition_help {
             let compact = rendered(command);
             let long_manual = composition_help_command(command, true).render_long_help().to_string();
             assert!(
-                long_manual.contains("The commands have real effects"),
+                long_manual.contains("Every problem found is reported"),
                 "{command}: the long-help paragraph this check relies on moved: {long_manual}"
             );
-            assert!(compact.contains("--dry-run-shell"), "{command}: {compact}");
+            assert!(compact.contains("--json"), "{command}: {compact}");
+            assert!(!compact.contains("--dry-run-shell"), "{command} lists the removed switch: {compact}");
             assert!(
-                !compact.contains("The commands have real effects"),
+                !compact.contains("Every problem found is reported"),
                 "{command} renders the long help paragraph: {compact}"
             );
         }
@@ -931,7 +934,7 @@ mod composition_help {
             let cases: [(&[&str], ErrorKind); 5] = [
                 (&["claudine", command, "x.md", "--provider", "nope"], ErrorKind::InvalidValue),
                 (&["claudine", command, "x.md", "--provider"], ErrorKind::InvalidValue),
-                (&["claudine", command, "x.md", "--dry-run-shell"], ErrorKind::MissingRequiredArgument),
+                (&["claudine", command, "x.md", "--json"], ErrorKind::MissingRequiredArgument),
                 (&["claudine", command, "x.md", "-i", "--no-interactive"], ErrorKind::ArgumentConflict),
                 (&["claudine", command, "x.md", "--quiet", "--silent"], ErrorKind::ArgumentConflict),
             ];
@@ -946,7 +949,7 @@ mod composition_help {
             }
             // The controls are valid once the defect is removed.
             assert!(parse_without_help(&["claudine", command, "x.md", "--provider", "claude"]).is_ok());
-            assert!(parse_without_help(&["claudine", command, "x.md", "--dry-run", "--dry-run-shell"]).is_ok());
+            assert!(parse_without_help(&["claudine", command, "x.md", "--dry-run", "--json"]).is_ok());
 
             // `PartitionError` is private to `argv`; its derived `Debug` names
             // the variant and both fields.

@@ -375,13 +375,6 @@ fn schema_validates_while_lifecycle_err_span_is_deferred() {
     assert_eq!(fm.get("total_phases").and_then(|v| v.as_i64()), Some(3));
 
     // The lifecycle key is deferred (DM1) and its span survives raw.
-    assert!(
-        prepared
-            .deferred_lifecycle_keys
-            .iter()
-            .any(|k| k == "failure"),
-        "failure should be reported as a deferred lifecycle key"
-    );
     let failure = prepared
         .lifecycle
         .stack(crate::composition::LifecycleSignal::Failure);

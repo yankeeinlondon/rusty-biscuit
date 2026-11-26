@@ -1,23 +1,28 @@
 use super::*;
-use super::selection::{Link, chain_notes};
 
+/// The check's own codes are declared in Claudine's catalog, never beside it.
 #[test]
-fn check_codes_are_unique_and_disjoint_from_darkmatter_findings() {
+fn check_codes_are_cataloged_unique_and_disjoint_from_darkmatter_findings() {
+    const CHECK_CODES: &[&str] = &[
+        SELECTION_KEY_AS_DATA,
+        NO_EXECUTABLE,
+        MULTIPLE_EXECUTABLES,
+        SEQUENCE_SHAPE,
+        PROVIDER_UNRESOLVED,
+        PROVIDER_UNKNOWN,
+        PROVIDER_NOT_INSTALLED,
+        MODEL_REQUIRED,
+        INVALID_ARGUMENTS,
+        INTERNAL_BUG,
+    ];
+    for code in CHECK_CODES {
+        assert!(claudine::diagnostics::code_spec(code).is_some(), "`{code}` is not in Claudine's catalog");
+    }
     let mut codes = CHECK_CODES.to_vec();
     codes.sort_unstable();
     codes.dedup();
     assert_eq!(codes.len(), CHECK_CODES.len());
     assert!(CHECK_CODES.iter().all(|code| darkmatter::findings::FINDING_CODES.iter().all(|(held, _)| held != code)));
-}
-
-#[test]
-fn chain_notes_number_the_links_and_align_their_states() {
-    let notes = chain_notes(
-        [("--provider flag", "not given"), ("_find.md frontmatter agent", "not set")]
-            .into_iter()
-            .map(|(label, state)| Link { label: label.into(), state: state.into() }),
-    );
-    assert_eq!(notes, ["1. --provider flag             not given", "2. _find.md frontmatter agent  not set"]);
 }
 
 #[test]

@@ -457,7 +457,7 @@ fn a_failing_shell_task_fails_its_step() {
 // Dry-run
 // ============================================================================
 
-/// Dry-run performs the full preflight and then composes each step against the
+/// Dry-run checks every step and previews each one composed against the
 /// *initial* state, launching nothing and writing nothing back.
 #[test]
 fn dry_run_composes_every_step_and_launches_nothing() {
@@ -487,8 +487,8 @@ exit 0"#,
         "dry-run must not write the document back"
     );
     assert!(
-        stderr.contains("1/2") && stderr.contains("2/2"),
-        "every step must be composed and rendered; stderr:\n{stderr}"
+        stderr.contains("Previewed 2 of 2 tasks."),
+        "every step must be composed and previewed; stderr:\n{stderr}"
     );
 }
 

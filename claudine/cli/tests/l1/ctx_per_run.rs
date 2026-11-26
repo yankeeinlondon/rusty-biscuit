@@ -616,7 +616,8 @@ fn volatile_observations(output: &str) -> String {
 }
 
 /// A fenced example in a partial is not composed, so it demands no Git state;
-/// the same mention outside the fence does.
+/// the same mention outside the fence does. A real run, because only a run
+/// reports `--perf`.
 #[test]
 fn a_fenced_example_in_a_partial_observes_no_git_state() {
     for (label, kid, expected) in [
@@ -627,7 +628,7 @@ fn a_fenced_example_in_a_partial_observes_no_git_state() {
         doc(&fixture, "kid.md", kid);
         doc(&fixture, "parent.md", "Parent line.\n\n::file ./kid.md\n");
 
-        let run = run(&fixture, &["compose", "--claude", "--dry-run", "--perf", "parent.md"]);
+        let run = run(&fixture, &["compose", "--claude", "--perf", "parent.md"]);
 
         assert_eq!(run.code, Some(0), "{label}: {}", run.output);
         assert_eq!(volatile_observations(&run.output), expected, "{label}: {}", run.output);
@@ -803,27 +804,33 @@ fn a_lifecycle_only_property_is_captured_before_initialize() {
 }
 
 /// A transclusion cycle among files that name `ctx` ends in the existing cycle
-/// error, naming both files, under a dry run and a real run alike.
+/// error, naming both files: the real run fails with it, and the passive dry
+/// run reports it as its Darkmatter transclusion finding.
 #[test]
 fn a_transclusion_cycle_during_ctx_collection_is_the_cycle_error() {
     let fixture = repo("ctx-per-run-cycle");
     doc(&fixture, "a.md", "A root={{ ctx.repo_root }}\n\n::file ./b.md\n");
     doc(&fixture, "b.md", "B root={{ ctx.repo_root }}\n\n::file ./a.md\n");
 
-    for args in [
-        &["compose", "--claude", "--dry-run", "a.md"][..],
-        &["compose", "--claude", "a.md"][..],
-    ] {
-        let run = run(&fixture, args);
+    let real = run(&fixture, &["compose", "--claude", "a.md"]);
+    assert_eq!(real.code, Some(1), "{}", real.output);
+    // The chain's paths wrap with the terminal; compare without layout.
+    let collapsed: String = real.output.chars().filter(|c| !c.is_whitespace() && *c != '┃').collect();
+    assert!(collapsed.contains("TransclusionError:cycledetected"), "{}", real.output);
+    for name in ["a.md:line1", "b.md:line1"] {
+        assert!(collapsed.contains(name), "`{name}`\n{}", real.output);
+    }
 
-        assert_eq!(run.code, Some(1), "{args:?}: {}", run.output);
-        // The chain's paths wrap with the terminal; compare without layout.
-        let collapsed: String =
-            run.output.chars().filter(|c| !c.is_whitespace() && *c != '┃').collect();
-        assert!(collapsed.contains("TransclusionError:cycledetected"), "{}", run.output);
-        for name in ["a.md:line1", "b.md:line1"] {
-            assert!(collapsed.contains(name), "{args:?}: `{name}`\n{}", run.output);
-        }
+    let check = run(&fixture, &["compose", "a.md", "--claude", "--dry-run", "--json"]);
+    assert_eq!(check.code, Some(2), "{}", check.output);
+    let report: serde_json::Value = serde_json::from_str(&check.output).expect("one JSON envelope");
+    let diagnostics = report["diagnostics"].as_array().expect("diagnostics");
+    assert_eq!(diagnostics.len(), 1, "{report:#}");
+    assert_eq!(diagnostics[0]["code"], "dm.transclusion.failure", "{report:#}");
+    let message = diagnostics[0]["message"].as_str().unwrap_or_default().replace('\\', "/");
+    assert!(message.contains("cycle detected"), "{message}");
+    for name in ["/a.md:1", "/b.md:1"] {
+        assert!(message.contains(name), "`{name}`: {message}");
     }
     assert!(runs(&fixture).is_empty());
 }
@@ -841,16 +848,15 @@ fn an_included_files_lifecycle_is_scanned_but_not_run() {
     );
     doc(&fixture, "parent.md", "Parent line.\n\n::file ./part.md\n");
 
-    for args in [
-        &["compose", "--claude", "--dry-run", "--perf", "parent.md"][..],
-        &["compose", "--claude", "--perf", "parent.md"][..],
-    ] {
-        let run = run(&fixture, args);
+    // The passive check parses the partial and previews its body cleanly.
+    let check = run(&fixture, &["compose", "--claude", "--dry-run", "parent.md"]);
+    assert_eq!(check.code, Some(0), "{}", check.output);
+    assert_eq!(line_with(&check.output, "PART "), "PART body");
 
-        assert_eq!(run.code, Some(0), "{args:?}: {}", run.output);
-        assert_eq!(line_with(&run.output, "PART "), "PART body", "{args:?}");
-        assert_eq!(volatile_observations(&run.output), "file_changes", "{args:?}: {}", run.output);
-    }
+    let real = run(&fixture, &["compose", "--claude", "--perf", "parent.md"]);
+    assert_eq!(real.code, Some(0), "{}", real.output);
+    assert_eq!(line_with(&real.output, "PART "), "PART body");
+    assert_eq!(volatile_observations(&real.output), "file_changes", "{}", real.output);
     assert!(runs(&fixture).is_empty(), "the parent never runs the partial's lifecycle");
 }
 

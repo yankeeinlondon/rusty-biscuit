@@ -111,7 +111,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
 ///
 /// The no-TTY abort body must be the **same** styled message the TTY path
 /// would show for the state, so it shares one source of truth with the
-/// dry-run table cell and the live TTY pre-prompt — see
+/// live TTY pre-prompt — see
 /// [`agent_message`](crate::composition::agent_message). The only state with a
 /// distinct (imperative) live message is
 /// [`AgentResolutionState::SingleInvalid`], which is built here from
@@ -145,7 +145,7 @@ pub(crate) fn render_agent_resolution_failed_body(
             "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> was already selected."
         ),
         // Every other prompting state aborts with the same breakdown the
-        // dry-run table predicts and the TTY path shows.
+        // TTY path shows.
         other => agent_state_breakdown(other),
     }
 }

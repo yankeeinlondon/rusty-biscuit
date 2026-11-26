@@ -1,12 +1,9 @@
 //! Canonical, cross-crate message text for each [`AgentResolutionState`].
 //!
-//! The spec requires the `--dry-run` metadata table to be a *faithful
-//! prediction* of the live (non-dry-run) path: every state's dry-run cell,
-//! its live TTY pre-prompt, and its no-TTY abort body must agree. Those three
-//! surfaces live in two crates (`claudine` for the no-TTY abort body in
-//! `super::error`; `claudine-cli` for the dry-run renderer and the TTY
-//! pre-prompt), so the only way to keep them from drifting is a single source
-//! of truth. That source is here.
+//! Every state's live TTY pre-prompt and its no-TTY abort body must agree.
+//! Those surfaces live in two crates (`claudine` for the no-TTY abort body in
+//! `super::error`; `claudine-cli` for the TTY pre-prompt), so the only way to
+//! keep them from drifting is a single source of truth. That source is here.
 //!
 //! These helpers return Prose **markup** (e.g. `<red>…</red>`), not
 //! terminal-rendered strings: each caller renders with its own
@@ -30,8 +27,8 @@ pub fn agent_message_prose(markup: impl Into<String>) -> Prose {
 /// Render the multi-line breakdown for an agent-resolution state as Prose
 /// markup.
 ///
-/// This is the canonical text for the dry-run `Agent` table cell **and** the
-/// body of the live no-TTY abort for every non–auto-selecting state except
+/// This is the canonical text for the TTY pre-prompt **and** the body of the
+/// live no-TTY abort for every non–auto-selecting state except
 /// [`AgentResolutionState::SingleInvalid`], whose live message is imperative
 /// and needs the document link (see [`invalid_agent_message`]).
 ///
@@ -94,7 +91,7 @@ fn no_agent_breakdown() -> String {
     String::from(
         "- CLI caller didn't specify the Agent\n\
          - the Markdown document didn't suggest any Agents in <inverse>agent</inverse> Frontmatter property\n\
-         - the caller will be interactively asked to choose an agent when <i>composing</i> called without the <green>--dry-run</green> flag; otherwise the run aborts with the same message",
+         - on a terminal the caller is asked to choose an agent; otherwise the run aborts with this message",
     )
 }
 

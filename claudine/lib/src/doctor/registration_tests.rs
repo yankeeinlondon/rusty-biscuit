@@ -1120,7 +1120,7 @@ fn load_installed_profile(
 
 #[test]
 fn an_unsupported_v2_manifest_is_a_fixable_error_with_update_and_republish_remedy() {
-    let v2_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let v2_source = biscuit_test_harness::manifest_dir!()
         .join("../../darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter");
     let fixture = Fixture::empty();
     copy_tree(&v2_source, &fixture.root());

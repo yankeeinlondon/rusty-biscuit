@@ -106,7 +106,7 @@ pub(super) struct StepComposition {
 /// Fold user setters and runtime mutations over the live document's frontmatter.
 /// The step's `seq` binding travels separately from those frontmatter layers.
 /// Passing `runtime: None` yields the initial view with empty `seq.outputs`
-/// and no mutations, used by validation and `--dry-run`.
+/// and no mutations, used by validation.
 pub(super) fn step_set_overrides(
     plan: &SequencePlan,
     step_index: usize,
@@ -137,9 +137,8 @@ pub(super) fn step_env_overrides(
     target: Option<&ResolvedExecutionTarget>,
 ) -> BTreeMap<String, String> {
     let mut env = step_owned_env(effective_fail_fast);
-    // A `--dry-run` step with an unresolved agent state has no target; leaving
-    // `AGENT` unset makes `{{env.AGENT}}` resolve empty exactly as the direct
-    // compose `--dry-run` path does.
+    // A step without a target leaves `AGENT` unset, so `{{env.AGENT}}`
+    // resolves empty.
     if let Some(target) = target {
         env.insert("AGENT".to_string(), target.provider.as_slug().to_string());
         if let Some(model) = &target.model {
@@ -248,7 +247,6 @@ pub(super) fn compose_step_selecting(
             claudine::harness::CapturedPermissions::for_source(ctx.invocation, ctx.file_resolution_context),
             Some(Arc::clone(&ctx.approval_cache)),
         ),
-        ctx.shared.dry_run,
         ctx.shared.yolo,
     );
 
