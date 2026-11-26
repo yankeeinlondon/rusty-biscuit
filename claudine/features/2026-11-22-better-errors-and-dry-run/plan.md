@@ -985,7 +985,7 @@ the final implementation log for test evidence and any concrete departures. Revi
 
 ### Establish baselines
 
-- [ ] **Capture Contracts**
+- [x] **Capture Contracts**
   - Record the old real-run failure facets and persisted result for graph, reference,
     input/provider, and Phase 1c failures before changing the paths. Include a case where
     grouped display order differs from the original failure order. Capture plain and JSON
@@ -997,7 +997,7 @@ the final implementation log for test evidence and any concrete departures. Revi
 
 ### Wave 1
 
-- [ ] **Build Findings**
+- [x] **Build Findings**
   - Darkmatter owns the types, constructors, collector, policy catalog, serializer and
     reference-renderer extraction in Rules 2–4. Update existing diagnostic
     construction/projectors and all report adapters. Compare the reference baselines
@@ -1020,7 +1020,7 @@ the final implementation log for test evidence and any concrete departures. Revi
     Exercise nested includes and callbacks, blocked lookup and slot propagation, normal policy
     refusal, and effectful calls and commands. Verify a passive invalid call prevents downstream
     effect dispatch.
-- [ ] **Build References**
+- [x] **Build References**
   - Darkmatter and biscuit-file own the reference finding builder and suggestion search in Rule
     5. Own reference projection and filesystem probe code. Supply the reusable directory-listing
     memo and root-filter interface. Leave Claudine caller edits to graph and CLI integration.
@@ -1038,7 +1038,7 @@ the final implementation log for test evidence and any concrete departures. Revi
 
 ### Wave 3
 
-- [ ] **Combine Document Checks**
+- [x] **Combine Document Checks**
   - Darkmatter CLI owns Rule 13 and the `notes.md` fixture. Feed the shared sink from the
     reference, call and schema families and the passive body verdict. Test failed references
     with independently excluded content, unknown conditions, warning denial and permitted
@@ -1392,29 +1392,29 @@ commands, so a caller who wants a provider's own `--json` forwards it after `--`
 
 Darkmatter and biscuit-file. The parts of Rules 2, 4, 5, and 13 that Phase 1 left out.
 
-- [ ] **Capture Report Baselines**
+- [x] **Capture Report Baselines**
   - (Phase 1 "Capture Contracts", Darkmatter half.) Before extracting anything, capture plain
     and JSON output and exit behavior of `md validate refs`, including listing, empty output,
     and failures, and the reference report of `md graph` at its existing caller.
-- [ ] **Unify Records**
+- [x] **Unify Records**
   - (Phase 1 "Build Findings", Rule 2.) Serialize `iteration_path` and `included_via` as
     projections of `trail`, keeping every null and omit contract. Reconcile the record with the
     spec: `related` is the published name for other locations, and the provider chain's `notes`
     either map onto it or are documented as an addition in the data contract. Put the same
     `diagnostic` type in every file under `darkmatter/cli/schemas/output/`. Fold
     `findings::FINDING_CODES` into `COMPOSE_DIAGNOSTIC_CODES` for the codes `md` emits.
-- [ ] **Extract Renderer**
+- [x] **Extract Renderer**
   - (Rule 4.) Move the render tree and layout helpers of `ValidationReportView` into
     `FindingReport` as its reference presentation and keep the view as a compatibility
     adapter. Compare against the baselines byte for byte.
-- [ ] **Finish References**
+- [x] **Finish References**
   - (Phase 1 "Build References", Rule 5.) Move the general basename search and its bounds from
     Claudine into Darkmatter, split passive candidate enumeration from the chooser in
     `completion/operation_file.rs`, and wire `resolve_composition_source_in_context` and
     `recover_operation_file` to the shared builder. Suppress case-only suggestions for an
     equivalent file. Prove no-match versus denied, ambiguous, and I/O outcomes, candidate
     order, the literal-glob hint, permission filtering, and reused directory reads.
-- [ ] **Combine Document Checks**
+- [x] **Combine Document Checks**
   - (Phase 1 task of the same name; Rule 13.) Feed the sink from the reference, call, and
     schema families and the passive body verdict in `md compose`, on the ordinary route and
     after `initialize` on the lifecycle route. Add the `notes.md` fixture and its snapshots.
