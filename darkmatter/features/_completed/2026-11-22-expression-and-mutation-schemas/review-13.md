@@ -4,10 +4,11 @@ description: "A **feature** review of `2026-11-22-expression-and-mutation-schema
 feature: "2026-11-22-expression-and-mutation-schemas/review-13.md"
 spec: "2026-11-22-expression-and-mutation-schemas/spec.md"
 previous: "2026-11-22-expression-and-mutation-schemas/review-12.md"
+next: "2026-11-22-expression-and-mutation-schemas/review-14.md"
 created: "2026-11-25T21:30:29+00:00"
 reviewed-by: "codex/gpt-6.2-sol"
 ready: false
-implemented: false
+implemented: true
 findings:
     - "R13-F1 (high): Reference checks accept targets that the inclusion directive rejects"
     - "R13-F2 (high): TOC target read errors lose the directive location"
@@ -17,6 +18,8 @@ human-in-the-loop: null
 has-blocked-findings: false
 blocked: false
 recurrence: true
+log: "/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-expression-and-mutation-schemas/log.md"
+implemented-by: "claude/opus"
 ---
 
 # Expression and mutation schemas review 13
