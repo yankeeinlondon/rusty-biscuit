@@ -124,6 +124,10 @@ The exit status is `2` when the report holds any error or warning, and `0`
 when it holds none; a dry run never exits `1`. A script can therefore treat
 any non-zero status as "fix the document first".
 
+Every finding carries a specific `code` that a script can match. A problem
+the check cannot classify is reported as `internal.bug`: that is a defect in
+Claudine to report, not something the document can fix.
+
 ## `--output` is refused
 
 Claudine has no output selector. `-o` and `--output` are still recognized, so

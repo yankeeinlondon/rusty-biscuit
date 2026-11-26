@@ -1700,8 +1700,8 @@ Nothing runs, even with `--yolo`:
 | A list built by `$( … )` | Not run, so its tasks are reported as not checked. |
 | `loop:` | No pass runs and no gate, condition, or action is evaluated. |
 | Task `when:` | Not evaluated; the task is checked as if it runs. |
-| Inline container `$schema` | Its syntax is checked; the values it judges at its turn are not. The root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
-| Lifecycle events | None fire, so a value an event would `set` is not there (supply it as a setter to preview with it). |
+| Inline container `$schema` | Its syntax is checked; the values it judges at its turn are not, and it is reported as not checked. The root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
+| Lifecycle events | None fire, so a value an event would `set` is not there (supply it as a setter to preview with it). A required input the root's `initialize` writes with a literal `set` is reported as not checked, not missing. |
 | `prep` | Targets do not run. |
 | Provider | Chosen by the same rules as a real run, and never launched. The finding lists each source it read; see [claudine sequence — Choosing providers](claudine/docs/cli/sequence.md#choosing-providers). |
 | Files | Nothing is written: no configuration, cache, approval record, or `inline-compose` write-back. |
@@ -1781,7 +1781,8 @@ sequence:
 
 `claudine sequence root.yaml` prints `ada`, and nothing is reported missing.
 A dry run fires no `initialize`, so under `--dry-run` the same file reports
-`who` missing; supply it as a setter (`who=ada`) to preview it.
+the input `who` as not checked rather than missing; supply it as a setter
+(`who=ada`) to preview with it.
 
 When only the root is missing inputs and it has steps that compose a prompt,
 the report lists them under those steps instead (`Step 1: p (/work/f.md)`),

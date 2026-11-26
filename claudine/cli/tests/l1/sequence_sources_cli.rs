@@ -743,8 +743,7 @@ fn a_directly_invoked_documents_state_declaration_validates_the_step_state() {
 /// setter (before or after the file) or a `--set` key naming `$state` or
 /// `template`, or a path under one, is refused before any step runs. (A
 /// setter name holds no `.` or `$`, so only `--set` can spell those.)
-#[test]
-fn a_setter_cannot_write_a_sequence_declaration() {
+fn assert_setter_refused(args: &[&str]) {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     let doc = write(
         &workspace,
@@ -752,18 +751,34 @@ fn a_setter_cannot_write_a_sequence_declaration() {
         "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\ntemplate:\n  desc: x\nsequence:\n  - blue\n",
     );
     let file = doc.to_str().unwrap();
-    for args in [
-        vec!["sequence", "--dry-run", file, "template={}"],
-        vec!["sequence", "--dry-run", "template=y", file],
-        vec!["sequence", "--dry-run", "--set", "{\"$state\": {}}", file],
-        vec!["sequence", "--dry-run", file, "--set", "{\"template.desc\": \"y\"}"],
-    ] {
-        let output = workspace.command().args(&args).assert().failure().get_output().clone();
-        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(flat.contains("is not accepted here"), "{args:?}: {flat}");
-        assert!(flat.contains("a setter supplies values, not declarations"), "{args:?}: {flat}");
-        assert!(!flat.contains("Handle blue"), "{args:?}: no step composed: {flat}");
+    let args: Vec<&str> = args.iter().map(|arg| if *arg == "FILE" { file } else { arg }).collect();
+    let output = workspace.command().args(&args).assert().failure().get_output().clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("is not accepted here"), "{args:?}: {flat}");
+    assert!(flat.contains("a setter supplies values, not declarations"), "{args:?}: {flat}");
+    assert!(!flat.contains("Handle blue"), "{args:?}: no step composed: {flat}");
+}
+
+mod a_setter_cannot_write_a_sequence_declaration {
+    #[test]
+    fn as_a_setter_after_the_file() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "FILE", "template={}"]);
+    }
+
+    #[test]
+    fn as_a_setter_before_the_file() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "template=y", "FILE"]);
+    }
+
+    #[test]
+    fn as_a_set_key() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "--set", "{\"$state\": {}}", "FILE"]);
+    }
+
+    #[test]
+    fn as_a_set_path_under_one() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "FILE", "--set", "{\"template.desc\": \"y\"}"]);
     }
 }
 

@@ -792,8 +792,9 @@ mod tests {
         // `provider.overlay_unsupported` / `provider.overlay_failed`
         // (shadow-home fix → Fail closed before spawn) → 49, plus structured
         // sibling cancellation (`composition.cancelled`) → 50, plus the
-        // lifecycle `edit` action's `composition.lifecycle_edit_failed` → 51.
+        // lifecycle `edit` action's `composition.lifecycle_edit_failed` → 51,
+        // plus the passive dry-run check's nine codes → 60.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 51);
+        assert_eq!(CODES.len(), 60);
     }
 }

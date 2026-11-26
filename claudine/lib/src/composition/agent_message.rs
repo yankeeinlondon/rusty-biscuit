@@ -172,7 +172,7 @@ mod tests {
         let body = agent_state_breakdown(&AgentResolutionState::NoAgent);
         assert!(body.contains("didn't specify the Agent"));
         assert!(body.contains("didn't suggest any Agents"));
-        assert!(body.contains("aborts with the same message"));
+        assert!(body.contains("the run aborts with this message"));
     }
 
     #[test]

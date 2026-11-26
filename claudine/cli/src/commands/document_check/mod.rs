@@ -365,7 +365,7 @@ impl Check {
     /// Records `error` as findings for `subject`: through Darkmatter's
     /// projection, then Claudine's diagnostic code, else as `internal.bug`.
     /// Darkmatter's catch-all `dm.compose.failure` record means it classified
-    /// nothing, so Claudine's code is preferred over it. A file-reference
+    /// nothing, so it is never reported. A file-reference
     /// failure carries its class (`failure`), as a real run's `failure:` row.
     fn push_error(
         &mut self,
@@ -376,7 +376,10 @@ impl Check {
         use darkmatter::markdown::compose::report_diagnostics::{COMPOSE_FAILURE_CODE, error_diagnostics};
         let projected = error_diagnostics(error);
         let unclassified = matches!(projected.as_slice(), [only] if only.code == COMPOSE_FAILURE_CODE);
-        if !projected.is_empty() && !(unclassified && claudine::diagnostics::as_diagnostic(error).is_some()) {
+        // Darkmatter's catch-all is never the answer: Claudine's own code
+        // speaks for an error it types, and an error neither crate types is
+        // `internal.bug`.
+        if !projected.is_empty() && !unclassified {
             let mut first = None;
             for diagnostic in projected {
                 let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail.clone()) };

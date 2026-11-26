@@ -869,3 +869,40 @@ fn a_dry_run_writes_nothing_anywhere() {
         assert_eq!(tree(&workspace), before, "{args:?} wrote to the fixture");
     }
 }
+
+// A step's preview reads `seq.*` as the real run binds it at the step's turn.
+#[test]
+fn a_step_preview_reads_its_seq_binding() {
+    let fixture = CliProcessFixture::named("dry-run-seq-binding");
+    install_provider_binary(&fixture, "goose");
+    fs::write(fixture.cwd().join("s.md"), "---\nsequence:\n  - name: alpha\n  - name: beta\n---\nDo {{ seq.name }} at {{ seq.index }}\n").unwrap();
+    let run = run(&fixture, &["sequence", "s.md", "--dry-run", "--goose"]);
+    assert_eq!(run.status.code(), Some(0), "{}", run.stderr);
+    assert!(run.stdout.contains("Do alpha at 1") && run.stdout.contains("Do beta at 2"), "{}", run.stdout);
+}
+
+// A YAML sequence with a document-level `prompt:` composes that prompt
+// inline at each step, as the real run does; it is not bodyless.
+#[test]
+fn a_yaml_sequence_with_a_prompt_composes_it_inline() {
+    let fixture = CliProcessFixture::named("dry-run-yaml-prompt");
+    install_provider_binary(&fixture, "goose");
+    fs::write(fixture.cwd().join("y.yaml"), "kind: sequence\ntopic: docs\nprompt: \"Step {{ seq.name }}/{{ topic }}.\"\nsequence:\n  - alpha\n").unwrap();
+    let run = run(&fixture, &["sequence", "y.yaml", "--dry-run", "--goose"]);
+    assert_eq!(run.status.code(), Some(0), "{}", run.stderr);
+    assert!(prose(&run.stderr).contains("composes the `prompt` of y.yaml"), "{}", run.stderr);
+    assert!(run.stdout.contains("Step alpha/docs."), "{}", run.stdout);
+}
+
+// An inline container's `$schema` judges values at its turn: not checked.
+#[test]
+fn an_inline_containers_schema_is_not_checked() {
+    let fixture = CliProcessFixture::named("dry-run-container-schema");
+    fs::write(
+        fixture.cwd().join("c.yaml"),
+        "kind: sequence\nsequence:\n  - name: review\n    $schema: { reviewer: string(required) }\n    sequence: [{ name: sign, side_effect: { set: { done: true } } }]\n",
+    ).unwrap();
+    let run = run(&fixture, &["sequence", "c.yaml", "--dry-run"]);
+    assert_eq!(run.status.code(), Some(0), "{}", run.stderr);
+    assert!(prose(&run.stderr).contains("not checked: `$schema` (an inline container's schema judges the values at its turn)"), "{}", run.stderr);
+}

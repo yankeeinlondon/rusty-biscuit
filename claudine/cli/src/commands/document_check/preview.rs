@@ -20,9 +20,20 @@ impl Check {
     pub(super) fn preview(&mut self, task: &PromptTask<'_>) {
         let session = PassiveSession::new();
         let Some(options) = self.passive_prepare_options(task, session.clone()) else { return };
-        let prepared = match self.mode {
-            Mode::InlineCompose => composition::prepare_inline(task.prompt, options),
-            Mode::Compose | Mode::Sequence => composition::prepare_direct(task.prompt, options),
+        // A sequence step composes a document with a string `prompt:`
+        // inline, as the real run decides for its own document and its
+        // prompt files.
+        let inline = match self.mode {
+            Mode::InlineCompose => true,
+            Mode::Compose => false,
+            Mode::Sequence => {
+                matches!(task.prompt.markdown.frontmatter().as_map().get("prompt"), Some(Value::String(_)))
+            }
+        };
+        let prepared = if inline {
+            composition::prepare_inline(task.prompt, options)
+        } else {
+            composition::prepare_direct(task.prompt, options)
         };
         let deferrals = session.deferrals();
         for deferral in &deferrals {
@@ -87,6 +98,7 @@ impl Check {
         options.source_repo_root = source_repo_root;
         options.file_ref_fallback_dir = Some(invocation.launch_cwd().to_path_buf());
         options.data_override_keys.extend(data_keys);
+        options.sequence_binding = task.seq.clone();
         options.prepared_context =
             Some(epoch.capture_launch_context(&ContextRequirements::for_document(&task.prompt.markdown)));
         options.invocation_context = Some(invocation);

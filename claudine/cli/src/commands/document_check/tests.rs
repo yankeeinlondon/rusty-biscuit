@@ -64,3 +64,51 @@ fn property_segments_follow_keys_and_indexes() {
     assert_eq!(property_segments("tasks[0][1]"), [Key("tasks".into()), Index(0), Index(1)]);
     assert!(property_segments("").is_empty());
 }
+
+#[derive(Debug, clap::Parser)]
+struct Probe {
+    #[command(flatten)]
+    shared: SharedComposeArgs,
+}
+
+/// An error Darkmatter can only call `dm.compose.failure` takes Claudine's
+/// code, and a file-reference failure keeps the class a real run prints as
+/// its `failure:` row.
+#[test]
+fn an_unclassified_error_takes_claudines_code_and_its_failure_class() {
+    use clap::Parser;
+    let shared = Probe::try_parse_from(["probe", "--dry-run"]).unwrap().shared;
+    let mut check = Check::new(Mode::Compose, shared, false);
+    let subject = check.sink.register_subject(Subject::document("doc.md", None));
+    let source = biscuit_file::FileReferenceError::RelativeTreeEscape {
+        base_dir: PathBuf::from("/tree"),
+        candidate: PathBuf::from("/outside.md"),
+        reference: "../outside.md".into(),
+    };
+    let error = CompositionError::InvalidReference { reference: "../outside.md".into(), source };
+
+    check.push_error(subject, &error, Trail::default());
+
+    let report = check.sink.finish();
+    let [diagnostic] = report.diagnostics().try_into().expect("one finding");
+    assert_eq!(diagnostic.code, "composition.invalid_file_reference");
+    let failure = diagnostic.reference_details.as_ref().and_then(|details| details.failure.as_deref());
+    assert_eq!(failure, Some("invalid-reference"));
+}
+
+/// An error neither Darkmatter nor Claudine types is `internal.bug`, never
+/// Darkmatter's catch-all.
+#[test]
+fn an_error_no_crate_types_is_an_internal_bug() {
+    use clap::Parser;
+    let shared = Probe::try_parse_from(["probe", "--dry-run"]).unwrap().shared;
+    let mut check = Check::new(Mode::Compose, shared, false);
+    let subject = check.sink.register_subject(Subject::document("doc.md", None));
+    let error = std::fmt::Error;
+
+    check.push_error(subject, &error, Trail::default());
+
+    let report = check.sink.finish();
+    let [diagnostic] = report.diagnostics().try_into().expect("one finding");
+    assert_eq!(diagnostic.code, INTERNAL_BUG);
+}
