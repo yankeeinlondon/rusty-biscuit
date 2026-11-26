@@ -1,0 +1,12 @@
+# The `kind: group-catalog` YAML document: named groups a step selects with
+# `group: <name>@<file-ref>`. Hand-maintained; see
+# claudine/docs/topics/schemas.md.
+#
+# Each `groups:` entry is a group object (sequence.yaml's `group`), closed.
+# The root is open, as the task parser reads only `kind` and `groups`.
+kind: yaml-schema
+description: "A `kind: group-catalog` file"
+$schema:
+    kind: literal(group-catalog; required) -> the document kind
+    description: string -> the catalog's summary
+    groups: "group[](required)@./sequence.yaml -> the catalog's groups, each selected by its `name`"

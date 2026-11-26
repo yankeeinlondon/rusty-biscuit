@@ -204,11 +204,18 @@ claudine sequence workflow.md --dry-run --dry-run-shell   # also run shell: task
 | Removed | Use instead |
 |---|---|
 | `kind: sequence` + `list:` | `sequence:` |
-| `execution: serial` | a nested `sequence:` |
-| sequence `fail_fast:`, `--fail-fast` | lifecycle handlers |
-| task `setup:`/`teardown:` | an inline sequence, or the prompt's own events |
+| `execution:` on a task or group (`serial` or `parallel`) | omit it; a nested `sequence:` for ordered work |
+| sequence `fail_fast:`, `--fail-fast` | `fail_fast` on a group object, or lifecycle handlers |
+| task `fail_fast:` | `fail_fast` on a `group:` object |
+| task `setup:` | a preceding `side_effect:` or `shell:` task |
+| task `teardown:` | a group's `finalize:` (a group of one for a single task) |
 | `state`, `outputs`, `step`, `total_steps` | `seq.*` |
 | `interactive: true` in a sequence document | `-i` |
+
+These are declared `removed(…)` in Claudine's schemas, so the editor, `md
+schema validate`, a dry run, and a run all refuse them, `null` included, with
+the replacement above. A step key one edit from a task field (`promt`) is a
+warning, and the step still runs.
 
 A runnable nesting example is in
 `claudine/docs/examples/sequence-containers.md`.

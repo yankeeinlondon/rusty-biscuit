@@ -457,6 +457,34 @@ Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.
   `prompt:` file (with the resolved path and up to three nearby files), the
   provider chain and whether the provider is on `PATH`, and a model the
   provider requires.
+- The whole tree is read the way a real run's preflight reads it: every root
+  task, group leg, nested or referenced sequence, `task:` file, and selected
+  catalog entry. A problem is reported under the task or leg it belongs to,
+  and the check goes on with that task's siblings, so one bad leg does not
+  hide the others. A task inside a group or sequence is labeled by the tasks
+  around it, and a file referenced twice is checked at each reference:
+
+  ```text
+  task first → inner (sequence[0])
+    ✗ the prompt file does not exist
+        prompt: ./gone.md
+        resolved to gone.md (relative to child.yaml)
+        at child.yaml:4:13
+
+  task again → inner (sequence[0])
+    ✗ the prompt file does not exist
+    ...
+  ```
+
+  A list built by `$( … )` is reported as not checked, since only running its
+  command can produce it.
+- Every task, group, catalog, and sequence file the check reads is judged
+  against its kind's definition, so a removed or misspelled key is reported in
+  any of them.
+- Each missing required input is one `composition.missing_properties` finding
+  under its task: a warning when an interactive run could ask for every
+  missing value, otherwise an error, since a run that cannot ask fails there.
+  A value that depends on a skipped command is not checked.
 - The report goes to stderr and the previews to stdout; `--json` prints one
   report (`file`, `outcome`, `diagnostics`, `summary`) on stdout. The exit
   status is `2` when any finding is an error or a warning, else `0`.

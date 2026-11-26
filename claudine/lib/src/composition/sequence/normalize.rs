@@ -91,10 +91,87 @@ pub fn normalize_plan_at(
         .enumerate()
         .map(|(index, item)| {
             let property = format!("{list_property}[{index}]");
-            parse_item(index, item, strictness, declaring_path, &property)
+            parse_item(index, item, strictness, declaring_path, &property, true)
         })
         .collect::<Result<_, _>>()?;
+    Ok(assemble_plan(parsed, source, invocation_path, document_fail_fast))
+}
 
+/// One authored item [`normalize_plan_recovering_at`] could not read, with
+/// its zero-based position in the authored list.
+#[derive(Debug)]
+pub struct ItemFailure {
+    /// The item's zero-based position in the authored list.
+    pub index: usize,
+    /// Why it could not be read.
+    pub error: CompositionError,
+}
+
+/// A plan built from the items of a list that could be read, and why the
+/// others could not.
+#[derive(Debug)]
+pub struct RecoveredPlan {
+    /// The readable items, in authored order. Generated state (`id`,
+    /// `index`, `count`) describes this plan, not the authored list.
+    pub plan: SequencePlan,
+    /// `ordinals[i]` is the authored position of `plan.steps[i]`.
+    pub ordinals: Vec<usize>,
+    /// The unreadable items, in authored order.
+    pub failures: Vec<ItemFailure>,
+}
+
+impl RecoveredPlan {
+    /// A plan read with nothing set aside.
+    #[must_use]
+    pub fn whole(plan: SequencePlan) -> Self {
+        let ordinals = (0..plan.steps.len()).collect();
+        Self { plan, ordinals, failures: Vec::new() }
+    }
+}
+
+/// [`normalize_plan_at`] that sets an unreadable item aside instead of
+/// failing the list, for a check that reports every item: each item is read
+/// exactly as [`normalize_plan_at`] reads it.
+#[must_use]
+pub fn normalize_plan_recovering_at(
+    items: &[Value],
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    list_property: &str,
+) -> RecoveredPlan {
+    let strictness = source.strictness();
+    let declaring_path = match &source {
+        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.clone(),
+        _ => invocation_path.to_path_buf(),
+    };
+    let mut parsed = Vec::with_capacity(items.len());
+    let mut ordinals = Vec::with_capacity(items.len());
+    let mut failures = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let property = format!("{list_property}[{index}]");
+        // Each item is judged alone; its legs and nested items are read,
+        // and judged, one by one where the walk reaches them.
+        match parse_item(index, item, strictness, &declaring_path, &property, false) {
+            Ok(step) => {
+                parsed.push(step);
+                ordinals.push(index);
+            }
+            Err(error) => failures.push(ItemFailure { index, error }),
+        }
+    }
+    let plan = assemble_plan(parsed, source, invocation_path, document_fail_fast);
+    RecoveredPlan { plan, ordinals, failures }
+}
+
+/// The plan of `parsed` items: generated ids, positions, and the shared
+/// `sequence_id`.
+fn assemble_plan(
+    parsed: Vec<ParsedStep>,
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+) -> SequencePlan {
     let ids = generate_ids(parsed.iter().map(|p| p.name.as_str()));
     let sequence_id = generate_sequence_id(invocation_path, &ids);
     let count = parsed.len();
@@ -124,7 +201,7 @@ pub fn normalize_plan_at(
         })
         .collect();
 
-    Ok(SequencePlan {
+    SequencePlan {
         source,
         steps,
         document_fail_fast,
@@ -133,7 +210,7 @@ pub fn normalize_plan_at(
         // list and whether that document recorded authored key order at all.
         authored: AuthoredOrder::default(),
         document_scope: None,
-    })
+    }
 }
 
 /// Parse a single authored item into its name, executable, and state portion.
@@ -143,6 +220,7 @@ fn parse_item(
     strictness: Strictness,
     origin: &Path,
     property: &str,
+    descend: bool,
 ) -> Result<ParsedStep, CompositionError> {
     match item {
         Value::String(s) => Ok(ParsedStep {
@@ -151,7 +229,7 @@ fn parse_item(
             extra: Map::new(),
             executable: None,
         }),
-        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property),
+        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property, descend),
         // `null` is a typed error under both contracts: leniency coerces a
         // value that *is* something into a name, it does not invent one.
         Value::Null => Err(CompositionError::SequenceNullItem { index }),
@@ -189,8 +267,13 @@ fn parse_object_step(
     strictness: Strictness,
     origin: &Path,
     property: &str,
+    descend: bool,
 ) -> Result<ParsedStep, CompositionError> {
-    super::grammar::validate_task_grammar(map, origin, property)?;
+    if descend {
+        super::grammar::validate_task_grammar(map, origin, property)?;
+    } else {
+        super::grammar::validate_task_grammar_shallow(map, origin, property)?;
+    }
     let name = match map.get("name") {
         Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
         // Foreign data may carry a non-string `name` (a numeric id, say); a

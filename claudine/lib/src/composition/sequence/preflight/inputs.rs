@@ -164,6 +164,7 @@ pub struct InputDiscoveryOptions<'a> {
     caller_layers: Option<&'a CallerInputLayers>,
     invocation: Option<(&'a InvocationContext, &'a SourceContext)>,
     leave_verdicts: bool,
+    recover: bool,
 }
 
 impl<'a> InputDiscoveryOptions<'a> {
@@ -174,7 +175,10 @@ impl<'a> InputDiscoveryOptions<'a> {
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         compose_context: &'a ComposeContext,
     ) -> Self {
-        Self { file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false }
+        Self {
+            file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false,
+            recover: false,
+        }
     }
 
     /// Resolve every reference from the repository context of the document
@@ -195,6 +199,17 @@ impl<'a> InputDiscoveryOptions<'a> {
     #[must_use]
     pub fn leaving_verdicts(mut self) -> Self {
         self.leave_verdicts = true;
+        self
+    }
+
+    /// Skip a task or group leg whose reading fails, and go on with its
+    /// siblings, instead of failing discovery: for a check, whose graph walk
+    /// reports that failure at the task
+    /// ([`super::check_sequence_tree`]). A failure outside every task (the
+    /// root's list or declarations) still fails discovery.
+    #[must_use]
+    pub fn recovering(mut self) -> Self {
+        self.recover = true;
         self
     }
 
@@ -359,12 +374,28 @@ impl Discovery<'_> {
     fn walk_owner_list(
         &mut self, items: &[Value], declaring_path: &Path, list_property: &str, scope: &Scope<'_>,
     ) -> Result<(), CompositionError> {
+        let mut readable = Vec::with_capacity(items.len());
         for (index, item) in items.iter().enumerate() {
             if let Value::Object(map) = item {
-                grammar::validate_task_grammar(map, declaring_path, &format!("{list_property}[{index}]"))?;
+                let judged = grammar::validate_task_grammar(map, declaring_path, &format!("{list_property}[{index}]"));
+                if self.recovered(judged)?.is_none() {
+                    // Kept as a placeholder so later items keep their positions.
+                    readable.push(Value::Null);
+                    continue;
+                }
             }
+            readable.push(item.clone());
         }
-        self.walk_items(items, declaring_path, declaring_path, list_property, scope)
+        self.walk_items(&readable, declaring_path, declaring_path, list_property, scope)
+    }
+
+    /// `result`, or `Ok(None)` for a failure a recovering discovery skips.
+    fn recovered<T>(&self, result: Result<T, CompositionError>) -> Result<Option<T>, CompositionError> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(_) if self.options.recover => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     fn walk_items(
@@ -381,8 +412,12 @@ impl Discovery<'_> {
                 }
                 _ => continue,
             };
-            match self.executable_of(map, scope, declaring_path)? {
-                Executable::Found(field, value) => self.walk_executable(field, &value, map, origin, &property, scope)?,
+            let Some(executable) = self.recovered(self.executable_of(map, scope, declaring_path))? else { continue };
+            match executable {
+                Executable::Found(field, value) => {
+                    let walked = self.walk_executable(field, &value, map, origin, &property, scope);
+                    self.recovered(walked)?;
+                }
                 Executable::Pending(field, reference) => self.inventory.pending.push(PendingReference {
                     owner: scope.owner, source_path: declaring_path.to_path_buf(),
                     property: property_child(&property, field.key()), reference,
@@ -481,7 +516,7 @@ impl Discovery<'_> {
                 if self.pending(&reference, scope, origin, &action_property) {
                     return Ok(());
                 }
-                let path = self.loader.resolve_reference(&reference, origin)?;
+                let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Task)?;
                 let (document, _) = self.loader.load_data_document(&path)?;
                 let root = expect_object(&document.value, "task file", &path)?;
                 expect_kind(root, "task", &path)?;
@@ -508,7 +543,7 @@ impl Discovery<'_> {
                     return Ok(());
                 }
                 let (name, reference) = split_catalog_reference(raw);
-                let path = self.loader.resolve_reference(&reference, origin)?;
+                let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Group)?;
                 let (document, _) = self.loader.load_data_document(&path)?;
                 let root = expect_object(&document.value, "group file", &path)?;
                 let (group, group_property) = match &name {
@@ -538,8 +573,9 @@ impl Discovery<'_> {
         for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
             let Value::Object(leg) = leg else { continue };
             let leg_property = property_child(property, &format!("tasks[{index}]"));
-            let (field, value, options) = parse_task_object(leg, origin, &leg_property)?;
-            self.walk_executable(field, &value, &options, origin, &leg_property, scope)?;
+            let walked = parse_task_object(leg, origin, &leg_property)
+                .and_then(|(field, value, options)| self.walk_executable(field, &value, &options, origin, &leg_property, scope));
+            self.recovered(walked)?;
         }
         Ok(())
     }
@@ -550,7 +586,7 @@ impl Discovery<'_> {
     fn walk_reference(
         &mut self, reference: &SequenceReference, origin: &Path, property: &str, owner: usize, role: InputOwnerRole,
     ) -> Result<(), CompositionError> {
-        let path = self.loader.resolve_reference(&reference.reference, origin)?;
+        let path = self.loader.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
         self.loader.enter(&path)?;
         let result = self.walk_referenced(reference, &path, origin, property, owner, role);
         self.loader.leave();

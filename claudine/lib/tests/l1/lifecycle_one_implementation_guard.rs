@@ -109,14 +109,14 @@ const ALLOWED: &[Allowed] = &[
     allowed(
         Rule::ParserTwin,
         "lib/src/composition/sequence/grammar.rs",
-        "validate_task_grammar: RemovedGrammar",
+        "validate_task_grammar_at: RemovedGrammar",
         "Claudine's sequence task grammar retires container events on non-inline tasks",
     ),
     allowed(
         Rule::ParserTwin,
-        "lib/src/composition/sequence/grammar.rs",
-        "removed_task_key: RemovedGrammar",
-        "Claudine's sequence task grammar retires `setup`/`teardown`/`execution`/`fail_fast`",
+        "lib/src/composition/sequence/removed.rs",
+        "removed_key: RemovedGrammar",
+        "Claudine's sequence grammar refuses the keys its shipped schemas declare `removed(…)`",
     ),
     // -- Seams: Claudine's adapters to Darkmatter's host traits. --
     allowed(Rule::Seam, LIFECYCLE_MOD, "LifecycleRunHost for ClaudineRunHost", "the run guard's host: source, effects, catalog, interrupts"),

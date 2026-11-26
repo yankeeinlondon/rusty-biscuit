@@ -19,3 +19,4 @@ $schema:
     $state: |-
         schema -> The shape for state in each step in the sequence. This defines what properties will eventually be made available off the `seq` namespace.
     sequence: "step[](required)@./sequence.yaml -> the sequence's steps, in order"
+    fail_fast: "removed(set fail_fast on a group object)"

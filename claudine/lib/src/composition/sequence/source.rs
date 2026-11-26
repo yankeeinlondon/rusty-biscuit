@@ -63,6 +63,29 @@ pub fn resolve_sequence_reference(
         })
 }
 
+/// The [`missing_document`] finding for `raw`, authored in `source_path`,
+/// when [`resolve_sequence_reference`] would fail because no candidate
+/// exists: what a check reports in place of the typed failure. Its hint
+/// names paths relative to `launch_dir`, and its base is `source_path`, the
+/// file the reference is written relative to.
+///
+/// [`missing_document`]: darkmatter::findings::reference::missing_document
+pub(crate) fn reference_finding(
+    raw: &str,
+    source_path: &Path,
+    request_context: &FileResolutionContext,
+    construct: darkmatter::findings::reference::DocumentConstruct<'_>,
+    memo: &mut darkmatter::findings::reference::ListingMemo,
+) -> Option<darkmatter::findings::Diagnostic> {
+    let reference = FileReference::new(raw).ok()?;
+    let detailed = reference.resolve_detailed(&request_context.for_source(source_path));
+    let mut finding = darkmatter::findings::reference::missing_document(construct, &detailed, memo)?;
+    if let Some(details) = finding.reference_details.as_mut() {
+        details.base = Some(biscuit_file::to_forward_slash_string(source_path));
+    }
+    Some(finding)
+}
+
 /// Load a referenced sequence source and normalize it into a plan.
 ///
 /// `invocation_path` is the resolved path of the document that referenced this
@@ -104,6 +127,43 @@ pub(crate) fn plan_referenced_sequence(
     document_fail_fast: bool,
     options: &SequenceSourceOptions<'_>,
 ) -> Result<SequencePlan, CompositionError> {
+    plan_referenced(reference, path, document, orders, invocation_path, frontmatter, document_fail_fast, options, false)
+        .map(|(recovered, _)| recovered.plan)
+}
+
+/// [`plan_referenced_sequence`] that sets an unreadable item aside instead
+/// of failing the list, for a check that reports every item. Also returns
+/// the selected items as authored, which the failures index.
+///
+/// ## Errors
+///
+/// As [`plan_referenced_sequence`], less the per-item failures.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn plan_referenced_sequence_recovering(
+    reference: &SequenceReference,
+    path: &Path,
+    document: &Value,
+    orders: Arc<darkmatter::markdown::MappingOrders>,
+    invocation_path: &Path,
+    frontmatter: &dyn DocumentFrontmatter,
+    document_fail_fast: bool,
+    options: &SequenceSourceOptions<'_>,
+) -> Result<(super::normalize::RecoveredPlan, Vec<Value>), CompositionError> {
+    plan_referenced(reference, path, document, orders, invocation_path, frontmatter, document_fail_fast, options, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_referenced(
+    reference: &SequenceReference,
+    path: &Path,
+    document: &Value,
+    orders: Arc<darkmatter::markdown::MappingOrders>,
+    invocation_path: &Path,
+    frontmatter: &dyn DocumentFrontmatter,
+    document_fail_fast: bool,
+    options: &SequenceSourceOptions<'_>,
+    recover: bool,
+) -> Result<(super::normalize::RecoveredPlan, Vec<Value>), CompositionError> {
     let file_resolution_context = options.file_resolution_context();
     let format = SourceFormat::for_path(path);
 
@@ -134,7 +194,7 @@ pub(crate) fn plan_referenced_sequence(
     if formal {
         let root = document.as_object().expect("formal implies an object root");
         if let Some(value) = root.get("fail_fast") {
-            return Err(super::grammar::removed_task_key("fail_fast", value, path));
+            return Err(super::removed::removed_key(super::removed::RemovedOwner::Root, "fail_fast", value, path));
         }
         super::grammar::validate_sequence_root(root, path)?;
         let authored: Arc<Map<String, Value>> = Arc::new(
@@ -148,16 +208,21 @@ pub(crate) fn plan_referenced_sequence(
         // referrer's `frontmatter` never enters them (it serves the data
         // operators above), so a key neither defines stays undefined.
         let values = Arc::new(own);
-        let mut plan = formal::normalize_formal_plan(
-            items,
-            formal::FormalOwner { keys, declaring_path: path, list_property: "sequence", values: &*values },
-            SequenceSource::External {
-                path: path.to_path_buf(),
-            },
-            invocation_path,
-            document_fail_fast,
-            file_resolution_context,
-        )?;
+        let owner = formal::FormalOwner { keys, declaring_path: path, list_property: "sequence", values: &*values };
+        let source = SequenceSource::External { path: path.to_path_buf() };
+        let authored_items = if recover { items.clone() } else { Vec::new() };
+        let mut recovered = if recover {
+            let state_schema = formal::prepare_state_schema(&owner, file_resolution_context)?;
+            formal::normalize_formal_plan_recovering(
+                items, owner, state_schema.as_ref(), source, invocation_path, document_fail_fast, file_resolution_context,
+            )?
+        } else {
+            let plan = formal::normalize_formal_plan(
+                items, owner, source, invocation_path, document_fail_fast, file_resolution_context,
+            )?;
+            super::normalize::RecoveredPlan::whole(plan)
+        };
+        let plan = &mut recovered.plan;
         // The steps are the referenced document's own `sequence:` list, read
         // without an offset or operator, so its authored key order applies
         // element for element. Data read through either of those is reshaped
@@ -169,18 +234,19 @@ pub(crate) fn plan_referenced_sequence(
             authored,
             values,
         }));
-        return Ok(plan);
+        return Ok((recovered, authored_items));
     }
 
-    normalize_plan_at(
-        &items,
-        SequenceSource::DataFile {
-            path: path.to_path_buf(),
-        },
-        invocation_path,
-        document_fail_fast,
-        reference.offset.as_deref().unwrap_or(""),
-    )
+    let source = SequenceSource::DataFile { path: path.to_path_buf() };
+    let list_property = reference.offset.as_deref().unwrap_or("");
+    if recover {
+        let recovered = super::normalize::normalize_plan_recovering_at(
+            &items, source, invocation_path, document_fail_fast, list_property,
+        );
+        return Ok((recovered, items));
+    }
+    let plan = normalize_plan_at(&items, source, invocation_path, document_fail_fast, list_property)?;
+    Ok((super::normalize::RecoveredPlan::whole(plan), Vec::new()))
 }
 
 /// The whole document at `path`, whose parsed `root` (and authored `orders`)

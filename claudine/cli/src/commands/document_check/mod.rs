@@ -23,7 +23,7 @@ use claudine::invocation_context::InvocationContext;
 use claudine::provider::{Provider, provider_info};
 use darkmatter::findings::reference::{DocumentConstruct, ListingMemo, missing_document};
 use darkmatter::findings::{
-    Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, EmptyBodyCause, FindingReport, FindingSink, HumanLayout,
+    Diagnostic, DiagnosticSource, EMPTY_BODY_CODE, EmptyBodyCause, FindingId, FindingReport, FindingSink, HumanLayout,
     NOT_CHECKED_CODE, Severity, Subject, SubjectId, Trail,
 };
 use darkmatter::markdown::Markdown;
@@ -38,6 +38,7 @@ use crate::args::Commands;
 mod outcome;
 mod preview;
 mod selection;
+mod tasks;
 
 use outcome::{Outcome, shown};
 
@@ -197,6 +198,8 @@ struct Check {
     invocation: Option<InvocationContext>,
     previews: Vec<String>,
     tasks: usize,
+    /// Each walked task's subject, by its identity.
+    task_subjects: std::collections::HashMap<String, SubjectId>,
 }
 
 impl Check {
@@ -214,6 +217,7 @@ impl Check {
             invocation: None,
             previews: Vec::new(),
             tasks: 0,
+            task_subjects: std::collections::HashMap::new(),
         }
     }
 
@@ -369,21 +373,28 @@ impl Check {
 
     /// Records `error` as findings for `subject`: through Darkmatter's
     /// projection, then Claudine's diagnostic code, else as `internal.bug`.
-    fn push_error(&mut self, subject: SubjectId, error: &(dyn std::error::Error + 'static), trail: Trail) {
+    fn push_error(
+        &mut self,
+        subject: SubjectId,
+        error: &(dyn std::error::Error + 'static),
+        trail: Trail,
+    ) -> Option<FindingId> {
         let projected = darkmatter::markdown::compose::report_diagnostics::error_diagnostics(error);
         if !projected.is_empty() {
+            let mut first = None;
             for diagnostic in projected {
                 let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail.clone()) };
-                self.sink.push(subject, diagnostic);
+                let id = self.sink.push(subject, diagnostic);
+                first.get_or_insert(id);
             }
-            return;
+            return first;
         }
         let diagnostic = match claudine::diagnostics::as_diagnostic(error) {
             Some(known) => Diagnostic::projected(known.code(), Severity::Error, error.to_string(), None),
             None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
         };
         let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail) };
-        self.sink.push(subject, diagnostic);
+        Some(self.sink.push(subject, diagnostic))
     }
 
     fn root_ref(&self) -> &ResolvedCompositionSource {
@@ -394,15 +405,7 @@ impl Check {
     /// locating authored keys.
     fn root_frontmatter(&self) -> (String, usize) {
         let root = self.root_ref();
-        if composition::is_yaml_source(&root.resolved_path) {
-            return (root.original_text.clone(), 1);
-        }
-        let text = root.original_text.strip_prefix('\u{feff}').unwrap_or(&root.original_text);
-        let Some(rest) = text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n")) else {
-            return (String::new(), 1);
-        };
-        let end = rest.find("\n---").map_or(rest.len(), |index| index + 1);
-        (rest[..end].to_string(), 2)
+        frontmatter_of(&root.resolved_path, &root.original_text)
     }
 
     /// The authored position of the key (or, with `value`, the value) at
@@ -438,309 +441,50 @@ impl Check {
         self.tasks = 1;
         let subject = self.root_subject();
         let root = self.root_ref().clone();
+        // The document's lifecycle and its literals, which its preparation
+        // refuses before any provider starts.
+        let frontmatter = Value::Object(
+            root.markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+        );
+        if let Err(error) = composition::lifecycle::parse_lifecycle_config(&frontmatter, &root.resolved_path) {
+            self.push_error(subject, &error, Trail::default());
+        } else if let Err(error) = composition::validate_lifecycle_literals(&root.markdown, &root.resolved_path) {
+            self.push_error(subject, &error, Trail::default());
+        }
         let task = PromptTask { subject, trail: Trail::default(), prompt: &root, with: Map::new(), step_agent: None };
         self.check_prompt_task(&task);
     }
 
-    fn check_sequence(&mut self) {
-        let root = self.root_ref().clone();
-        let frontmatter = root.markdown.frontmatter().as_map().clone();
-        if let Some(Some(true)) =
-            frontmatter.get("interactive").map(composition::parse_interactive_hint).and_then(Result::ok)
-        {
-            let subject = self.root_subject();
-            let error = CompositionError::SequenceInteractiveRejected(root.resolved_path.clone());
-            let source = self.locate(&[YamlPathSegment::Key("interactive".into())], false);
-            let code = claudine::diagnostics::as_diagnostic(&error).map_or(INTERNAL_BUG, |known| known.code());
-            self.sink.push(
-                subject,
-                Diagnostic::actionable(
-                    code,
-                    Severity::Error,
-                    error.to_string(),
-                    "remove `interactive: true`; a sequence always runs its tasks non-interactively",
-                )
-                .with_source(source),
-            );
-        }
-        match frontmatter.get("sequence") {
-            None => {
-                // The default plan composes the document's own body.
-                self.tasks = 1;
-                let subject = self.root_subject();
-                if self.root_is_bodyless() {
-                    let message = format!("{} has no `sequence` and no body to compose", self.root_label());
-                    self.sink.push(
-                        subject,
-                        Diagnostic::actionable(
-                            NO_EXECUTABLE,
-                            Severity::Error,
-                            message,
-                            "add a `sequence:` list of tasks, or a body for the document to compose",
-                        )
-                        .with_source(DiagnosticSource::file_only(Some(root.resolved_path.clone()))),
-                    );
-                    return;
-                }
-                let task =
-                    PromptTask { subject, trail: Trail::default(), prompt: &root, with: Map::new(), step_agent: None };
-                self.check_prompt_task(&task);
-            }
-            Some(Value::Array(items)) => {
-                self.tasks = items.len();
-                for (index, item) in items.iter().enumerate() {
-                    self.check_step(&root, index, item);
-                }
-            }
-            Some(Value::String(text)) => {
-                let subject = self.root_subject();
-                let reason = if text.trim_start().starts_with("$(") {
-                    "the list comes from a shell command a dry run skips"
-                } else {
-                    "a referenced sequence file is not walked by the dry run yet"
-                };
-                self.sink.not_checked(subject, "tasks", reason, None);
-            }
-            Some(other) => {
-                let subject = self.root_subject();
-                let source = self.locate(&[YamlPathSegment::Key("sequence".into())], true);
-                self.sink.push(
-                    subject,
-                    Diagnostic::actionable(
-                        SEQUENCE_SHAPE,
-                        Severity::Error,
-                        format!("`sequence` is {}, not a list of tasks or a file reference", json_kind(other)),
-                        "write `sequence:` as a list of tasks",
-                    )
-                    .with_source(source),
-                );
-                self.sink.not_checked(subject, "tasks", "`sequence` is not a list", None);
-            }
-        }
-    }
-
-    fn check_step(&mut self, root: &ResolvedCompositionSource, index: usize, item: &Value) {
-        let property = format!("sequence[{index}]");
-        let item_path = [YamlPathSegment::Key("sequence".into()), YamlPathSegment::Index(index)];
-        let (name, step) = match item {
-            Value::String(name) if !name.trim().is_empty() => (name.clone(), Map::new()),
-            Value::Object(step) => {
-                let name = step
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map_or_else(|| format!("step-{}", index + 1), str::to_string);
-                (name, step.clone())
-            }
-            other => {
-                let subject = self.sink.register_subject(Subject::construct(
-                    "task",
-                    format!("step-{}", index + 1),
-                    property.clone(),
-                    Some(root.resolved_path.clone()),
-                ));
-                let source = self.locate(&item_path, true);
-                self.sink.push(
-                    subject,
-                    Diagnostic::actionable(
-                        SEQUENCE_SHAPE,
-                        Severity::Error,
-                        format!("this task is {}, not a task name or mapping", json_kind(other)),
-                        "write the task as a mapping such as `- name: review` with an executable",
-                    )
-                    .with_source(source),
-                );
-                return;
-            }
-        };
-        let subject = self.sink.register_subject(Subject::construct(
-            "task",
-            name.clone(),
-            property.clone(),
-            Some(root.resolved_path.clone()),
-        ));
-        let trail = Trail::host("task", name.clone(), property.clone());
-        let key_path = |key: &str| {
-            let mut path = item_path.to_vec();
-            path.push(YamlPathSegment::Key(key.to_string()));
-            path
-        };
-
-        for (key, noun) in [("agent", "provider"), ("model", "model")] {
-            if let Some(value) = step.get(key) {
-                let written = scalar_text(value);
-                let finding = Diagnostic::actionable(
-                    SELECTION_KEY_AS_DATA,
-                    Severity::Warning,
-                    format!("`{key}: {written}` is step data (read as `seq.{key}`), not the task's {noun}"),
-                    format!("to choose the {noun}, move it into the task's inputs: `with: {{ {key}: {written} }}`"),
-                )
-                .with_source(self.locate(&key_path(key), false))
-                .with_trail(Trail::host("task", name.clone(), format!("{property}.{key}")));
-                self.sink.push(subject, finding);
-            }
-        }
-
-        let executables: Vec<ExecutableField> = step.keys().filter_map(|key| ExecutableField::from_key(key)).collect();
-        let executable = match executables.as_slice() {
-            [] => None,
-            [one] => Some(*one),
-            many => {
-                let keys: Vec<String> = many.iter().map(|field| format!("`{}`", field.key())).collect();
-                self.sink.push(
-                    subject,
-                    Diagnostic::actionable(
-                        MULTIPLE_EXECUTABLES,
-                        Severity::Error,
-                        format!("this task names more than one executable: {}", keys.join(", ")),
-                        "keep exactly one executable per task, and move the others into their own tasks",
-                    )
-                    .with_source(self.locate(&item_path, true))
-                    .with_trail(trail.clone()),
-                );
-                self.sink.not_checked(subject, "provider", "more than one executable", None);
-                self.sink.not_checked(subject, "inputs", "more than one executable", None);
-                return;
-            }
-        };
-        let with = step.get("with").and_then(Value::as_object).cloned().unwrap_or_default();
-        let step_agent = step.get("agent").map(scalar_text);
-
-        match executable {
-            None if self.root_is_bodyless() => {
-                let why = if composition::is_yaml_source(&root.resolved_path) {
-                    "and a YAML file has no body"
-                } else {
-                    "and its body is empty"
-                };
-                let source = if step.contains_key("name") {
-                    self.locate(&key_path("name"), false)
-                } else {
-                    self.locate(&item_path, true)
-                };
-                let blocker = self.sink.push(
-                    subject,
-                    Diagnostic::actionable(
-                        NO_EXECUTABLE,
-                        Severity::Error,
-                        format!(
-                            "this task has no executable, so it would compose the body of {}, {why}",
-                            self.root_label()
-                        ),
-                        format!("add an executable such as `prompt: ./{name}.md`"),
-                    )
-                    .with_source(source)
-                    .with_trail(trail),
-                );
-                self.sink.not_checked(subject, "provider", "no executable", Some(blocker));
-                self.sink.not_checked(subject, "inputs", "no executable", Some(blocker));
-            }
-            None => {
-                self.sink.push(
-                    subject,
-                    Diagnostic::projected(
-                        NO_EXECUTABLE,
-                        Severity::Info,
-                        format!("this task has no executable, so it composes the body of {}", self.root_label()),
-                        None,
-                    )
-                    .with_trail(trail.clone()),
-                );
-                let task = PromptTask { subject, trail, prompt: root, with, step_agent };
-                self.check_prompt_task(&task);
-            }
-            Some(ExecutableField::Prompt) => {
-                let Some(raw) = step.get("prompt").and_then(Value::as_str).filter(|raw| !raw.trim().is_empty())
-                else {
-                    self.sink.push(
-                        subject,
-                        Diagnostic::actionable(
-                            SEQUENCE_SHAPE,
-                            Severity::Error,
-                            "`prompt` must name a prompt file",
-                            "write `prompt: ./file.md`",
-                        )
-                        .with_source(self.locate(&key_path("prompt"), true))
-                        .with_trail(trail),
-                    );
-                    return;
-                };
-                let prompt_trail = Trail::host("task", name.clone(), format!("{property}.prompt"));
-                let Some(prompt) = self.load_prompt(subject, raw, &key_path("prompt"), prompt_trail) else {
-                    return;
-                };
-                let task = PromptTask { subject, trail, prompt: &prompt, with, step_agent };
-                self.check_prompt_task(&task);
-            }
-            Some(ExecutableField::Shell) => {
-                self.sink.not_checked(subject, "command", "a dry run runs no commands", None);
-            }
-            Some(ExecutableField::SideEffect) => {
-                self.sink.not_checked(subject, "side effect", "a dry run dispatches no side effects", None);
-            }
-            Some(field @ (ExecutableField::Group | ExecutableField::Task | ExecutableField::Sequence)) => {
-                let reason = format!("a nested {} is not walked by the dry run yet", field.noun());
-                self.sink.not_checked(subject, "nested tasks", &reason, None);
-            }
-        }
-    }
-
-    /// Reads a step's prompt document, recording why it could not be read.
-    fn load_prompt(
-        &mut self,
-        subject: SubjectId,
-        raw: &str,
-        path: &[YamlPathSegment],
-        trail: Trail,
-    ) -> Option<ResolvedCompositionSource> {
-        let root = self.root_ref().clone();
-        let invocation = self.invocation.clone().expect("the invocation is captured before tasks are checked");
-        let context = match invocation.derive_composition_source(&root) {
-            Ok(source) => source.file_resolution_context().clone(),
-            Err(error) => {
-                self.push_error(subject, &error, trail);
-                return None;
-            }
-        };
-        let source = self.locate(path, true);
-        if let Ok(reference) = FileReference::new(raw) {
-            let detailed = reference.resolve_detailed(&context);
-            if let Some(mut finding) = missing_document(
-                DocumentConstruct { construct: "prompt:", noun: "prompt file", launch_dir: self.launch_dir.as_deref() },
-                &detailed,
-                &mut self.memo,
-            ) {
-                // A step's reference is written relative to the sequence file.
-                if let Some(details) = finding.reference_details.as_mut() {
-                    details.base = Some(to_forward_slash_string(&root.resolved_path));
-                }
-                let blocker = self.sink.push(subject, finding.with_source(source).with_trail(trail));
-                self.sink.not_checked(subject, "provider", "the prompt file could not be read", Some(blocker));
-                self.sink.not_checked(subject, "inputs", "the prompt file could not be read", Some(blocker));
-                return None;
-            }
-        }
-        match composition::resolve_composition_source_in_context(raw, &context) {
-            Ok(prompt) => Some(prompt),
-            Err(error) => {
-                self.push_error(subject, &error, trail);
-                self.sink.not_checked(subject, "provider", "the prompt file could not be read", None);
-                self.sink.not_checked(subject, "inputs", "the prompt file could not be read", None);
-                None
-            }
-        }
-    }
-
     /// The provider, model, and preview checks of one prompt task.
     fn check_prompt_task(&mut self, task: &PromptTask<'_>) {
+        self.check_selection(task);
+        self.preview(task);
+    }
+
+    /// The provider and model checks of one prompt task.
+    fn check_selection(&mut self, task: &PromptTask<'_>) {
         match self.select_provider(task) {
             Some(provider) => self.check_model(task, provider),
             None => {
                 self.sink.not_checked(task.subject, "model requirement", "no provider", None);
             }
         }
-        self.preview(task);
     }
 
+}
+
+/// The YAML text of `path`'s authored data (`text`): a YAML file whole, a
+/// Markdown file's frontmatter, and the one-based line it starts on.
+fn frontmatter_of(path: &Path, text: &str) -> (String, usize) {
+    if composition::is_yaml_source(path) {
+        return (text.to_string(), 1);
+    }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let Some(rest) = text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n")) else {
+        return (String::new(), 1);
+    };
+    let end = rest.find("\n---").map_or(rest.len(), |index| index + 1);
+    (rest[..end].to_string(), 2)
 }
 
 fn file_name(path: &Path) -> String {

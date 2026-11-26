@@ -1,0 +1,11 @@
+# The `kind: group` YAML document: the group a step's `group: <file-ref>`
+# names. Hand-maintained; see claudine/docs/topics/schemas.md.
+#
+# A group file is one group object (sequence.yaml's `group`), closed, with
+# `kind` required.
+kind: yaml-schema
+description: "A `kind: group` file"
+$schema:
+    $extends: group@./sequence.yaml
+    kind: literal(group; required) -> the document kind
+    $constraints: { closed: true }

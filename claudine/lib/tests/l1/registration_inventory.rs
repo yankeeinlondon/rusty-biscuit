@@ -297,7 +297,8 @@ fn a_sequence_document_selects_composition_and_its_sequence_trigger_and_types_it
     assert_eq!(installed.problems("kind: sequence\n"), [""], "an explicit sequence kind requires `sequence`");
     assert_eq!(installed.problems("sequence:\n    - name: { a: 1 }\n"), ["/sequence/0/name"]);
     assert_eq!(installed.problems("sequence:\n    - name: a\n      group: { tasks: [] }\n"), ["/sequence/0/group/tasks"]);
-    assert_eq!(installed.problems("sequence: [plan]\nfail_fast: true\n"), ["/fail_fast"]);
+    // A removed key's problem points at its owner (the root), naming the key.
+    assert_eq!(installed.problems("sequence: [plan]\nfail_fast: true\n"), [""]);
     assert_eq!(installed.problems("sequence: [plan]\nagent: { a: 1 }\n"), ["/agent"], "composition types its controls");
 }
 
@@ -377,6 +378,85 @@ fn a_formal_sequence_yaml_requires_an_inline_step_list() {
     assert_eq!(installed.yaml_problems("kind: sequence\n"), (kind.clone(), vec![String::new()]), "`sequence` is required");
     assert_eq!(installed.yaml_problems("kind: sequence\nsequence: ./steps.yaml\n"), (kind.clone(), vec!["/sequence".to_string()]));
     assert_eq!(installed.yaml_problems("kind: sequence\nsequence:\n    - name: { a: 1 }\n"), (kind, vec!["/sequence/0/name".to_string()]));
+}
+
+/// Every member of Claudine's inventory, for a test that judges documents
+/// against the whole registered host.
+const ALL_MEMBERS: &Files<'_> = &[
+    ("action.yaml", include_str!("../../../registration/action.yaml")),
+    ("claudine-config.yaml", include_str!("../../../registration/claudine-config.yaml")),
+    ("composition.yaml", include_str!("../../../registration/composition.yaml")),
+    ("content-policy.yaml", include_str!("../../../registration/content-policy.yaml")),
+    ("document.yaml", include_str!("../../../registration/document.yaml")),
+    ("formal-sequence-file.yaml", include_str!("../../../registration/formal-sequence-file.yaml")),
+    ("group.yaml", include_str!("../../../registration/group.yaml")),
+    ("group-catalog-file.yaml", include_str!("../../../registration/group-catalog-file.yaml")),
+    ("group-file.yaml", include_str!("../../../registration/group-file.yaml")),
+    ("inline-composition.yaml", include_str!("../../../registration/inline-composition.yaml")),
+    ("lifecycle-events.yaml", include_str!("../../../registration/lifecycle-events.yaml")),
+    ("linking.yaml", include_str!("../../../registration/linking.yaml")),
+    ("loop.yaml", include_str!("../../../registration/loop.yaml")),
+    ("seq.yaml", include_str!("../../../registration/seq.yaml")),
+    ("sequence-document.yaml", include_str!("../../../registration/sequence-document.yaml")),
+    ("sequence.yaml", include_str!("../../../registration/sequence.yaml")),
+    ("shared.yaml", include_str!("../../../registration/shared.yaml")),
+    ("task-file.yaml", include_str!("../../../registration/task-file.yaml")),
+];
+
+/// The route and problem paths of each `(text, expected)` YAML document,
+/// all expected on `kind`'s route.
+fn assert_kind_problems(kind: &str, cases: &[(&str, &[&str])]) {
+    let installed = Installed::new(ALL_MEMBERS);
+    let route = Route::Kind(kind.into());
+    for (text, expected) in cases {
+        let expected: Vec<String> = expected.iter().map(|path| path.to_string()).collect();
+        assert_eq!(installed.yaml_problems(text), (route.clone(), expected), "{text}");
+    }
+}
+
+/// A `kind: task` file is a closed leg: an undeclared key or a removed one
+/// (whatever its value) is refused on the root.
+#[test]
+fn a_task_file_is_judged_as_a_closed_task() {
+    assert_kind_problems(
+        "task",
+        &[
+            ("kind: task\nname: review\nprompt: ./review.md\n", &[]),
+            ("kind: task\nshell: just test\nowner: docs\n", &[""]),
+            ("kind: task\nshell: just test\nsetup: ./prepare.md\n", &[""]),
+            ("kind: task\nshell: just test\nfail_fast: null\n", &[""]),
+            ("kind: task\nname: { a: 1 }\nshell: x\n", &["/name"]),
+        ],
+    );
+}
+
+/// A `kind: group` file is a closed group: `fail_fast` is legal there, and a
+/// removed or misspelled group key, or a removed leg key, is refused.
+#[test]
+fn a_group_file_is_judged_as_a_closed_group() {
+    assert_kind_problems(
+        "group",
+        &[
+            ("kind: group\nname: checks\nfail_fast: false\ntasks: [{ name: lint, shell: just lint }]\n", &[]),
+            ("kind: group\ntasks: [{ name: lint, shell: x }]\nexecution: parallel\n", &[""]),
+            ("kind: group\ntasks: [{ name: lint, shell: x }]\nmax_paralel: 2\n", &[""]),
+            ("kind: group\ntasks: [{ name: lint, shell: x, teardown: y }]\n", &["/tasks/0"]),
+        ],
+    );
+}
+
+/// A `kind: group-catalog` root is open, as the parser reads only `kind` and
+/// `groups`; each entry is a closed group.
+#[test]
+fn a_group_catalog_file_types_each_entry_as_a_group() {
+    assert_kind_problems(
+        "group-catalog",
+        &[
+            ("kind: group-catalog\nowner: docs\ngroups:\n  - name: checks\n    tasks: [{ name: lint, shell: x }]\n", &[]),
+            ("kind: group-catalog\ngroups:\n  - name: checks\n    execution: serial\n    tasks: [{ name: lint, shell: x }]\n", &["/groups/0"]),
+            ("kind: group-catalog\n", &[""]),
+        ],
+    );
 }
 
 #[test]

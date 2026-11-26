@@ -270,3 +270,158 @@ fn dry_run_shell_is_refused_by_the_passive_check() {
     }
     assert!(!fixture.cwd().join("marker").exists());
 }
+
+/// The shipped schemas' key findings on the root as authored: a removed key
+/// on the root, a group, or a leg is an error with its replacement, once per
+/// key; a misspelled group key gets its did-you-mean; a near-miss step key
+/// is a warning; `agent` (reported on its own) and `group.fail_fast` (legal)
+/// get no schema finding.
+#[test]
+fn removed_unknown_and_near_miss_keys_are_findings_with_their_hints() {
+    let fixture = CliProcessFixture::named("dry-run-schema-keys");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("ask.md"), "ask\n").unwrap();
+    fs::write(
+        fixture.cwd().join("seq.md"),
+        "---\nfail_fast: null\nsequence:\n  - name: ask\n    promt: ./other.md\n    prompt: ./ask.md\n    agent: claude\n  - name: checks\n    group:\n      fail_fast: false\n      execution: parallel\n      max_paralel: 2\n      tasks:\n        - name: lint\n          shell: just lint\n          teardown: ./clean.md\n---\n",
+    )
+    .unwrap();
+    let run = run(&fixture, &["sequence", "seq.md", "--dry-run"]);
+    let stderr = prose(&run.stderr);
+    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    for expected in [
+        "key `fail_fast` has been removed",
+        "set fail_fast on a group object",
+        "omit execution; use a nested sequence for ordered work",
+        "use a group's `finalize:`; wrap a single task in a group of one",
+        "did you mean `max_parallel`?",
+        "key `promt` is not a declared field, so it is kept as data",
+        "did you mean `prompt`?",
+    ] {
+        assert!(stderr.contains(expected), "{expected:?} in stderr:\n{}", run.stderr);
+    }
+    assert_eq!(stderr.matches("key `fail_fast` has been removed").count(), 1, "stderr:\n{}", run.stderr);
+    assert!(!stderr.contains("key `agent`"), "`agent` has its own finding: {}", run.stderr);
+}
+
+/// A formal YAML sequence file is judged by its kind's definition.
+#[test]
+fn a_formal_sequence_files_removed_root_key_is_a_finding() {
+    let fixture = CliProcessFixture::named("dry-run-schema-keys-yaml");
+    fs::write(fixture.cwd().join("seq.yaml"), "kind: sequence\nfail_fast: true\nsequence:\n  - name: run\n    shell: just test\n")
+        .unwrap();
+    let run = run(&fixture, &["sequence", "seq.yaml", "--dry-run"]);
+    let stderr = prose(&run.stderr);
+    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    assert!(stderr.contains("key `fail_fast` has been removed"), "stderr:\n{}", run.stderr);
+    assert!(stderr.contains("set fail_fast on a group object"), "stderr:\n{}", run.stderr);
+}
+
+/// A referenced document that was read and failed to parse fails only the
+/// task referencing it, naming the resolved file and the loader's line and
+/// column, once per loader family; the control after it is still previewed
+/// and nothing runs.
+#[test]
+fn a_document_that_fails_to_parse_fails_only_its_task() {
+    let fixture = CliProcessFixture::named("dry-run-loaders");
+    install_provider_binary(&fixture, "claude");
+    let files = [
+        ("child.yaml", "kind: sequence\nsequence:\n  - name: a\n    name: b\n    prompt: ./ok.md\n"),
+        ("rows.json5", "[{name: 'a'}] xx\n"),
+        ("rows.jsonl", "{\"name\": \"a\"}\n\n{\"name\": \"b\", \"name\": \"c\"}\n"),
+        ("child.md", "---\nkind: sequence\nsequence:\n  - name: a\n    name: b\n---\n"),
+        ("ok.md", "the control prompt\n"),
+    ];
+    for (name, text) in files {
+        fs::write(fixture.cwd().join(name), text).unwrap();
+    }
+    fs::write(
+        fixture.cwd().join("seq.md"),
+        "---\nagent: claude\nsequence:\n  - name: yaml\n    sequence: ./child.yaml\n  - name: json5\n    sequence: ./rows.json5\n  - name: jsonl\n    sequence: ./rows.jsonl\n  - name: markdown\n    sequence: ./child.md\n  - name: mark\n    shell: touch marker\n  - name: tail\n    prompt: ./ok.md\n---\n",
+    )
+    .unwrap();
+    let run = run(&fixture, &["sequence", "seq.md", "--dry-run"]);
+    let stderr = prose(&run.stderr);
+    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    for expected in [
+        "child.yaml: YAML parse error: sequence[0]: duplicate entry with key \"name\" at line 3 column 5",
+        "rows.json5: JSON5 parse error",
+        "line 1 column 15",
+        "rows.jsonl: line 3: duplicate key `name`",
+        "child.md: Failed to parse frontmatter",
+        "Previewed 1 of 2 tasks.",
+    ] {
+        assert!(stderr.contains(expected), "{expected:?} in stderr:\n{}", run.stderr);
+    }
+    assert!(run.stdout.contains("the control prompt"), "stdout:\n{}", run.stdout);
+    assert!(!fixture.cwd().join("marker").exists(), "a dry run runs no command");
+}
+
+/// Each occurrence of a referenced sequence is its own subject, labeled by
+/// the task that references it, and a missing required input is one
+/// `composition.missing_properties` row under its task.
+#[test]
+fn nested_occurrences_and_missing_inputs_are_reported_under_their_task() {
+    let fixture = CliProcessFixture::named("dry-run-occurrences");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("needs.md"), "---\n$schema:\n  topic: string(required)\n---\nAbout {{ topic }}\n").unwrap();
+    fs::write(fixture.cwd().join("child.yaml"), "kind: sequence\nsequence:\n  - name: inner\n    prompt: ./gone.md\n").unwrap();
+    fs::write(
+        fixture.cwd().join("seq.md"),
+        "---\nagent: claude\nsequence:\n  - name: first\n    sequence: ./child.yaml\n  - name: again\n    sequence: ./child.yaml\n  - name: need\n    prompt: ./needs.md\n---\n",
+    )
+    .unwrap();
+    let run = run(&fixture, &["sequence", "seq.md", "--dry-run", "--json"]);
+    assert_eq!(run.status.code(), Some(2), "stdout:\n{}", run.stdout);
+    let report: Value = serde_json::from_str(&run.stdout).unwrap();
+    let diagnostics = report["diagnostics"].as_array().unwrap();
+    let trail = |diagnostic: &Value| -> Vec<String> {
+        diagnostic["trail"].as_array().unwrap().iter().map(|frame| format!("{} {}", frame["host"].as_str().unwrap(), frame["label"].as_str().unwrap())).collect()
+    };
+    let missing: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic["code"] == "dm.reference.missing_document").map(trail).collect();
+    assert_eq!(missing, [["sequence first", "task inner"], ["sequence again", "task inner"]], "one finding per occurrence:\n{}", run.stdout);
+    let inputs: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic["code"] == "composition.missing_properties").map(trail).collect();
+    assert_eq!(inputs, [["task need"]], "{}", run.stdout);
+}
+
+/// A single-pass lifecycle literal that nests a span is refused before any
+/// provider starts: for a sequence's referenced prompt at its task, and for
+/// the document `compose` runs.
+#[test]
+fn a_nested_lifecycle_literal_is_a_finding() {
+    let fixture = CliProcessFixture::named("dry-run-nested-literal");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("ok.md"), "---\nagent: claude\n---\nfine\n").unwrap();
+    fs::write(fixture.cwd().join("bad.md"), "---\nagent: claude\nsuccess:\n    say: \"{{ ok ? 'done in {{area}}' : 'failed' }}\"\n---\nBody\n").unwrap();
+    fs::write(fixture.cwd().join("seq.md"), "---\nsequence:\n  - name: fine\n    prompt: ./ok.md\n  - name: nested\n    prompt: ./bad.md\n---\n").unwrap();
+    for args in [&["sequence", "seq.md", "--dry-run"][..], &["compose", "bad.md", "--dry-run"][..]] {
+        let run = run(&fixture, args);
+        let stderr = prose(&run.stderr);
+        assert_eq!(run.status.code(), Some(2), "{args:?}; stderr:\n{}", run.stderr);
+        assert!(stderr.contains("nests `{{area}}` inside the string literal"), "{args:?}; stderr:\n{}", run.stderr);
+    }
+}
+
+/// A renamed lifecycle event in the document `compose` runs is refused, as
+/// its preparation refuses it.
+#[test]
+fn compose_reports_a_renamed_lifecycle_event() {
+    let fixture = CliProcessFixture::named("dry-run-renamed-event");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\ncomposed:\n    - info: \"ready\"\n---\nBody.\n").unwrap();
+    let run = run(&fixture, &["compose", "doc.md", "--dry-run"]);
+    let stderr = prose(&run.stderr);
+    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    assert!(stderr.contains("lifecycle event `composed` is named `start`"), "stderr:\n{}", run.stderr);
+}
+
+/// A setter naming a sequence declaration is refused before the list is
+/// read, as a real run refuses it.
+#[test]
+fn a_setter_naming_a_declaration_is_a_finding() {
+    let fixture = CliProcessFixture::named("dry-run-declaration-setter");
+    fs::write(fixture.cwd().join("seq.yaml"), "sequence:\n  - name: run\n    shell: just test\n").unwrap();
+    let run = run(&fixture, &["sequence", "seq.yaml", "--dry-run", "template={}"]);
+    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    assert!(prose(&run.stderr).contains("template"), "stderr:\n{}", run.stderr);
+}

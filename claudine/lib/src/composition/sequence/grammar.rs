@@ -465,11 +465,29 @@ pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "f
 /// `origin` (`sequence[1]`, or empty for a file whose root is the task); it
 /// locates the task `when`/`loop` diagnostics.
 pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
-    for key in ["setup", "teardown", "execution", "fail_fast"] {
-        if let Some(value) = map.get(key) {
-            return Err(removed_task_key(key, value, origin));
-        }
-    }
+    validate_task_grammar_at(map, origin, property, true)
+}
+
+/// [`validate_task_grammar`] for the task alone: its own keys, events,
+/// declarations, guard, inputs, loop, inline group object, and the shape of
+/// its `sequence:` value, but not its group legs or its inline list's items.
+/// A check reads those one by one, so one bad leg or item does not hide its
+/// siblings.
+///
+/// ## Errors
+///
+/// As [`validate_task_grammar`], less those of the legs and items.
+pub fn validate_task_grammar_shallow(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    validate_task_grammar_at(map, origin, property, false)
+}
+
+fn validate_task_grammar_at(
+    map: &serde_json::Map<String, Value>,
+    origin: &std::path::Path,
+    property: &str,
+    descend: bool,
+) -> Result<(), CompositionError> {
+    super::removed::refuse_removed(super::removed::RemovedOwner::Task, map, origin)?;
     let inline = matches!(map.get("sequence"), Some(Value::Array(_)));
     if !inline && let Some(key) = CONTAINER_EVENT_KEYS.iter().find(|key| map.contains_key(**key)) {
         return Err(CompositionError::RemovedGrammar {
@@ -486,7 +504,8 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
         let group_property = child_property(property, "group");
         validate_container_events(group, origin)?;
         group_object_grammar(group, origin, &group_property)?;
-        for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        let legs = if descend { group.get("tasks").and_then(Value::as_array) } else { None };
+        for (index, leg) in legs.into_iter().flatten().enumerate() {
             let Value::Object(leg) = leg else {
                 // Same wording as `build_group`, which judges a group file's
                 // legs; here the file is the one declaring the inline group.
@@ -501,11 +520,12 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
     }
     if let Some(value) = map.get("sequence") {
         match value {
-            Value::Array(items) => {
+            Value::Array(items) if descend => {
                 super::normalize::normalize_plan_at(
                     items, super::model::SequenceSource::Inline, origin, true, &child_property(property, "sequence"),
                 )?;
             }
+            Value::Array(_) => {}
             Value::String(_) => {
                 if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
                     return Err(CompositionError::SequenceInvalid("task `sequence` must be a list or file reference; dynamic sources belong on the sequence document".into()));
@@ -667,14 +687,3 @@ fn validate_container_events(map: &serde_json::Map<String, Value>, origin: &std:
     Ok(())
 }
 
-pub(crate) fn removed_task_key(key: &str, value: &Value, origin: &std::path::Path) -> CompositionError {
-    let replacement = match key {
-        "setup" => "use a preceding `side_effect:` task for an action or `shell:` task for a command",
-        "teardown" => "use a group's `finalize:`; wrap a single task in a group of one",
-        "execution" if value.as_str() == Some("serial") => "use `sequence: [{name: first, shell: command}]` for ordered work; nest that sequence as a group leg when needed",
-        "execution" => "groups run concurrently; omit `execution:` (including `execution: parallel`)",
-        "fail_fast" => "`fail_fast` belongs on a `group:` object only; use a group of one with `fail_fast: false` to continue after failure",
-        _ => unreachable!(),
-    };
-    CompositionError::RemovedGrammar { source_path: origin.to_path_buf(), path: key.into(), removed: key.into(), replacement: replacement.into() }
-}

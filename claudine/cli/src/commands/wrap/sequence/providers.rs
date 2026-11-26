@@ -44,7 +44,7 @@ use super::super::composition::{ModelResolveMode, resolve_document_model};
 /// One provider-launching unit of the graph: a `prompt:` task, or a step
 /// that composes its sequence document's body.
 #[derive(Debug, Clone)]
-pub(super) struct TaskSite {
+pub(super) struct SelectionSite {
     pub(super) identity: TaskIdentity,
     /// The zero-based root step the site belongs to, which its review row is
     /// labeled with.
@@ -114,7 +114,7 @@ impl TaskTarget {
 /// One site and how its provider is decided.
 #[derive(Debug, Clone)]
 pub(super) struct TaskSelection {
-    pub(super) site: TaskSite,
+    pub(super) site: SelectionSite,
     pub(super) target: TaskTarget,
     /// The hints its model is re-selected from when its document captures
     /// its own environment.
@@ -194,12 +194,12 @@ pub(super) fn collect_sites(
     root_path: &Path,
     root_hints: &EffectiveSelectionHints,
     caller_sets_agent: bool,
-) -> Vec<TaskSite> {
+) -> Vec<SelectionSite> {
     let root_document = root_hints.names_agent().then(|| (root_path.to_path_buf(), root_hints.clone()));
     let mut sites = Vec::new();
     for (index, step) in graph.steps.iter().enumerate() {
         match &step.task {
-            None => sites.push(TaskSite {
+            None => sites.push(SelectionSite {
                 identity: TaskIdentity::root(index),
                 step: index,
                 name: plan.steps.get(index).map_or_else(|| step.name.clone(), |s| s.name.clone()),
@@ -226,13 +226,13 @@ fn visit(
     containers: &[String],
     enclosing: &[(PathBuf, EffectiveSelectionHints)],
     caller_sets_agent: bool,
-    sites: &mut Vec<TaskSite>,
+    sites: &mut Vec<SelectionSite>,
 ) {
     let name = task.name.clone().unwrap_or_else(|| step_name.to_string());
     match &task.action {
         PreflightAction::Prompt { .. } => {
             let Some(prediction) = &task.provider else { return };
-            sites.push(TaskSite {
+            sites.push(SelectionSite {
                 identity: task.identity.clone(),
                 step: root_step,
                 name,
@@ -266,7 +266,7 @@ fn visit(
             for (index, step) in sequence.steps.iter().enumerate() {
                 match &step.task {
                     // A body step composes the nearest sequence document.
-                    None => sites.push(TaskSite {
+                    None => sites.push(SelectionSite {
                         identity: task.identity.sequence_child(index),
                         step: root_step,
                         name: step.name.clone(),
@@ -312,7 +312,7 @@ fn visit(
 /// task's prompt still evaluates the hint when it composes.
 #[allow(clippy::result_large_err)]
 pub(super) fn select(
-    sites: Vec<TaskSite>,
+    sites: Vec<SelectionSite>,
     inputs: &SelectionInputs<'_>,
 ) -> Result<TaskSelections, CompositionError> {
     let mut warned: BTreeSet<Provider> = BTreeSet::new();
@@ -326,7 +326,7 @@ pub(super) fn select(
 
 #[allow(clippy::result_large_err)]
 fn select_one(
-    site: &TaskSite,
+    site: &SelectionSite,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
 ) -> Result<(TaskTarget, EffectiveSelectionHints), CompositionError> {
@@ -368,7 +368,7 @@ fn model_decided_above_hints(target: &TaskTarget, inputs: &SelectionInputs<'_>) 
 
 #[allow(clippy::result_large_err)]
 fn select_target(
-    site: &TaskSite,
+    site: &SelectionSite,
     own: OwnSelection,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
@@ -451,7 +451,7 @@ impl CircularHint {
         })
     }
 
-    fn error(&self, site: &TaskSite) -> CompositionError {
+    fn error(&self, site: &SelectionSite) -> CompositionError {
         task_error(
             site,
             self.hint_path.clone(),
@@ -462,7 +462,7 @@ impl CircularHint {
 }
 
 #[allow(clippy::result_large_err)]
-fn own_hints(site: &TaskSite) -> Result<OwnSelection, CompositionError> {
+fn own_hints(site: &SelectionSite) -> Result<OwnSelection, CompositionError> {
     match &site.own {
         OwnHints::Body(None) => Ok(OwnSelection {
             class: TaskProviderClass::Missing,
@@ -523,7 +523,7 @@ fn own_hints(site: &TaskSite) -> Result<OwnSelection, CompositionError> {
 
 /// The file and property of the hint that decides `prediction`: its
 /// `agent`'s, or its `model`'s when the task names no `agent`.
-fn hint_location(prediction: &ProviderPrediction, site: &TaskSite) -> (PathBuf, String) {
+fn hint_location(prediction: &ProviderPrediction, site: &SelectionSite) -> (PathBuf, String) {
     state_location(&prediction.agent)
         .or_else(|| state_location(&prediction.model))
         .unwrap_or_else(|| (site.task_path.clone(), "agent".into()))
@@ -550,11 +550,11 @@ pub(super) fn launch_error(selection: &TaskSelection, problem: SequenceTaskProvi
     task_error(&selection.site, hint_path, property, problem)
 }
 
-fn selection_error(site: &TaskSite, own: &OwnSelection, problem: SequenceTaskProviderProblem) -> CompositionError {
+fn selection_error(site: &SelectionSite, own: &OwnSelection, problem: SequenceTaskProviderProblem) -> CompositionError {
     task_error(site, own.hint_path.clone(), own.property.clone(), problem)
 }
 
-fn task_error(site: &TaskSite, hint_path: PathBuf, property: String, problem: SequenceTaskProviderProblem) -> CompositionError {
+fn task_error(site: &SelectionSite, hint_path: PathBuf, property: String, problem: SequenceTaskProviderProblem) -> CompositionError {
     CompositionError::SequenceTaskProviderSelection {
         task: site.label.clone(),
         task_path: site.task_path.clone(),
@@ -569,7 +569,7 @@ fn task_error(site: &TaskSite, hint_path: PathBuf, property: String, problem: Se
 /// prompt, as the target and the hints its model is chosen from: the
 /// document's `agent`, and the task's own `model` above the document's.
 fn enclosing_target(
-    site: &TaskSite,
+    site: &SelectionSite,
     own: &EffectiveSelectionHints,
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,

@@ -486,19 +486,42 @@ previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
 literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
 `--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
 The passive document check that will replace this preview lives in
-`cli/src/commands/document_check.rs`: dispatched from `main.rs::dispatch`
+`cli/src/commands/document_check/`: dispatched from `main.rs::dispatch`
 before tracing, `request::darkmatter_config()`, the wrapper, and
 `ensure_config_exists`, but only when `document_check::enabled()` (today a
 `test-fixtures` build with `CLAUDINE_TEST_PASSIVE_DRY_RUN=1`; `--json` is a
-hidden flag refused otherwise). It walks the root's `sequence` items into a
-`darkmatter::findings::FindingSink` and previews prompts with
+hidden flag refused otherwise). It reads the tree through the library's
+recovering walk, `composition::check_sequence_tree`
+(`sequence/preflight/check.rs`), and reports each `CheckedTask` as its own
+subject in `document_check/tasks.rs` into a
+`darkmatter::findings::FindingSink`; it previews prompts with
 `ComposeOptions::with_dry_run()`, under which Darkmatter skips every document
-command before approval (`ShellExpansionError::SkippedInDryRun`). Before it
-becomes `--dry-run` it must walk the tree through the library preflight
-loader (dynamic sources, groups, task files, catalogs); the old preview's
-L1 suites (`sequence_sources_cli`, `sequence_errors_cli`, `entry_point_parity`,
-…) read its output and must migrate in the same change. Tests:
-`cli/tests/l1/dry_run_check.rs`, fixtures `cli/tests/fixtures/check/`.
+command before approval (`ShellExpansionError::SkippedInDryRun`).
+The walk is the real preflight `Loader` with `check: Some(CheckState)`:
+`check_task` records a task before its children and turns its failure into a
+record instead of an early return; lists normalize through
+`normalize_plan_recovering_at` / `formal::normalize_formal_plan_recovering` /
+`source::plan_referenced_sequence_recovering` (an unreadable item keeps its
+authored position); an inline group's legs are judged one by one with
+`grammar::validate_task_grammar_shallow`; `resolve_reference` takes the
+`ExecutableField` so a no-match becomes a `findings::reference` finding
+(`source::reference_finding`); discovery runs
+`InputDiscoveryOptions::recovering()`, which skips what it cannot read. A
+check-mode root property is `sequence[i]` (the authored key), a real run's
+stays `tasks[i]`. `check.rs::check_root` makes the refusals
+`commands/sequence.rs` makes before any list is read (declaration setters,
+root grammar, lifecycle, removed `seq.*` reads), so a `$( … )` root list
+still reports them, and the walk skips them in check mode; after the walk
+each prompt task's document is judged by `validate_lifecycle_literals`, the
+per-document half of `PreflightGraph::validate_prompt_lifecycle_literals`. A real run never sets `check`, so its fail-fast order and
+errors are unchanged (`cli/tests/l1/sequence_preflight_baselines.rs` pins
+them). Missing inputs are one `composition.missing_properties` row per value,
+graded by `tasks.rs::missing_input_severity` (Rule 10's cohort). The old
+preview's L1 suites (`sequence_sources_cli`, `sequence_errors_cli`,
+`entry_point_parity`, …) read its output and migrate when the check becomes
+`--dry-run`. Tests: `cli/tests/l1/dry_run_check.rs`,
+`lib/src/composition/sequence/preflight/tests/check_tree.rs`, fixtures
+`cli/tests/fixtures/check/`.
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,
@@ -704,8 +727,21 @@ keys. Nested inline and referenced sequences execute recursively; group legs
 may themselves be containers. Groups reject `execution:` (concurrency is implicit), require
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
-Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. Sequence declarations live in `composition/sequence/declarations.rs`:
+Task `setup:`/`teardown:`/`execution:`/`fail_fast:`, group `execution:`, and
+the root `fail_fast:` are removed grammar, declared `removed(<replacement>)`
+in the shipped schemas (`sequence.yaml`'s `task-fields` and `group`,
+`sequence-document.yaml`, `formal-sequence-file.yaml`); the parser reads
+each replacement from there through `composition/sequence/removed.rs`
+(`RemovedOwner`, `refuse_removed`, `removed_key`), never a hand list, and
+keeps its typed `RemovedGrammar` at the boundary where it always refused the
+key (a guard allowlists `removed.rs::removed_key` as the ParserTwin). A
+step `task` is open with `$advise-unknown-keys: [agent, model]`; a group leg
+is the closed `leg`. `task-file.yaml`, `group-file.yaml`, and
+`group-catalog-file.yaml` are the `kind: task`/`group`/`group-catalog`
+definitions. The passive dry run (`document_check::check_schema_keys`)
+reports removed/unknown keys of the root and of every file the walk read, and near-miss advice, from the same
+schemas; `tests/fixtures/schema_keys/` is shared with DMLS's
+`claudine_schema_key_parity.rs`. Sequence declarations live in `composition/sequence/declarations.rs`:
 a root's `$state`/`template` and an inline container task's
 `$schema`/`$state`/`template` are judged by key presence (null included) for
 placement (only beside that owner's inline `sequence: [ … ]`; never on a
@@ -938,7 +974,7 @@ schema-validated only, and the inline launch then reports
 union has no editor shape, so DMLS completion/hover sees nothing from it.
 The sequence trigger is `sequence-document.yaml` (matches `kind: sequence` or
 any non-null `sequence`; payload `sequence` (required), `template`, `$state`,
-and `fail_fast: null` so a root `fail_fast` is reported by name), and it is
+and the removed root `fail_fast`, reported by name with its replacement), and it is
 the only declaration of `sequence`: `composition.yaml` does not declare it
 but selects on it, so a sequence document gets the whole main contract. The
 shared Darkmatter events `initialize`, `cancelled`, and `finalize` never

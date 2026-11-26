@@ -541,12 +541,15 @@ fn embedded_payloads_apply_without_disk_schemas() {
     for (frontmatter, property) in [
         ("sequence: [{ name: a, sequence: [{ name: b, sequence: [{ name: c, with: [1] }] }] }]", "sequence"),
         ("sequence: [{ group: { tasks: [{ name: l }], execution: parallel } }]", "sequence"),
-        ("sequence: [a]\nfail_fast: true", "fail_fast"),
     ] {
         let (_, found, valid) = judge_memory(&schemas, frontmatter);
         assert!(!valid, "`{frontmatter}` is rejected");
         assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from([property.to_string()]));
     }
+    // A removed root key is reported at the root, which owns it, by name.
+    let (_, found, valid) = judge_memory(&schemas, "sequence: [a]\nfail_fast: true");
+    assert!(!valid);
+    assert_eq!(found, [(String::new(), "key `fail_fast` has been removed".to_string())], "{found:?}");
 
     bare.assert_untouched();
 }

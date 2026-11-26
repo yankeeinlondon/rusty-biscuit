@@ -127,6 +127,8 @@ mod inline_prompt_shell_preflight;
 mod invalid_trigger_warnings;
 #[cfg(feature = "test-fixtures")]
 mod launch_trigger_schemas;
+#[cfg(feature = "test-fixtures")]
+mod sequence_preflight_baselines;
 #[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
 #[cfg(unix)]

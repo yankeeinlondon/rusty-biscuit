@@ -34,3 +34,28 @@ fn the_summary_line_counts_findings_checks_and_previews() {
     assert_eq!(outcome.envelope()["outcome"], "failure");
     assert_eq!(outcome.envelope()["file"], Value::Null);
 }
+
+/// Rule 10's cohort rule: a missing input warns only when the run could ask
+/// for it and every missing shape can be asked for.
+#[test]
+fn a_missing_input_warns_only_when_the_whole_cohort_can_be_collected() {
+    use super::tasks::missing_input_severity;
+    assert_eq!(missing_input_severity(true, true), Severity::Warning);
+    assert_eq!(missing_input_severity(true, false), Severity::Error);
+    assert_eq!(missing_input_severity(false, true), Severity::Error);
+    assert_eq!(missing_input_severity(false, false), Severity::Error);
+}
+
+#[test]
+fn property_segments_follow_keys_and_indexes() {
+    use super::tasks::property_segments;
+    use biscuit_file::yaml::YamlPathSegment::{Index, Key};
+    assert_eq!(
+        property_segments("sequence[0].group.tasks[12]"),
+        [Key("sequence".into()), Index(0), Key("group".into()), Key("tasks".into()), Index(12)]
+    );
+    assert_eq!(property_segments("groups[1].tasks[0]"), [Key("groups".into()), Index(1), Key("tasks".into()), Index(0)]);
+    assert_eq!(property_segments("[3]"), [Index(3)], "a bare list's item has no key");
+    assert_eq!(property_segments("tasks[0][1]"), [Key("tasks".into()), Index(0), Index(1)]);
+    assert!(property_segments("").is_empty());
+}

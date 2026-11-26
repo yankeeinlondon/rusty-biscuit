@@ -12,10 +12,17 @@
 # schema adds no container-depth limit; each event stack starts its own
 # conditional-depth count, which the lifecycle parser checks.
 #
-# A task object is open: an undeclared key is authored step data, read as
-# `seq.<key>`. `$schema`, `$state`, and `template` are an inline sequence's own
-# declarations; the task parser refuses them on any other task. A group object is closed, so `execution` (removed) and a
-# misspelled key such as `max_paralel` are schema errors.
+# `task-fields` declares every task field once, with the retired task keys as
+# `removed(…)` (refused whenever present, `null` included, with the
+# replacement as the hint); the task parser reads its replacements from here.
+# A sequence step's `task` is open: an undeclared key is authored step data,
+# read as `seq.<key>`, and it opts into near-miss advice (`promt` beside
+# `prompt`) except for `agent` and `model`, which have their own check. A group
+# leg (`leg`) is the same fields closed, as the task parser reads a leg.
+# `$schema`, `$state`, and `template` are an inline sequence's own
+# declarations; the task parser refuses them on any other task. A group object
+# is closed, so `execution` (removed) and a misspelled key such as
+# `max_paralel` are schema errors.
 kind: schema
 name: sequence-schema
 description: the step and container types of a sequence; nothing is exported through `$schema`
@@ -28,7 +35,7 @@ types:
         - number
         - boolean
         - task
-    task:
+    task-fields:
         name: "string(not-empty) -> the step or leg name"
         when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
         with: "object -> a prompt task's frontmatter values for the document it runs"
@@ -54,16 +61,27 @@ types:
         failure: "stack@./lifecycle-events.yaml -> actions run after the container fails"
         cancelled: "cancelled-stack@./lifecycle-events.yaml -> opt into cancellation; actions run when cancelled"
         finalize: "stack@./lifecycle-events.yaml -> actions run last, whatever the outcome"
+        setup: "removed(use a preceding `side_effect:` task for an action or `shell:` task for a command)"
+        teardown: "removed(use a group's `finalize:`; wrap a single task in a group of one)"
+        execution: "removed(omit execution; use a nested sequence for ordered work)"
+        fail_fast: "removed(`fail_fast` belongs on a `group:` object only)"
+    task:
+        $extends: task-fields
         "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
+        $advise-unknown-keys: [agent, model]
+    leg:
+        $extends: task-fields
+        kind: "string -> a task file's `kind: task`; the task parser ignores it on a leg"
     group:
         name: "string(not-empty) -> the container name"
-        tasks: "task[](required; min(1)) -> named legs; the task parser checks unique names"
+        tasks: "leg[](required; min(1)) -> named legs; the task parser checks unique names"
         variables: "object -> bindings scoped to this group, read as `group.<variable>`"
         description: "string -> the container summary"
         operation: "string -> default operation for prompt legs"
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        execution: "removed(omit execution; use a nested sequence for ordered work)"
         loop: "loop@./lifecycle-events.yaml -> the group's loop, beside `tasks:`"
         initialize: "initialize-stack@./lifecycle-events.yaml -> actions run before the group starts; shell-free"
         start: "stack@./lifecycle-events.yaml -> actions run when the group starts"

@@ -53,6 +53,7 @@ use super::task::TaskStage;
 use super::{reserved, source as source_resolution};
 use crate::invocation_context::{InvocationContext, SourceContext};
 
+mod check;
 mod inputs;
 mod reapproval;
 mod shape;
@@ -62,6 +63,9 @@ pub mod providers;
 pub use inputs::{
     InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
     SequenceInputInventory, discover_sequence_inputs,
+};
+pub use check::{
+    CheckFailure, CheckedTask, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use reapproval::PreflightApproval;
 pub use shape::{
@@ -577,23 +581,27 @@ impl PreflightGraph {
     /// The first [`CompositionError::LifecycleNestedSpanInLiteral`], in
     /// first-encounter document order.
     pub fn validate_prompt_lifecycle_literals(&self) -> Result<(), CompositionError> {
-        for document in &self.prompt_documents {
-            let frontmatter = Value::Object(
-                document
-                    .markdown
-                    .frontmatter()
-                    .as_map()
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            );
-            let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, &document.path) else {
-                continue;
-            };
-            validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, &document.path)?;
-        }
-        Ok(())
+        self.prompt_documents
+            .iter()
+            .try_for_each(|document| validate_lifecycle_literals(&document.markdown, &document.path))
     }
+}
+
+/// [`PreflightGraph::validate_prompt_lifecycle_literals`] for one document:
+/// a nested `{{ … }}` span inside one of its single-pass lifecycle literals.
+/// A lifecycle block that does not parse is left to its own turn.
+///
+/// ## Errors
+///
+/// [`CompositionError::LifecycleNestedSpanInLiteral`].
+pub fn validate_lifecycle_literals(markdown: &Markdown, path: &Path) -> Result<(), CompositionError> {
+    let frontmatter = Value::Object(
+        markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+    );
+    let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, path) else {
+        return Ok(());
+    };
+    validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, path)
 }
 
 
@@ -1199,6 +1207,10 @@ struct Loader<'a> {
     ///
     /// [`document::owner_values`]: super::document::owner_values
     owner_values: HashMap<PathBuf, Arc<Map<String, Value>>>,
+    /// Set for a check ([`check_sequence_tree`]): each task's failure is
+    /// recorded at it and the walk continues with its siblings. `None` for
+    /// every real run, whose first failure ends the walk.
+    check: Option<Box<check::CheckState>>,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -1243,6 +1255,7 @@ impl<'a> Loader<'a> {
             capture_log: Vec::new(),
             refresh: false,
             owner_values: HashMap::new(),
+            check: None,
         }
     }
 
@@ -1291,6 +1304,7 @@ impl<'a> Loader<'a> {
             capture_log: Vec::new(),
             refresh: false,
             owner_values: HashMap::new(),
+            check: None,
         }
     }
 
@@ -1303,12 +1317,17 @@ impl<'a> Loader<'a> {
             values.extend(self.caller_setters.iter().filter(|(key, _)| key.as_str() != "sequence")
                 .map(|(key, value)| (key.clone(), value.clone())));
         }
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+        let removed_reads = crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
             &source_path, crate::composition::lifecycle::bindings::AuthoredDocument {
                 frontmatter: &authored,
                 body: self.source.markdown.content(), body_line_offset: self.source.markdown.frontmatter_line_count(),
             }, Some(&Value::Object(self.caller_setters.clone())), None,
-        )?;
+        );
+        // A check reports these with the root's other refusals, before any
+        // list is read.
+        if !self.checking() {
+            removed_reads?;
+        }
         // The invoking document roots the ancestry, so a task or prompt that
         // references the sequence source itself closes a cycle rather than
         // recursing forever.
@@ -1323,9 +1342,15 @@ impl<'a> Loader<'a> {
         crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &root_late);
         let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
-        let mut lifecycle = parse_lifecycle_config(&authored, &source_path)?;
-        self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
-            Placement { position: TaskPosition::First, in_group: false })?;
+        let mut lifecycle = match parse_lifecycle_config(&authored, &source_path) {
+            Ok(lifecycle) => lifecycle,
+            // A check reported it before reading the list.
+            Err(_) if self.checking() => crate::composition::LifecycleConfig::default(),
+            Err(error) => return Err(error),
+        };
+        let events = self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
+            Placement { position: TaskPosition::First, in_group: false });
+        self.recover_root(events)?;
         self.graph.root_lifecycle = Some(lifecycle);
         // A whole document's rows resolve their references from the file that
         // declares them, which a root `sequence:` reference makes a file other
@@ -1343,31 +1368,38 @@ impl<'a> Loader<'a> {
             self.owner = rows_origin.clone();
         }
         self.seed_steps(entered)?;
+        self.record_root_item_failures(&rows_origin);
         for (index, step) in plan.steps.iter().enumerate() {
-            let label = format!("step {} (`{}`)", index + 1, step.state.id);
-            let property = format!("tasks[{index}]");
+            // A check that set unreadable items aside names each step by its
+            // authored position, and its tasks by their authored paths.
+            let ordinal = self.root_ordinal(index);
+            let label = format!("step {} (`{}`)", ordinal + 1, step.state.id);
+            let property = if self.checking() { format!("sequence[{ordinal}]") } else { format!("tasks[{index}]") };
             self.enter_step(plan, index);
-            let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
             // The root sequence is first, so its first step is; a nested
             // sequence would apply the same rule to its own children.
             let placement = Placement {
                 position: TaskPosition::First.child(index),
                 in_group: false,
             };
-
-            let task = match &step.executable {
-                Some(executable) => Some(self.load_step_task(
+            let seed = check::SiteSeed {
+                slot: check::Slot::Root(ordinal), name: step.name.clone(), file: &rows_origin,
+                property: format!("sequence[{ordinal}]"), item: &step.raw_state,
+                executable: step.executable.as_ref().map(|executable| executable.field),
+            };
+            let task = self.check_task(seed, |loader| {
+                let state = reapproval::early_binding_state(&loader.step_frontmatter, loader.context.clone())?;
+                step.executable.as_ref().map(|executable| loader.load_step_task(
                     executable,
                     &rows_origin,
                     &label,
                     &property,
-                    &plan.authored.at(index),
+                    &plan.authored.at(ordinal),
                     &state,
                     None,
                     placement,
-                )?),
-                None => None,
-            };
+                )).transpose()
+            })?;
 
             self.graph.steps.push(PreflightStep {
                 index,
@@ -1647,6 +1679,9 @@ impl<'a> Loader<'a> {
         use super::grammar::SequenceSourceSpec;
         let resolution = self.source_context_for(origin)
             .map_or_else(|| self.file_resolution_context.clone(), |context| context.file_resolution_context().clone());
+        // A check's list (inline or referenced) sets unreadable items aside: their authored
+        // positions and failures.
+        let mut recovered_items = None;
         let (plan, child_origin, child_authored, events, entered, frontmatter, inline_schema) = match spec {
             SequenceSourceSpec::Inline(items) => {
                 let list_property = property_child(property, "sequence");
@@ -1676,20 +1711,31 @@ impl<'a> Loader<'a> {
                         // coercion apply as they do for a root template.
                         let keys = super::formal::FormalKeys { template: declarations.template, state_schema: declarations.state };
                         let values = self.owner_template_values(&keys)?;
-                        super::formal::normalize_formal_plan_prepared(
-                            items,
-                            super::formal::FormalOwner {
-                                keys, declaring_path: origin, list_property: &list_property, values: &*values,
-                            },
-                            state_schema.as_ref(), super::model::SequenceSource::Inline, origin, true, &resolution,
-                        )?
+                        let owner = super::formal::FormalOwner {
+                            keys, declaring_path: origin, list_property: &list_property, values: &*values,
+                        };
+                        if self.checking() {
+                            let recovered = super::formal::normalize_formal_plan_recovering(
+                                items.clone(), owner, state_schema.as_ref(), super::model::SequenceSource::Inline,
+                                origin, true, &resolution,
+                            )?;
+                            let failures = recovered.failures.into_iter()
+                                .map(|failure| (failure.index, items.get(failure.index).cloned().unwrap_or(Value::Null), failure.error))
+                                .collect::<Vec<_>>();
+                            recovered_items = Some((recovered.ordinals, failures));
+                            recovered.plan
+                        } else {
+                            super::formal::normalize_formal_plan_prepared(
+                                items, owner, state_schema.as_ref(), super::model::SequenceSource::Inline, origin, true, &resolution,
+                            )?
+                        }
                     }
                 };
                 plan.authored = authored.child("sequence");
                 (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None, inline_schema)
             }
             SequenceSourceSpec::Reference(reference) => {
-                let path = self.resolve_reference(&reference.reference, origin)?;
+                let path = self.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
                 self.enter(&path)?;
                 let (document, order) = self.load_data_document(&path)?;
                 let whole = reference.offset.is_none() && reference.operator.is_none();
@@ -1716,10 +1762,22 @@ impl<'a> Loader<'a> {
                         let mut options = super::SequenceSourceOptions::new(&resolution).with_compose_context(&self.context);
                         if let Some(supplied) = &supplied { options = options.with_caller_layers(supplied); }
                         if let Some(invocation) = self.invocation { options = options.with_invocation(invocation); }
-                        source_resolution::plan_referenced_sequence(
-                            &reference, &path, &document.value, Arc::clone(&document.orders),
-                            origin, &self.step_frontmatter, true, &options,
-                        )?
+                        if self.checking() {
+                            let (recovered, items) = source_resolution::plan_referenced_sequence_recovering(
+                                &reference, &path, &document.value, Arc::clone(&document.orders),
+                                origin, &self.step_frontmatter, true, &options,
+                            )?;
+                            let failures = recovered.failures.into_iter()
+                                .map(|failure| (failure.index, items.get(failure.index).cloned().unwrap_or(Value::Null), failure.error))
+                                .collect::<Vec<_>>();
+                            recovered_items = Some((recovered.ordinals, failures));
+                            recovered.plan
+                        } else {
+                            source_resolution::plan_referenced_sequence(
+                                &reference, &path, &document.value, Arc::clone(&document.orders),
+                                origin, &self.step_frontmatter, true, &options,
+                            )?
+                        }
                     }
                 };
                 // A reference to a whole sequence document brings the
@@ -1774,7 +1832,7 @@ impl<'a> Loader<'a> {
         });
         let result = self.load_sequence_children(
             &plan, &mut lifecycle, &child_origin, &child_authored, label, property, entered,
-            state, enclosing.is_some(), placement,
+            state, enclosing.is_some(), placement, recovered_items,
         );
         if let Some((step_frontmatter, step_derived, step_authored, owner)) = enclosing {
             self.step_frontmatter = step_frontmatter;
@@ -1797,26 +1855,59 @@ impl<'a> Loader<'a> {
         &mut self, plan: &SequencePlan, lifecycle: &mut crate::composition::LifecycleConfig, child_origin: &Path,
         child_authored: &AuthoredOrder, label: &str, property: &str, entered: bool,
         state: &EffectiveState, own_state: bool, placement: Placement,
+        recovered_items: Option<RecoveredItems>,
     ) -> Result<Vec<PreflightStep>, CompositionError> {
         let referenced_state;
         let state = if own_state {
             referenced_state = reapproval::early_binding_state(&self.step_frontmatter, state.context().clone())?;
             &referenced_state
         } else { state };
-        self.prepare_container_events(lifecycle, child_origin, label, state, placement)?;
+        // A check records a failed event at the container's task and still
+        // reads its children.
+        let events = self.prepare_container_events(lifecycle, child_origin, label, state, placement);
+        self.recover_in_task(events)?;
+        let child_property = |index: usize| if entered { format!("sequence[{index}]") }
+            else { property_child(property, &format!("sequence[{index}]")) };
+        let (ordinals, failures) = recovered_items.unzip();
+        // A check's unreadable items are recorded in authored order among
+        // the readable ones.
+        let mut failures = failures.unwrap_or_default().into_iter().peekable();
         let mut steps = Vec::with_capacity(plan.steps.len());
         for (index, step) in plan.steps.iter().enumerate() {
-            let child_label = format!("{label} → step {} (`{}`)", index + 1, step.state.id);
-            let child_property = if entered { format!("sequence[{index}]") }
-                else { property_child(property, &format!("sequence[{index}]")) };
-            let task = step.executable.as_ref().map(|executable| self.load_step_task(
+            let ordinal = ordinals.as_ref().and_then(|ordinals| ordinals.get(index).copied()).unwrap_or(index);
+            while let Some((failed, item, error)) = failures.next_if(|(failed, ..)| *failed < ordinal) {
+                self.record_child_item_failure(failed, &item, error, child_origin, &child_property);
+            }
+            let child_label = format!("{label} → step {} (`{}`)", ordinal + 1, step.state.id);
+            let child_property = child_property(ordinal);
+            let seed = check::SiteSeed {
+                slot: check::Slot::SequenceChild(ordinal), name: step.name.clone(), file: child_origin,
+                property: child_property.clone(), item: &step.raw_state,
+                executable: step.executable.as_ref().map(|executable| executable.field),
+            };
+            let task = self.check_task(seed, |loader| step.executable.as_ref().map(|executable| loader.load_step_task(
                 executable, child_origin, &child_label, &child_property,
-                &child_authored.at(index), state, None,
+                &child_authored.at(ordinal), state, None,
                 Placement { position: placement.position.child(index), in_group: placement.in_group },
-            )).transpose()?;
+            )).transpose())?;
             steps.push(PreflightStep { index, id: step.state.id.clone(), name: step.name.clone(), task });
         }
+        for (failed, item, error) in failures {
+            self.record_child_item_failure(failed, &item, error, child_origin, &child_property);
+        }
         Ok(steps)
+    }
+
+    /// Record the unreadable item at `index` of a nested list.
+    fn record_child_item_failure(
+        &mut self, index: usize, item: &Value, error: CompositionError, origin: &Path,
+        property: &dyn Fn(usize) -> String,
+    ) {
+        let seed = check::SiteSeed {
+            slot: check::Slot::SequenceChild(index), name: check::item_name(item, index), file: origin,
+            property: property(index), item, executable: check::item_executable(item),
+        };
+        self.record_item_failure(seed, error);
     }
 
     /// Expand a `task: <file-ref>` reference into the task it names.
@@ -1833,7 +1924,7 @@ impl<'a> Loader<'a> {
         group_defaults: Option<&GroupDefaults>,
         placement: Placement,
     ) -> Result<PreflightTask, CompositionError> {
-        let path = self.resolve_reference(reference, origin)?;
+        let path = self.resolve_reference(reference, origin, ExecutableField::Task)?;
         let (document, authored) = self.load_data_document(&path)?;
         let root = expect_object(&document.value, "task file", &path)?;
 
@@ -1906,11 +1997,11 @@ impl<'a> Loader<'a> {
     ) -> Result<PreflightGroup, CompositionError> {
         match value {
             Value::Object(map) => {
-                self.build_group(map, origin, label, property, authored, state, position)
+                self.build_group(map, origin, label, property, authored, state, position, true)
             }
             Value::String(raw) => {
                 let (name, reference) = split_catalog_reference(raw);
-                let path = self.resolve_reference(&reference, origin)?;
+                let path = self.resolve_reference(&reference, origin, ExecutableField::Group)?;
                 let (document, document_authored) = self.load_data_document(&path)?;
                 let root = expect_object(&document.value, "group file", &path)?;
 
@@ -1941,6 +2032,7 @@ impl<'a> Loader<'a> {
                     &group_authored,
                     state,
                     position,
+                    false,
                 );
                 self.leave();
                 result
@@ -1956,7 +2048,9 @@ impl<'a> Loader<'a> {
         }
     }
 
-    /// Validate a group definition and expand its tasks.
+    /// Validate a group definition and expand its tasks. `inline` is a
+    /// group object written in its task, whose legs' grammar the task's
+    /// grammar judged.
     #[allow(clippy::too_many_arguments)]
     fn build_group(
         &mut self,
@@ -1967,6 +2061,7 @@ impl<'a> Loader<'a> {
         authored: &AuthoredOrder,
         state: &EffectiveState,
         position: TaskPosition,
+        inline: bool,
     ) -> Result<PreflightGroup, CompositionError> {
         providers::collect_written_keys(&Value::Object(map.clone()), &mut self.written_keys);
         let name = match map.get("name") {
@@ -1984,7 +2079,7 @@ impl<'a> Loader<'a> {
         super::grammar::group_object_grammar(map, origin, property)?;
 
         if let Some(value) = map.get("execution") {
-            return Err(super::grammar::removed_task_key("execution", value, origin));
+            return Err(super::removed::removed_key(super::removed::RemovedOwner::Group, "execution", value, origin));
         }
         let fail_fast = match map.get("fail_fast") {
             None => true,
@@ -2003,7 +2098,8 @@ impl<'a> Loader<'a> {
                 lifecycle.stacks.loop_gate = block.gate;
                 Box::new(PreflightLoop { config: block.config, location: loop_location })
             });
-        self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
+        let events = self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true });
+        self.recover_in_task(events)?;
         let source_owner;
         let referenced_owner = self.documents.get(origin).cloned();
         let owner = match &referenced_owner {
@@ -2071,38 +2167,51 @@ impl<'a> Loader<'a> {
         let mut tasks = Vec::with_capacity(raw_tasks.len());
         let mut leg_names = std::collections::HashSet::new();
         for (index, raw) in raw_tasks.iter().enumerate() {
-            let task_map = raw.as_object().ok_or_else(|| {
-                invalid(format!(
-                    "task {} must be an object, got {}",
-                    index + 1,
-                    json_type_name(raw)
-                ))
-            })?;
-            let leg_name = task_map.get("name").and_then(Value::as_str)
-                .filter(|name| !name.trim().is_empty())
-                .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
-            if !leg_names.insert(leg_name) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
             let task_property = property_child(property, &format!("tasks[{index}]"));
-            let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
-            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
-            let mut leg = self.load_task(
-                field,
-                &value,
-                &options,
-                origin,
-                &task_label,
-                &task_property,
-                &authored.child("tasks").at(index),
-                state,
-                Some(&defaults),
-                // Legs are not ordered: every leg of a first group is first.
-                Placement {
-                    position,
-                    in_group: true,
-                },
-            )?;
-            leg.name = Some(leg_name.to_string());
-            tasks.push(leg);
+            let seed = check::SiteSeed {
+                slot: check::Slot::Leg(index), name: check::item_name(raw, index), file: origin,
+                property: task_property.clone(), item: raw, executable: check::item_executable(raw),
+            };
+            // A check records a bad leg at the leg and reads its siblings.
+            let leg = self.check_task(seed, |loader| {
+                let task_map = raw.as_object().ok_or_else(|| {
+                    invalid(format!(
+                        "task {} must be an object, got {}",
+                        index + 1,
+                        json_type_name(raw)
+                    ))
+                })?;
+                let leg_name = task_map.get("name").and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
+                if !leg_names.insert(leg_name.to_string()) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
+                // A real run judged an inline group's legs with the task
+                // that holds it; a check judges each one here, at the leg.
+                if inline && loader.checking() {
+                    super::grammar::validate_task_grammar_shallow(task_map, origin, &task_property)?;
+                }
+                let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
+                let task_label = format!("{label} → task {} of group `{name}`", index + 1);
+                let mut leg = loader.load_task(
+                    field,
+                    &value,
+                    &options,
+                    origin,
+                    &task_label,
+                    &task_property,
+                    &authored.child("tasks").at(index),
+                    state,
+                    Some(&defaults),
+                    // Legs are not ordered: every leg of a first group is first.
+                    Placement {
+                        position,
+                        in_group: true,
+                    },
+                )?;
+                leg.name = Some(leg_name.to_string());
+                Ok(Some(leg))
+            })?;
+            tasks.extend(leg);
         }
 
         let group = PreflightGroup {
@@ -2187,7 +2296,7 @@ impl<'a> Loader<'a> {
     /// A prompt remains a leaf. A referenced document with `sequence:` needs
     /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
-        let path = self.resolve_reference(reference, origin)?;
+        let path = self.resolve_reference(reference, origin, ExecutableField::Prompt)?;
         self.capture_source(&path);
         if let Some(existing) = self.graph.prompt_document(&path) {
             let _ = existing;
@@ -3035,18 +3144,26 @@ impl<'a> Loader<'a> {
     }
 
     /// Resolve a reference authored inside `origin` to an absolute path.
+    ///
+    /// A check notes the reference finding for a failure, which the task
+    /// that authored `field` then reports.
     fn resolve_reference(
         &mut self,
         reference: &str,
         origin: &Path,
+        field: ExecutableField,
     ) -> Result<PathBuf, CompositionError> {
         let source_context = self.source_context_for(origin);
         let file_resolution_context = source_context
             .as_ref()
             .map(SourceContext::file_resolution_context)
             .unwrap_or(&self.file_resolution_context);
-        source_resolution::resolve_sequence_reference(reference, origin, file_resolution_context)
-            .map(|p| canonical(&p))
+        let resolved = source_resolution::resolve_sequence_reference(reference, origin, file_resolution_context)
+            .map(|p| canonical(&p));
+        if resolved.is_err() && self.checking() {
+            self.note_unresolved_reference(reference, origin, field);
+        }
+        resolved
     }
 
     /// The invocation's caller inputs with their recorded origins, or the
@@ -3187,6 +3304,7 @@ impl<'a> Loader<'a> {
         path: &Path,
     ) -> Result<(Arc<ReferencedDocument>, AuthoredOrder), CompositionError> {
         self.capture_source(path);
+        self.note_loaded_file(path);
         if let Some(document) = self.documents.get(path) {
             return Ok((Arc::clone(document), AuthoredOrder::at_root(Arc::clone(&document.orders))));
         }
@@ -3596,6 +3714,11 @@ fn canonical(path: &Path) -> PathBuf {
     biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+
+/// A check's list items set aside: the read items' authored positions, and
+/// each unreadable item's position, value, and failure.
+type RecoveredItems = (Vec<usize>, Vec<(usize, Value, CompositionError)>);
+
 #[cfg(test)]
 mod tests;
 
@@ -3621,3 +3744,7 @@ mod prepared_shell_values_tests;
 #[cfg(test)]
 #[path = "tests/provider_dependencies.rs"]
 mod provider_dependencies_tests;
+
+#[cfg(test)]
+#[path = "tests/check_tree.rs"]
+mod check_tree_tests;

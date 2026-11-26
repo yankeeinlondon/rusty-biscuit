@@ -33,4 +33,4 @@ $schema:
     template: |-
         object -> key/values which are _composed_ with each step's state; these key/values are then merged with the existing key/values from the step. This allows for expressions like: `slug: {{ dasherize(name) }}`, etc.
     $state: "schema -> the schema each step's normalized state in this document's inline `sequence:` list must satisfy; root `$schema` describes the document itself"
-    fail_fast: "null -> removed: a sequence document has no fail_fast; set fail_fast on a group object"
+    fail_fast: "removed(set fail_fast on a group object)"

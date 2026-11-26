@@ -391,27 +391,39 @@ impl PreparedSequenceSchema {
     /// failing step.
     pub fn validate_states(&self, plan: &SequencePlan, container: &str) -> Result<(), CompositionError> {
         for step in &plan.steps {
-            let Some(report) = self.validate(&step.state.to_value()) else {
-                return Ok(());
+            self.validate_step(step, step.index, container)?;
+        }
+        Ok(())
+    }
+
+    /// [`Self::validate_states`] for one step, reported at `index`: the
+    /// step's position in the authored list, which a check that set
+    /// unreadable items aside knows and the plan does not.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validate_states`].
+    pub fn validate_step(&self, step: &super::model::SequenceStep, index: usize, container: &str) -> Result<(), CompositionError> {
+        let Some(report) = self.validate(&step.state.to_value()) else {
+            return Ok(());
+        };
+        if let Some(problem) = report.problems.first() {
+            // A top-level missing property has no pointer of its own, so it
+            // is named; every other problem, including a field missing
+            // inside a value, keeps its instance pointer (the message names
+            // the field).
+            let property = match &problem.property {
+                Some(name) if problem.path.is_empty() => name.clone(),
+                _ => problem.path.clone(),
             };
-            if let Some(problem) = report.problems.first() {
-                // A top-level missing property has no pointer of its own, so it
-                // is named; every other problem, including a field missing
-                // inside a value, keeps its instance pointer (the message names
-                // the field).
-                let property = match &problem.property {
-                    Some(name) if problem.path.is_empty() => name.clone(),
-                    _ => problem.path.clone(),
-                };
-                return Err(CompositionError::SequenceStateSchemaViolation {
-                    index: step.index,
-                    id: step.state.id.clone(),
-                    property,
-                    message: problem.message.clone(),
-                    source_path: self.source_path.clone(),
-                    container: container.to_string(),
-                });
-            }
+            return Err(CompositionError::SequenceStateSchemaViolation {
+                index,
+                id: step.state.id.clone(),
+                property,
+                message: problem.message.clone(),
+                source_path: self.source_path.clone(),
+                container: container.to_string(),
+            });
         }
         Ok(())
     }

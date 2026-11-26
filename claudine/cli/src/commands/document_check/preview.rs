@@ -42,9 +42,15 @@ impl Check {
             Err(PreviewError::Markdown(error)) if skipped_command(&error) => {
                 self.sink.not_checked(task.subject, "preview", "it depends on a command a dry run skips", None);
             }
-            Err(PreviewError::Markdown(error)) => self.push_error(task.subject, &error, task.trail.clone()),
-            Err(PreviewError::Context(error)) => self.push_error(task.subject, &error, task.trail.clone()),
-            Err(PreviewError::Invocation(error)) => self.push_error(task.subject, &error, task.trail.clone()),
+            Err(PreviewError::Markdown(error)) => {
+                self.push_error(task.subject, &error, task.trail.clone());
+            }
+            Err(PreviewError::Context(error)) => {
+                self.push_error(task.subject, &error, task.trail.clone());
+            }
+            Err(PreviewError::Invocation(error)) => {
+                self.push_error(task.subject, &error, task.trail.clone());
+            }
         }
     }
 }

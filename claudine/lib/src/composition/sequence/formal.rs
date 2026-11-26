@@ -47,7 +47,7 @@ pub struct FormalKeys<'a> {
 /// [`CompositionError::SequenceReservedTemplateKey`].
 pub fn formal_keys<'a>(root: &'a Map<String, Value>, source_path: &Path) -> Result<FormalKeys<'a>, CompositionError> {
     if let Some(value) = root.get("fail_fast") {
-        return Err(super::grammar::removed_task_key("fail_fast", value, source_path));
+        return Err(super::removed::removed_key(super::removed::RemovedOwner::Root, "fail_fast", value, source_path));
     }
     let declarations = declarations::root_declarations(root, source_path)?;
     Ok(FormalKeys {
@@ -96,7 +96,16 @@ pub fn normalize_formal_plan(
     // The contract is resolved before any row is read: a malformed or
     // unloadable `$state` fails an empty list too, and it resolves once
     // however many rows it judges.
-    let state_schema = owner
+    let state_schema = prepare_state_schema(&owner, file_resolution_context)?;
+    normalize_formal_plan_prepared(items, owner, state_schema.as_ref(), source, invocation_path, document_fail_fast, file_resolution_context)
+}
+
+/// The owner's `$state`, prepared once for every row it judges.
+pub(crate) fn prepare_state_schema(
+    owner: &FormalOwner<'_>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Option<PreparedSequenceSchema>, CompositionError> {
+    owner
         .keys
         .state_schema
         .map(|declaration| {
@@ -105,8 +114,7 @@ pub fn normalize_formal_plan(
             );
             PreparedSequenceSchema::prepare(declaration, owner.declaring_path, &property, file_resolution_context)
         })
-        .transpose()?;
-    normalize_formal_plan_prepared(items, owner, state_schema.as_ref(), source, invocation_path, document_fail_fast, file_resolution_context)
+        .transpose()
 }
 
 /// The owner path of a list authored at `list_property`: empty for a root
@@ -150,6 +158,52 @@ pub(crate) fn normalize_formal_plan_prepared(
         schema.validate_states(&plan, list_property)?;
     }
     Ok(plan)
+}
+
+/// [`normalize_formal_plan_prepared`] that sets an unreadable item aside
+/// ([`super::normalize::normalize_plan_recovering_at`]) and judges each
+/// readable item's state on its own, reporting it at its authored position.
+///
+/// ## Errors
+///
+/// What fails the whole list rather than one item: template evaluation.
+pub(crate) fn normalize_formal_plan_recovering(
+    items: Vec<Value>,
+    owner: FormalOwner<'_>,
+    state_schema: Option<&PreparedSequenceSchema>,
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<super::normalize::RecoveredPlan, CompositionError> {
+    let FormalOwner { keys, declaring_path, list_property, values } = owner;
+    let items = match keys.template {
+        Some(template) => {
+            let items = expand_scalar_shorthand(items);
+            apply_template(template, items, values, declaring_path, file_resolution_context)?
+        }
+        None => items,
+    };
+    let mut recovered = super::normalize::normalize_plan_recovering_at(
+        &items, source, invocation_path, document_fail_fast, list_property,
+    );
+    if let Some(schema) = state_schema {
+        let mut kept = Vec::with_capacity(recovered.plan.steps.len());
+        let mut ordinals = Vec::with_capacity(recovered.ordinals.len());
+        for (step, ordinal) in std::mem::take(&mut recovered.plan.steps).into_iter().zip(std::mem::take(&mut recovered.ordinals)) {
+            match schema.validate_step(&step, ordinal, list_property) {
+                Ok(()) => {
+                    kept.push(step);
+                    ordinals.push(ordinal);
+                }
+                Err(error) => recovered.failures.push(super::normalize::ItemFailure { index: ordinal, error }),
+            }
+        }
+        recovered.failures.sort_by_key(|failure| failure.index);
+        recovered.plan.steps = kept;
+        recovered.ordinals = ordinals;
+    }
+    Ok(recovered)
 }
 
 /// Whether filling `keys`' template reads the owner's values at all: only a

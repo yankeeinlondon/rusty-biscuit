@@ -38,6 +38,7 @@ pub mod grammar;
 pub mod model;
 pub mod normalize;
 pub mod preflight;
+pub mod removed;
 pub mod reserved;
 pub mod source;
 pub mod task;
@@ -232,7 +233,7 @@ pub fn resolve_sequence_plan_with(
     };
 
     if let Some(value) = fm.as_map().get("fail_fast") {
-        return Err(grammar::removed_task_key("fail_fast", value, &source.resolved_path));
+        return Err(removed::removed_key(removed::RemovedOwner::Root, "fail_fast", value, &source.resolved_path));
     }
     let fail_fast = true;
 

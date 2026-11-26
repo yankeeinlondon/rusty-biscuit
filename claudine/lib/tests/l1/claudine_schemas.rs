@@ -284,6 +284,7 @@ impl Discovered {
                 advisories: Vec::new(),
                 trigger_findings: Vec::new(),
                 defaults: Vec::new(),
+                key_advice: Vec::new(),
             },
         };
         let held = match &effective {

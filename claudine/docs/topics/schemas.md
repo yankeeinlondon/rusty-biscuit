@@ -154,11 +154,12 @@ imports always use the path.
 | [`inline-composition.yaml`](../../registration/inline-composition.yaml) | the catalog for an inline composition: exactly one of `prompt` or `sections` (see [Inline compositions: `prompt` or `sections`](#inline-compositions-prompt-or-sections)) |
 | [`sequence-document.yaml`](../../registration/sequence-document.yaml) | the sequence keys of a Markdown sequence document (`sequence`, `template`, `$state`, and the removed root `fail_fast`); requires `sequence` |
 | [`formal-sequence-file.yaml`](../../registration/formal-sequence-file.yaml) | a `kind: sequence` YAML file run directly (see [Sequence declarations](#sequence-declarations)) |
+| [`task-file.yaml`](../../registration/task-file.yaml), [`group-file.yaml`](../../registration/group-file.yaml), [`group-catalog-file.yaml`](../../registration/group-catalog-file.yaml) | a `kind: task`, `kind: group`, or `kind: group-catalog` YAML file a sequence references: a task file is a closed `leg`, a group file a closed `group`, and a catalog's `groups:` entries are groups beneath an open root |
 | [`shared.yaml`](../../registration/shared.yaml) | `common-attributes`: every control a Claudine Markdown document shares (provider and model, run controls, the lifecycle events, linking keys, managed metadata); declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`document.yaml`](../../registration/document.yaml) | the document metadata types `prompt`, `sections`, `hash`, and `last_updated` |
 | [`lifecycle-events.yaml`](../../registration/lifecycle-events.yaml) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
 | [`action.yaml`](../../registration/action.yaml) | the four action types and the dictionary-bundle types, each verb's shape referenced from Darkmatter |
-| [`sequence.yaml`](../../registration/sequence.yaml) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
+| [`sequence.yaml`](../../registration/sequence.yaml) | the sequence step and container types (`steps`, `step`, `task-fields`, the open step `task`, the closed group `leg`, and `group`), with the retired keys declared `removed(…)` |
 | [`linking.yaml`](../../registration/linking.yaml) | the eleven optional linking keys of a linked skill, command, or agent |
 | [`content-policy.yaml`](../../registration/content-policy.yaml) | a byte-for-byte copy of Content Policy's types for `content_policy`, so the bundle needs nothing outside it; a test keeps the copy equal to its source |
 | [`claudine-config.yaml`](../../registration/claudine-config.yaml) | the schema of Claudine's own `config.yaml` files, used by configuration validation and DMLS rather than by any trigger |
@@ -234,8 +235,8 @@ too, and it requires `sequence`:
 | `sequence: "42"` | applies | valid: quoted text is a file reference |
 | `sequence: null`, or no `sequence` | — | no sequence trigger |
 | `kind: sequence` with no `sequence` | applies | invalid: `sequence` is required |
-| `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
-| `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
+| `fail_fast: true` beside `sequence:` | applies | invalid: `dm.schema.removed_key` on the root naming `fail_fast`, hint `set fail_fast on a group object` |
+| `fail_fast: null` beside `sequence:` | applies | invalid, the same: a removed key is refused whatever its value |
 
 Only `sequence-document.yaml` declares `sequence`. A non-null `sequence` also
 selects `composition.yaml`, so a sequence document's events, `loop`, and every
@@ -683,25 +684,53 @@ sequence:
             with: [release]              # invalid: `with` is a mapping
     - group:
           name: checks
-          execution: parallel            # invalid: removed; a group is closed
+          execution: parallel            # invalid: removed, with its replacement as the hint
           max_paralel: 2                 # invalid: misspelled `max_parallel`
           tasks:
               - name: lint
                 shell: "just lint"
-                owner: docs-team         # valid: step data, read as `seq.owner`
+                setup: ./prepare.md      # invalid: removed from every task
+    - name: docs
+      prompt: ./docs.md
+      owner: docs-team                   # valid: step data, read as `seq.owner`
+      promt: ./other.md                  # valid, with a near-miss warning: did you mean `prompt`?
 ```
 
 A **group object is closed**, so a removed key (`execution`) or a misspelled
 one (`max_paralel`) is a schema error. Because a group's value can also be a
 file reference, the problem is reported at the group (`/sequence/1/group`)
-with the group's value, which names the offending key. A **task object is
-open**: a key Claudine does not reserve, such as `params` or `owner`, is
-authored step data, never a schema error. A document-level `fail_fast` is
-removed and reported at `/fail_fast`; set `fail_fast` on a group object
-instead.
+with the group's value, which names the offending key. A **group leg is
+closed** too: it takes the task fields (and a task file's `kind`), nothing
+else, as the task parser reads a leg.
 
-The container types are recursive: a task's inline `sequence:` items and a
-group's `tasks:` legs are `task` again, so a container is typed the same way
+A **sequence step is open**: a key Claudine does not reserve, such as `params`
+or `owner`, is authored step data, never a schema error. Because a typo would
+also be kept as data, a step key one edit from a single declared field (`promt`
+beside `prompt`) gets a `dm.schema.near_miss_key` **warning** in the editor and
+in `md compose`'s findings; the step still runs. `agent` and `model` are never
+advised on, since Claudine reports them on their own.
+
+### Removed keys
+
+Retired keys are declared `removed(<replacement>)` in the shipped schemas, so
+the editor, `md schema validate`, and a run all refuse them with the same
+replacement advice. A removed key is refused whatever its value, `null`
+included.
+
+| Key | Where | Replacement |
+|---|---|---|
+| `fail_fast` | the document root | set fail_fast on a group object |
+| `setup` | any task or leg | use a preceding `side_effect:` task for an action or `shell:` task for a command |
+| `teardown` | any task or leg | use a group's `finalize:`; wrap a single task in a group of one |
+| `execution` | any task, leg, or group | omit execution; use a nested sequence for ordered work |
+| `fail_fast` | any task or leg | `fail_fast` belongs on a `group:` object only |
+
+The sequence parser reads the same table, so a run reports the removal as its
+own `RemovedGrammar` error with that replacement (`execution: serial` adds an
+example of the nested sequence to write instead).
+
+The container types are recursive: a task's inline `sequence:` items are
+`task` again and a group's `tasks:` legs are `leg` (the same fields, closed), so a container is typed the same way
 at every depth, and each container event takes the same family as the
 document event of that name:
 

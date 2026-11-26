@@ -117,7 +117,7 @@ fn every_container_level_is_typed() {
         (
             "level2-invalid",
             include_str!("../fixtures/sequence-schema/level2-invalid.md"),
-            Invalid(&[("/sequence/0/sequence/0/group", "'execution' was unexpected")]),
+            Invalid(&[("/sequence/0/sequence/0/group", "key `execution` has been removed")]),
         ),
         ("level3-valid", include_str!("../fixtures/sequence-schema/level3-valid.md"), Valid),
         (
@@ -125,7 +125,7 @@ fn every_container_level_is_typed() {
             include_str!("../fixtures/sequence-schema/level3-invalid.md"),
             Invalid(&[
                 ("/sequence/0/sequence/0/sequence/0/with", "not of type \"object\""),
-                ("/sequence/0/sequence/0/sequence/1/group", "'execution' was unexpected"),
+                ("/sequence/0/sequence/0/sequence/1/group", "key `execution` has been removed"),
             ]),
         ),
         (
@@ -133,19 +133,18 @@ fn every_container_level_is_typed() {
             include_str!("../fixtures/sequence-schema/level4-invalid.md"),
             Invalid(&[
                 ("/sequence/0/sequence/0/sequence/0/sequence/0/with", "not of type \"object\""),
-                ("/sequence/0/sequence/0/sequence/0/sequence/0/sequence/0/group", "'execution' was unexpected"),
+                ("/sequence/0/sequence/0/sequence/0/sequence/0/sequence/0/group", "key `execution` has been removed"),
             ]),
         ),
     ]);
 }
 
-/// A group object is closed, so its removed `execution` key and a misspelled
-/// key are reported at the group, with the key named in the message (a
-/// group is a union of an object and a file reference, so the problem is the
-/// union's). Root `fail_fast` is declared `null`, so a value is reported at
-/// `/fail_fast`; the sequence parser rejects it too. An explicit null passes
-/// the schema, and the parser, which rejects any present root `fail_fast`, is
-/// what refuses it.
+/// A group's `execution` and the root's `fail_fast` are declared
+/// `removed(…)`: each is reported at its owner (the group, the root) with the
+/// key named, whatever its value, an explicit `null` included, and the
+/// sequence parser refuses both too. A misspelled group key is an unknown
+/// key at the group (a group is a union of an object and a file reference,
+/// so the problem is the union's).
 #[test]
 fn removed_and_misspelled_keys_are_reported_by_name() {
     const ROOT_FAIL_FAST_NULL: &str = "---\nfail_fast: null\nsequence:\n    - name: one\n      shell: just one\n---\nBody.\n";
@@ -153,7 +152,7 @@ fn removed_and_misspelled_keys_are_reported_by_name() {
         (
             "group-execution",
             include_str!("../fixtures/sequence-schema/group-execution.md"),
-            Invalid(&[("/sequence/0/group", "'execution' was unexpected")]),
+            Invalid(&[("/sequence/0/group", "key `execution` has been removed")]),
         ),
         (
             "group-misspelled-max-parallel",
@@ -163,9 +162,9 @@ fn removed_and_misspelled_keys_are_reported_by_name() {
         (
             "root-fail-fast",
             include_str!("../fixtures/sequence-schema/root-fail-fast.md"),
-            Invalid(&[("/fail_fast", "not of type \"null\"")]),
+            Invalid(&[("", "key `fail_fast` has been removed")]),
         ),
-        ("root-fail-fast-null", ROOT_FAIL_FAST_NULL, Valid),
+        ("root-fail-fast-null", ROOT_FAIL_FAST_NULL, Invalid(&[("", "key `fail_fast` has been removed")])),
     ]);
 
     let repo = SchemaRepo::new(&[]);
