@@ -575,8 +575,20 @@ preview) prints its warnings once before task one unless `--silent`. Tests:
 `cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*` is the mapping
 guard, one case per boundary), `lib/src/composition/error/tests.rs::check_failed`.
 The scope guards (`error_guards/sequence_scope.rs`, allowlist
-`sequence-scope-allow.toml`: site, noun, catch-all) and the code snapshot guard
+`sequence-scope-allow.toml`: site, noun, catch-all, own arm; only
+`outside-scope` entries, never a `Sequence…` variant) and the code snapshot guard
 (`dry_run_check::codes`) are listed in [Error Architecture](topics/error-architecture.md#the-lossy-boundary-audit).
+Every `Sequence…` variant carries `site: Box<SequenceSite>` (`error/site.rs`:
+optional file, property, task) or `source_path` + `property`; a deep layer
+raises an unlocated site and the first caller that knows it calls
+`CompositionError::locate_sequence` (innermost wins; `referenced_as` fills the
+construct noun). A referenced file's failure is `SequenceReferenceResolution`,
+`SequenceSourceRead`, or `SequenceSourceParse` (with its parse stage); each
+variant has its own arm in `render/sequence.rs`, and its passive-check row
+carries the same hint. Wording changes keep the old facets
+(`cli/tests/l1/sequence_error_blocks.rs`). The dry-run preview reports the
+preparation's `warnings` (a tolerated transclusion failure) as warning rows
+(`document_check/preview.rs`).
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,

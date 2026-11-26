@@ -4,9 +4,9 @@ How a typed error travels from the place it is raised to the place a human reads
 it or a `when:` clause matches it — and the rules that keep those two answers the
 same.
 
-The **taxonomy** (the facet enums and the locked code catalog) is ratified in
-[`error-catalog.md`](../../features/_completed/2026-06-28-real-errors/error-catalog.md);
-its data model is [`error-structure.md`](../../features/_completed/2026-06-28-real-errors/error-structure.md).
+The **taxonomy** (the facet enums and the locked code catalog) lives in code:
+the facets in `claudine::diagnostics` and every registered code, with its
+detail keys, in `claudine/lib/src/diagnostics/registry.rs`.
 This document is the **transport**: the seams, the selection rule, and what an
 author of a new error must do. For the `err.*` surface those facets reach, see
 [lifecycle.md](flow-control/lifecycle.md#err-fields).
@@ -31,8 +31,7 @@ a human, it is worth exposing to a handler — one struct, both jobs.
 
 ### Where diagnostic identity lives
 
-Claudine owns the facets; lower layers do not have any (**Option A**, ratified in
-the feature's [decisions.md §D-1](../../features/2026-07-13-error-propogation/decisions.md)).
+Claudine owns the facets; lower layers do not have any.
 Every Darkmatter, biscuit-file, or `std::io` error that crosses into Claudine is
 retained as a `#[source]` by a Claudine diagnostic wrapper. The cost is that
 every ingress must be wrapped; what it buys is a dependency direction that does
@@ -186,6 +185,61 @@ loading, before it collects inputs, and `err.code` is the file's.
 
 A run whose passive check finds nothing, or whose error is not a typed
 `CompositionError`, returns its error unwrapped and renders as before.
+
+## Sequence errors: a site and a block of their own
+
+Every `CompositionError::Sequence…` variant says where the author wrote the
+problem. It carries a `site: Box<SequenceSite>` (`lib/src/composition/error/site.rs`),
+unless it already has `source_path` and `property` fields:
+
+| Field | Holds | Example |
+|-------|-------|---------|
+| `file` | the file that wrote the construct | `prompts/seq.md` |
+| `property` | the authored property path, zero-based as written | `sequence[1].prompt` |
+| `task` | the task's `name`, else its generated label | `review` |
+
+A part nobody knows stays `None` and is not rendered; a site never guesses a
+file or a line. A layer deep in loading often raises the error before it knows
+its file, so it raises an unlocated site and the first caller that knows the
+location fills it in with `CompositionError::locate_sequence`. The innermost
+location wins: a caller never overwrites what a lower layer proved.
+
+Each variant renders through its own arm of `render/sequence.rs`, in the
+four-part shape the message standard asks for (what, where, why, fix):
+
+```text
+⤫ CompositionError: prompt file not found
+┃
+┃ prompt file ./missing.md could not be resolved: file not found
+┃
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃
+┃ Correct the reference ./missing.md.
+```
+
+- **What** names the construct the author wrote (`prompt file`, `task file`,
+  `sequence file`), taken from `ExecutableField::noun`, never "external
+  sequence file".
+- **Why** is the cause the code established. Loading a referenced file has
+  three variants, so a message never lists causes it has not proven:
+  `SequenceReferenceResolution` (the reference matched no file; an unresolved
+  reference also lists the candidates it tried), `SequenceSourceRead` (the file
+  exists but could not be read), and `SequenceSourceParse` (it was read but
+  did not parse, with the stage that failed: frontmatter, YAML, YAML
+  conversion, JSON5, a repeated key, or a JSON line).
+- **Fix** is one hint for that cause; an unknown task field gets the near
+  miss (`Did you mean when? Rename whem.`) or, near nothing, the field list.
+- Prose counts steps from one ("step 2", "sequence item 5 is null"); the
+  property path keeps the zero-based index the file uses.
+
+The facets do not change with the wording: these variants keep the code,
+category, disposition, and origin they had, so an author who matches
+`err.code` sees the same failure (`cli/tests/l1/sequence_error_blocks.rs`
+pins each block, its JSON projection, and its identity). A sequence that stops
+at preflight shows the passive check's rows instead of the block, so a row
+carries the same hint as the block and the site's file as its source.
 
 ## The snapshot boundary
 
@@ -423,6 +477,7 @@ The guards live in `cli/tests/l1/error_guards.rs`, backed by a `syn` reader over
 | `sequence_scope::every_sequence_variant_carries_its_site` | a `CompositionError` variant named `Sequence…` has neither a `site` field nor both `source_path` and `property` |
 | `sequence_scope::no_message_hard_codes_a_construct_noun` | an `#[error]` text or a `render/` block spells a construct noun such as "external sequence file" instead of taking it from `ExecutableField::noun` |
 | `sequence_scope::only_listed_variants_reach_the_catch_all_block` | a variant no renderer names, so it falls through to the generic "composition failed" block of `render/provider.rs` |
+| `sequence_scope::every_routed_sequence_variant_has_its_own_arm` | a variant the renderer routes to `render/sequence.rs` has no arm of its own there, or an arm names a variant that no longer exists |
 
 Three more guards live beside the tests of what they guard:
 
@@ -449,10 +504,11 @@ knows two things a grep cannot:
 ### Adding an exception
 
 The sequence scope guards read `error_guards/sequence-scope-allow.toml`: one
-entry per variant (or `render/<file>.rs` for a noun in a renderer) and guard,
-tagged `sequence-error-standard` for a sequence error that does not meet the
-message standard yet and `outside-scope` for any other variant. An unlisted variant and
-an entry matching no variant both fail.
+entry per variant and guard, tagged `outside-scope`. Only variants outside the
+sequence error standard may be listed (today, other variants that still reach
+the generic block); an entry naming a `Sequence…` variant or a `render/` file
+is refused, because every sequence error has its site and its own block. An
+unlisted variant and an entry matching no variant both fail.
 
 Both D8 allowlists (`error_guards/transport-allow.toml`,
 `error_guards/boxed-diagnostic-allow.toml`) key an entry to an **enclosing

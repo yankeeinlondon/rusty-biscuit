@@ -1030,15 +1030,23 @@ fn a_missing_prompt_file_is_named_by_its_noun_and_cause() {
     let seq = "---\nagent: goose\nsequence:\n  - name: find\n    prompt: ./missing.md\n---\n";
     let fixture = sequence_fixture("seq-site-missing-prompt", &[("seq.md", seq)]);
     let (human, envelope) = sequence_reports(&fixture);
-    let real = run(&fixture, &["sequence", "seq.md"]);
     assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
     insta::assert_snapshot!("seq_site_missing_prompt_human", portable_text(&fixture, &human.stderr));
+    insta::assert_json_snapshot!("seq_site_missing_prompt_json", envelope);
+}
+
+/// The real run of [`a_missing_prompt_file_is_named_by_its_noun_and_cause`]:
+/// its stop line names the prompt file and the proven cause.
+#[test]
+fn a_real_run_stops_at_the_missing_prompt_file() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: find\n    prompt: ./missing.md\n---\n";
+    let fixture = sequence_fixture("seq-site-missing-prompt-real", &[("seq.md", seq)]);
+    let real = run(&fixture, &["sequence", "seq.md"]);
     assert!(
         prose(&real.stderr).contains("The run stopped at: prompt file `./missing.md` could not be resolved: file not found"),
         "{}",
         real.stderr
     );
-    insta::assert_json_snapshot!("seq_site_missing_prompt_json", envelope);
 }
 
 /// The control of [`a_missing_prompt_file_is_named_by_its_noun_and_cause`]:
@@ -1060,7 +1068,6 @@ fn a_task_file_yaml_error_names_the_file_and_the_parse_stage() {
     let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./bad.yaml\n---\n";
     let fixture = sequence_fixture("seq-site-yaml", &[("seq.md", seq), ("bad.yaml", "kind: task\nprompt: [unclosed\n")]);
     let (human, envelope) = sequence_reports(&fixture);
-    let real = run(&fixture, &["sequence", "seq.md"]);
     assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
     // The row holds the absolute path, so its wrapping varies by host: the
     // JSON snapshot pins the text, and the human report its shape.
@@ -1072,6 +1079,15 @@ fn a_task_file_yaml_error_names_the_file_and_the_parse_stage() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].1.starts_with("task file `/work/bad.yaml` is not valid YAML:"), "{rows:?}");
     assert_eq!(rows[0].2.as_deref(), Some("Fix the YAML syntax of `/work/bad.yaml`."));
+}
+
+/// The real run of [`a_task_file_yaml_error_names_the_file_and_the_parse_stage`]
+/// stops on the same parse failure.
+#[test]
+fn a_real_run_stops_at_the_task_file_yaml_error() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./bad.yaml\n---\n";
+    let fixture = sequence_fixture("seq-site-yaml-real", &[("seq.md", seq), ("bad.yaml", "kind: task\nprompt: [unclosed\n")]);
+    let real = run(&fixture, &["sequence", "seq.md"]);
     assert!(prose(&real.stderr).contains("is not valid YAML"), "{}", real.stderr);
 }
 
@@ -1155,31 +1171,47 @@ fn an_unknown_task_field_near_nothing_lists_the_fields() {
     assert!(parser_row.2.as_deref().is_some_and(|hint| hint.starts_with("Remove `zzzzzz`, or use one of")), "{parser_row:?}");
 }
 
-/// `agent: []` is reported once, by the provider selection row, and not
-/// again as a schema row. Control: a second schema problem in the same file
-/// keeps its schema row.
-#[test]
-fn an_empty_agent_list_is_reported_once() {
-    let seq = "---\nagent: goose\nsequence:\n  - name: one\n    prompt: ./task.md\n---\n";
-    let fixture = sequence_fixture("seq-agent-empty", &[("seq.md", seq), ("task.md", "---\nagent: []\n---\nTask body\n")]);
-    for args in [&["sequence", "seq.md", "--dry-run"][..], &["sequence", "seq.md"][..]] {
-        let run = run(&fixture, args);
-        let stderr = prose(&run.stderr);
-        assert!(stderr.contains("an `agent` list needs at least one entry"), "{args:?}: {}", run.stderr);
-        assert!(!stderr.contains("schema validation failed"), "{args:?}: one row per problem:\n{}", run.stderr);
-        assert!(stderr.contains("found 1 error"), "{args:?}: {}", run.stderr);
-    }
+/// `agent: []` in a prompt document: one row, the provider selection's.
+const EMPTY_AGENT_SEQ: &str = "---\nagent: goose\nsequence:\n  - name: one\n    prompt: ./task.md\n---\n";
 
+/// `args` over a document whose `agent: []` is reported once, by the provider
+/// selection row, and not again as a schema row.
+fn assert_empty_agent_reported_once(name: &str, args: &[&str]) {
+    let fixture = sequence_fixture(name, &[("seq.md", EMPTY_AGENT_SEQ), ("task.md", "---\nagent: []\n---\nTask body\n")]);
+    let run = run(&fixture, args);
+    let stderr = prose(&run.stderr);
+    assert!(stderr.contains("an `agent` list needs at least one entry"), "{args:?}: {}", run.stderr);
+    assert!(!stderr.contains("schema validation failed"), "{args:?}: one row per problem:\n{}", run.stderr);
+    assert!(stderr.contains("found 1 error"), "{args:?}: {}", run.stderr);
+}
+
+#[test]
+fn an_empty_agent_list_is_reported_once_in_a_dry_run() {
+    assert_empty_agent_reported_once("seq-agent-empty-dry", &["sequence", "seq.md", "--dry-run"]);
+}
+
+#[test]
+fn an_empty_agent_list_is_reported_once_when_a_real_run_stops() {
+    assert_empty_agent_reported_once("seq-agent-empty-real", &["sequence", "seq.md"]);
+}
+
+/// The same value supplied by a task's `with:` is one row too.
+#[test]
+fn an_empty_agent_list_from_with_is_reported_once() {
     let inline = sequence_fixture(
         "seq-agent-empty-with",
         &[("seq.md", "---\nagent: goose\nsequence:\n  - name: one\n    prompt: ./p.md\n    with: { agent: [] }\n---\n"), ("p.md", "hi\n")],
     );
     let inline_run = run(&inline, &["sequence", "seq.md", "--dry-run"]);
     assert!(prose(&inline_run.stderr).contains("found 1 error"), "{}", inline_run.stderr);
+}
 
+/// Control: a second schema problem in the same file keeps its schema row.
+#[test]
+fn another_schema_problem_beside_an_empty_agent_list_keeps_its_row() {
     let control = sequence_fixture(
         "seq-agent-empty-control",
-        &[("seq.md", seq), ("task.md", "---\nagent: []\nyolo: maybe\n---\nTask body\n")],
+        &[("seq.md", EMPTY_AGENT_SEQ), ("task.md", "---\nagent: []\nyolo: maybe\n---\nTask body\n")],
     );
     let control_run = run(&control, &["sequence", "seq.md", "--dry-run"]);
     let stderr = prose(&control_run.stderr);

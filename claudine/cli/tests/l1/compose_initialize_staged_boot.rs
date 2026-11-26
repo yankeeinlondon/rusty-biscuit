@@ -364,7 +364,7 @@ fn a_dry_run_never_runs_initialize_and_still_reports_the_missing_include() {
         staged.run(&["compose", doc.to_str().unwrap(), "--dry-run", "--claude"]);
 
     assert!(!success, "{output}");
-    assert!(output.contains("File not found"), "{output}");
+    assert!(output.contains("file not found in `::file`"), "{output}");
     assert!(staged.events().is_empty(), "dry run fires no lifecycle event:\n{output}");
     assert!(!staged.generated_exists(), "dry run must not create the file:\n{output}");
     assert!(!staged.prompt.exists(), "{output}");
