@@ -282,7 +282,10 @@ fn template_shape<'a>(
     };
     // A `$schema` default would land on every item as a container's check.
     if let Some(key) = template.keys().find(|key| reserved::is_reserved_state_key(key) || *key == CHECK_KEY) {
-        return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
+        return Err(CompositionError::SequenceReservedTemplateKey {
+            key: key.clone(),
+            site: Box::new(super::super::error::SequenceSite::at(source_path, &format!("{property}.{key}"))),
+        });
     }
     Ok(template)
 }
@@ -341,8 +344,11 @@ impl PreparedSequenceSchema {
         let mut frontmatter = darkmatter::markdown::Frontmatter::new();
         // `$schema` is a key every frontmatter accepts; a refusal here would be
         // a Darkmatter invariant change, kept typed as the declaring file's.
-        frontmatter.insert("$schema", declaration.clone()).map_err(|error| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_forward_slash_string(source_path),
+        frontmatter.insert("$schema", declaration.clone()).map_err(|error| CompositionError::SequenceSourceParse {
+            field: None,
+            path: source_path.to_path_buf(),
+            stage: super::super::error::SourceParseStage::Frontmatter,
+            site: Box::new(super::super::error::SequenceSite::at(source_path, property)),
             source: SequenceLoadCause::Frontmatter(Box::new(error)),
         })?;
         let view = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");

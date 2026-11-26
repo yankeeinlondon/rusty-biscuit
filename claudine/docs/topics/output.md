@@ -90,13 +90,20 @@ wc -c answer.txt  # 0 answer.txt
 A script can therefore treat a nonempty stdout together with exit status `0` as
 an answer, and anything else as a run that produced none.
 
+A `sequence` that stops at preflight, before its first task, puts a report
+on stderr in place of the single error block: every error and warning its
+preflight could prove, grouped by task, then a closing
+`The run stopped at: …` line naming the error the run returned (left out
+when a row already says it). See
+[`claudine sequence` → Failures and exit codes](../cli/sequence.md#failures-and-exit-codes).
+
 ## Exit status
 
 | Status | Meaning |
 |---|---|
 | 0 | the run succeeded |
 | 1 | the run failed, including a failure before the provider started, and a provider that exited 0 without completing its work |
-| 2 | a usage error: Claudine refused the command line and ran nothing |
+| 2 | a usage error: Claudine refused the command line and ran nothing; or a `--dry-run` that found an error or warning (see [A dry run's report](#a-dry-runs-report)) |
 | 130 | interrupted with Ctrl-C |
 
 Exit 0 from the provider alone is not success; see

@@ -7,6 +7,7 @@ blast_radius:
   - claudine/cli/src/commands/wrap/sequence/
   - claudine/cli/src/commands/wrap/selection_ui.rs
   - claudine/lib/src/composition/sequence/
+  - claudine/cli/src/commands/document_check/
 ---
 # Claudine's `sequence` command
 
@@ -374,6 +375,43 @@ provider review screen. A looping root sequence that ends through `break`
 exits with that `break`'s `code` (default `0`); see
 [Looping — Breaking out of a loop](../topics/flow-control/looping.md#breaking-out-of-a-loop). A preflight failure starts no step.
 
+A run that stops at preflight (a missing `prompt:` or `sequence:` file, an
+invalid group, a task without a usable provider, a missing input) prints the
+same report a [dry run](#dry-run) prints, with every error and warning it can
+prove at that point, instead of a single error block. The last line names
+the error the run returned, unless a row already says it:
+
+```text
+Sequence preflight found 2 errors and 0 warnings; no task ran
+
+task one (sequence[0])
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in needs.md
+      hint: add `topic` to the task's `with:`, or pass `topic=<value>`
+            after the file
+
+task two (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:7:13
+      hint: create missing.md before a real run, or correct the reference
+
+The run stopped at: <the error the run returned>
+```
+
+The exit status is still `1`, and the root's `blocked`, `failure`, and
+`finalize` handlers see that returned error in `err.*`, not the report's
+first row. Here the run met task two's missing file while loading the task
+graph, before it collected inputs, so `err.*` describes the missing file.
+See [Pre-Flight Checks — When preflight stops a sequence](../topics/pre-flight-checks.md#when-preflight-stops-a-sequence).
+
+When preflight passes, warnings that no earlier stage showed (a step's own
+`agent:` or `model:`, a misspelled step key) are printed once, under
+`Sequence preflight found 0 errors and 1 warning; the sequence runs`, before
+the first task starts. `--silent` leaves them out.
+
 ## Interactive sessions
 
 A sequence document may not set `interactive: true`. A run is serial
@@ -400,11 +438,85 @@ Each step's provider session gets these variables:
 `--dry-run` checks the sequence and previews what composes, without running
 anything: no provider, shell command, lifecycle event, prompt for input, or
 write. It reports every problem in one pass instead of stopping at the
-first:
+first.
+
+A sequence is checked in two stages. The dry run is the first: it sees
+everything it can without an effect, so you can fix the document before
+anything runs. The real run is the second: its preflight runs the same
+checks with the values it has collected, and either stops before the first
+task, with the same report, or warns once and runs.
+
+```mermaid
+flowchart TD
+    A["claudine sequence plan.yaml --dry-run"] --> B[Passive check of every task<br/>report on stderr, previews on stdout]
+    B --> C{any error or warning?}
+    C -- yes --> D[exit 2: fix the document]
+    D --> A
+    C -- no --> E[exit 0]
+    E --> F["claudine sequence plan.yaml"]
+    F --> G[Preflight: the same checks,<br/>with collected inputs and providers]
+    G -- a problem stops the run --> H["report, then 'The run stopped at: …'<br/>no task runs, exit 1"]
+    G -- passes --> I[new warnings, once] --> J[task 1, task 2, …]
+```
+
+Given this sequence, where `_find.md` exists and names no `agent`:
+
+```yaml
+# renderers/_fleet.yaml
+kind: sequence
+sequence:
+    - name: find
+      description: Find the Mermaid renderers and provide basic research
+      agent: opencode
+      model: gemini/neon
+      prompt: ./_find.md
+      with:
+          output: "./overview.md"
+    - name: metadata
+      description: extract metadata
+```
+
+a dry run, with stderr redirected, reports every problem of both tasks:
 
 ```text
 Dry run of renderers/_fleet.yaml (no commands run)
 
+task find (sequence[0])
+  ⚠ `agent: opencode` is step data (read as `seq.agent`), not the task's
+    provider
+      at renderers/_fleet.yaml:5:7
+      hint: to choose the provider, move it into the task's inputs:
+            `with: { agent: opencode }`
+  ⚠ `model: gemini/neon` is step data (read as `seq.model`), not the task's
+    model
+      at renderers/_fleet.yaml:6:7
+      hint: to choose the model, move it into the task's inputs: `with: {
+            model: gemini/neon }`
+  ✗ no provider for this task; a non-interactive run fails here
+      1. --provider flag             not given
+      2. agent= setter               not given
+      3. with.agent                  not set (see `agent:` above)
+      4. _find.md frontmatter agent  not set
+      5. _fleet.yaml agent           not set
+      hint: add `with: { agent: opencode }`, or run with `--provider
+            opencode`
+  ℹ not checked: model requirement (no provider)
+
+task metadata (sequence[1])
+  ✗ this task has no executable, so it would compose the body of
+    renderers/_fleet.yaml, and a YAML file has no body
+      at renderers/_fleet.yaml:10:7
+      hint: add an executable such as `prompt: ./metadata.md`
+  ℹ not checked: provider, inputs (no executable)
+
+Dry run found 2 errors and 2 warnings; 3 checks not run. Previewed 1 of 2 tasks.
+```
+
+The exit status is `2`, and `find`'s composed prompt follows on stdout. Add
+`prompt: ./_frontmatter.md` to `metadata` before that file exists, and the
+`find` rows are unchanged while `metadata` reports the missing file:
+
+```text
 task metadata (sequence[1])
   ✗ the prompt file does not exist
       prompt: ./_frontmatter.md
@@ -413,9 +525,12 @@ task metadata (sequence[1])
       hint: create renderers/_frontmatter.md before a real run, or
             correct the reference
   ℹ not checked: provider, inputs (the prompt file could not be read)
-
-Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.
 ```
+
+Each row has a severity (`✗` error, `⚠` warning, `ℹ` info), a message that
+names what failed and why, the place it was written when that is known, and
+a hint with the next step. A check that could not run is an `ℹ not checked`
+row that says what blocked it, instead of silence.
 
 What the check does:
 
@@ -471,8 +586,9 @@ What the check does:
   any of them.
 - Each missing required input is one `composition.missing_properties` finding
   under its task: a warning when an interactive run could ask for every
-  missing value (`prompt_for_missing` is on and both stdin and stderr are
-  terminals), otherwise an error, since a run that cannot ask fails there.
+  missing value (`prompt_for_missing` is on, both stdin and stderr are
+  terminals, and every missing value has a type the input prompt can
+  collect), otherwise an error, since a run that cannot ask fails there.
   A value that comes from a skipped command still counts as given. A task
   whose sequence is missing an input waits for it: its inputs and preview
   are reported as not checked instead of naming the same input again.
@@ -524,8 +640,22 @@ empty:
 }
 ```
 
-The exit status is `2` when any finding is an error or a warning, else `0`.
-`--json` without `--dry-run` is a usage error.
+`outcome` is `failure` when any finding is an error or a warning, else
+`success`; `file` is `null` when the root document could not be resolved. Each entry of
+`diagnostics` is the record Darkmatter's `md --output json` uses (see
+[Darkmatter's data contracts](darkmatter/docs/cli/data-contracts.md)), so a
+script tells findings apart by `code`, never by message text. Every failure
+the check meets, even a root document that cannot be read or an invalid
+configuration, is a finding in this one report.
+
+| Situation | Exit | Output |
+|---|---|---|
+| No finding, or only `info` findings | `0` | report and previews (or one JSON report) |
+| Any `error` or `warning` finding | `2` | the full report and previews (or one JSON report) |
+| A refused command line (`--json` without `--dry-run`, `--dry-run-shell`, a provider switch before the file) | `2` | the usage message on stderr; no report and no JSON |
+
+A dry run never exits `1`: tell a usage error apart from a report by
+whether a report (or JSON) was printed.
 
 `--dry-run-shell` was removed. It is a usage error, with or without
 `--dry-run`:

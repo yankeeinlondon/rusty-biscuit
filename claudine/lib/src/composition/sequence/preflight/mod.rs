@@ -43,7 +43,7 @@ use darkmatter::markdown::compose::{ComposeContext, EffectiveState, SharedFrontm
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_in_literals};
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
@@ -374,6 +374,7 @@ fn late_value_failure(site: &PreparedShellSite, error: HoleError) -> Composition
     CompositionError::SequenceShellLateValue {
         command: site.authored.clone(),
         task: site.label.clone(),
+        site: Box::new(SequenceSite { property: Some(site.property.clone()), task: Some(site.label.clone()), ..SequenceSite::unlocated() }),
         message,
         source: Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(
             shell_error,
@@ -630,6 +631,7 @@ pub fn reject_non_sequence_kind(source: &ResolvedCompositionSource) -> Result<()
     Err(CompositionError::SequenceUnsupportedConstruct {
         construct: format!("running a `kind: {kind}` document directly"),
         detail: detail.to_string(),
+        site: Box::new(SequenceSite::at(&source.resolved_path, "kind")),
     })
 }
 
@@ -1002,16 +1004,15 @@ pub(crate) fn prepare_nested_sequence(
     let empty = Map::new();
     let (spec, raw_task) = if whole_document {
         let name = task.origin_path.file_name().map(|name| name.to_string_lossy().into_owned()).ok_or_else(|| {
-            CompositionError::SequenceInvalid("a whole sequence document has no file name".into())
+            CompositionError::sequence_invalid("a whole sequence document has no file name", task.error_site())
         })?;
         let reference = super::grammar::SequenceReference { reference: format!("./{name}"), offset: None, operator: None };
         (super::grammar::SequenceSourceSpec::Reference(reference), &empty)
     } else {
         let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
-            .ok_or_else(|| CompositionError::SequenceInvalid("nested sequence disappeared before preparation".into()))?;
-        let value = raw_task.get("sequence").ok_or_else(|| CompositionError::SequenceInvalid(
-            "nested `sequence:` executable changed before preparation".into(),
-        ))?;
+            .ok_or_else(|| CompositionError::sequence_invalid("nested sequence disappeared before preparation", task.error_site()))?;
+        let value = raw_task.get("sequence").ok_or_else(|| CompositionError::sequence_invalid(
+            "nested `sequence:` executable changed before preparation", task.error_site()))?;
         (super::grammar::classify_source(value)?, raw_task)
     };
     let mut loader = Loader::new(&nested.source, context, resolution.clone());
@@ -1051,10 +1052,9 @@ pub(crate) fn prepare_nested_group(
 ) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
     let nested = sources.load(&task.origin_path)?;
     let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
-        .ok_or_else(|| CompositionError::SequenceInvalid("group disappeared before preparation".into()))?;
-    let value = raw_task.get("group").ok_or_else(|| CompositionError::SequenceInvalid(
-        "group executable changed before preparation".into(),
-    ))?;
+        .ok_or_else(|| CompositionError::sequence_invalid("group disappeared before preparation", task.error_site()))?;
+    let value = raw_task.get("group").ok_or_else(|| CompositionError::sequence_invalid(
+        "group executable changed before preparation", task.error_site()))?;
     let mut loader = Loader::new(&nested.source, context, resolution.clone());
     loader.with_reread_invocation(invocation, &task.origin_path);
     loader.graph.nested_sources = sources.clone();
@@ -1507,8 +1507,33 @@ impl<'a> Loader<'a> {
     /// `property` is the source-rooted semantic path of the task and `authored`
     /// is its JSON Pointer in the *same* document — the two travel together and
     /// are both reset when the walk crosses into another file.
+    ///
+    /// ## Errors
+    ///
+    /// Every failure of the task's expansion. One raised without a site
+    /// (an unresolved reference, a cycle, a catalog miss) is located at the
+    /// task's executable field ([`CompositionError::locate_sequence`]); a
+    /// failure inside a referenced file keeps that file's site.
     #[allow(clippy::too_many_arguments)]
     fn load_task(
+        &mut self,
+        field: ExecutableField,
+        value: &Value,
+        options: &Map<String, Value>,
+        origin: &Path,
+        label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
+        state: &EffectiveState,
+        group_defaults: Option<&GroupDefaults>,
+        placement: Placement,
+    ) -> Result<PreflightTask, CompositionError> {
+        self.load_task_unlocated(field, value, options, origin, label, property, authored, state, group_defaults, placement)
+            .map_err(|error| error.locate_sequence(origin, &property_child(property, field.key()), Some(label)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_task_unlocated(
         &mut self,
         field: ExecutableField,
         value: &Value,
@@ -1536,7 +1561,7 @@ impl<'a> Loader<'a> {
         let mut provider = None;
         let action = match field {
             ExecutableField::Prompt => {
-                let reference = expect_reference(value, "prompt", label)?;
+                let reference = expect_reference(value, field, label, origin, &property_child(property, field.key()))?;
                 let document = self.load_prompt(&reference, origin)?;
                 let with = option_map(options, "with");
                 let prepared = self.record_prompt_reference(&document, &with, origin, state, placement, guard.as_ref());
@@ -1585,7 +1610,7 @@ impl<'a> Loader<'a> {
                 )?))
             }
             ExecutableField::Task => {
-                let reference = expect_reference(value, "task", label)?;
+                let reference = expect_reference(value, field, label, origin, &property_child(property, field.key()))?;
                 self.guard_override = (!when.is_empty()).then(|| (when.clone(), when_property.clone()));
                 let mut task = self.load_external_task(
                     &reference,
@@ -1738,7 +1763,7 @@ impl<'a> Loader<'a> {
             SequenceSourceSpec::Reference(reference) => {
                 let path = self.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
                 self.enter(&path)?;
-                let (document, order) = self.load_data_document(&path)?;
+                let (document, order) = self.load_data_document(&path, ExecutableField::Sequence)?;
                 let whole = reference.offset.is_none() && reference.operator.is_none();
                 let formal_root = document.value.as_object().filter(|root| whole && root.contains_key("sequence"));
                 let plan = match (refresh, formal_root) {
@@ -1792,8 +1817,9 @@ impl<'a> Loader<'a> {
                 } else if document.value.is_array() { order } else { order.child("sequence") };
                 (plan, path, child_authored, events, true, frontmatter, None)
             }
-            _ => return Err(CompositionError::SequenceInvalid(
-                "a nested `sequence:` must be a list or file reference".into(),
+            _ => return Err(CompositionError::sequence_invalid(
+                "a nested `sequence:` must be a list or file reference",
+                SequenceSite::at(origin, &property_child(property, "sequence")).in_task(label),
             )),
         };
         providers::collect_written_keys(&Value::Object(events.clone()), &mut self.written_keys);
@@ -1929,7 +1955,7 @@ impl<'a> Loader<'a> {
         placement: Placement,
     ) -> Result<PreflightTask, CompositionError> {
         let path = self.resolve_reference(reference, origin, ExecutableField::Task)?;
-        let (document, authored) = self.load_data_document(&path)?;
+        let (document, authored) = self.load_data_document(&path, ExecutableField::Task)?;
         let root = expect_object(&document.value, "task file", &path)?;
 
         expect_kind(root, "task", &path)?;
@@ -2006,7 +2032,7 @@ impl<'a> Loader<'a> {
             Value::String(raw) => {
                 let (name, reference) = split_catalog_reference(raw);
                 let path = self.resolve_reference(&reference, origin, ExecutableField::Group)?;
-                let (document, document_authored) = self.load_data_document(&path)?;
+                let (document, document_authored) = self.load_data_document(&path, ExecutableField::Group)?;
                 let root = expect_object(&document.value, "group file", &path)?;
 
                 // A catalog selects one named entry, so the group's authored
@@ -2048,6 +2074,7 @@ impl<'a> Loader<'a> {
                     "`group:` must be an inline group object or a file reference, got {}",
                     json_type_name(other)
                 ),
+                site: Box::new(SequenceSite::at(origin, property).in_task(label)),
             }),
         }
     }
@@ -2076,6 +2103,7 @@ impl<'a> Loader<'a> {
             group: name.clone(),
             origin: origin.to_path_buf(),
             problem,
+            site: Box::new(SequenceSite::at(origin, property).in_task(label)),
         };
 
         // A group file or catalog entry reaches the group grammar only here;
@@ -2281,6 +2309,7 @@ impl<'a> Loader<'a> {
                     return Err(CompositionError::SequenceWriteBackCollision {
                         group: group.name.clone(), target: path,
                         first: first.clone(), second: owner.clone(),
+                        site: Box::new(SequenceSite::file(&group.origin_path)),
                     });
                 }
                 claimed.insert(path, owner.clone());
@@ -2324,6 +2353,7 @@ impl<'a> Loader<'a> {
             return Err(CompositionError::SequenceNestedSequence {
                 path: path.clone(),
                 referenced_from: origin.to_path_buf(),
+                site: Box::new(SequenceSite::unlocated()),
             });
         }
         let inline_compose = matches!(frontmatter.as_map().get("prompt"), Some(Value::String(_)));
@@ -2361,6 +2391,7 @@ impl<'a> Loader<'a> {
                             "every `shell` entry must be a string, got {}",
                             json_type_name(other)
                         ),
+                        site: Box::new(scope.error_site()),
                     }),
                 })
                 .collect::<Result<_, _>>()?,
@@ -2372,6 +2403,7 @@ impl<'a> Loader<'a> {
                         "`shell` must be a string or a list of strings, got {}",
                         json_type_name(other)
                     ),
+                    site: Box::new(scope.error_site()),
                 });
             }
         };
@@ -2508,6 +2540,7 @@ impl<'a> Loader<'a> {
                                   command"
                             .to_string(),
                         source: None,
+                        site: Box::new(scope.error_site()),
                     },
                 )?;
                 (command.command.to_string(), command.span, command.conditional)
@@ -2713,6 +2746,7 @@ impl<'a> Loader<'a> {
                         root,
                         task: label.to_string(),
                         source: Some(Box::new(diagnostic.error)),
+                        site: Box::new(scope.error_site()),
                     },
                     None => CompositionError::SequenceShellResolution {
                         command: raw.to_string(),
@@ -2722,6 +2756,7 @@ impl<'a> Loader<'a> {
                             raw,
                             diagnostic.error,
                         ))),
+                        site: Box::new(scope.error_site()),
                     },
                 });
             }
@@ -2731,6 +2766,7 @@ impl<'a> Loader<'a> {
                 command: raw.to_string(),
                 root,
                 task: label.to_string(),
+                site: Box::new(scope.error_site()),
             });
         }
         Ok(())
@@ -2855,6 +2891,7 @@ impl<'a> Loader<'a> {
             task: scope.label.to_string(),
             message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+            site: Box::new(scope.error_site()),
         })?;
         for command in value.commands() {
             self.graph.push_shell_command(DiscoveredCommand {
@@ -2901,6 +2938,7 @@ impl<'a> Loader<'a> {
             task: scope.label.to_string(),
             message,
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+            site: Box::new(scope.error_site()),
         }
     }
 
@@ -3164,7 +3202,7 @@ impl<'a> Loader<'a> {
             .as_ref()
             .map(SourceContext::file_resolution_context)
             .unwrap_or(&self.file_resolution_context);
-        let resolved = source_resolution::resolve_sequence_reference(reference, origin, file_resolution_context)
+        let resolved = source_resolution::resolve_sequence_reference(reference, field, origin, file_resolution_context)
             .map(|p| canonical(&p));
         if resolved.is_err() && self.checking() {
             self.note_unresolved_reference(reference, origin, field);
@@ -3305,9 +3343,13 @@ impl<'a> Loader<'a> {
     /// The returned cursor is rooted at that document, not at the referencing
     /// one: crossing a file boundary replaces both the order source and the
     /// pointer, exactly as it already resets the semantic `property` path.
+    ///
+    /// `field` is the executable that referenced `path`; a read or parse
+    /// failure names its construct.
     fn load_data_document(
         &mut self,
         path: &Path,
+        field: ExecutableField,
     ) -> Result<(Arc<ReferencedDocument>, AuthoredOrder), CompositionError> {
         self.capture_source(path);
         self.note_loaded_file(path);
@@ -3315,7 +3357,7 @@ impl<'a> Loader<'a> {
             return Ok((Arc::clone(document), AuthoredOrder::at_root(Arc::clone(&document.orders))));
         }
         let read = self.graph.authored_sources.get(path).and_then(Option::as_deref);
-        let document = self.graph.nested_sources.document(path, read)?;
+        let document = self.graph.nested_sources.document(path, read).map_err(|error| error.referenced_as(field))?;
         let present = crate::composition::lifecycle::bindings::retired_names_present(&self.caller_setters);
         if !document.checked_under(present) {
             crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&document.value));
@@ -3344,7 +3386,7 @@ impl<'a> Loader<'a> {
                 entry.as_ref().map_or_else(|| path.clone(), |entry| PathBuf::from(format!("{}#{entry}", path.display())))
             }).collect();
             chain.push(entry.map_or_else(|| path.to_path_buf(), |entry| PathBuf::from(format!("{}#{entry}", path.display()))));
-            return Err(CompositionError::SequenceReferenceCycle { chain });
+            return Err(CompositionError::SequenceReferenceCycle { chain, site: Box::new(SequenceSite::unlocated()) });
         }
         Ok(())
     }
@@ -3390,6 +3432,13 @@ struct SiteScope<'s> {
     /// task (its `shell:` command); `None` for its `setup:`/`teardown:` stacks
     /// and for a container's events.
     guard: Option<&'s TaskGuard>,
+}
+
+impl SiteScope<'_> {
+    /// The site of an error in this command: its field, in its task.
+    fn error_site(&self) -> SequenceSite {
+        SequenceSite::at(self.origin, &self.property).in_task(self.label)
+    }
 }
 
 /// A task's `when:` guard, parsed passively, as the values the sequence
@@ -3545,6 +3594,7 @@ fn select_catalog_group<'a>(
                     "a `kind: group-catalog` document must declare a `groups:` list, got {}",
                     other.map_or("nothing", json_type_name)
                 ),
+                site: Box::new(SequenceSite::at(path, "groups")),
             });
         }
     };
@@ -3562,6 +3612,7 @@ fn select_catalog_group<'a>(
     let lookup_failure = |problem: &str| CompositionError::SequenceGroupCatalogLookup {
         name: name.to_string(),
         path: path.to_path_buf(),
+        site: Box::new(SequenceSite::unlocated()),
         problem: problem.to_string(),
         available: groups
             .iter()
@@ -3581,7 +3632,15 @@ fn select_catalog_group<'a>(
 }
 
 /// Parse a task object into its single executable field, that field's value,
-/// and its validated option map.
+/// and its validated option map. `property` is the task's authored path in
+/// `origin` (empty for a `kind: task` file, whose root is the task).
+///
+/// ## Errors
+///
+/// The task grammar's errors, [`CompositionError::SequenceReferenceInvalid`]
+/// at the task for a missing or second executable, and
+/// [`CompositionError::SequenceUnknownTaskField`] at the key for one the
+/// executable's task does not accept, with the nearest field it does.
 fn parse_task_object(
     map: &Map<String, Value>,
     origin: &Path,
@@ -3591,6 +3650,7 @@ fn parse_task_object(
         context: "task".to_string(),
         path: origin.to_path_buf(),
         problem,
+        site: Box::new(SequenceSite::at(origin, property)),
     };
 
     super::grammar::validate_task_grammar(map, origin, property)?;
@@ -3622,10 +3682,15 @@ fn parse_task_object(
             continue;
         }
         if !reserved::is_task_option_key(key) {
-            return Err(invalid(format!(
-                "`{key}` is not a task field; expected one of {}",
-                reserved::TASK_OPTION_KEYS.join(", ")
-            )));
+            let allowed: Vec<String> = allowed.iter().map(|key| (*key).to_string()).collect();
+            let suggestion = darkmatter::catalog::suggest_strings(&allowed, key, 1).first().map(|key| (*key).to_string());
+            return Err(CompositionError::SequenceUnknownTaskField {
+                key: key.clone(),
+                executable: field,
+                allowed,
+                suggestion,
+                site: Box::new(SequenceSite::at(origin, &property_child(property, key))),
+            });
         }
         if !allowed.contains(&key.as_str()) {
             return Err(invalid(format!(
@@ -3650,6 +3715,7 @@ fn expect_kind(
         other => Err(CompositionError::SequenceReferenceInvalid {
             context: format!("`kind: {expected}` document"),
             path: path.to_path_buf(),
+            site: Box::new(SequenceSite::at(path, "kind")),
             problem: match other {
                 Some(Value::String(kind)) => format!("declares `kind: {kind}`"),
                 Some(other) => format!("`kind` must be a string, got {}", json_type_name(other)),
@@ -3670,19 +3736,34 @@ fn expect_object<'a>(
             context: context.to_string(),
             path: path.to_path_buf(),
             problem: format!("root must be an object, got {}", json_type_name(document)),
+            site: Box::new(SequenceSite::file(path)),
         })
 }
 
-fn expect_reference(value: &Value, key: &str, label: &str) -> Result<String, CompositionError> {
+/// `value` as the file reference `field` authors at `property` of
+/// `origin`, in the task labeled `label`.
+///
+/// ## Errors
+///
+/// [`CompositionError::SequenceReferenceInvalid`] at that property when the
+/// value is not a non-empty string.
+fn expect_reference(
+    value: &Value,
+    field: ExecutableField,
+    label: &str,
+    origin: &Path,
+    property: &str,
+) -> Result<String, CompositionError> {
     match value {
         Value::String(s) if !s.trim().is_empty() => Ok(s.trim().to_string()),
         other => Err(CompositionError::SequenceReferenceInvalid {
-            context: format!("`{key}:` in {label}"),
-            path: PathBuf::new(),
+            context: format!("`{}:` in {label}", field.key()),
+            path: origin.to_path_buf(),
             problem: format!(
                 "must be a non-empty file reference, got {}",
                 json_type_name(other)
             ),
+            site: Box::new(SequenceSite::at(origin, property).in_task(label)),
         }),
     }
 }

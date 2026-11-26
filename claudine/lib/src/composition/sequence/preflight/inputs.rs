@@ -152,6 +152,10 @@ impl SequenceInputInventory {
         (!failures.is_empty()).then(|| CompositionError::SequenceMissingProperties {
             failure_count: failures.len(),
             failures,
+            // The combined report belongs to the root, the first owner.
+            site: Box::new(self.owners.first().map_or_else(crate::composition::SequenceSite::unlocated, |root| {
+                crate::composition::SequenceSite::file(&root.path)
+            })),
         })
     }
 }
@@ -467,15 +471,27 @@ impl Discovery<'_> {
 
     /// Follow one executable. `options` is the task's map (its options, and
     /// for a list item its state too).
+    /// Walk one executable. A failure raised without a site is located at
+    /// the executable's field ([`CompositionError::locate_sequence`]), as the
+    /// graph walk locates it.
     fn walk_executable(
         &mut self, field: ExecutableField, value: &Value, options: &Map<String, Value>, origin: &Path,
         property: &str, scope: &Scope<'_>,
     ) -> Result<(), CompositionError> {
         let action_property = property_child(property, field.key());
+        self.walk_executable_unlocated(field, value, options, origin, property, &action_property, scope)
+            .map_err(|error| error.locate_sequence(origin, &action_property, None))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn walk_executable_unlocated(
+        &mut self, field: ExecutableField, value: &Value, options: &Map<String, Value>, origin: &Path,
+        property: &str, action_property: &str, scope: &Scope<'_>,
+    ) -> Result<(), CompositionError> {
         match field {
             ExecutableField::Prompt => {
-                let reference = expect_reference(value, "prompt", property)?;
-                if self.pending(&reference, scope, origin, &action_property) {
+                let reference = expect_reference(value, field, property, origin, action_property)?;
+                if self.pending(&reference, scope, origin, action_property) {
                     return Ok(());
                 }
                 let path = self.loader.load_prompt(&reference, origin)?;
@@ -497,27 +513,28 @@ impl Discovery<'_> {
                     // The container's own template, never its parent's,
                     // fills its rows, from the values its owner sees.
                     let inner = Scope { owner: scope.owner, template: declarations.template, values: Arc::clone(&scope.values) };
-                    self.walk_items(&items, origin, origin, &action_property, &inner)?;
+                    self.walk_items(&items, origin, origin, action_property, &inner)?;
                 }
                 SequenceSourceSpec::Reference(reference) => {
-                    if !self.pending(&reference.reference, scope, origin, &action_property) {
-                        self.walk_reference(&reference, origin, &action_property, scope.owner, InputOwnerRole::Nested)?;
+                    if !self.pending(&reference.reference, scope, origin, action_property) {
+                        self.walk_reference(&reference, origin, action_property, scope.owner, InputOwnerRole::Nested)?;
                     }
                 }
                 SequenceSourceSpec::Expression(_) | SequenceSourceSpec::Shell(_) => {
-                    return Err(CompositionError::SequenceInvalid(
-                        "a nested `sequence:` must be a list or file reference".into(),
+                    return Err(CompositionError::sequence_invalid(
+                        "a nested `sequence:` must be a list or file reference",
+                        crate::composition::SequenceSite::at(origin, action_property),
                     ));
                 }
             },
-            ExecutableField::Group => self.walk_group(value, origin, &action_property, scope)?,
+            ExecutableField::Group => self.walk_group(value, origin, action_property, scope)?,
             ExecutableField::Task => {
-                let reference = expect_reference(value, "task", property)?;
-                if self.pending(&reference, scope, origin, &action_property) {
+                let reference = expect_reference(value, field, property, origin, action_property)?;
+                if self.pending(&reference, scope, origin, action_property) {
                     return Ok(());
                 }
                 let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Task)?;
-                let (document, _) = self.loader.load_data_document(&path)?;
+                let (document, _) = self.loader.load_data_document(&path, ExecutableField::Task)?;
                 let root = expect_object(&document.value, "task file", &path)?;
                 expect_kind(root, "task", &path)?;
                 let (field, value, options) = parse_task_object(root, &path, "")?;
@@ -544,7 +561,7 @@ impl Discovery<'_> {
                 }
                 let (name, reference) = split_catalog_reference(raw);
                 let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Group)?;
-                let (document, _) = self.loader.load_data_document(&path)?;
+                let (document, _) = self.loader.load_data_document(&path, ExecutableField::Group)?;
                 let root = expect_object(&document.value, "group file", &path)?;
                 let (group, group_property) = match &name {
                     Some(name) => {
@@ -597,7 +614,7 @@ impl Discovery<'_> {
         &mut self, reference: &SequenceReference, path: &Path, origin: &Path, property: &str, owner: usize,
         role: InputOwnerRole,
     ) -> Result<(), CompositionError> {
-        let (document, _) = self.loader.load_data_document(path)?;
+        let (document, _) = self.loader.load_data_document(path, ExecutableField::Sequence)?;
         let whole = reference.offset.is_none() && reference.operator.is_none();
         if whole && let Some(root) = document.value.as_object() && root.contains_key("sequence") {
             grammar::validate_sequence_root(root, path)?;

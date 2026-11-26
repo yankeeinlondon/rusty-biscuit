@@ -34,6 +34,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             containers,
             problem,
+            ..
         } => {
             let hint_link = super::render_file_link(hint_path);
             let inside = if containers.is_empty() {

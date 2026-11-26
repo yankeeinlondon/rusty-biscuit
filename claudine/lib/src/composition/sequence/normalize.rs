@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::json_util::json_type_name;
 use super::model::{
     ExecutableField, SequencePlan, SequenceSource, SequenceStep, StepExecutable, StepState,
@@ -232,7 +232,7 @@ fn parse_item(
         Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property, descend),
         // `null` is a typed error under both contracts: leniency coerces a
         // value that *is* something into a name, it does not invent one.
-        Value::Null => Err(CompositionError::SequenceNullItem { index }),
+        Value::Null => Err(CompositionError::SequenceNullItem { index, site: Box::new(SequenceSite::at(origin, property)) }),
         Value::Number(_) | Value::Bool(_) if strictness == Strictness::Lenient => {
             let name = scalar_name(item);
             Ok(ParsedStep {
@@ -242,10 +242,10 @@ fn parse_item(
                 executable: None,
             })
         }
-        other => Err(CompositionError::SequenceInvalid(format!(
-            "step at index {index} must be a string or object, got {}",
-            json_type_name(other)
-        ))),
+        other => Err(CompositionError::sequence_invalid(
+            format!("step {} must be a string or object, got {}", index + 1, json_type_name(other)),
+            SequenceSite::at(origin, property),
+        )),
     }
 }
 
@@ -285,12 +285,15 @@ fn parse_object_step(
             return Err(CompositionError::SequenceStepNameWrongType {
                 index,
                 found: json_type_name(other).to_string(),
+                site: Box::new(SequenceSite::at(origin, &format!("{property}.name"))),
             });
         }
         // A nameless foreign object gets its one-based ordinal, which then
         // dasherizes into an id exactly as an authored name would.
         None if strictness == Strictness::Lenient => (index + 1).to_string(),
-        None => return Err(CompositionError::SequenceStepNameMissing { index }),
+        None => {
+            return Err(CompositionError::SequenceStepNameMissing { index, site: Box::new(SequenceSite::at(origin, property)) });
+        }
     };
 
     // Exactly-one executable field.
@@ -303,6 +306,7 @@ fn parse_object_step(
         return Err(CompositionError::SequenceExclusiveExecutable {
             index,
             fields: executable_keys.iter().map(|s| (*s).to_string()).collect(),
+            site: Box::new(SequenceSite::at(origin, property).in_task(name.clone())),
         });
     }
     let executable_field = executable_keys
@@ -322,6 +326,7 @@ fn parse_object_step(
             return Err(CompositionError::SequenceReservedStateKey {
                 index,
                 key: key.clone(),
+                site: Box::new(SequenceSite::at(origin, &format!("{property}.{key}")).in_task(name.clone())),
             });
         } else {
             extra.insert(key.clone(), value.clone());
@@ -337,6 +342,7 @@ fn parse_object_step(
                         index,
                         field: option_key.clone(),
                         executable: field.key().to_string(),
+                        site: Box::new(SequenceSite::at(origin, &format!("{property}.{option_key}")).in_task(name.clone())),
                     });
                 }
             }

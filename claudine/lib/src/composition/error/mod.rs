@@ -33,6 +33,8 @@ use thiserror::Error;
 
 mod lifecycle_authoring;
 mod lifecycle_preflight;
+mod site;
+pub use site::SequenceSite;
 #[allow(missing_docs)]
 mod render;
 use render::pointer_to_dotted;
@@ -333,6 +335,8 @@ pub enum CompositionError {
         /// Why no provider can be selected. Boxed: the classified state it
         /// may carry would otherwise widen every `CompositionError`.
         problem: Box<SequenceTaskProviderProblem>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// The `agent` frontmatter property is not a valid type.
@@ -1789,82 +1793,182 @@ pub enum CompositionError {
     },
 
     // -- Sequence errors -------------------------------------------------------
-    /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
-    #[error("invalid sequence definition: {0}")]
-    SequenceInvalid(String),
+    /// A sequence definition is not well formed: the `sequence` value's type,
+    /// a task's `sequence` value, or a list the walk could not read.
+    #[error("invalid sequence definition: {message}")]
+    SequenceInvalid {
+        /// What is wrong, naming the authored key.
+        message: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// The sequence list is empty.
     #[error("sequence list is empty; at least one step is required")]
-    SequenceEmpty,
+    SequenceEmpty {
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
-    /// The external YAML file could not be loaded.
-    #[error("failed to load external sequence file: {context}: {source}")]
-    SequenceExternalLoad {
-        /// Display context: the raw reference (formatted as `` `raw` ``) for the
-        /// reference-resolution sites, or the resolved YAML path for the load
-        /// sites.
-        context: String,
-        /// The typed lower-layer cause.
+    /// A reference a sequence construct authors (`prompt:`, `task:`, `group:`,
+    /// `sequence:`) did not resolve to a file.
+    #[error("{} `{reference}` could not be resolved: {source}", field.noun())]
+    SequenceReferenceResolution {
+        /// The executable field that authored the reference; its noun names
+        /// the construct.
+        field: super::sequence::model::ExecutableField,
+        /// The reference as authored.
+        reference: String,
+        /// The resolver's probe record, when the reference parsed. Boxed: it
+        /// holds every candidate the resolver tried.
+        resolution: Option<Box<ResolutionDetail>>,
+        /// The referencing construct.
+        site: Box<SequenceSite>,
+        /// Why it did not resolve: [`SequenceLoadCause::Reference`],
+        /// [`SequenceLoadCause::NotFound`], or [`SequenceLoadCause::HomeDir`].
         #[source]
         source: SequenceLoadCause,
     },
 
-    /// The external YAML file has an unexpected root shape.
-    #[error("external sequence file has wrong structure: {0}")]
-    SequenceExternalWrongType(String),
+    /// A file a sequence construct references resolved but could not be read.
+    #[error("could not read {} `{}`: {source}", source_noun(*field), biscuit_file::to_forward_slash_string(path))]
+    SequenceSourceRead {
+        /// The executable field that referenced the file, once the caller
+        /// that knows it says so.
+        field: Option<super::sequence::model::ExecutableField>,
+        /// The file that could not be read.
+        path: PathBuf,
+        /// The referencing construct, or the file itself.
+        site: Box<SequenceSite>,
+        /// The read failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A file a sequence construct references was read but could not be
+    /// parsed; [`SourceParseStage`] says which operation failed.
+    #[error("{} `{}` {}: {source}", source_noun(*field), biscuit_file::to_forward_slash_string(path), stage.phrase())]
+    SequenceSourceParse {
+        /// The executable field that referenced the file, once the caller
+        /// that knows it says so.
+        field: Option<super::sequence::model::ExecutableField>,
+        /// The file that could not be parsed.
+        path: PathBuf,
+        /// The operation that failed.
+        stage: SourceParseStage,
+        /// The referencing construct, or the file itself.
+        site: Box<SequenceSite>,
+        /// The typed parse failure.
+        #[source]
+        source: SequenceLoadCause,
+    },
+
+    /// A referenced sequence file has an unexpected root shape.
+    #[error("`{}` has the wrong structure: {problem}", biscuit_file::to_forward_slash_string(path))]
+    SequenceExternalWrongType {
+        /// The referenced file.
+        path: PathBuf,
+        /// What shape it has and which it needs.
+        problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// An object step is missing the required `name` property.
-    #[error("sequence step at index {index} is missing required `name` property")]
-    SequenceStepNameMissing { index: usize },
+    #[error("step {} is missing its required `name` property", index + 1)]
+    SequenceStepNameMissing {
+        /// Zero-based step index; prose shows it one-based.
+        index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// The `name` property of an object step is not a string.
-    #[error("sequence step at index {index} has `name` of type {found}, expected string")]
-    SequenceStepNameWrongType { index: usize, found: String },
+    #[error("step {} has a `name` of type {found}; expected a string", index + 1)]
+    SequenceStepNameWrongType {
+        /// Zero-based step index; prose shows it one-based.
+        index: usize,
+        /// The JSON type found.
+        found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// A template key collides with a reserved sequence overlay key.
-    #[error("sequence template key `{0}` collides with reserved sequence key")]
-    SequenceReservedTemplateKey(String),
+    #[error("sequence template key `{key}` collides with reserved sequence key")]
+    SequenceReservedTemplateKey {
+        /// The reserved key.
+        key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// A step declared more than one executable field.
     ///
     /// A step runs the document body (no executable) or exactly one of
-    /// `prompt`/`shell`/`side_effect`/`group`/`task` — never several.
+    /// [`EXECUTABLE_KEYS`](super::sequence::reserved::EXECUTABLE_KEYS) —
+    /// never several.
     #[error(
-        "sequence step at index {index} declares multiple executable fields ({}); \
-         a step may declare at most one of prompt/shell/side_effect/group/task",
-        fields.join(", ")
+        "step {} declares more than one executable field ({}); a step declares at most one of {}",
+        index + 1,
+        fields.join(", "),
+        super::sequence::reserved::EXECUTABLE_KEYS.join(", ")
     )]
     SequenceExclusiveExecutable {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The executable field names found on the step.
         fields: Vec<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An authored step state key collides with a generated or root reserved key.
     #[error(
-        "sequence step at index {index} uses reserved key `{key}` as state; \
-         it is generated by Claudine and cannot be authored"
+        "step {} uses reserved key `{key}` as state; it is generated by Claudine and cannot be authored",
+        index + 1
     )]
     SequenceReservedStateKey {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The offending reserved key.
         key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task option is meaningless for the step's chosen executable.
-    #[error(
-        "sequence step at index {index} sets `{field}`, which is not valid for a \
-         `{executable}` task"
-    )]
+    #[error("step {} sets `{field}`, which is not valid for a `{executable}` task", index + 1)]
     SequenceInvalidTaskField {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The offending task-option field.
         field: String,
         /// The executable the step declared.
         executable: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
+
+    /// A `kind: task` file or group leg names a key that is no field of its
+    /// executable's task.
+    #[error(
+        "`{key}` is not a field of a `{}` task; expected one of {}",
+        executable.key(),
+        allowed.join(", ")
+    )]
+    SequenceUnknownTaskField {
+        /// The key as authored.
+        key: String,
+        /// The task's executable.
+        executable: super::sequence::model::ExecutableField,
+        /// The fields that executable's task accepts.
+        allowed: Vec<String>,
+        /// The closest allowed field, when one is near
+        /// ([`darkmatter::catalog::suggest_strings`]).
+        suggestion: Option<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// The `<file-ref> [-> offset] [::op(args)]` suffix could not be parsed.
@@ -1874,11 +1978,18 @@ pub enum CompositionError {
         authored: String,
         /// What specifically was wrong with it.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator name is not one of `map`, `name`, or `template`.
-    #[error("unknown sequence source operator `{0}`; expected `map`, `name`, or `template`")]
-    SequenceUnknownOperator(String),
+    #[error("unknown sequence source operator `{operator}`; expected `map`, `name`, or `template`")]
+    SequenceUnknownOperator {
+        /// The operator as authored.
+        operator: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// An operator was given the wrong number of arguments.
     #[error("sequence source operator `{operator}` takes {expected} argument(s), got {found}")]
@@ -1889,6 +2000,8 @@ pub enum CompositionError {
         expected: usize,
         /// How many were supplied.
         found: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An offset path segment does not exist in the source document.
@@ -1903,6 +2016,8 @@ pub enum CompositionError {
         failed_at: String,
         /// The JSON type of the value the failing segment was looked up on.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An offset path resolved to something that is not a list.
@@ -1912,6 +2027,8 @@ pub enum CompositionError {
         path: String,
         /// The JSON type actually found.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `->` offset was used against a line-delimited file.
@@ -1927,6 +2044,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// The rejected format's display name (`JSONL`/`NDJSON`).
         format: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator was applied to an item that is not an object.
@@ -1940,6 +2059,8 @@ pub enum CompositionError {
         index: usize,
         /// The JSON type actually found.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator's source field is missing from an item.
@@ -1951,6 +2072,8 @@ pub enum CompositionError {
         field: String,
         /// Zero-based item index.
         index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `template(expr)` operator produced an empty or null name.
@@ -1963,6 +2086,8 @@ pub enum CompositionError {
         index: usize,
         /// The template expression source.
         expression: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A dynamic `{{ … }}` or `template(...)` expression failed.
@@ -1973,6 +2098,8 @@ pub enum CompositionError {
         /// Whether it failed to parse or to evaluate, and why.
         #[source]
         source: SequenceExpressionCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `$( … )` sequence source could not be expanded.
@@ -1983,6 +2110,8 @@ pub enum CompositionError {
         /// Where in approval or execution it failed.
         #[source]
         source: SequenceShellCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A lenient (foreign-data) item was `null`.
@@ -1990,6 +2119,8 @@ pub enum CompositionError {
     SequenceNullItem {
         /// Zero-based item index.
         index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A step's normalized state failed its owner's `$state` schema.
@@ -2090,6 +2221,8 @@ pub enum CompositionError {
     SequenceReferenceCycle {
         /// The full canonical chain, from the entry document to the repeat.
         chain: Vec<PathBuf>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A referenced document could not be loaded or is not the expected `kind`.
@@ -2101,6 +2234,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// What was wrong with it.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `prompt:` task referenced a document that itself declares `sequence:`.
@@ -2115,6 +2250,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// The document that referenced it.
         referenced_from: PathBuf,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A construct that preflight recognizes but v1 deliberately does not run.
@@ -2127,6 +2264,8 @@ pub enum CompositionError {
         construct: String,
         /// Why it is rejected and what to do instead.
         detail: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `prompt:` task's document could not be launched at all.
@@ -2153,6 +2292,8 @@ pub enum CompositionError {
         /// Boxed to keep `CompositionError` small — it is the `Err` type of
         /// most composition `Result`s.
         snapshot: Option<Box<DiagnosticSnapshot>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A step has neither an executable nor a body to run.
@@ -2163,7 +2304,8 @@ pub enum CompositionError {
     /// so — the author either meant to write a body or to declare a task.
     #[error(
         "step {step} (`{name}`) has nothing to run: `{path}` composed to an empty body and the \
-         step declares no `prompt`, `shell`, `side_effect`, `task`, or `group`"
+         step declares no executable ({})",
+        super::sequence::reserved::EXECUTABLE_KEYS.join(", ")
     )]
     SequenceStepNotExecutable {
         /// One-based step position.
@@ -2172,6 +2314,8 @@ pub enum CompositionError {
         name: String,
         /// The sequence document whose body composed empty.
         path: PathBuf,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `{group}@{file-ref}` catalog reference did not resolve to one group.
@@ -2188,6 +2332,8 @@ pub enum CompositionError {
         problem: String,
         /// The names the catalog does define, for a did-you-mean list.
         available: Vec<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A group definition violates the group schema.
@@ -2199,6 +2345,8 @@ pub enum CompositionError {
         origin: PathBuf,
         /// The specific schema violation.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// Two tasks in the same parallel group write back to the same document.
@@ -2218,6 +2366,8 @@ pub enum CompositionError {
         first: String,
         /// The second task's label.
         second: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command reads a value no approval can cover: `err`,
@@ -2243,6 +2393,8 @@ pub enum CompositionError {
         /// Darkmatter's typed unavailable-binding error.
         #[source]
         source: Option<Box<darkmatter::markdown::compose::expression::ExpressionError>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A graph-phase shell command references the resolved target's identity.
@@ -2266,6 +2418,8 @@ pub enum CompositionError {
         root: String,
         /// A label locating the task.
         task: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command failed approval-time resolution or runtime
@@ -2281,6 +2435,8 @@ pub enum CompositionError {
         /// The typed lower-layer failure, when one was raised.
         #[source]
         source: Option<Box<MarkdownError>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A late value a task's shell command reads was missing or invalid when
@@ -2297,6 +2453,8 @@ pub enum CompositionError {
         /// Darkmatter's typed `MissingValue` or `TemplateValueRejected`.
         #[source]
         source: Box<MarkdownError>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's preflight-approved shell command resolves to different text
@@ -2325,6 +2483,8 @@ pub enum CompositionError {
         /// whose values changed, or a note that the change is not attributable
         /// to a named one.
         changed: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     // -- Atomic task execution (phase 7) ---------------------------------------
@@ -2346,6 +2506,8 @@ pub enum CompositionError {
         /// The parser's typed rejection.
         #[source]
         source: crate::harness::HarnessError,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command finished with a non-zero exit code.
@@ -2357,6 +2519,8 @@ pub enum CompositionError {
         command: String,
         /// The process exit code.
         code: i32,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command exceeded its per-command timeout and was killed.
@@ -2368,6 +2532,8 @@ pub enum CompositionError {
         command: String,
         /// The elapsed budget, in seconds.
         seconds: f64,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command was killed because it breached the per-task
@@ -2388,6 +2554,8 @@ pub enum CompositionError {
         /// Which capture limit tripped, the observed count, and the configured
         /// limit — what separates a slightly oversized command from a flood.
         trip: RunawayTrip,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command could not be spawned at all.
@@ -2400,6 +2568,8 @@ pub enum CompositionError {
         /// The underlying spawn failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command spawned and ran, but waiting on it failed, so
@@ -2419,6 +2589,8 @@ pub enum CompositionError {
         /// The underlying wait failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command spawned, but exclusive ownership of its process
@@ -2437,6 +2609,8 @@ pub enum CompositionError {
         /// The underlying ownership failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's `prompt:` document ran to completion but reported failure.
@@ -2448,6 +2622,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// The provider's exit code.
         code: i32,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's `side_effect:` value is not a side-effect action.
@@ -2461,6 +2637,8 @@ pub enum CompositionError {
         task: String,
         /// What the value was instead.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task `with:` key targets a reserved key: a generated step field or
@@ -2475,6 +2653,8 @@ pub enum CompositionError {
         task: String,
         /// The refused `with` key.
         key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task value failed just-in-time evaluation against the effective state.
@@ -2494,6 +2674,8 @@ pub enum CompositionError {
         /// [`LifecycleCause`]: super::lifecycle_context::LifecycleCause
         #[source]
         cause: super::lifecycle_context::LifecycleCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task shape reached execution that only a later phase can schedule.
@@ -2505,13 +2687,8 @@ pub enum CompositionError {
         construct: String,
         /// What the author should do instead.
         detail: String,
-    },
-
-    /// One or more sequence steps failed provider/model resolution in non-TTY mode.
-    #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
-    SequenceSelectionFailed {
-        failures: Vec<SequenceSelectionFailure>,
-        failure_count: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// One or more sequence steps or sequence documents have missing
@@ -2527,6 +2704,8 @@ pub enum CompositionError {
         failures: Vec<SequenceMissingPropertiesEntry>,
         /// Number of entries that reported missing properties.
         failure_count: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `sequence` document authored `interactive: true` in its frontmatter.
@@ -2534,11 +2713,17 @@ pub enum CompositionError {
     /// Sequences are serial automation; interactive mode must be requested
     /// per-invocation with the `--interactive` flag instead.
     #[error(
-        "`interactive: true` is not allowed in a sequence document ({0}); \
+        "`interactive: true` is not allowed in a sequence document ({}); \
          use `compose` or `inline-compose` for dialog-shaped prompts, \
-         or pass `--interactive` to override a single sequence run"
+         or pass `--interactive` to override a single sequence run",
+        path.display()
     )]
-    SequenceInteractiveRejected(PathBuf),
+    SequenceInteractiveRejected {
+        /// The sequence document.
+        path: PathBuf,
+        /// Its `interactive` property.
+        site: Box<SequenceSite>,
+    },
 
     // -- Loop errors -----------------------------------------------------------
     /// A `loop:` block's configuration is invalid.
@@ -3234,10 +3419,50 @@ pub enum MarkdownLoadCause {
     Yaml(#[from] biscuit_file::YamlError),
 }
 
-/// Heterogeneous lower-layer cause of an external sequence-file load failure.
+/// What a person calls the file a sequence error is about: the noun of the
+/// construct that referenced it, or `file` while no caller has said.
+fn source_noun(field: Option<super::sequence::model::ExecutableField>) -> &'static str {
+    field.map_or("file", super::sequence::model::ExecutableField::noun)
+}
+
+/// The operation a [`CompositionError::SequenceSourceParse`] failed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceParseStage {
+    /// Assembling a Markdown frontmatter from the file's values.
+    Frontmatter,
+    /// Parsing YAML text.
+    Yaml,
+    /// Converting parsed YAML to the data model (a non-string key, a tag).
+    YamlConversion,
+    /// Parsing JSON or JSON5 text.
+    Json5,
+    /// The duplicate-key check of a JSON-family document.
+    DuplicateKey,
+    /// Parsing one JSONL/NDJSON record.
+    JsonLine,
+}
+
+impl SourceParseStage {
+    /// The failure in prose, after the file's name.
+    #[must_use]
+    pub fn phrase(self) -> &'static str {
+        match self {
+            Self::Frontmatter => "could not be read as frontmatter",
+            Self::Yaml => "is not valid YAML",
+            Self::YamlConversion => "could not be converted from YAML",
+            Self::Json5 => "is not valid JSON",
+            Self::DuplicateKey => "repeats a key",
+            Self::JsonLine => "has a record that is not valid JSON",
+        }
+    }
+}
+
+/// Heterogeneous lower-layer cause of a sequence reference, read, or parse
+/// failure.
 ///
 /// Carried as the typed `#[source]` of
-/// [`CompositionError::SequenceExternalLoad`] so a programmatic handler can
+/// [`CompositionError::SequenceReferenceResolution`] and
+/// [`CompositionError::SequenceSourceParse`] so a programmatic handler can
 /// recover the concrete lower-layer type via [`std::error::Error::source`]
 /// instead of inspecting a flattened string.
 #[derive(Error, Debug)]
@@ -3681,17 +3906,163 @@ pub struct SequenceMissingPropertiesEntry {
     pub pointer_paths: Vec<String>,
 }
 
-/// Per-step failure information for sequence selection errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SequenceSelectionFailure {
-    /// 1-based step number.
-    pub step: usize,
-    /// Display name of the step.
-    pub step_name: String,
-    /// Why the step failed resolution.
-    pub reason: String,
-    /// Providers that were installed at the time of resolution.
-    pub installed: Vec<Provider>,
+impl CompositionError {
+    /// The site of a `Sequence…` error, looking through
+    /// [`Self::WithFrontmatter`] and [`Self::CheckFailed`]; `None` for any
+    /// other error.
+    #[must_use]
+    pub fn sequence_site(&self) -> Option<&SequenceSite> {
+        match self {
+            Self::SequenceInvalid { site, .. }
+            | Self::SequenceEmpty { site, .. }
+            | Self::SequenceReferenceResolution { site, .. }
+            | Self::SequenceSourceRead { site, .. }
+            | Self::SequenceSourceParse { site, .. }
+            | Self::SequenceExternalWrongType { site, .. }
+            | Self::SequenceStepNameMissing { site, .. }
+            | Self::SequenceStepNameWrongType { site, .. }
+            | Self::SequenceReservedTemplateKey { site, .. }
+            | Self::SequenceExclusiveExecutable { site, .. }
+            | Self::SequenceReservedStateKey { site, .. }
+            | Self::SequenceInvalidTaskField { site, .. }
+            | Self::SequenceSourceSyntax { site, .. }
+            | Self::SequenceUnknownOperator { site, .. }
+            | Self::SequenceOperatorArity { site, .. }
+            | Self::SequenceOffsetMissing { site, .. }
+            | Self::SequenceOffsetNotAList { site, .. }
+            | Self::SequenceOffsetUnsupported { site, .. }
+            | Self::SequenceOperatorItemNotObject { site, .. }
+            | Self::SequenceOperatorMissingField { site, .. }
+            | Self::SequenceOperatorEmptyName { site, .. }
+            | Self::SequenceExpressionFailed { site, .. }
+            | Self::SequenceShellFailed { site, .. }
+            | Self::SequenceNullItem { site, .. }
+            | Self::SequenceReferenceCycle { site, .. }
+            | Self::SequenceReferenceInvalid { site, .. }
+            | Self::SequenceNestedSequence { site, .. }
+            | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceTaskPromptLaunch { site, .. }
+            | Self::SequenceStepNotExecutable { site, .. }
+            | Self::SequenceGroupCatalogLookup { site, .. }
+            | Self::SequenceGroupInvalid { site, .. }
+            | Self::SequenceWriteBackCollision { site, .. }
+            | Self::SequenceShellLateBinding { site, .. }
+            | Self::SequenceShellTargetIdentity { site, .. }
+            | Self::SequenceShellResolution { site, .. }
+            | Self::SequenceShellLateValue { site, .. }
+            | Self::SequenceShellApprovalChanged { site, .. }
+            | Self::SequenceTaskTimeoutInvalid { site, .. }
+            | Self::SequenceTaskShellExit { site, .. }
+            | Self::SequenceTaskShellTimeout { site, .. }
+            | Self::SequenceTaskShellRunaway { site, .. }
+            | Self::SequenceTaskShellSpawn { site, .. }
+            | Self::SequenceTaskShellWait { site, .. }
+            | Self::SequenceTaskShellIsolation { site, .. }
+            | Self::SequenceTaskPromptFailed { site, .. }
+            | Self::SequenceTaskInvalidSideEffect { site, .. }
+            | Self::SequenceTaskWithReserved { site, .. }
+            | Self::SequenceTaskValueResolution { site, .. }
+            | Self::SequenceTaskUnsupported { site, .. }
+            | Self::SequenceMissingProperties { site, .. }
+            | Self::SequenceTaskProviderSelection { site, .. }
+            | Self::SequenceInteractiveRejected { site, .. }
+            | Self::SequenceUnknownTaskField { site, .. } => Some(site),
+            Self::WithFrontmatter { inner, .. } | Self::CheckFailed { cause: inner, .. } => inner.sequence_site(),
+            _ => None,
+        }
+    }
+
+    fn sequence_site_mut(&mut self) -> Option<&mut SequenceSite> {
+        match self {
+            Self::SequenceInvalid { site, .. }
+            | Self::SequenceEmpty { site, .. }
+            | Self::SequenceReferenceResolution { site, .. }
+            | Self::SequenceSourceRead { site, .. }
+            | Self::SequenceSourceParse { site, .. }
+            | Self::SequenceExternalWrongType { site, .. }
+            | Self::SequenceStepNameMissing { site, .. }
+            | Self::SequenceStepNameWrongType { site, .. }
+            | Self::SequenceReservedTemplateKey { site, .. }
+            | Self::SequenceExclusiveExecutable { site, .. }
+            | Self::SequenceReservedStateKey { site, .. }
+            | Self::SequenceInvalidTaskField { site, .. }
+            | Self::SequenceSourceSyntax { site, .. }
+            | Self::SequenceUnknownOperator { site, .. }
+            | Self::SequenceOperatorArity { site, .. }
+            | Self::SequenceOffsetMissing { site, .. }
+            | Self::SequenceOffsetNotAList { site, .. }
+            | Self::SequenceOffsetUnsupported { site, .. }
+            | Self::SequenceOperatorItemNotObject { site, .. }
+            | Self::SequenceOperatorMissingField { site, .. }
+            | Self::SequenceOperatorEmptyName { site, .. }
+            | Self::SequenceExpressionFailed { site, .. }
+            | Self::SequenceShellFailed { site, .. }
+            | Self::SequenceNullItem { site, .. }
+            | Self::SequenceReferenceCycle { site, .. }
+            | Self::SequenceReferenceInvalid { site, .. }
+            | Self::SequenceNestedSequence { site, .. }
+            | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceTaskPromptLaunch { site, .. }
+            | Self::SequenceStepNotExecutable { site, .. }
+            | Self::SequenceGroupCatalogLookup { site, .. }
+            | Self::SequenceGroupInvalid { site, .. }
+            | Self::SequenceWriteBackCollision { site, .. }
+            | Self::SequenceShellLateBinding { site, .. }
+            | Self::SequenceShellTargetIdentity { site, .. }
+            | Self::SequenceShellResolution { site, .. }
+            | Self::SequenceShellLateValue { site, .. }
+            | Self::SequenceShellApprovalChanged { site, .. }
+            | Self::SequenceTaskTimeoutInvalid { site, .. }
+            | Self::SequenceTaskShellExit { site, .. }
+            | Self::SequenceTaskShellTimeout { site, .. }
+            | Self::SequenceTaskShellRunaway { site, .. }
+            | Self::SequenceTaskShellSpawn { site, .. }
+            | Self::SequenceTaskShellWait { site, .. }
+            | Self::SequenceTaskShellIsolation { site, .. }
+            | Self::SequenceTaskPromptFailed { site, .. }
+            | Self::SequenceTaskInvalidSideEffect { site, .. }
+            | Self::SequenceTaskWithReserved { site, .. }
+            | Self::SequenceTaskValueResolution { site, .. }
+            | Self::SequenceTaskUnsupported { site, .. }
+            | Self::SequenceMissingProperties { site, .. }
+            | Self::SequenceTaskProviderSelection { site, .. }
+            | Self::SequenceInteractiveRejected { site, .. }
+            | Self::SequenceUnknownTaskField { site, .. } => Some(site),
+            Self::WithFrontmatter { inner, .. } | Self::CheckFailed { cause: inner, .. } => inner.sequence_site_mut(),
+            _ => None,
+        }
+    }
+
+    /// A [`Self::SequenceInvalid`] saying `message` at `site`.
+    pub fn sequence_invalid(message: impl Into<String>, site: SequenceSite) -> Self {
+        Self::SequenceInvalid { message: message.into(), site: Box::new(site) }
+    }
+
+    /// Locate a `Sequence…` error raised by a layer that did not know where:
+    /// fill its site's unknown parts with `property` of `file` and the task
+    /// named `task` ([`SequenceSite::fill`]). A located site, and any other
+    /// error, is returned unchanged, so the innermost caller that knows the
+    /// site decides it.
+    #[must_use]
+    pub fn locate_sequence(mut self, file: &Path, property: &str, task: Option<&str>) -> Self {
+        if let Some(site) = self.sequence_site_mut() {
+            site.fill(file, property, task);
+        }
+        self
+    }
+
+    /// Name the construct that referenced the file a
+    /// [`Self::SequenceSourceRead`] or [`Self::SequenceSourceParse`] is
+    /// about, when the reading layer did not know it.
+    #[must_use]
+    pub fn referenced_as(mut self, referencing: super::sequence::model::ExecutableField) -> Self {
+        if let Self::SequenceSourceRead { field, .. } | Self::SequenceSourceParse { field, .. } = &mut self
+            && field.is_none()
+        {
+            *field = Some(referencing);
+        }
+        self
+    }
 }
 
 impl CompositionError {

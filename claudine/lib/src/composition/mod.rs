@@ -80,7 +80,7 @@ pub use error::{
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
-    SequenceLoadCause, SequenceMissingPropertiesEntry, SequenceMissingSubject, SequenceSelectionFailure, SequenceShellCause,
+    SequenceLoadCause, SequenceMissingPropertiesEntry, SequenceMissingSubject, SequenceShellCause, SequenceSite, SourceParseStage,
     ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};

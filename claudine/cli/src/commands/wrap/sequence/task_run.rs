@@ -596,6 +596,7 @@ impl<'a> WrapperPromptRunner<'a> {
             path: request.path.clone(),
             message: error.to_string(),
             snapshot: DiagnosticSnapshot::select(error.as_ref()).map(Box::new),
+            site: Box::new(claudine::composition::SequenceSite::file(&request.path).in_task(request.reference.clone())),
         })?;
         Ok(PromptRunOutcome {
             withheld: final_output.is_none(),
@@ -1155,6 +1156,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             // diagnostic the wrapper raised is still reachable by downcast here
             // — the last point that has it.
             snapshot: DiagnosticSnapshot::select(error.as_ref()).map(Box::new),
+            site: Box::new(claudine::composition::SequenceSite::file(&request.path).in_task(request.reference.clone())),
         })?;
 
         *self.record() = PromptRunRecord {

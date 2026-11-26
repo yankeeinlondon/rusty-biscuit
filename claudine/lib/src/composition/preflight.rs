@@ -318,16 +318,17 @@ fn approve_commands(
 ) -> Result<PreFlightResult, CompositionError> {
     if let Some(approved) = &approval_options.closed_approvals {
         let uncovered = candidates.iter().find(|candidate| !candidate.authorized_by(approved))
-            .map(|candidate| candidate.display_command())
+            .map(|candidate| (candidate.display_command(), None))
             .or_else(|| all_commands.iter().find(|(command, _, _)| {
                 !approved.contains_exact(command) && !candidates.iter().any(|candidate| {
                     candidate.authorized_by(approved) && candidate.resolved.as_ref().is_some_and(|keys| keys.contains(command))
                 })
-            }).map(|(command, _, _)| command.clone()));
-        if let Some(command) = uncovered {
+            }).map(|(command, file, _)| (command.clone(), Some(file))));
+        if let Some((command, file)) = uncovered {
             return Err(CompositionError::SequenceShellResolution {
                 command, task: "sequence descendant".into(),
                 message: "introduced an unapproved command after sequence approval closed".into(), source: None,
+                site: Box::new(file.map_or_else(super::SequenceSite::unlocated, |file| super::SequenceSite::file(file))),
             });
         }
         return Ok(PreFlightResult { approved_commands: approved.clone(),

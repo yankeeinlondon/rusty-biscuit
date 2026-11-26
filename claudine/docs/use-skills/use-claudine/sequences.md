@@ -203,6 +203,16 @@ and reports every problem under its task (`composition.provider_unresolved`,
 `composition.no_executable`, a missing `prompt:` file, a missing input, …),
 then exits `2` if any is an error or warning, else `0`. On a terminal a
 choice the run would ask about is a warning; without one it is an error.
+A dry run never exits `1`; a refused command line (`--json` without
+`--dry-run`, `--dry-run-shell`) exits `2` with a usage message and no
+report. In `--json`, match findings by `code`, never by message text.
+
+A real run checks the same things at preflight. If one stops it before the
+first task, it prints the same report under `Sequence preflight found …; no
+task ran`, ends with `The run stopped at: …` (unless a row already says
+it), and exits `1`; lifecycle `err.*` describes that returned error, not the
+report's first row. If preflight passes, new warnings (a step's own
+`agent:`/`model:`, a near-miss key) print once before task one.
 
 ## Removed spellings
 

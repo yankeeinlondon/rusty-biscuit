@@ -104,6 +104,35 @@ is the whole wide pointer (address *and* vtable), because a `#[from]` payload ca
 share its parent's address and treating that as a revisit would truncate a healthy
 chain.
 
+## Findings: one record for a report
+
+An error is one failure that stops something. A **finding** is one row of a
+report that collects many problems without stopping: the `--dry-run` check
+and the report a sequence prints when preflight stops it. Claudine does not
+have its own type for findings. It pushes Darkmatter's
+`darkmatter::findings::Diagnostic` into a `FindingSink`, grouped under a
+subject (the root document, or a task by its place in the graph), and
+renders the finished `FindingReport`. The same record reaches
+`md --output json`, DMLS, and Claudine's `--json` envelope; its fields are
+documented in [Darkmatter's data contracts](darkmatter/docs/cli/data-contracts.md).
+
+Who supplies a finding's code follows who owns the fact:
+
+| Fact | Code namespace | Examples |
+|------|----------------|----------|
+| true of a document whatever agent runs it | `dm.*`, from Darkmatter's catalog | `dm.reference.missing_document`, `dm.schema.removed_key`, `dm.compose.empty_body`, `dm.check.not_checked` |
+| needs the task tree, a provider, or the lifecycle | `composition.*`, from Claudine's registry | `composition.provider_unresolved`, `composition.selection_key_as_data`, `composition.no_executable`, `composition.model_required`, `composition.missing_properties` |
+| an error no projector classifies | `internal.bug` | a defect in Claudine, never in the document |
+
+A finding's code is a **report code**, not an `err.code`. A lifecycle
+`when:` clause never sees findings; it sees the one typed error the run
+returns, described next. Each finding follows the
+[message standard](darkmatter/docs/errors/message-standard.md): what failed in
+the author's terms, where, the cause that actually applies, and a hint.
+Context such as the task travels as a trail frame
+(`{ "kind": "host", "host": "task", "label": "find", "property": "sequence[0].agent" }`),
+never as text glued onto the message.
+
 ## A preflight report around a typed error
 
 When a real `claudine sequence` run stops before its first task, the error it
@@ -134,14 +163,21 @@ surface renders the cause's block.
 ```text
 Sequence preflight found 2 errors and 0 warnings; no task ran
 
-task one (seq.md, sequence[0])
-  ✗ error[composition.missing_properties] `topic` has no value
-  …
+task one (sequence[0])
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in needs.md
+      hint: add `topic` to the task's `with:`, or pass `topic=<value>`
+            after the file
 
-task two (seq.md, sequence[1])
-  ✗ error[dm.reference.not_found] …
+task two (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:7:13
+      hint: create missing.md before a real run, or correct the reference
 
-The run stopped at: failed to load external sequence file: `./missing.md`: file not found
+The run stopped at: <the message of the error the run returned>
 ```
 
 The first row need not be the failure: here a dry run groups task one's

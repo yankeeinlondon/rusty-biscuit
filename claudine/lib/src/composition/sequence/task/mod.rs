@@ -358,6 +358,7 @@ impl PromptTaskRunner for UnavailablePromptRunner {
             task: request.reference.clone(),
             construct: "a `prompt:` task".to_string(),
             detail: "this caller executes no prompt documents".to_string(),
+            site: Box::new(crate::composition::SequenceSite::file(&request.path)),
         })
     }
 }
@@ -988,6 +989,7 @@ impl TaskExecution<'_> {
                     task: self.label(),
                     path: request.path.clone(),
                     code: run.exit_code,
+                    site: Box::new(self.task.error_site()),
                 },
             )),
             Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -1050,6 +1052,7 @@ impl TaskExecution<'_> {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &CompositionError::SequenceShellResolution {
                         command: site.authored.clone(), task: self.label(), message: error.to_string(),
                         source: Some(Box::new(MarkdownError::ShellExpansion(Box::new(error)))),
+                        site: Box::new(self.task.error_site()),
                     }));
                 }
                 Err(error @ TaskShellError::UnsupportedStructured) => {
@@ -1057,6 +1060,7 @@ impl TaskExecution<'_> {
                         TaskStage::Primary,
                         &CompositionError::SequenceShellResolution {
                             command: command.clone(), task: self.label(), message: error.to_string(), source: None,
+                            site: Box::new(self.task.error_site()),
                         },
                     ));
                 }
@@ -1067,6 +1071,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             source,
+                            site: Box::new(self.task.error_site()),
                         },
                     ));
                 }
@@ -1077,6 +1082,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             source,
+                            site: Box::new(self.task.error_site()),
                         },
                     ));
                 }
@@ -1090,6 +1096,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             source,
+                            site: Box::new(self.task.error_site()),
                         },
                     ));
                 }
@@ -1115,6 +1122,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             trip,
+                            site: Box::new(self.task.error_site()),
                         },
                     ),
                 );
@@ -1128,6 +1136,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             seconds: timeout.as_secs_f64(),
+                            site: Box::new(self.task.error_site()),
                         },
                     ),
                 );
@@ -1141,6 +1150,7 @@ impl TaskExecution<'_> {
                             task: self.label(),
                             command: command.clone(),
                             code: output.exit_code,
+                            site: Box::new(self.task.error_site()),
                         },
                     ),
                 );
@@ -1179,6 +1189,7 @@ impl TaskExecution<'_> {
                 &CompositionError::SequenceTaskInvalidSideEffect {
                     task: self.label(),
                     problem: describe_action(&parsed),
+                    site: Box::new(self.task.error_site()),
                 },
             ));
         }
@@ -1414,6 +1425,7 @@ impl TaskExecution<'_> {
                         stage.key()
                     ),
                     source: None,
+                    site: Box::new(self.task.error_site()),
                 });
             };
             *expr = Expr::StringLiteral(approved.command().to_string());
@@ -1434,6 +1446,7 @@ impl TaskExecution<'_> {
                 return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),
+                    site: Box::new(self.task.error_site()),
                 });
             }
             evaluated.insert(key.clone(), self.resolve_with_entry(key, value)?);
@@ -1492,6 +1505,7 @@ impl TaskExecution<'_> {
                     raw: rendered,
                 }),
                 source,
+                site: Box::new(self.task.error_site()),
             }
         })
     }
@@ -1537,6 +1551,7 @@ impl TaskExecution<'_> {
                 field: field.to_string(),
                 message: error.to_string(),
                 cause: LifecycleCause::new(LifecycleExprError::Compose(Box::new(error))),
+                site: Box::new(self.task.error_site()),
             })
     }
 
@@ -1617,7 +1632,7 @@ impl TaskExecution<'_> {
         match invocation.derive_source(document) {
             Ok(source) => Ok(std::borrow::Cow::Owned(source.file_resolution_context().clone())),
             Err(InvocationContextError::ResolutionContext(error)) => Err(CompositionError::ResolutionContext(error)),
-            Err(error @ InvocationContextError::SourceWithoutParent(_)) => Err(CompositionError::SequenceInvalid(error.to_string())),
+            Err(error @ InvocationContextError::SourceWithoutParent(_)) => Err(CompositionError::sequence_invalid(error.to_string(), self.task.error_site())),
         }
     }
 

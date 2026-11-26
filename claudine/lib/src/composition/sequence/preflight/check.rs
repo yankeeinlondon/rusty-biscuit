@@ -435,7 +435,7 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
 
     if let Err(error) = super::reject_non_sequence_kind(source) {
         fail(&mut state, error);
-        return finish(state, RootList::Unread, Err(no_discovery()));
+        return finish(state, RootList::Unread, Err(no_discovery(&source.resolved_path)));
     }
     let resolution = source_context.file_resolution_context();
     let mut options = SequenceSourceOptions::new(resolution).with_compose_context(&compose_context).with_invocation(invocation);
@@ -459,7 +459,7 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     }
     let inventory = match list {
         RootList::Body | RootList::Read => super::discover_sequence_inputs(source, discovery),
-        RootList::Command | RootList::Unread => Err(no_discovery()),
+        RootList::Command | RootList::Unread => Err(no_discovery(&source.resolved_path)),
     };
 
     let Some((plan, ordinals, item_failures)) = recovered else {
@@ -530,9 +530,10 @@ fn check_root(source: &ResolvedCompositionSource, setters: &Map<String, Value>, 
     }
 }
 
-/// The error a check records in place of an inventory it did not discover.
-fn no_discovery() -> CompositionError {
-    CompositionError::SequenceInvalid("the task list could not be read".into())
+/// The error a check records in place of an inventory it did not discover;
+/// the root's `sequence` list is what could not be read.
+fn no_discovery(root: &Path) -> CompositionError {
+    CompositionError::sequence_invalid("the task list could not be read", crate::composition::SequenceSite::at(root, "sequence"))
 }
 
 fn finish(

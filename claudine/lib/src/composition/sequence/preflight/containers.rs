@@ -37,6 +37,7 @@ impl Loader<'_> {
                                 return Err(CompositionError::SequenceShellResolution {
                                     command: shell.command.to_string(), task: label.into(),
                                     message: "container shell commands must be authored strings".into(), source: None,
+                                    site: Box::new(scope.error_site()),
                                 });
                             }
                         }

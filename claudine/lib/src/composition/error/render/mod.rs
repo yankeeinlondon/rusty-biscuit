@@ -13,6 +13,7 @@ mod lifecycle;
 mod provider;
 mod schema;
 mod selection;
+mod sequence;
 mod sequence_loop;
 
 #[cfg(test)]
@@ -108,10 +109,68 @@ impl BlockError for CompositionError {
             CompositionError::LoopIterationFailed { .. }
             | CompositionError::LoopRateLimited { .. }
             | CompositionError::SequenceMissingProperties { .. }
-            | CompositionError::SequenceInteractiveRejected(..)
+            | CompositionError::SequenceInteractiveRejected { .. }
             | CompositionError::InlineComposeSequenceMismatch { .. } => {
                 sequence_loop::status_block(self)
             }
+
+            // Sequence errors: a block per variant, its site as data.
+            CompositionError::SequenceInvalid { .. }
+            | CompositionError::SequenceEmpty { .. }
+            | CompositionError::SequenceReferenceResolution { .. }
+            | CompositionError::SequenceSourceRead { .. }
+            | CompositionError::SequenceSourceParse { .. }
+            | CompositionError::SequenceExternalWrongType { .. }
+            | CompositionError::SequenceStepNameMissing { .. }
+            | CompositionError::SequenceStepNameWrongType { .. }
+            | CompositionError::SequenceReservedTemplateKey { .. }
+            | CompositionError::SequenceExclusiveExecutable { .. }
+            | CompositionError::SequenceReservedStateKey { .. }
+            | CompositionError::SequenceInvalidTaskField { .. }
+            | CompositionError::SequenceUnknownTaskField { .. }
+            | CompositionError::SequenceSourceSyntax { .. }
+            | CompositionError::SequenceUnknownOperator { .. }
+            | CompositionError::SequenceOperatorArity { .. }
+            | CompositionError::SequenceOffsetMissing { .. }
+            | CompositionError::SequenceOffsetNotAList { .. }
+            | CompositionError::SequenceOffsetUnsupported { .. }
+            | CompositionError::SequenceOperatorItemNotObject { .. }
+            | CompositionError::SequenceOperatorMissingField { .. }
+            | CompositionError::SequenceOperatorEmptyName { .. }
+            | CompositionError::SequenceExpressionFailed { .. }
+            | CompositionError::SequenceShellFailed { .. }
+            | CompositionError::SequenceNullItem { .. }
+            | CompositionError::SequenceStateSchemaViolation { .. }
+            | CompositionError::SequenceDeclarationMisplaced { .. }
+            | CompositionError::SequenceDeclarationShape { .. }
+            | CompositionError::SequenceDeclarationLoad { .. }
+            | CompositionError::SequenceContainerSchemaViolation { .. }
+            | CompositionError::SequenceReferenceCycle { .. }
+            | CompositionError::SequenceReferenceInvalid { .. }
+            | CompositionError::SequenceNestedSequence { .. }
+            | CompositionError::SequenceUnsupportedConstruct { .. }
+            | CompositionError::SequenceTaskPromptLaunch { .. }
+            | CompositionError::SequenceStepNotExecutable { .. }
+            | CompositionError::SequenceGroupCatalogLookup { .. }
+            | CompositionError::SequenceGroupInvalid { .. }
+            | CompositionError::SequenceWriteBackCollision { .. }
+            | CompositionError::SequenceShellLateBinding { .. }
+            | CompositionError::SequenceShellTargetIdentity { .. }
+            | CompositionError::SequenceShellResolution { .. }
+            | CompositionError::SequenceShellLateValue { .. }
+            | CompositionError::SequenceShellApprovalChanged { .. }
+            | CompositionError::SequenceTaskTimeoutInvalid { .. }
+            | CompositionError::SequenceTaskShellExit { .. }
+            | CompositionError::SequenceTaskShellTimeout { .. }
+            | CompositionError::SequenceTaskShellRunaway { .. }
+            | CompositionError::SequenceTaskShellSpawn { .. }
+            | CompositionError::SequenceTaskShellWait { .. }
+            | CompositionError::SequenceTaskShellIsolation { .. }
+            | CompositionError::SequenceTaskPromptFailed { .. }
+            | CompositionError::SequenceTaskInvalidSideEffect { .. }
+            | CompositionError::SequenceTaskWithReserved { .. }
+            | CompositionError::SequenceTaskValueResolution { .. }
+            | CompositionError::SequenceTaskUnsupported { .. } => sequence::status_block(self),
 
             // Provider / execution / file-reference family, plus the generic
             // catch-all for every variant without a dedicated block.

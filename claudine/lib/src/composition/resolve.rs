@@ -269,9 +269,11 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
         source: MarkdownLoadCause::Yaml(e),
     })?;
     let root = json_value.as_object().ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType(
-            "YAML sequence file root must be an object".to_string(),
-        )
+        CompositionError::SequenceExternalWrongType {
+            path: path.to_path_buf(),
+            problem: "a YAML sequence file's root must be an object".to_string(),
+            site: Box::new(super::SequenceSite::file(path)),
+        }
     })?;
 
     let mut frontmatter = darkmatter::markdown::Frontmatter::new();

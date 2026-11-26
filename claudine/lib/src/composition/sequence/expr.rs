@@ -226,6 +226,7 @@ fn evaluate_authored<L: EvaluationLookup>(
     let failed = |source| CompositionError::SequenceExpressionFailed {
         expression: text.to_string(),
         source,
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let prepared = prepare_value(&Value::String(text.to_string()), mode)
         .map_err(|error| failed(SequenceExpressionCause::Prepare(error)))?;

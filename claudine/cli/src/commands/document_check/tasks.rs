@@ -132,7 +132,10 @@ impl Check {
             frontmatter.get("interactive").map(composition::parse_interactive_hint).and_then(Result::ok)
         {
             let subject = self.root_subject();
-            let error = CompositionError::SequenceInteractiveRejected(root.resolved_path.clone());
+            let error = CompositionError::SequenceInteractiveRejected {
+                path: root.resolved_path.clone(),
+                site: Box::new(claudine::composition::SequenceSite::at(&root.resolved_path, "interactive")),
+            };
             let source = self.locate(&[YamlPathSegment::Key("interactive".into())], false);
             let code = claudine::diagnostics::as_diagnostic(&error).map_or(INTERNAL_BUG, |known| known.code());
             self.sink.push(

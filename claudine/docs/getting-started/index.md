@@ -822,9 +822,10 @@ children to parents. Documents, groups, and sequences all loop the same
 way; see [Looping](../topics/flow-control/looping.md).
 
 A group's isolation applies to in-memory values. Filesystem edits and shell
-side effects are shared and never rolled back. `--dry-run` renders `shell:`
-and `side_effect:` tasks without running them, but composition shell
-expansions still run with real effects. See
+side effects are shared and never rolled back. `--dry-run` checks every
+task and previews each prompt without running anything: no `shell:` or
+`side_effect:` task, `$( … )` expansion, `::shell` line, lifecycle event, or
+provider. See
 [Sequences](../topics/flow-control/sequences.md) for the complete grammar and
 [the executable example](../examples/sequence-containers.md) for nesting.
 

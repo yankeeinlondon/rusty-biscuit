@@ -503,15 +503,40 @@ that check proves, once, instead of the single error block:
 ```text
 Sequence preflight found 2 errors and 0 warnings; no task ran
 
-task one (seq.md, sequence[0])
-  ✗ error[composition.missing_properties] `topic` has no value
-  …
+task one (sequence[0])
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in needs.md
+      hint: add `topic` to the task's `with:`, or pass `topic=<value>`
+            after the file
 
-task two (seq.md, sequence[1])
-  ✗ error[dm.reference.not_found] …
+task two (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:7:13
+      hint: create missing.md before a real run, or correct the reference
 
-The run stopped at: failed to load external sequence file: `./missing.md`: file not found
+The run stopped at: <the message of the error the run returned>
 ```
+
+These are the points where preflight can refuse a run, in the order it
+meets them, and what the report collects beside the failure:
+
+| Where the run stops | Typical failure | Also reported |
+|---|---|---|
+| Sequence resolution and prompt loading | a `sequence:`, `task:`, `group:`, or `prompt:` file that does not exist or does not parse | every other task's references, keys, providers, and inputs |
+| Task graph | an invalid group, a cycle, a task with two executables | the same, for every sibling task the walk can still reach |
+| Transclusion discovery | a prompt's `::file` target is missing | the other prompts' references and inputs |
+| Inputs | a required input with no value and no terminal to ask on | every other missing input, one row each |
+| Providers | a provider name that is unknown or not installed | the provider chain of every other task |
+
+The report is taken only when the failure is a typed composition error and
+the passive check proves at least one error or warning. Only errors and
+warnings are kept: a check that could not run is left out rather than
+guessed at. Because
+the check runs in the state the run stopped in, an input the root's
+`initialize` already wrote is not reported missing.
 
 The last line names the failure the run returned; it is left out when one of
 the rows already says exactly that. That failure, not the

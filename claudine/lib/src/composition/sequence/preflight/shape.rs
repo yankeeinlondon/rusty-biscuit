@@ -136,6 +136,16 @@ impl std::fmt::Display for TaskIdentity {
 }
 
 impl PreflightTask {
+    /// Where an error of this task was authored: the task's property in the
+    /// file that authored it ([`TaskDiagnosticProvenance`]), under its
+    /// authored `name`, else its generated label. A `kind: task` file's own
+    /// task is the file as a whole.
+    #[must_use]
+    pub fn error_site(&self) -> crate::composition::SequenceSite {
+        crate::composition::SequenceSite::at(&self.diagnostic.source_path, &self.diagnostic.task_property)
+            .in_task(self.name.clone().unwrap_or_else(|| self.label.clone()))
+    }
+
     /// Every template site of this task whose placeholders include a late
     /// value, as `(site id, template)`: what the step barrier resolves before
     /// any of the task's commands run.

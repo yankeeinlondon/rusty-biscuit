@@ -147,6 +147,13 @@ claudine compose @prompts/review.md review="review.md" count=3 draft=true
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and lifecycle-stack recovery.
 
+**Check before you run.** `--dry-run` on any of the three commands is a passive check: it runs no command, provider, or lifecycle event, asks nothing, and writes nothing. It reports every problem it finds (a missing `prompt:` file, a task with no provider, a missing input, a misplaced key) on stderr, grouped by task, and prints each composed prompt on stdout. It exits `2` when it finds any error or warning, else `0`; add `--json` for one machine-readable report. A real `sequence` run that stops before its first task prints the same report. See [Composition → Dry Run](docs/topics/composition.md#dry-run) and [`claudine sequence` → Dry run](docs/cli/sequence.md#dry-run).
+
+```sh
+claudine sequence renderers/_fleet.yaml --dry-run           # report on stderr, previews on stdout
+claudine sequence renderers/_fleet.yaml --dry-run --json    # one JSON report for CI
+```
+
 **Lifecycle events.** A document's frontmatter can react to its own run (`initialize`, `start`, `success`, `failure`, `finalize`, …). The lifecycle grammar and engine are [Darkmatter's](../darkmatter/docs/topics/lifecycle/index.md); Claudine is a host that adds `success`, `failure`, and `loop` and calls Darkmatter's `composed` and `failed` events `start` and `blocked`. See [Lifecycle](docs/topics/flow-control/lifecycle.md).
 
 Shell approval can fix an exact command or authorize a typed command shape,

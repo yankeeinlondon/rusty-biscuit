@@ -2142,3 +2142,19 @@ While this phase ran, the author's tooling committed the worktree: this phase's 
 research move in `b74da8c2a`. At `HEAD`, 140 `include_str!` paths in claudine, darkmatter, and simplified-schema
 tests still point into the old `claudine/docs/research/` layout, so no test binary of those areas compiles from this
 worktree until the move is finished.
+
+## Phase 8
+
+Started 2026-11-26.
+
+### Unblocking the build: research paths
+
+- The committed research move (`b74da8c2a`) left `include_str!` and path literals pointing into the old
+  `claudine/docs/research/<topic>/` layout, so claudine, claudine-gen, darkmatter and simplified-schema tests did not
+  compile in this worktree. Every moved topic moved one level down (`providers/`, `local-ai/local_runners`,
+  `external-crates/rendezvous`, `models/system-one`), so the repair is one mechanical rewrite of
+  `docs/research/<topic>` to its new parent in 158 tracked files (62 Markdown, the rest Rust, YAML, JSON, Python,
+  text), skipping `features/`/`fixes/` (snapshots in time) and Darkmatter's `tests/fixtures/dynamic_slots/` tree,
+  whose directory mirrors the old layout on purpose and is read through `dynamic_slots_fixtures/mod.rs`.
+  After the rewrite `cargo nextest list` compiles all six packages. Phase 8 therefore verifies in this worktree, not a
+  scratch clone.

@@ -1038,7 +1038,16 @@ A dry run is passive. Even with `--yolo` it:
 - launches no provider and asks no question (no agent picker, no
   missing-input prompt, no provider review screen);
 - writes nothing: no configuration file is created or migrated, no cache or
-  approval record is stored, and `inline-compose` never edits the file.
+  approval record is stored, and `inline-compose` never edits the file;
+- probes nothing: a function that would start the login shell, send network
+  packets, or query a provider's API (`has_alias`, `ping`, `pr`, …) is not
+  called.
+
+Expressions and the functions that only read (`file_exists`, `::block
+when=`, `::map`, `::filter`) evaluate as in a real run, and local files are
+read. A remote `::file` or `::code` is fetched when the configured `network`
+permission allows its host, and stored in no cache; a denied host is the
+same refusal a real run reports.
 
 Whatever needs one of those effects is left as written in the preview,
 marked `[not evaluated in a dry run]`, and reported as a not-checked row,
@@ -1091,12 +1100,23 @@ each kind of task.
   `source` location, so a script can tell findings apart without reading
   message text.
 - The exit status is `2` when any finding is an error or a warning, else
-  `0`.
+  `0`. A dry run never exits `1`: every failure it meets, even a document
+  that cannot be read, is a finding in the report rather than the standard
+  error block.
+- A refused command line, such as `--json` without `--dry-run`, also exits
+  `2`, with its usage message on stderr and no report or JSON.
 
 `--quiet`, `--silent`, and `--perf` do not change a dry run.
 
 `--dry-run-shell` was removed; it is a usage error with or without
-`--dry-run`. To see what a command does, run the document.
+`--dry-run`:
+
+```text
+error: `--dry-run-shell` was removed. Dry runs skip commands.
+  hint: use `--dry-run` to check and preview, or run the command without it
+```
+
+To see what a command does, run the document.
 
 ## Schema Validation
 

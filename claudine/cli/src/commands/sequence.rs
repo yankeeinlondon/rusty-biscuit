@@ -76,9 +76,10 @@ fn reject_sequence_interactive(
         .map(parse_interactive_hint)
         .transpose()?
     {
-        return Err(CompositionError::SequenceInteractiveRejected(
-            source.resolved_path.clone(),
-        ));
+        return Err(CompositionError::SequenceInteractiveRejected {
+            path: source.resolved_path.clone(),
+            site: Box::new(claudine::composition::SequenceSite::at(&source.resolved_path, "interactive")),
+        });
     }
     Ok(())
 }
@@ -194,12 +195,14 @@ fn expand_shell_source(
     let approved = claudine::harness::shell::validate_and_approve_command(command, options)
         .map_err(|e| CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Approval(e),
         })?;
 
     let mut child = claudine::child_environment::command(&approved.executable).map_err(|e| {
         CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Spawn(std::io::Error::other(e)),
         }
     })?;
@@ -208,12 +211,14 @@ fn expand_shell_source(
         .output()
         .map_err(|e| CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Spawn(e),
         })?;
 
     if !output.status.success() {
         return Err(CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Exited {
                 status: output.status.to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),

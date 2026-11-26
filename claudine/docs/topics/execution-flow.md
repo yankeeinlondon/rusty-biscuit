@@ -431,10 +431,11 @@ This is the raw provider-wrapper dry-run seam: it renders the planned command
 using the profile's executable name and exits with code 0 without resolving
 that executable on `PATH`.
 
-Composition commands return at their earlier post-composition seam, immediately
-after provider/model resolution. They do not enter the provider/env wiring
-steps above, validate or resolve the selected executable, construct MCP/argv/
-system-prompt launch state, or build the lifecycle runtime.
+A composition command's `--dry-run` never reaches this executor: `main.rs`
+dispatches it to the passive check before configuration setup, so it enters
+none of the provider/env wiring steps above, resolves no executable, and
+builds no launch state or lifecycle runtime. See
+[Composition — Dry Run](composition.md#dry-run).
 
 ##### 6j. Preflight Checks
 
@@ -795,7 +796,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way without printing the warning.
 
 ### Model Resolution
 

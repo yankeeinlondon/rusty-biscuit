@@ -332,9 +332,14 @@ fn failures_slice(contexts: &[StepMissingContext]) -> Vec<SequenceMissingPropert
 fn into_sequence_missing(contexts: Vec<StepMissingContext>) -> CompositionError {
     let failures: Vec<SequenceMissingPropertiesEntry> =
         contexts.into_iter().map(|c| c.failure).collect();
+    // The report belongs to the file the first missing input was declared in.
+    let root_site = failures.first().map_or_else(claudine::composition::SequenceSite::unlocated, |first| {
+        claudine::composition::SequenceSite::file(&first.source_path)
+    });
     CompositionError::SequenceMissingProperties {
         failure_count: failures.len(),
         failures,
+        site: Box::new(root_site),
     }
 }
 

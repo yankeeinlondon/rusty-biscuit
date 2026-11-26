@@ -19,7 +19,7 @@
 use serde_json::Value;
 use simplified_schema::expression::scan::scan_plain;
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::json_util::json_type_name;
 use super::super::types::{LoopLocation, LoopOwner};
 
@@ -92,10 +92,10 @@ pub fn classify_source(value: &Value) -> Result<SequenceSourceSpec, CompositionE
     match value {
         Value::Array(items) => Ok(SequenceSourceSpec::Inline(items.clone())),
         Value::String(raw) => classify_string_source(raw),
-        other => Err(CompositionError::SequenceInvalid(format!(
-            "expected a list, a file reference, an expression, or a shell expansion, got {}",
-            json_type_name(other)
-        ))),
+        other => Err(CompositionError::sequence_invalid(
+            format!("expected a list, a file reference, an expression, or a shell expansion, got {}", json_type_name(other)),
+            SequenceSite::unlocated(),
+        )),
     }
 }
 
@@ -110,10 +110,10 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
     // A literal token is stored data. Read as `{{ … }}` it would become an
     // expression, and decoded it would be data choosing the run's steps.
     if crate::composition::closure::opens_stored_token(trimmed) {
-        return Err(CompositionError::SequenceInvalid(
+        return Err(CompositionError::sequence_invalid(
             "`sequence` holds a stored literal token (`{{!data:…}}`), which is data; \
-             author the list, file reference, expression, or shell expansion directly"
-                .to_string(),
+             author the list, file reference, expression, or shell expansion directly",
+            SequenceSite::unlocated(),
         ));
     }
 
@@ -131,10 +131,13 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
         && let Some(suffix) = trimmed.get(shell.close_span.end..)
         && suffix.starts_with("::")
     {
-        return Err(CompositionError::SequenceInvalid(format!(
-            "`sequence` shell source `{trimmed}` takes no suffix: `{suffix}` applies to a \
-             frontmatter value, and a sequence source must produce a list"
-        )));
+        return Err(CompositionError::sequence_invalid(
+            format!(
+                "`sequence` shell source `{trimmed}` takes no suffix: `{suffix}` applies to a \
+                 frontmatter value, and a sequence source must produce a list"
+            ),
+            SequenceSite::unlocated(),
+        ));
     }
 
     Ok(SequenceSourceSpec::Reference(parse_reference(trimmed)?))
@@ -179,6 +182,7 @@ fn parse_reference(input: &str) -> Result<SequenceReference, CompositionError> {
                 return Err(CompositionError::SequenceSourceSyntax {
                     authored: input.to_string(),
                     problem: "`->` must be followed by a dot-notation offset path".to_string(),
+                    site: Box::new(SequenceSite::unlocated()),
                 });
             }
             (head.trim(), Some(offset.to_string()))
@@ -190,6 +194,7 @@ fn parse_reference(input: &str) -> Result<SequenceReference, CompositionError> {
         return Err(CompositionError::SequenceSourceSyntax {
             authored: input.to_string(),
             problem: "missing the file reference before the suffix".to_string(),
+            site: Box::new(SequenceSite::unlocated()),
         });
     }
 
@@ -207,6 +212,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
     let open = tail.find('(').ok_or_else(|| CompositionError::SequenceSourceSyntax {
         authored: full.to_string(),
         problem: "an operator must be written `name(args)`".to_string(),
+        site: Box::new(SequenceSite::unlocated()),
     })?;
     let verb = tail[..open].trim().to_string();
 
@@ -214,6 +220,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
         CompositionError::SequenceSourceSyntax {
             authored: full.to_string(),
             problem: format!("operator `{verb}` is missing its closing `)`"),
+            site: Box::new(SequenceSite::unlocated()),
         }
     })?;
 
@@ -227,6 +234,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
         return Err(CompositionError::SequenceSourceSyntax {
             authored: full.to_string(),
             problem,
+            site: Box::new(SequenceSite::unlocated()),
         });
     }
 
@@ -242,6 +250,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
                     operator: "template".to_string(),
                     expected: 1,
                     found: 0,
+                    site: Box::new(SequenceSite::unlocated()),
                 });
             }
             Ok(SourceOperator::Template {
@@ -262,15 +271,20 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
                     operator: "map".to_string(),
                     expected: 2,
                     found,
+                    site: Box::new(SequenceSite::unlocated()),
                 }),
                 (_, found) => Err(CompositionError::SequenceOperatorArity {
                     operator: "name".to_string(),
                     expected: 1,
                     found,
+                    site: Box::new(SequenceSite::unlocated()),
                 }),
             }
         }
-        other => Err(CompositionError::SequenceUnknownOperator(other.to_string())),
+        other => Err(CompositionError::SequenceUnknownOperator {
+            operator: other.to_string(),
+            site: Box::new(SequenceSite::unlocated()),
+        }),
     }
 }
 
@@ -513,12 +527,14 @@ fn validate_task_grammar_at(
                     group: group.get("name").and_then(Value::as_str).unwrap_or("<inline>").to_string(),
                     origin: origin.to_path_buf(),
                     problem: format!("task {} must be an object, got {}", index + 1, json_type_name(leg)),
+                    site: Box::new(SequenceSite::at(origin, &format!("{group_property}.tasks[{index}]"))),
                 });
             };
             validate_task_grammar(leg, origin, &format!("{group_property}.tasks[{index}]"))?;
         }
     }
     if let Some(value) = map.get("sequence") {
+        let sequence_property = child_property(property, "sequence");
         match value {
             Value::Array(items) if descend => {
                 super::normalize::normalize_plan_at(
@@ -527,11 +543,20 @@ fn validate_task_grammar_at(
             }
             Value::Array(_) => {}
             Value::String(_) => {
-                if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
-                    return Err(CompositionError::SequenceInvalid("task `sequence` must be a list or file reference; dynamic sources belong on the sequence document".into()));
+                let spec = classify_source(value).map_err(|error| error.locate_sequence(origin, &sequence_property, None))?;
+                if !matches!(spec, SequenceSourceSpec::Reference(_)) {
+                    return Err(CompositionError::sequence_invalid(
+                        "task `sequence` must be a list or file reference; dynamic sources belong on the sequence document",
+                        SequenceSite::at(origin, &sequence_property),
+                    ));
                 }
             }
-            other => return Err(CompositionError::SequenceInvalid(format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)))),
+            other => {
+                return Err(CompositionError::sequence_invalid(
+                    format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)),
+                    SequenceSite::at(origin, &sequence_property),
+                ));
+            }
         }
     }
     Ok(())

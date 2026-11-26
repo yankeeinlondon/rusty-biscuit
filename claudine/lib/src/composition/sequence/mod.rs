@@ -226,6 +226,15 @@ pub fn resolve_sequence_plan_with(
     source: &ResolvedCompositionSource,
     options: SequenceSourceOptions<'_>,
 ) -> Result<Option<SequencePlan>, CompositionError> {
+    // A failure the source layers raised without knowing the file is the
+    // root's `sequence` value's.
+    resolve_root_plan(source, options).map_err(|error| error.locate_sequence(&source.resolved_path, "sequence", None))
+}
+
+fn resolve_root_plan(
+    source: &ResolvedCompositionSource,
+    options: SequenceSourceOptions<'_>,
+) -> Result<Option<SequencePlan>, CompositionError> {
     let fm = source.markdown.frontmatter();
     let sequence_value = match fm.as_map().get("sequence") {
         Some(v) => v.clone(),
@@ -296,6 +305,7 @@ pub fn resolve_sequence_plan_with(
         SequenceSourceSpec::Reference(reference) => {
             let path = source::resolve_sequence_reference(
                 &reference.reference,
+                model::ExecutableField::Sequence,
                 &source.resolved_path,
                 options.file_resolution_context,
             )?;
@@ -358,6 +368,7 @@ fn resolve_shell_source(
         .ok_or_else(|| CompositionError::SequenceShellFailed {
             command: command.to_string(),
             source: super::error::SequenceShellCause::Unavailable,
+            site: Box::new(super::error::SequenceSite::at(invocation_path, "sequence")),
         })?;
 
     let output = runner(command)?;

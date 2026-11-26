@@ -483,6 +483,9 @@ fn run_one_step(
             step: step_index + 1,
             name: run.plan.steps[step_index].name.clone(),
             path: live.resolved_path.clone(),
+            site: Box::new(
+                claudine::composition::SequenceSite::file(&live.resolved_path).in_task(run.plan.steps[step_index].name.clone()),
+            ),
         });
     }
 

@@ -1185,7 +1185,10 @@ Claudine walks the **entire task graph**:
   confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence. Preparation
-never degrades to best-effort.
+never degrades to best-effort. The run still returns the first failure in
+this order, but it prints every other error and warning it can prove at
+that point in one report, so one edit can fix them all; see
+[Pre-Flight Checks — When preflight stops a sequence](../pre-flight-checks.md#when-preflight-stops-a-sequence).
 
 An include that a prompt's `initialize` would create must already exist at this
 boundary. A missing include remains a typed preflight failure, with guidance to
@@ -1703,8 +1706,24 @@ Nothing runs, even with `--yolo`:
 | Inline container `$schema` | Its syntax is checked; the values it judges at its turn are not, and it is reported as not checked. The root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
 | Lifecycle events | None fire, so a value an event would `set` is not there (supply it as a setter to preview with it). A required input the root's `initialize` writes with a literal `set` is reported as not checked, not missing. |
 | `prep` | Targets do not run. |
+| Remote `::file` or `::code` | Fetched when the configured `network` permission allows the host, with nothing cached; a denied host is the same refusal a real run reports. |
 | Provider | Chosen by the same rules as a real run, and never launched. The finding lists each source it read; see [claudine sequence — Choosing providers](claudine/docs/cli/sequence.md#choosing-providers). |
 | Files | Nothing is written: no configuration, cache, approval record, or `inline-compose` write-back. |
+
+A dry run never asks, so a choice a real run would ask you for is graded by
+whether that real run could ask:
+
+- **A task with no provider** is a warning when stderr is a terminal (the
+  real run opens the provider review screen) and an error otherwise. An
+  unknown provider name, or one whose program is not on `PATH`, is an error
+  either way.
+- **A missing required input** is a warning when the real run could collect
+  every missing value (`prompt_for_missing` is on, stdin and stderr are both
+  terminals, and each value has a type the input prompt can collect), and an
+  error otherwise.
+
+Either way the exit status is `2`, so a script running without a terminal
+sees the same verdict a person would.
 
 `--dry-run-shell` was removed; it is a usage error with or without
 `--dry-run`. To see what a `shell:` task does, run the sequence.

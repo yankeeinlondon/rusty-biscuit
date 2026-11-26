@@ -12,7 +12,7 @@ use std::path::Path;
 use darkmatter::markdown::MappingOrders;
 use serde_json::{Map, Value};
 
-use super::super::error::{CompositionError, SequenceLoadCause};
+use super::super::error::{CompositionError, SequenceLoadCause, SequenceSite, SourceParseStage};
 use super::super::json_util::json_type_name;
 use super::grammar::SourceOperator;
 
@@ -86,24 +86,35 @@ pub struct LoadedDocument {
 ///
 /// ## Errors
 ///
-/// Returns [`CompositionError::SequenceExternalLoad`] carrying the typed
-/// lower-layer parse cause, including [`SequenceLoadCause::DuplicateKey`] for
-/// a JSON, JSON5, JSONL, or NDJSON object that repeats a key (YAML and
-/// frontmatter reject one in their own parser).
+/// [`CompositionError::SequenceSourceRead`] when the file cannot be read, and
+/// [`CompositionError::SequenceSourceParse`] carrying the typed lower-layer
+/// parse cause and the operation that failed, including
+/// [`SequenceLoadCause::DuplicateKey`] for a JSON, JSON5, JSONL, or NDJSON
+/// object that repeats a key (YAML and frontmatter reject one in their own
+/// parser). Both are sited at the file; the caller that knows which construct
+/// referenced it names it ([`CompositionError::referenced_as`]).
 pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
     if is_markdown(path) {
         return load_markdown_document(path).map(|(document, _)| document);
     }
-    let context = || biscuit_file::to_forward_slash_string(path);
-    let text = std::fs::read_to_string(path).map_err(|error| CompositionError::SequenceExternalLoad {
-        context: context(),
-        source: match SourceFormat::for_path(path) {
-            SourceFormat::Yaml => SequenceLoadCause::Yaml(error.into()),
-            SourceFormat::Json | SourceFormat::Json5 => SequenceLoadCause::Json5(error.into()),
-            SourceFormat::LineDelimited => SequenceLoadCause::Read(error),
-        },
+    let text = std::fs::read_to_string(path).map_err(|source| CompositionError::SequenceSourceRead {
+        field: None,
+        path: path.to_path_buf(),
+        site: Box::new(SequenceSite::file(path)),
+        source,
     })?;
     load_document_from_text(path, &text)
+}
+
+/// The [`CompositionError::SequenceSourceParse`] of `path` failing at `stage`.
+fn parse_failure(path: &Path, stage: SourceParseStage, source: SequenceLoadCause) -> CompositionError {
+    CompositionError::SequenceSourceParse {
+        field: None,
+        path: path.to_path_buf(),
+        stage,
+        site: Box::new(SequenceSite::file(path)),
+        source,
+    }
 }
 
 /// [`load_document`] over `text`, the content of the YAML, JSON, JSON5,
@@ -118,36 +129,28 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
 ///
 /// As [`load_document`], with the same text for the same content.
 pub fn load_document_from_text(path: &Path, text: &str) -> Result<LoadedDocument, CompositionError> {
-    let context = || biscuit_file::to_forward_slash_string(path);
     match SourceFormat::for_path(path) {
         SourceFormat::Yaml => {
-            let yaml = biscuit_file::Yaml::from_str(text).map_err(|e| {
-                CompositionError::SequenceExternalLoad {
-                    context: context(),
-                    source: SequenceLoadCause::Yaml(e),
-                }
-            })?;
+            let yaml = biscuit_file::Yaml::from_str(text)
+                .map_err(|e| parse_failure(path, SourceParseStage::Yaml, SequenceLoadCause::Yaml(e)))?;
             let orders = MappingOrders::collect(yaml.value());
             let value = yaml
                 .as_json()
-                .map_err(|e| CompositionError::SequenceExternalLoad {
-                    context: context(),
-                    source: SequenceLoadCause::Yaml(e),
-                })?;
+                .map_err(|e| parse_failure(path, SourceParseStage::YamlConversion, SequenceLoadCause::Yaml(e)))?;
             Ok(LoadedDocument { value, orders })
         }
         SourceFormat::Json | SourceFormat::Json5 => {
-            let json5_failure = |e| CompositionError::SequenceExternalLoad {
-                context: context(),
-                source: SequenceLoadCause::Json5(e),
-            };
-            let json5 = biscuit_file::Json5::from_str(text).map_err(json5_failure)?;
+            let json5 = biscuit_file::Json5::from_str(text)
+                .map_err(|e| parse_failure(path, SourceParseStage::Json5, SequenceLoadCause::Json5(e)))?;
             // `serde_json::Value` keeps the last of two equal keys, so the
             // raw text is checked before that conversion is trusted.
-            if let DuplicateScan(Some(duplicate)) = json5.deserialize_raw::<DuplicateScan>().map_err(json5_failure)? {
-                return Err(duplicate.into_error(context(), None));
+            let scan_failure = |e| parse_failure(path, SourceParseStage::DuplicateKey, SequenceLoadCause::Json5(e));
+            if let DuplicateScan(Some(duplicate)) = json5.deserialize_raw::<DuplicateScan>().map_err(scan_failure)? {
+                return Err(duplicate.into_error(path, None));
             }
-            let orders = json5.deserialize_raw::<MappingOrders>().map_err(json5_failure)?;
+            let orders = json5
+                .deserialize_raw::<MappingOrders>()
+                .map_err(|e| parse_failure(path, SourceParseStage::Json5, SequenceLoadCause::Json5(e)))?;
             Ok(LoadedDocument {
                 value: json5.as_json_value().clone(),
                 orders,
@@ -188,15 +191,11 @@ fn parse_line_delimited(path: &Path, text: &str) -> Result<Value, CompositionErr
         if line.is_empty() {
             continue;
         }
-        let line_failure = |e| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_forward_slash_string(path),
-            source: SequenceLoadCause::JsonLine {
-                line: offset + 1,
-                source: e,
-            },
+        let line_failure = |e| {
+            parse_failure(path, SourceParseStage::JsonLine, SequenceLoadCause::JsonLine { line: offset + 1, source: e })
         };
         if let DuplicateScan(Some(duplicate)) = serde_json::from_str::<DuplicateScan>(line).map_err(line_failure)? {
-            return Err(duplicate.into_error(biscuit_file::to_forward_slash_string(path), Some(offset + 1)));
+            return Err(duplicate.into_error(path, Some(offset + 1)));
         }
         let value: Value = serde_json::from_str(line).map_err(line_failure)?;
         items.push(value);
@@ -216,15 +215,19 @@ struct DuplicateKey {
 }
 
 impl DuplicateKey {
-    fn into_error(self, context: String, line: Option<usize>) -> CompositionError {
-        CompositionError::SequenceExternalLoad {
-            context,
-            source: SequenceLoadCause::DuplicateKey {
-                key: self.key,
-                path: if self.path.is_empty() { "<root>".to_string() } else { self.path },
-                line,
-            },
+    fn into_error(self, file: &Path, line: Option<usize>) -> CompositionError {
+        let mut error = parse_failure(file, SourceParseStage::DuplicateKey, SequenceLoadCause::DuplicateKey {
+            key: self.key.clone(),
+            path: if self.path.is_empty() { "<root>".to_string() } else { self.path.clone() },
+            line,
+        });
+        // A data document's own property path: `sequence[1].group.name`.
+        if let CompositionError::SequenceSourceParse { site, .. } = &mut error
+            && line.is_none()
+        {
+            site.property = Some(if self.path.is_empty() { self.key } else { format!("{}.{}", self.path, self.key) });
         }
+        error
     }
 }
 
@@ -318,6 +321,7 @@ pub fn apply_offset<'a>(root: &'a Value, path: &str) -> Result<&'a Value, Compos
                 path: path.to_string(),
                 failed_at: walked.clone(),
                 found: json_type_name(current).to_string(),
+                site: Box::new(SequenceSite { property: Some(walked.clone()), ..SequenceSite::unlocated() }),
             }
         })?;
     }
@@ -337,6 +341,7 @@ pub fn expect_list(value: &Value, path: Option<&str>) -> Result<Vec<Value>, Comp
         .ok_or_else(|| CompositionError::SequenceOffsetNotAList {
             path: path.unwrap_or("<root>").to_string(),
             found: json_type_name(value).to_string(),
+            site: Box::new(SequenceSite { property: path.map(str::to_string), ..SequenceSite::unlocated() }),
         })
 }
 
@@ -344,7 +349,8 @@ pub fn expect_list(value: &Value, path: Option<&str>) -> Result<Vec<Value>, Comp
 ///
 /// ## Errors
 ///
-/// Every failure names the zero-based item index that caused it.
+/// Every failure names the zero-based item index that caused it, unlocated:
+/// the caller knows the file the items came from.
 pub fn apply_operator(
     items: Vec<Value>,
     operator: &SourceOperator,
@@ -368,6 +374,7 @@ fn apply_operator_to_item(
             operator: operator.verb().to_string(),
             index,
             found: json_type_name(&item).to_string(),
+            site: Box::new(SequenceSite::unlocated()),
         });
     };
 
@@ -392,6 +399,7 @@ fn apply_operator_to_item(
                 return Err(CompositionError::SequenceOperatorEmptyName {
                     index,
                     expression: expr.clone(),
+                    site: Box::new(SequenceSite::unlocated()),
                 });
             }
             map.insert("name".to_string(), Value::String(name));
@@ -414,5 +422,6 @@ fn take_field(
             operator: operator.verb().to_string(),
             field: field.to_string(),
             index,
+            site: Box::new(SequenceSite::unlocated()),
         })
 }

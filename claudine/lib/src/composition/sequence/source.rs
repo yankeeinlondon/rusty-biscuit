@@ -18,12 +18,12 @@ use biscuit_file::{FileReference, FileResolutionContext};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
-use super::super::error::{CompositionError, SequenceLoadCause};
+use super::super::error::{CompositionError, SequenceLoadCause, SequenceSite};
 use super::data::{self, SourceFormat};
 use super::expr::{DocumentFrontmatter, SourceExpressionLookup};
 use super::formal;
 use super::grammar::{SequenceReference, SourceOperator};
-use super::model::{SequencePlan, SequenceSource};
+use super::model::{ExecutableField, SequencePlan, SequenceSource};
 use super::SequenceSourceOptions;
 use super::normalize::normalize_plan_at;
 
@@ -38,29 +38,42 @@ use super::normalize::normalize_plan_at;
 /// fallback here. The source's context is derived from the request's
 /// (`for_source`), so repository anchors come from the request, not from a
 /// fresh discovery.
+///
+/// ## Errors
+///
+/// [`CompositionError::SequenceReferenceResolution`] naming `field`'s
+/// construct, with the resolver's probe record once the reference parses.
+/// Its site is unlocated: the caller knows the property that authored the
+/// reference ([`CompositionError::locate_sequence`]).
 pub fn resolve_sequence_reference(
     raw: &str,
+    field: ExecutableField,
     source_path: &Path,
     request_context: &FileResolutionContext,
 ) -> Result<PathBuf, CompositionError> {
-    let file_ref = FileReference::new(raw).map_err(|e| {
-        CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: e.into(),
+    let failure = |file_ref: Option<&FileReference>, source: SequenceLoadCause| {
+        // The probe record is rebuilt only for a failure, so a resolving
+        // reference costs one resolution.
+        let resolution = file_ref.map(|file_ref| {
+            let detailed = file_ref.resolve_detailed(&request_context.for_source(source_path));
+            Box::new(crate::harness::ResolutionDetail::from_detailed(&detailed))
+        });
+        CompositionError::SequenceReferenceResolution {
+            field,
+            reference: raw.to_string(),
+            resolution,
+            site: Box::new(SequenceSite::unlocated()),
+            source,
         }
-    })?;
-    file_ref
-        .resolve_in_context(&request_context.for_source(source_path))
-        .map_err(|e| CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: e.into(),
-        })?
-        .ok_or_else(|| CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: SequenceLoadCause::NotFound {
-                glob_hint: biscuit_file::ResolutionFailure::NoMatch.glob_hint(raw),
-            },
-        })
+    };
+    let file_ref = FileReference::new(raw).map_err(|e| failure(None, e.into()))?;
+    match file_ref.resolve_in_context(&request_context.for_source(source_path)) {
+        Ok(Some(path)) => Ok(path),
+        Ok(None) => Err(failure(Some(&file_ref), SequenceLoadCause::NotFound {
+            glob_hint: biscuit_file::ResolutionFailure::NoMatch.glob_hint(raw),
+        })),
+        Err(error) => Err(failure(Some(&file_ref), error.into())),
+    }
 }
 
 /// The [`missing_document`] finding for `raw`, authored in `source_path`,
@@ -182,11 +195,15 @@ fn plan_referenced(
         return Err(CompositionError::SequenceOffsetUnsupported {
             path: path.to_path_buf(),
             format: line_delimited_label(path),
+            site: Box::new(SequenceSite::file(path)),
         });
     }
 
     let formal = is_formal_sequence(document, reference);
-    let items = select_items(document, reference, formal)?;
+    let list_property = reference.offset.as_deref().unwrap_or("");
+    // The data layer does not know the file it reads items from.
+    let located = |error: CompositionError| error.locate_sequence(path, list_property, None);
+    let items = select_items(document, reference, formal, path).map_err(located)?;
 
     let items = match &reference.operator {
         Some(operator) => apply_source_operator(
@@ -195,7 +212,8 @@ fn plan_referenced(
             frontmatter,
             invocation_path,
             file_resolution_context,
-        )?,
+        )
+        .map_err(located)?,
         None => items,
     };
 
@@ -246,7 +264,6 @@ fn plan_referenced(
     }
 
     let source = SequenceSource::DataFile { path: path.to_path_buf() };
-    let list_property = reference.offset.as_deref().unwrap_or("");
     if recover {
         let recovered = super::normalize::normalize_plan_recovering_at(
             &items, source, invocation_path, document_fail_fast, list_property,
@@ -314,6 +331,7 @@ fn select_items(
     document: &Value,
     reference: &SequenceReference,
     formal: bool,
+    path: &Path,
 ) -> Result<Vec<Value>, CompositionError> {
     if let Some(offset) = &reference.offset {
         let node = data::apply_offset(document, offset)?;
@@ -334,18 +352,22 @@ fn select_items(
     // `list:` form is retired. Naming it explicitly beats "must have `sequence`"
     // for the authors who have to migrate.
     if root.contains_key("list") {
-        return Err(CompositionError::SequenceExternalWrongType(
-            "the `list:` sequence shape has been removed; rename the property to `sequence:` \
+        return Err(CompositionError::SequenceExternalWrongType {
+            path: path.to_path_buf(),
+            problem: "the `list:` sequence shape has been removed; rename the property to `sequence:` \
              (the same shape now works both when referenced and when invoked directly)"
                 .to_string(),
-        ));
+            site: Box::new(SequenceSite::at(path, "list")),
+        });
     }
 
-    Err(CompositionError::SequenceExternalWrongType(
-        "sequence file must have a root `sequence:` list, be a list at its root, or be \
+    Err(CompositionError::SequenceExternalWrongType {
+        path: path.to_path_buf(),
+        problem: "it must have a root `sequence:` list, be a list at its root, or be \
          reached with a `-> offset` path"
             .to_string(),
-    ))
+        site: Box::new(SequenceSite::file(path)),
+    })
 }
 
 /// Apply a `::map`/`::name`/`::template` operator to every item.

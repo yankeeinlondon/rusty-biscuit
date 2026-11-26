@@ -422,6 +422,7 @@ impl TaskExecution<'_> {
                     let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
                         &CompositionError::SequenceTaskUnsupported {
                             task: self.label(), construct: "nested container recovery".into(), detail: format!("{decision:?}"),
+                            site: Box::new(self.task.error_site()),
                         });
                     error = Some(diagnostic.info);
                     runner.set_error(error.as_ref().unwrap().clone());
@@ -540,6 +541,7 @@ impl TaskExecution<'_> {
             return Err(CompositionError::SequenceShellResolution {
                 command: command.command.clone(), task: self.label(),
                 message: "nested source introduced a command after sequence approval closed".into(), source: None,
+                site: Box::new(self.task.error_site()),
             });
         }
         for candidate in &fresh.template_candidates {
@@ -548,12 +550,13 @@ impl TaskExecution<'_> {
                 return Err(CompositionError::SequenceShellResolution {
                     command: candidate.authored().unwrap_or("").into(), task: self.label(),
                     message: "nested source introduced a template after sequence approval closed".into(), source: None,
+                    site: Box::new(self.task.error_site()),
                 });
             }
         }
         for document in &fresh.prompt_documents {
             if self.graph.prompt_document(&document.path).is_none() {
-                return Err(CompositionError::SequenceInvalid("nested source introduced an unapproved prompt document".into()));
+                return Err(CompositionError::sequence_invalid("nested source introduced an unapproved prompt document", self.task.error_site()));
             }
         }
         if let Some(authorization) = self.graph.shell_authorization() {
@@ -571,9 +574,11 @@ impl TaskExecution<'_> {
                 PreflightAction::Group(group) => &group.origin_path,
                 _ => &self.task.origin_path,
             };
+            // A container proxy's target is a container document.
             let path = crate::composition::sequence::source::resolve_sequence_reference(
-                target, source, self.stack.file_resolution_context,
-            )?;
+                target, crate::composition::sequence::model::ExecutableField::Sequence, source, self.stack.file_resolution_context,
+            )
+            .map_err(|error| error.locate_sequence(source, "", Some(&self.label())))?;
             let path = biscuit_file::canonicalize_simplified(&path).unwrap_or(path);
             let owned_runtime = Arc::new(RuntimeState::new_sequence());
             let runtime = self.runtime.unwrap_or(&owned_runtime);
@@ -602,6 +607,7 @@ impl TaskExecution<'_> {
                 return Err(CompositionError::SequenceTaskUnsupported {
                     task: self.label(), construct: "container proxy".into(),
                     detail: format!("target `{target}` was not approved during sequence preflight"),
+                    site: Box::new(self.task.error_site()),
                 });
             }
             let mut task = self.task.clone();
