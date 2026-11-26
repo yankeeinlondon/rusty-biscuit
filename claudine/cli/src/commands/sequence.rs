@@ -91,7 +91,7 @@ fn reject_sequence_interactive(
 /// that `sequence`, `prompt`, `name`, `description`, `$schema`, and other keys
 /// behave exactly as they would in a Markdown frontmatter block.
 #[allow(clippy::result_large_err)]
-fn resolve_sequence_source(
+pub(crate) fn resolve_sequence_source(
     file_ref: &str,
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedCompositionSource, CompositionError> {

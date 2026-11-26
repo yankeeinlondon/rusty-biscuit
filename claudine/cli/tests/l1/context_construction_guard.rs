@@ -39,6 +39,12 @@ const ALLOWLIST: &[Allowance] = &[
     },
     ambient("argv/mod.rs", "std::env::var_os", 1, "`COMPLETE` selects clap's dynamic completion mode"),
     ambient(
+        "commands/document_check/mod.rs",
+        "std::env::var_os",
+        1,
+        "test-fixtures-only seam that turns the passive document check on; it supplies no file resolution or ctx values",
+    ),
+    ambient(
         "request.rs",
         "biscuit_file::capture_env",
         1,

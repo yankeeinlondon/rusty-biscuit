@@ -522,6 +522,17 @@ async fn dispatch(
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
+    // The passive document check is dispatched before tracing, the
+    // Darkmatter configuration load (which can create or migrate files), the
+    // wrapper, and first-run setup, and it reports every failure itself. It
+    // does not yet replace `--dry-run` (see `document_check::enabled`).
+    if !cli.help
+        && let Some((mode, shared, args)) = cli.command.as_ref().and_then(commands::document_check::dry_run_request)
+        && let Some(format) = commands::document_check::enabled()
+    {
+        return Ok(commands::document_check::run(mode, format, shared, args));
+    }
+
     let tracing_start = std::time::Instant::now();
     telemetry::init_tracing(cli.debug);
     let root_span = telemetry::root_span(&cli);

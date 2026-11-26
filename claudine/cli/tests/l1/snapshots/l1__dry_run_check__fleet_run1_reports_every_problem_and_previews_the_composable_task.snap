@@ -1,0 +1,35 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: run.stderr
+---
+Dry run of renderers/_fleet.yaml (no commands run)
+
+task find (sequence[0])
+  ⚠ `agent: opencode` is step data (read as `seq.agent`), not the task's
+    provider
+      at renderers/_fleet.yaml:5:7
+      hint: to choose the provider, move it into the task's inputs:
+            `with: { agent: opencode }`
+  ⚠ `model: gemini/neon` is step data (read as `seq.model`), not the task's
+    model
+      at renderers/_fleet.yaml:6:7
+      hint: to choose the model, move it into the task's inputs: `with: {
+            model: gemini/neon }`
+  ✗ no provider for this task; a non-interactive run fails here
+      1. --provider flag             not given
+      2. agent= setter               not given
+      3. with.agent                  not set (see `agent:` above)
+      4. _find.md frontmatter agent  not set
+      5. _fleet.yaml agent           not set
+      hint: add `with: { agent: opencode }`, or run with `--provider
+            opencode`
+  ℹ not checked: model requirement (no provider)
+
+task metadata (sequence[1])
+  ✗ this task has no executable, so it would compose the body of
+    renderers/_fleet.yaml, and a YAML file has no body
+      at renderers/_fleet.yaml:10:7
+      hint: add an executable such as `prompt: ./metadata.md`
+  ℹ not checked: provider, inputs (no executable)
+
+Dry run found 2 errors and 2 warnings; 3 checks not run. Previewed 1 of 2 tasks.

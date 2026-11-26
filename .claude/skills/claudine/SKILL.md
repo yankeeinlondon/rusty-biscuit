@@ -485,6 +485,20 @@ approval inventory of `prep` targets. `--dry-run` renders `shell:` and
 previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
 literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
 `--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
+The passive document check that will replace this preview lives in
+`cli/src/commands/document_check.rs`: dispatched from `main.rs::dispatch`
+before tracing, `request::darkmatter_config()`, the wrapper, and
+`ensure_config_exists`, but only when `document_check::enabled()` (today a
+`test-fixtures` build with `CLAUDINE_TEST_PASSIVE_DRY_RUN=1`; `--json` is a
+hidden flag refused otherwise). It walks the root's `sequence` items into a
+`darkmatter::findings::FindingSink` and previews prompts with
+`ComposeOptions::with_dry_run()`, under which Darkmatter skips every document
+command before approval (`ShellExpansionError::SkippedInDryRun`). Before it
+becomes `--dry-run` it must walk the tree through the library preflight
+loader (dynamic sources, groups, task files, catalogs); the old preview's
+L1 suites (`sequence_sources_cli`, `sequence_errors_cli`, `entry_point_parity`,
+…) read its output and must migrate in the same change. Tests:
+`cli/tests/l1/dry_run_check.rs`, fixtures `cli/tests/fixtures/check/`.
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,

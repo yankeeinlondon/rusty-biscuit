@@ -7,6 +7,7 @@ pub mod context;
 pub mod context_render;
 pub mod dashboard;
 pub mod doctor;
+pub mod document_check;
 pub mod errors;
 pub mod exec_prep;
 pub mod handle;

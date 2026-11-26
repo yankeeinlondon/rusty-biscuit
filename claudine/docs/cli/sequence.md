@@ -427,6 +427,43 @@ the preview, for real (`git add` stages); it never launches a provider, runs
 no `side_effect:` task, and turns no loop or lifecycle event back on.
 `--dry-run-shell` without `--dry-run` is a usage error.
 
+### Passive check (planned)
+
+`--dry-run` will become a passive check that runs nothing at all and reports
+every problem in one pass, instead of stopping at the first:
+
+```text
+Dry run of renderers/_fleet.yaml (no commands run)
+
+task metadata (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./_frontmatter.md
+      resolved to renderers/_frontmatter.md (relative to renderers/_fleet.yaml)
+      at renderers/_fleet.yaml:12:15
+      hint: create renderers/_frontmatter.md before a real run, or
+            correct the reference
+  ℹ not checked: provider, inputs (the prompt file could not be read)
+
+Dry run found 1 error and 0 warnings; 2 checks not run. Previewed 0 of 1 task.
+```
+
+**Planned** behavior, not yet what `--dry-run` does:
+
+- No command runs, even with `--yolo`: `$( … )` values, `::shell` lines, and
+  `shell:` tasks are skipped and reported as not checked, and no approval is
+  asked for. `--dry-run-shell` is removed.
+- Each task is checked for a step-level `agent:`/`model:` (step data, not the
+  provider), a missing executable over a body-less document, a missing
+  `prompt:` file (with the resolved path and up to three nearby files), the
+  provider chain and whether the provider is on `PATH`, and a model the
+  provider requires.
+- The report goes to stderr and the previews to stdout; `--json` prints one
+  report (`file`, `outcome`, `diagnostics`, `summary`) on stdout. The exit
+  status is `2` when any finding is an error or a warning, else `0`.
+- No configuration, cache, or other file is created.
+
+Until then, `--json` is refused with a usage error.
+
 ## Flags
 
 Flags shared with `compose`:

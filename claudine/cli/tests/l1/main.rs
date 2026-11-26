@@ -81,6 +81,7 @@ mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
 mod doctor;
+mod dry_run_check;
 // Reads the `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS` seam, which only
 // `test-fixtures` builds compile into the binary.
 #[cfg(feature = "test-fixtures")]

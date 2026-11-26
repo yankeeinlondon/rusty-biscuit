@@ -97,6 +97,19 @@ impl ExecutableField {
         }
     }
 
+    /// What a person calls the executable's target in a diagnostic, such as
+    /// `prompt file`; [`key`](Self::key) is the authored property name.
+    pub fn noun(self) -> &'static str {
+        match self {
+            ExecutableField::Prompt => "prompt file",
+            ExecutableField::Shell => "shell command",
+            ExecutableField::SideEffect => "side effect",
+            ExecutableField::Group => "group",
+            ExecutableField::Task => "task file",
+            ExecutableField::Sequence => "sequence",
+        }
+    }
+
     /// Resolve a frontmatter key to its executable variant, if it is one.
     pub fn from_key(key: &str) -> Option<Self> {
         match key {

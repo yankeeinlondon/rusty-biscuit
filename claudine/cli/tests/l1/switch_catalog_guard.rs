@@ -131,9 +131,10 @@ fn switch_metadata_is_never_written_by_hand() {
 }
 
 /// Ownership is decided once per invocation: the pure classifier has one
-/// production caller, and that caller is reached only from the two command
-/// entry points (`compose`/`inline-compose` share `prep.rs`), never from a
-/// retry, resume, proxy, or step launch path.
+/// production caller, and that caller is reached only from the command entry
+/// points (`compose`/`inline-compose` share `prep.rs`; the passive document
+/// check owns its own invocation), never from a retry, resume, proxy, or
+/// step launch path.
 #[test]
 fn composition_arguments_are_classified_once_per_invocation() {
     let files = sources();
@@ -147,6 +148,7 @@ fn composition_arguments_are_classified_once_per_invocation() {
         [
             "cli/src/commands/compose/ownership.rs",
             "cli/src/commands/compose/prep.rs",
+            "cli/src/commands/document_check/mod.rs",
             "cli/src/commands/sequence.rs",
         ],
         "each command entry point classifies once (plus the definition)"

@@ -362,3 +362,11 @@ symbol = "check_member"
 tag = "retained"
 reason = """
 The build-time member envelope check; its refusal becomes a line of the build's panic message (see the `walk` entry for this file)."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/document_check/mod.rs"
+symbol = "Check::run"
+tag = "retained"
+reason = """
+The passive document check records a refused command-line argument (a malformed setter or `--set` value from `parse_composition_positionals`/`merge_set_overrides`, both `eyre` reports with no typed cause) as one `composition.invalid_arguments` finding whose message is that report's text. This is the final render into the dry-run report; nothing is returned."""
