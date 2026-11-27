@@ -163,6 +163,40 @@ let resolved = buffers::with_reads_retained(|| {
 });
 ```
 
+A retained scope ends with its host operation. A host whose work spans many
+operations and threads, such as a dry run that checks one document in
+several passes, keeps one `resolve::buffers::SharedReads` for the whole run
+instead. Put it in force on a thread with
+`resolve::buffers::enter_shared_reads(reads.clone())` (or run a closure under
+`with_shared_reads`): every file the resolver reads from the disk there is
+opened once for the whole `SharedReads`, and later reads, from any thread
+that holds a clone, get the first read's bytes. A host reads its own
+sources the same way with `SharedReads::read(path)`, which returns the bytes
+and the modification time from one open (`ReadSource`). A failed read is
+not kept. Guards still run first, so a path a guard refuses is refused even
+when the shared reads already hold it:
+
+```rust
+let reads = buffers::SharedReads::default();
+let first = buffers::with_shared_reads(&reads, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+let again = buffers::with_shared_reads(&reads, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+// the schema file was opened once; both resolutions saw the same bytes
+```
+
+A host can also keep work it derives from those bytes for the life of the
+observation: `SharedReads::memo::<T>()` returns the observation's one `T`
+(made on first request, shared by every clone), and
+`resolve::buffers::shared_reads_alone()` returns the `SharedReads` in force
+only while every schema read on the thread comes from it (no guard or bundle
+scope, no editor buffer), which is when that work is still what a fresh
+resolution would produce. Darkmatter keeps its prepared effective schemas
+this way.
+
+`resolve::buffers::open_source(path)` is that one open, for a reader with no
+`SharedReads`. A test can count how often it ran with
+`work_counters::source_opens(path)` (`work-counters` feature), and a host's
+test build can log every open with `resolve::buffers::observe_opens`.
+
 A host that must approve each file before it is read (Darkmatter's schema
 slots, whose reads need a grant) wraps the resolution in
 `resolve::buffers::guarded(guard, || ...)`. The guard is asked with each path

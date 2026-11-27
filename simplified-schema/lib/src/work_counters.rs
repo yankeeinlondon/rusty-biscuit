@@ -176,3 +176,23 @@ impl WorkSnapshot {
 pub fn snapshot() -> WorkSnapshot {
     WorkSnapshot { counts: COUNTS.iter().map(|count| count.load(Ordering::Relaxed)).collect() }
 }
+
+/// Every local source opened through
+/// [`buffers::open_source`](crate::resolve::buffers::open_source), each
+/// path in [`SourceBuffers::key`](crate::resolve::buffers::SourceBuffers::key)
+/// form, in open order.
+static SOURCE_OPENS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Records one open of the local source at `path`.
+pub(crate) fn note_source_open(path: &std::path::Path) {
+    let key = crate::resolve::buffers::SourceBuffers::key(path);
+    SOURCE_OPENS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(key);
+}
+
+/// How many times the local source at `path` has been opened through
+/// [`buffers::open_source`](crate::resolve::buffers::open_source), by
+/// whichever reader: a read-once contract's measure.
+pub fn source_opens(path: &std::path::Path) -> usize {
+    let key = crate::resolve::buffers::SourceBuffers::key(path);
+    SOURCE_OPENS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().filter(|opened| **opened == key).count()
+}
