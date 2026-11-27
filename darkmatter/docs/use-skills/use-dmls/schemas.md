@@ -250,7 +250,9 @@ $schema:
   value stays valid. It applies to the object that declares
   `$advise-unknown-keys`, not to objects that extend it.
 - **An unknown key** on a closed object ends its message with
-  ``did you mean `name`?`` when one declared key is near it.
+  ``did you mean `name`?`` when one declared key is near it, and
+  otherwise ``remove `zzz`, or use one of `name`, `tags` `` (at most
+  eight declared keys, then `…`).
 
 ## Schema triggers
 

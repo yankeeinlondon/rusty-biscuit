@@ -122,6 +122,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::collection_blocks::diagnostics::CALLBACK_FAILED_CODE, "a `::map` / `::filter` callback that failed"),
     (super::collection_blocks::diagnostics::VISIT_LIMIT_CODE, "a collection iteration that exceeded the visit limit"),
     (super::collection_blocks::diagnostics::EXPANSION_LIMIT_CODE, "a collection expansion that exceeded the byte limit"),
+    (simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE, "a key an open object accepts as data that closely resembles a declared field"),
     (crate::findings::EMPTY_BODY_CODE, "a composed body that is proven empty"),
     (crate::findings::NOT_CHECKED_CODE, "a check that could not run, with the finding that blocked it (always info)"),
 ];
@@ -248,5 +249,21 @@ mod tests {
         codes.dedup();
         assert_eq!(codes.len(), count);
         assert!(codes.iter().all(|code| code.starts_with("dm.")));
+    }
+
+    /// Every warning a composition reports under its own code is nameable by
+    /// `--deny`: the advisories this catalog's findings report join it.
+    #[test]
+    fn the_catalog_names_the_reported_advisory_warnings() {
+        for code in [
+            simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE,
+            crate::findings::EMPTY_BODY_CODE,
+            MISSING_TRANSCLUSION_CODE,
+        ] {
+            assert!(
+                COMPOSE_DIAGNOSTIC_CODES.iter().any(|(registered, _)| *registered == code),
+                "`{code}` is reported as a warning but `--deny` cannot name it"
+            );
+        }
     }
 }

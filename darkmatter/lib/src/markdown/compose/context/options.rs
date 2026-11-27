@@ -2254,16 +2254,20 @@ impl ComposeOptions {
     /// caller that configures an allowed host via [`with_remote_read_config`],
     /// or whose configuration says `network: allow`, enables them without
     /// also opting into remote transclusion. Block transclusion keeps its own
-    /// explicit [`with_allow_remote_transclusion`] gate. An empty allowlist
-    /// and a denied `network` with the transclusion flag unset mean remote
-    /// reads stay fully disabled, preserving the deny-all default.
+    /// explicit [`with_allow_remote_transclusion`] gate. A configured
+    /// `network: ask` enables them too, so a URL read reports the approval
+    /// it needs. An empty allowlist and a denied `network` with the
+    /// transclusion flag unset mean remote reads stay fully disabled,
+    /// preserving the deny-all default.
     ///
     /// [`with_remote_read_config`]: Self::with_remote_read_config
     /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
     pub(crate) fn remote_reads_enabled(&self) -> bool {
+        let network = self.network_permission();
         self.allow_remote_transclusion
             || self.remote_read_config.http_hosts().next().is_some()
-            || self.network_permission().allows_every_host()
+            || network.allows_every_host()
+            || network.requires_approval()
     }
 
     /// The request's ICMP authority with its grants derived from the
@@ -3462,6 +3466,7 @@ fn encode_network_permission(enc: &mut GraphIdentityEncoder, network: &crate::co
     match network {
         NetworkPermission::Deny => enc.tag(0),
         NetworkPermission::Allow => enc.tag(1),
+        NetworkPermission::Ask => enc.tag(3),
         NetworkPermission::Invalid(error) => {
             enc.tag(2);
             enc.str(&error.to_string());

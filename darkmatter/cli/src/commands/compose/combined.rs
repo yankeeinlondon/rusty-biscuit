@@ -14,10 +14,13 @@
 //!   known-false condition excludes is evidence even when its own reference
 //!   is broken, while a construct the dry run left as written (a condition
 //!   or value that waits on a command) never proves the body empty, so the
-//!   check is reported `not checked` instead.
+//!   check is reported `not checked` instead, as it is when the passive
+//!   composition fails for another reason (an expression such as
+//!   `{{ 3 / 0 }}`), since the body then has no verdict.
 //!
 //! When those checks add nothing, the run prints the reference report it
-//! always printed. When they add a finding, the run prints one
+//! always printed. When they add a finding or a `not checked` row, the run
+//! prints one
 //! [`FindingReport`] for the document instead: the reference findings first,
 //! then the others, then the checks that could not run, and a closing tally.
 //!
@@ -305,8 +308,7 @@ impl Collector {
                     BodyVerdict::Deferred(reason) => self.not_checked(AFTER_PREPARATION, &reason, None),
                     BodyVerdict::Empty(cause) => {
                         let finding = empty_body_finding(&cause, self.document.clone(), true);
-                        self.sink.push(self.subject, finding);
-                        self.contributed = true;
+                        self.push_all(vec![finding]);
                     }
                 }
             }
@@ -321,13 +323,17 @@ impl Collector {
                 }
                 // A failure of another family (an expression, a shell
                 // command) is the composition's to report once the
-                // references are fixed. The empty body is not checked, but
-                // saying so alone would turn the reference report into a
-                // combined one for a check nobody asked about.
+                // references are fixed; it still leaves the body unjudged,
+                // and that verdict is reported.
                 None => {
-                    for check in AFTER_PREPARATION {
-                        self.sink.not_checked(self.subject, check, "the document did not compose", None);
-                    }
+                    let reason = error_diagnostics(&failure.error)
+                        .first()
+                        .and_then(|record| record.message.lines().next().map(str::to_string))
+                        .map_or_else(
+                            || "the document did not compose".to_string(),
+                            |cause| format!("the document did not compose: {cause}"),
+                        );
+                    self.not_checked(AFTER_PREPARATION, &reason, None);
                 }
             },
         }

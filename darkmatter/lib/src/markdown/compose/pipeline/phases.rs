@@ -352,10 +352,30 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(
-                transclusion::parse_directives_in(&self.content, data, self.source_context_for_errors(), 0)
-                    .map_err(|error| error.at_authored_directive(self, origin, 0))?,
+            // A dry run leaves a directive whose line holds a value it could
+            // not produce as written: its target is no path to resolve.
+            let session = options.passive_session();
+            let deferred = |line: &str| session.and_then(|session| session.deferred_span_in(line));
+            let (directives, set_aside) = transclusion::parse_directives_deferring(
+                &self.content,
+                data,
+                self.source_context_for_errors(),
+                0,
+                &deferred,
             )
+            .map_err(|error| error.at_authored_directive(self, origin, 0))?;
+            if let Some(session) = session {
+                for directive in set_aside {
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                        reason: directive.reason,
+                        authored: directive.text,
+                        key: None,
+                        line: None,
+                    });
+                }
+            }
+            Some(directives)
         } else {
             None
         };
@@ -602,7 +622,7 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(tolerated_failure_warning(&error, self.generated_identity()));
+                    skipped.add_warning(tolerated_failure_warning(&error, self.generated_identity(), anchor.inclusion.as_ref()));
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
@@ -759,10 +779,17 @@ fn at_directive_site(
 /// directive in a document whose lines count generated text (`generated` is
 /// its identity) is worded without its line; a child's keeps its own, and
 /// names the child's file. A directive failure placed at its authored opener
-/// keeps that position. Out of line: the caller's frame recurs once per
-/// nested composition.
+/// keeps that position. A failure with no site of its own (a child whose
+/// frontmatter does not parse) is reported at `inclusion`, the inclusion that
+/// was left out, and any failure no other code describes takes the
+/// tolerated-transclusion code. Out of line: the caller's frame recurs once
+/// per nested composition.
 #[inline(never)]
-pub(crate) fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path::Path>) -> ComposeWarning {
+pub(crate) fn tolerated_failure_warning(
+    error: &MarkdownError,
+    generated: Option<&std::path::Path>,
+    inclusion: Option<&transclusion::InclusionSite>,
+) -> ComposeWarning {
     let failure = error.resolution_failure();
     // A child's inclusion target failure names the child's own inclusion.
     let located = match error.without_iteration() {
@@ -780,7 +807,9 @@ pub(crate) fn tolerated_failure_warning(error: &MarkdownError, generated: Option
                 super::super::policy::COMPOSE_DIAGNOSTIC_CODES.iter().any(|(registered, _)| registered == code)
             })
         })
-        .map(str::to_string);
+        .unwrap_or(super::super::report_diagnostics::TRANSCLUSION_FAILURE_CODE)
+        .to_string();
+    let code = Some(code);
     let (message, document) = match error {
         MarkdownError::TocLinking(toc) if generated.is_some() && toc.document() == generated => (toc.reason(), None),
         MarkdownError::FileLinks(links) if generated.is_some() && links.document() == generated => (links.reason(), None),
@@ -797,7 +826,12 @@ pub(crate) fn tolerated_failure_warning(error: &MarkdownError, generated: Option
     if let Some(opener) = authored {
         warning = warning.at_authored(None, opener);
     }
-    warning.attribute_to(document.or(site.map(|site| site.file())));
+    // A failure that names no place of its own is the inclusion's.
+    let fallback = (authored.is_none() && document.is_none() && site.is_none()).then_some(inclusion).flatten();
+    if let Some(opener) = fallback.and_then(transclusion::InclusionSite::authored) {
+        warning = warning.at_authored(None, opener);
+    }
+    warning.attribute_to(document.or(site.map(|site| site.file())).or(fallback.map(|site| site.file())));
     warning
 }
 
@@ -820,6 +854,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
                 transclusion::TransclusionError::CycleDetected { .. }
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
                     | transclusion::TransclusionError::RemoteFetchFailed { .. }
+                    | transclusion::TransclusionError::RemoteNeedsApproval { .. }
             )
     ) || error.missing_runtime_context().is_some()
         || error.unavailable_binding().is_some()

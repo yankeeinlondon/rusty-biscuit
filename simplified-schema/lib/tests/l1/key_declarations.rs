@@ -171,9 +171,32 @@ fn a_closed_object_unknown_key_hint_follows_the_clean_ranking() {
     let schema = schema("$schema:\n  title: string\n  tags: \"string[]\"\n  $constraints: { closed: true }\n");
     let found = problems(&schema, &json!({ "titel": "x" }));
     assert_eq!(found[0].hint.as_deref(), Some("did you mean `title`?"), "{found:#?}");
-    // No near candidate: no hint.
+    // No near candidate: remove it or use a declared key.
     let found = problems(&schema, &json!({ "zzzzzz": "x" }));
-    assert_eq!(found[0].hint, None, "{found:#?}");
+    assert_eq!(found[0].hint.as_deref(), Some("remove `zzzzzz`, or use one of `title`, `tags`"), "{found:#?}");
+}
+
+#[test]
+fn an_unknown_key_near_nothing_lists_at_most_eight_declared_keys_in_order() {
+    let eight = schema(
+        "$schema:\n  k1: string\n  k2: string\n  k3: string\n  k4: string\n  k5: string\n  k6: string\n  k7: string\n  k8: string\n  $constraints: { closed: true }\n",
+    );
+    let found = problems(&eight, &json!({ "zzzzzz": 1 }));
+    assert_eq!(
+        found[0].hint.as_deref(),
+        Some("remove `zzzzzz`, or use one of `k1`, `k2`, `k3`, `k4`, `k5`, `k6`, `k7`, `k8`"),
+        "{found:#?}"
+    );
+    // Removed keys are never offered, and a ninth declared key is elided.
+    let nine = schema(
+        "$schema:\n  k9: string\n  k8: string\n  old: \"removed(use k1)\"\n  k7: string\n  k6: string\n  k5: string\n  k4: string\n  k3: string\n  k2: string\n  k1: string\n  $constraints: { closed: true }\n",
+    );
+    let found = problems(&nine, &json!({ "zzzzzz": 1, "qqqqqq": 2 }));
+    assert_eq!(
+        found[0].hint.as_deref(),
+        Some("remove `zzzzzz`, `qqqqqq`, or use one of `k9`, `k8`, `k7`, `k6`, `k5`, `k4`, `k3`, `k2`, …"),
+        "{found:#?}"
+    );
 }
 
 const OPEN_STEP: &str = "kind: schema\ntypes:\n  task:\n    name: string\n    prompt: string\n    model: string\n    \"<starting::x->\": unknown\n    \"<string>\": unknown\n    $advise-unknown-keys: [agent, modle]\n$schema:\n  steps: \"task[]\"\n";

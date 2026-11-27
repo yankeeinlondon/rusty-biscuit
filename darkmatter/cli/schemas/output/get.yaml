@@ -31,7 +31,7 @@ types:
         related: related-diagnostic[] -> other locations involved in the finding, e.g. the other declarations of a conflict
         hint: string -> the next step that fixes the problem
         notes: string[] -> supporting lines with no location of their own, shown under the message
-        trail: trail-frame[] -> how the problem was reached, outermost first; present only when a host frame is in it
+        trail: trail-frame[] -> how the problem was reached, outermost first; omitted when empty, and written by commands other than md compose and md render only when a host frame is in it
     related-diagnostic:
         message: string(required)
         source: source(required)

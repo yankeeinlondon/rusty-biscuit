@@ -211,7 +211,7 @@ let session = options.passive_session().expect("a dry run has a session").clone(
 // … compose with `options` …
 for deferral in session.deferrals() {
     // construct: FrontmatterValue, Interpolation, ShellDirective,
-    // ShellBlock, BlockCondition, or SchemaTemplate
+    // ShellBlock, BlockCondition, SchemaTemplate, or Transclusion
     println!("{:?} `{}`: {}", deferral.construct, deferral.authored, deferral.reason.describe());
 }
 ```
@@ -224,6 +224,13 @@ for deferral in session.deferrals() {
   the `{{{ … }}}` span stays as written, a `::block` whose condition reads it
   stays whole, and a frontmatter value that reads it is deferred too.
   `try(…)` and `||` never recover it.
+- An inclusion whose target reads such a value names no file yet: a
+  `::file`/`::code` line holding a span left as written stays as written,
+  and a `prologue`/`epilogue` value that is deferred or holds one adds
+  nothing. Each is a `Transclusion` deferral, never a parse failure or a
+  missing file. A caller can declare a value it has not got with
+  `session.defer_absent("topic", reason)` before composing, and the same
+  holds for what reads it.
 - No approval is asked for and no cache is read or written. A `$schema` slot
   whose read needs approval is deferred (`SchemaTemplate`) and its checks are
   not run. An allowed remote read is fetched without being stored.
@@ -249,10 +256,19 @@ sink.not_checked(doc, "inputs", "the template could not be read", Some(found));
 let report = sink.finish();   // counts(), has_problems(), diagnostics(), render_human(..)
 ```
 
+Pushing a finding equal to one already held for the subject (code,
+severity, message, location, and trail) stores nothing and returns the held
+one's id. So does a finding that differs only in naming the file alone where
+the held one names a line in it: two producers that report one problem keep
+the located copy, whichever came first.
+
 - Subjects keep the order they were registered in; equivalent findings for
   one subject collapse.
 - `not_checked` records one `dm.check.not_checked` `info` finding, with the
-  blocking finding as `related` when it has a location.
+  blocking finding as `related` when it has a location. When a subject is
+  one occurrence among several that share a file (a task two references
+  reach), `not_checked_within(…, trail)` gives the record that
+  occurrence's `trail`, so the occurrences stay apart in JSON output.
 - `findings::reference::check_document` turns a confirmed no-match of a
   document-valued reference into `dm.reference.missing_document`, with the
   resolved path, searched locations, and up to three suggestions.

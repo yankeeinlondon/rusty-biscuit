@@ -138,7 +138,8 @@ impl CompiledValidators {
 ///
 /// It also settles key problems ([`validate::annotate_key_problems`]): a
 /// removed key's problem names it with its replacement hint, and an unknown
-/// key gains a `did you mean` hint when a declared key is near it.
+/// key gains a `did you mean` hint when a declared key is near it, and
+/// otherwise a hint to remove it or use one of the declared keys.
 pub fn describe_problems(json_schema: &Value, instance: &Value, problems: &mut [ValidationProblem]) {
     validate::annotate_key_problems(json_schema, instance, problems);
     for problem in problems {

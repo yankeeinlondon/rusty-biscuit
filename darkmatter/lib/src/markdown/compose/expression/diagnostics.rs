@@ -173,10 +173,11 @@ pub struct Diagnostic {
     /// How the problem was reached, outermost first: host constructs (a
     /// Claudine task), transclusions, and `::map` / `::filter` items.
     ///
-    /// Serialized as `trail` (every frame) only when it holds a host frame;
-    /// its iteration and included frames are always serialized as
-    /// `iteration_path` and `included_via`, so a trail of Darkmatter frames
-    /// alone adds no field.
+    /// Serialized as `trail` (every frame) whenever it has one; its
+    /// iteration and included frames are also always serialized as
+    /// `iteration_path` and `included_via`. [`LegacyTrailProjection`] writes
+    /// `trail` only when it holds a host frame, for the outputs that
+    /// published the record before trails existed.
     pub trail: crate::findings::Trail,
 }
 
@@ -518,6 +519,26 @@ struct ReferenceWire<'a> {
 
 impl Serialize for Diagnostic {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.wire(!self.trail.is_empty()).serialize(serializer)
+    }
+}
+
+/// A [`Diagnostic`] serialized as the outputs that predate [`Trail`]
+/// publish it: `trail` is written only when it holds a host frame, so a
+/// record whose trail is only transclusions and `::map` / `::filter` items
+/// keeps exactly its `iteration_path` and `included_via` bytes.
+///
+/// [`Trail`]: crate::findings::Trail
+pub struct LegacyTrailProjection<'a>(pub &'a Diagnostic);
+
+impl Serialize for LegacyTrailProjection<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.wire(self.0.trail.has_host_frame()).serialize(serializer)
+    }
+}
+
+impl Diagnostic {
+    fn wire(&self, write_trail: bool) -> DiagnosticWire<'_> {
         DiagnosticWire {
             code: &self.code,
             severity: self.severity,
@@ -544,9 +565,8 @@ impl Serialize for Diagnostic {
             related: &self.related,
             hint: self.hint.as_deref(),
             notes: &self.notes,
-            trail: self.trail.has_host_frame().then_some(&self.trail),
+            trail: write_trail.then_some(&self.trail),
         }
-        .serialize(serializer)
     }
 }
 

@@ -1,0 +1,31 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.transclusion.remote_needs_approval",
+      "severity": "error",
+      "message": "Transclusion error: [ROOT]/work/doc.md:3:1: Remote fetch of http://127.0.0.1:9/child.md was not made: remote read of host '127.0.0.1' needs approval: `permissions.network` is `ask`, and a composition does not ask; allow the host for this run (`--allow host=127.0.0.1`) or set `permissions.network: allow`",
+      "source": {
+        "file": "[ROOT]/work/doc.md",
+        "line": 3,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 9,
+        "end": 10
+      },
+      "iteration_path": []
+    }
+  ],
+  "counts": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

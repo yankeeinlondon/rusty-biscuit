@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use super::report::{FindingReport, ReportEntry};
-use super::{Diagnostic, DiagnosticRelated, NOT_CHECKED_CODE, Severity};
+use super::{Diagnostic, DiagnosticRelated, NOT_CHECKED_CODE, Severity, Trail};
 
 /// A subject registered with a [`FindingSink`]: an opaque index, assigned in
 /// registration order.
@@ -65,7 +65,11 @@ impl Subject {
 /// Subjects keep their registration order and findings their push order
 /// within each subject. Pushing a finding equivalent to one already held for
 /// the same subject (same code, severity, location, message, and trail)
-/// returns the original's id and stores nothing.
+/// returns the original's id and stores nothing. Two producers that report
+/// one problem may differ only in how much of its location they proved: a
+/// finding that names only the file of a held finding located at a line in
+/// that file, all else equal, is that finding, and the held one keeps (or
+/// takes) the line.
 #[derive(Debug, Default)]
 pub struct FindingSink {
     subjects: Vec<Subject>,
@@ -92,11 +96,18 @@ impl FindingSink {
     /// When `subject` was not registered with this sink.
     pub fn push(&mut self, subject: SubjectId, finding: Diagnostic) -> FindingId {
         assert!(subject.0 < self.subjects.len(), "finding pushed for an unregistered subject");
-        if let Some(index) = self
-            .entries
-            .iter()
-            .position(|entry| entry.subject == subject && equivalent(&entry.diagnostic, &finding))
+        if let Some(index) = self.entries.iter().position(|entry| {
+            entry.subject == subject
+                && (equivalent(&entry.diagnostic, &finding) || located_in(&entry.diagnostic, &finding))
+        }) {
+            return FindingId(index);
+        }
+        if let Some(index) =
+            self.entries.iter().position(|entry| entry.subject == subject && located_in(&finding, &entry.diagnostic))
         {
+            let held = &mut self.entries[index].diagnostic;
+            held.source = finding.source;
+            held.span = finding.span;
             return FindingId(index);
         }
         self.entries.push(ReportEntry { subject, diagnostic: finding, check: None });
@@ -114,12 +125,27 @@ impl FindingSink {
         reason: &str,
         blocked_by: Option<FindingId>,
     ) -> FindingId {
+        self.not_checked_within(subject, check, reason, blocked_by, Trail::default())
+    }
+
+    /// [`Self::not_checked`] for a subject that is one occurrence among
+    /// several (a task a repeated reference reaches): the record carries
+    /// `trail`, so occurrences that share a file stay apart in data output.
+    pub fn not_checked_within(
+        &mut self,
+        subject: SubjectId,
+        check: &str,
+        reason: &str,
+        blocked_by: Option<FindingId>,
+        trail: Trail,
+    ) -> FindingId {
         let mut finding = Diagnostic::projected(
             NOT_CHECKED_CODE,
             Severity::Info,
             format!("not checked: {check} ({reason})"),
             None,
-        );
+        )
+        .with_trail(trail);
         if let Some(source) = blocked_by
             .and_then(|id| self.entries.get(id.0))
             .and_then(|entry| entry.diagnostic.source.clone().map(|source| (source, entry.diagnostic.message.clone())))
@@ -158,6 +184,22 @@ fn equivalent(held: &Diagnostic, new: &Diagnostic) -> bool {
         && held.span == new.span
         && held.message == new.message
         && held.trail == new.trail
+}
+
+/// Whether `file_only` is `located` but for naming only `located`'s file,
+/// not its line.
+fn located_in(located: &Diagnostic, file_only: &Diagnostic) -> bool {
+    let (Some(at), Some(file)) = (&located.source, &file_only.source) else { return false };
+    at.line.is_some()
+        && file.line.is_none()
+        && file.column.is_none()
+        && file.file.is_some()
+        && file.file == at.file
+        && file_only.span.is_none()
+        && located.code == file_only.code
+        && located.severity == file_only.severity
+        && located.message == file_only.message
+        && located.trail == file_only.trail
 }
 
 impl SubjectId {

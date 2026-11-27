@@ -2357,7 +2357,9 @@ fn anchor_hash(base_dir: Option<&Path>, fallback: Option<&Path>, judged_in: &Jud
 ///   the replacement as its hint;
 /// - an [`ValidationProblemCode::UnknownKey`] problem gains a
 ///   `did you mean` hint when one declared key of the object it names is
-///   near the offending key ([`crate::validation::suggest::nearest`]).
+///   near the offending key ([`crate::validation::suggest::nearest`]), and
+///   otherwise a hint to remove the key or use one of the declared keys
+///   ([`removal_hint`]).
 ///
 /// The schemas consulted are the object schemas the instance location
 /// reaches through references and the union arms its value can select
@@ -2380,7 +2382,8 @@ pub fn annotate_key_problems(root: &Value, instance: &Value, problems: &mut [Val
                     .filter_map(|key| Some((key.clone(), suggest::nearest(key, declared.iter().copied())?)))
                     .collect();
                 problem.hint = match pairs.as_slice() {
-                    [] => None,
+                    [] if problem.offending_properties.is_empty() => None,
+                    [] => Some(removal_hint(&problem.offending_properties, &declared)),
                     [(_, only)] if problem.offending_properties.len() == 1 => Some(suggest::did_you_mean(only)),
                     many => Some(
                         many.iter()
@@ -2423,6 +2426,24 @@ pub fn annotate_key_problems(root: &Value, instance: &Value, problems: &mut [Val
             _ => {}
         }
     }
+}
+
+/// The most declared keys a [`removal_hint`] lists before eliding the rest.
+const REMOVAL_HINT_KEYS: usize = 8;
+
+/// The hint for unknown keys none of which is near a declared key: remove
+/// them, or use one of the object's declared keys, in declaration order and
+/// at most [`REMOVAL_HINT_KEYS`] of them.
+fn removal_hint(offending: &[String], declared: &[&str]) -> String {
+    let remove = offending.iter().map(|key| format!("`{key}`")).collect::<Vec<_>>().join(", ");
+    if declared.is_empty() {
+        return format!("remove {remove}");
+    }
+    let mut listed: Vec<String> = declared.iter().take(REMOVAL_HINT_KEYS).map(|key| format!("`{key}`")).collect();
+    if declared.len() > REMOVAL_HINT_KEYS {
+        listed.push("…".to_string());
+    }
+    format!("remove {remove}, or use one of {}", listed.join(", "))
 }
 
 /// The near-miss advice for `instance` judged against `root`: one

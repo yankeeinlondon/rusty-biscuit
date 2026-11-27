@@ -384,9 +384,25 @@ run, never by a saved approval:
   URL, and `--allow host=HOST` allows that host's URLs for one run, the same
   decision composition takes (see
   [Remote URL References](../remote-url-references.md#allowed-hosts));
-- without that consent, the read is asked about with two choices, allow
-  this URL for this run or deny it for this run, and fails with
-  `dm.schema.slot_approval_required` where nothing can ask.
+- under `permissions.network: ask`, a URL without that consent is asked
+  about with two choices, allow this URL for this run or deny it for this
+  run, and fails with `dm.schema.slot_approval_required` where nothing can
+  ask; a dry run sends no request and reports the schema as not checked;
+- under `permissions.network: deny` (the default), a URL without that
+  consent is refused without asking, with `dm.schema.slot_network_denied`.
+
+```yaml
+# ~/.darkmatter.yaml
+permissions:
+  network: deny
+```
+
+A slot `{{ load_data("https://example.com/os.yaml", "string[]") }}` then
+fails, with no request sent:
+
+```text
+load_data() may not read https://example.com/os.yaml: `permissions.network` is `deny`; allow the host for this run (`--allow host=HOST`), or set `permissions.network` to `ask` or `allow`
+```
 
 A "deny for this run" refuses the URL even when network consent would allow
 it. A slot's URL reads go through a remote runtime of their own, which may
@@ -1012,6 +1028,7 @@ The cause the expression failed with is kept:
 | the slot text is not an expression | `dm.schema.slot_syntax` | |
 | a refused binding or function | `dm.schema.slot_forbidden_binding`, `dm.schema.slot_forbidden_function` | the refused read's position |
 | a read no approval covers, or one denied for this run | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | `grants_needed` (approval only): the approvals any one of which would allow the read |
+| a URL read under `permissions.network: deny` that no `--allow host` covers | `dm.schema.slot_network_denied` | |
 | the configuration's `permissions` failed to load | `dm.config.invalid`, `dm.config.reference` | the configuration error's own fields |
 | a malformed data file, a contract mismatch | the `load_data` code (`dm.data.malformed`, …) | `data_location`, the position inside the data file |
 | a missing or unreadable file | `dm.schema.slot_failed` | the reference fields (`construct`, `reference`, `failure`) |

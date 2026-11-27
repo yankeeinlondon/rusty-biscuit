@@ -175,7 +175,8 @@ flowchart TD
 
 `permissions` holds three separate policies: `file-read` (the files a schema
 slot may read without asking), `shell-commands` (the commands that run
-without a prompt), and `network` (`allow` or `deny` for URL fetches). A
+without a prompt), and `network` (`allow`, `ask`, or `deny` for URL
+fetches). A
 leading `!` on a list entry excludes what it matches from pre-approval:
 
 ```yaml
@@ -190,8 +191,8 @@ permissions:
 
 Inside a repository, an operation is pre-approved when no file excludes it
 and either your user file allows it or the repository file allows it both as
-committed at `HEAD` and in the working copy; `network` is `allow` only when
-every file says so. The entry forms, how the scopes combine, current-run
+committed at `HEAD` and in the working copy; `network` is the most
+restrictive setting any file holds (`deny` over `ask` over `allow`). The entry forms, how the scopes combine, current-run
 approvals, and the built-in shell blacklist are described in
 [Permissions](./permissions.md).
 
@@ -696,10 +697,10 @@ for reason in &report.reasons {
 | Change | Result |
 |---|---|
 | the same block, inline or behind a reference, in any order | not widening |
-| an entry removed, a `!` exclusion added, `network: allow` → `deny` | not widening |
+| an entry removed, a `!` exclusion added, `network` narrowed (`allow` → `ask` or `deny`, `ask` → `deny`) | not widening |
 | an entry added (a rewritten glob or command counts as added) | `added-allow` |
 | a `!` exclusion removed | `removed-exclusion` |
-| `network: deny` → `allow` | `network-allowed` |
+| `network` widened (`deny` → `ask` or `allow`, `ask` → `allow`) | `network-allowed` |
 | a deleted file or property whose default is wider | `added-allow` |
 | a shipped default that grows, or that the trusted code cannot read | `added-allow`, `defaults-not-understood` |
 | any change to a file the check depends on | `checker-input-changed` |

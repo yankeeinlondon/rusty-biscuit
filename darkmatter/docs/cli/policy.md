@@ -377,7 +377,10 @@ command rules either:
 - **`--allow host=HOST` is the only flag that affects a slot read.** On
   `md compose` it also allows a slot's `http` and `https` reads on that host
   for the run, unless the read was denied for this run. (The configured
-  `network: allow` allows every such read the same way.) No other `--allow`,
+  `network: allow` allows every such read the same way; under
+  `network: deny` any other URL read is refused with
+  `dm.schema.slot_network_denied` without asking, and only under
+  `network: ask` is it asked about.) No other `--allow`,
   `--deny`, or `--disable` identifier governs a slot, and no
   `dm.schema.slot_*` code is a recovery or one of the codes `--deny` takes, so
   `--deny dm.schema.slot_denied` is a usage error and `--allow all` recovers

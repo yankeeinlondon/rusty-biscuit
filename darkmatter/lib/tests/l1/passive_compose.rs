@@ -305,3 +305,82 @@ fn a_deferred_value_is_never_judged_by_its_schema() {
     let error = compose(&path, options_in(dir.path(), &path).with_dry_run()).expect_err("an independent value is judged");
     assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }), "{error:?}");
 }
+
+/// A required value the caller declared absent (a missing input the dry run
+/// reports itself) is not judged missing, and what reads it stays as
+/// written: a span, a `::block` condition, and a frontmatter value derived
+/// from it. Independent text composes, and a value supplied after all reads
+/// as itself. Its control, an undeclared missing value, still fails the
+/// verdict.
+#[test]
+fn a_value_declared_absent_leaves_only_its_readers_as_written() {
+    let dir = TempDir::new().unwrap();
+    let text = "---\n$schema:\n  topic: string(required)\nheading: \"About {{ topic }}\"\nowner: Ken\n---\nOwner {{ owner }}.\nTopic {{ topic }}.\nHeading {{ heading }}.\n\n::block when=\"topic == 'x'\"\nx only\n::end-block\n";
+    let path = write(dir.path(), "doc.md", text);
+    let options = options_in(dir.path(), &path).with_dry_run();
+    let session = options.passive_session().cloned().unwrap();
+    let missing = DeferralReason::MissingInput { name: "topic".into() };
+    session.defer_absent("topic", missing.clone());
+
+    let composed = compose(&path, options).unwrap_or_else(|error| panic!("the dry run failed: {error}"));
+
+    let body = composed.content();
+    assert!(body.contains("Owner Ken."), "{body}");
+    assert!(body.contains("Topic {{ topic }}."), "{body}");
+    assert!(body.contains("Heading {{ heading }}."), "{body}");
+    assert!(body.contains("::block when=\"topic == 'x'\""), "{body}");
+    let deferrals = session.deferrals();
+    assert!(
+        deferrals.iter().any(|deferral| deferral.construct == DeferredConstruct::Interpolation && deferral.reason == missing),
+        "{deferrals:?}"
+    );
+    assert!(deferrals.iter().any(|deferral| deferral.key.as_deref() == Some("heading")), "{deferrals:?}");
+    assert_eq!(session.absent_value("topic"), Some(missing));
+
+    let control = compose(&path, options_in(dir.path(), &path).with_dry_run()).expect_err("an undeclared absence is judged");
+    assert!(matches!(control, MarkdownError::SchemaValidationFailed { .. }), "{control:?}");
+}
+
+/// An inclusion whose target reads a value the dry run left as written (a
+/// declared-absent input, a `$( … )` value) names no path: the `::file` and
+/// `::code` lines stay as written, `prologue`/`epilogue` contribute nothing,
+/// and each is a deferred transclusion, never a parse or missing-file
+/// failure. Its control, the same document with the value known, includes
+/// the files.
+#[test]
+fn an_inclusion_whose_target_reads_a_deferred_value_is_left_as_written() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "a.md", "Included.\n");
+    write(dir.path(), "a.rs", "fn a() {}\n");
+    let text = |topic: &str| {
+        format!(
+            "---\n$schema:\n  topic: string(required)\n{topic}prologue: ./{{{{ topic }}}}.md\nepilogue: ./{{{{topic}}}}.md\n---\nIntro.\n\n::file ./{{{{ topic }}}}.md\n\n::code ./{{{{topic}}}}.rs\n"
+        )
+    };
+    for topic in ["", "topic: $(echo a)\n"] {
+        let path = write(dir.path(), "doc.md", &text(topic));
+        let options = options_in(dir.path(), &path).with_dry_run();
+        let session = options.passive_session().cloned().unwrap();
+        session.defer_absent("topic", DeferralReason::MissingInput { name: "topic".into() });
+
+        let composed = compose(&path, options).unwrap_or_else(|error| panic!("the dry run failed ({topic:?}): {error}"));
+
+        let body = composed.content();
+        assert!(body.contains("::file ./{{ topic }}.md\n"), "{body}");
+        assert!(body.contains("::code ./{{topic}}.rs"), "{body}");
+        assert!(!body.contains("Included."), "{body}");
+        let transclusions: Vec<&str> = session
+            .deferrals()
+            .iter()
+            .filter(|deferral| deferral.construct == DeferredConstruct::Transclusion)
+            .map(|deferral| deferral.authored.as_str())
+            .map(|authored| if authored.starts_with("::") { "directive" } else { "frontmatter" })
+            .collect();
+        assert_eq!(transclusions, ["directive", "directive", "frontmatter", "frontmatter"], "{topic:?}");
+    }
+
+    let path = write(dir.path(), "doc.md", &text("topic: a\n"));
+    let composed = compose(&path, options_in(dir.path(), &path).with_dry_run()).unwrap();
+    assert_eq!(composed.content().matches("Included.").count(), 3, "{}", composed.content());
+    assert!(composed.content().contains("fn a() {}"));
+}

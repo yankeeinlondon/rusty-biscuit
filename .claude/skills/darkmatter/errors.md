@@ -147,7 +147,12 @@ not from `BlockError`s:
 - **Codes.** A code `md compose` emits goes in `COMPOSE_DIAGNOSTIC_CODES`; a
   host-only code (`dm.reference.missing_document`) in `findings::FINDING_CODES`;
   `findings.rs::every_finding_code_is_declared_once_across_the_two_catalogs`
-  guards it. Empty bodies carry `EmptyBodyCause` and render only that cause.
+  guards it. A new or changed report code also joins
+  `findings::REPORTED_FINDING_CODES`: `findings.rs::reported_codes` then
+  requires its `lib/tests/fixtures/findings/<code>/{finding,control}/` pair
+  and its plain (width 80, no color) and JSON report snapshots (an internal
+  fallback, such as `dm.compose.warning`, through a projection seam). Empty
+  bodies carry `EmptyBodyCause` and render only that cause.
 - **Message.** Every new message follows `docs/errors/message-standard.md`:
   what (the author's construct noun, supplied by the construct's owner),
   where (`SourceRef::OnDiskSpan` only when proven, else the file), why (only

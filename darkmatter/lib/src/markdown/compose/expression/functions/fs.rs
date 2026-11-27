@@ -76,9 +76,11 @@ fn authored_reference(raw: &str, ctx: &ResolutionContext) -> (String, PathBuf) {
 }
 
 /// The failure of `function` for a remote read of `raw` that returned no
-/// text: a host the policy refuses is a typed file-reference failure, and
-/// any other failure is a [`ExpressionError::RemoteRead`] keeping the remote
-/// runtime's kind and wording.
+/// text: a host the policy refuses, or one that needs network approval, is a
+/// typed file-reference failure (a dry run defers the latter instead, since
+/// a dry run asks nothing), and any other failure is a
+/// [`ExpressionError::RemoteRead`] keeping the remote runtime's kind and
+/// wording.
 pub(crate) fn remote_text_error(
     function: &'static str,
     raw: &str,
@@ -87,6 +89,12 @@ pub(crate) fn remote_text_error(
 ) -> ExpressionError {
     match error {
         RemoteTextError::Denied => file_reference_error(function, raw, ctx, FileRefFailure::RemoteDenied, None),
+        RemoteTextError::NeedsApproval if ctx.passive.is_some() => ExpressionError::Unavailable(Box::new(
+            crate::markdown::compose::passive::DeferralReason::NetworkNeedsApproval { url: raw.to_string() },
+        )),
+        RemoteTextError::NeedsApproval => {
+            file_reference_error(function, raw, ctx, FileRefFailure::RemoteNeedsApproval, None)
+        }
         RemoteTextError::Failed(failure) => ExpressionError::RemoteRead {
             function,
             reference: authored_reference(raw, ctx).0,

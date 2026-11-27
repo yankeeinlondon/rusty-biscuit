@@ -62,6 +62,49 @@ fn a_missing_file_reference_record_names_the_resolved_path_and_the_fix() {
     assert_eq!((record["source"]["line"].as_u64(), record["source"]["column"].as_u64()), (Some(5), Some(1)));
 }
 
+/// A child's missing link reached through one inclusion: `md compose`
+/// publishes the inclusion as a `trail` beside `included_via`, while
+/// `md validate refs` keeps its legacy record with neither `trail` nor the
+/// resolver evidence.
+#[test]
+fn an_included_missing_link_publishes_its_inclusion_trail_on_compose_only() {
+    let fixture = CliProcessFixture::named("inclusion_findings_child_trail");
+    fixture.write_file("cwd/docs/child.md", "# Child\n\n[x](./child-gone.md)\n");
+    let root = fixture.write_file("cwd/docs/root.md", "# Root\n\n::file ./child.md\n");
+
+    let (status, stdout, stderr) = compose(&fixture, &root, &["--output", "json"]);
+
+    assert_eq!(status, Some(1), "{stdout}");
+    assert!(stderr.is_empty(), "{stderr}");
+    let record = error_record(&stdout);
+    assert_eq!(record["code"], "dm.reference.missing_hyperlink", "{record:#}");
+    let [step] = record["included_via"].as_array().expect("an inclusion path").as_slice() else {
+        panic!("one step: {record:#}")
+    };
+    assert_eq!(step["line"], 3, "{record:#}");
+    let [frame] = record["trail"].as_array().expect("a trail").as_slice() else { panic!("one frame: {record:#}") };
+    assert_eq!(frame["kind"], "included", "{record:#}");
+    assert_eq!(frame["file"], step["file"], "{record:#}");
+    assert_eq!(frame["line"], 3, "{record:#}");
+    assert_eq!(record["hint"], "create child-gone.md, or correct the reference", "{record:#}");
+
+    let output = fixture
+        .command_builder()
+        .plain_terminal(100, 40)
+        .build()
+        .args(["validate", "refs"])
+        .arg(&root)
+        .args(["--output", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let legacy = error_record(&String::from_utf8_lossy(&output.stdout));
+    assert_eq!(legacy["included_via"], record["included_via"], "{legacy:#}");
+    for added in ["trail", "base", "resolved", "hint"] {
+        assert!(legacy.get(added).is_none(), "legacy record has no {added}: {legacy:#}");
+    }
+}
+
 #[test]
 fn a_missing_target_the_reference_check_cannot_see_fails_with_its_fix() {
     // Standard input has no file, so the reference check cannot resolve a

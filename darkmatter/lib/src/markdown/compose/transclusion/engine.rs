@@ -337,6 +337,10 @@ pub(crate) struct FailureAnchor {
     pub(crate) order: usize,
     pub(crate) target: ApplyTarget,
     pub(crate) notice: String,
+    /// Where the inclusion was written, which a tolerated failure with no
+    /// site of its own (a child's frontmatter that does not parse) is
+    /// reported at.
+    pub(crate) inclusion: Option<transclusion::InclusionSite>,
 }
 
 impl PreparedTransclusion {
@@ -354,6 +358,13 @@ impl PreparedTransclusion {
             format!("_Could not transclude `{name}`_")
         };
 
+        let inclusion = match self {
+            Self::Markdown { inclusion, .. }
+            | Self::Code { inclusion, .. }
+            | Self::RemoteFile { inclusion, .. }
+            | Self::RemoteCode { inclusion, .. } => inclusion.clone(),
+            _ => None,
+        };
         let (order, target, notice) = match self {
             Self::FixedReplace { order, span, .. } => (
                 *order,
@@ -409,6 +420,7 @@ impl PreparedTransclusion {
             order,
             target,
             notice,
+            inclusion,
         }
     }
 }
@@ -1009,6 +1021,30 @@ impl<'a> TransclusionEngine<'a> {
             transclusion::InclusionSite::of_frontmatter_value(self.markdown, key, index, reference)
         };
         let at_value = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
+        // A dry run's value it could not produce (a missing input, a command
+        // it did not run) names no target: the slot contributes nothing and
+        // the session records why.
+        if let Some((session, reason)) = options
+            .passive_session()
+            .and_then(|session| Some((session, session.deferred_reference(reference)?)))
+        {
+            use crate::markdown::compose::passive::{Deferral, DeferredConstruct};
+            session.record(Deferral {
+                construct: DeferredConstruct::Transclusion,
+                reason,
+                authored: reference.to_string(),
+                key: Some(match slot {
+                    SectionSlot::Prologue(_) => "prologue".to_string(),
+                    SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                }),
+                line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+            });
+            let mut report = ComposeReport::new();
+            report.transclusions_skipped = 1;
+            prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+            *next_order += 1;
+            return Ok(());
+        }
         let file_ref = match transclusion::classify_frontmatter_reference(reference) {
             transclusion::FrontmatterReference::Inline => {
                 prepared.push(PreparedTransclusion::FixedSection {
@@ -1152,6 +1188,41 @@ impl<'a> TransclusionEngine<'a> {
         }
     }
 
+    /// In a dry run, the inclusion of `url` left as written instead of
+    /// fetched when the captured `network: ask` leaves it needing an
+    /// approval the dry run never asks for: a directive keeps its text, a
+    /// `prologue`/`epilogue` contributes nothing, and the session records
+    /// why. `None` outside a dry run or when the URL needs no approval.
+    fn defer_unapproved_fetch(
+        &self,
+        options: &crate::markdown::compose::ComposeRequest,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+        url: &url::Url,
+        order: usize,
+        target: &ApplyTarget,
+        inclusion: Option<&transclusion::InclusionSite>,
+    ) -> Option<ResolvedTransclusion> {
+        use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
+        let session = options.passive_session()?;
+        if !remote_fetch.needs_approval(url) {
+            return None;
+        }
+        let written = match target {
+            ApplyTarget::Replace(span) => self.markdown.content().get(span.clone()).map(str::to_string),
+            _ => None,
+        };
+        session.record(Deferral {
+            construct: DeferredConstruct::Transclusion,
+            reason: DeferralReason::NetworkNeedsApproval { url: url.to_string() },
+            authored: written.as_deref().map_or_else(|| url.to_string(), |text| text.trim_end().to_string()),
+            key: None,
+            line: inclusion.and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+        });
+        let mut report = ComposeReport::new();
+        report.transclusions_skipped = 1;
+        Some(ResolvedTransclusion { order, target: target.clone(), content: written, report, source_file: None })
+    }
+
     pub(crate) fn resolve_prepared_transclusion(
         &self,
         item: PreparedTransclusion,
@@ -1268,6 +1339,9 @@ impl<'a> TransclusionEngine<'a> {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
+                if let Some(deferred) = self.defer_unapproved_fetch(options, &remote_fetch, &url, order, &target, inclusion.as_ref()) {
+                    return Ok(deferred);
+                }
                 let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 // Parse the fetched body as Markdown and recursively compose it.
@@ -1396,6 +1470,10 @@ impl<'a> TransclusionEngine<'a> {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
+                let target = ApplyTarget::Replace(span.clone());
+                if let Some(deferred) = self.defer_unapproved_fetch(options, &remote_fetch, &url, order, &target, inclusion.as_ref()) {
+                    return Ok(deferred);
+                }
                 let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 let fenced = transclusion::wrap_in_code_block(&body_text, &language);
@@ -2106,6 +2184,11 @@ fn fetched_body(
     match remote_fetch.get_content(url) {
         Ok(Some(body)) => Ok(body),
         Ok(None) => Err(failed("URL was not registered for fetching".to_string()).at_inclusion(site)),
+        Err(_) if remote_fetch.needs_approval(url) => Err(transclusion::TransclusionError::RemoteNeedsApproval {
+            url: url.to_string(),
+            host: url.host_str().unwrap_or_default().to_string(),
+        }
+        .at_inclusion(site)),
         Err(reason) => Err(failed(reason).at_inclusion(site)),
     }
 }
@@ -2113,7 +2196,7 @@ fn fetched_body(
 /// Whether `markdown` tolerates invalid references: the request's
 /// `ignore_invalid_references` when set, else the document's own
 /// frontmatter `ignore_invalid`, else the context's `IGNORE_INVALID`.
-fn ignores_invalid(options: &crate::markdown::compose::ComposeRequest, markdown: &crate::markdown::Markdown) -> bool {
+pub(crate) fn ignores_invalid(options: &crate::markdown::compose::ComposeRequest, markdown: &crate::markdown::Markdown) -> bool {
     if let Some(value) = options.ignore_invalid_references {
         return value;
     }
@@ -2159,7 +2242,7 @@ fn skipped_transclusion_warning(
     site: Option<transclusion::InclusionSite>,
 ) -> ComposeWarning {
     let error = crate::markdown::MarkdownError::from(err.at_inclusion(site));
-    crate::markdown::compose::pipeline::phases::tolerated_failure_warning(&error, markdown.generated_identity())
+    crate::markdown::compose::pipeline::phases::tolerated_failure_warning(&error, markdown.generated_identity(), None)
 }
 
 #[cfg(test)]

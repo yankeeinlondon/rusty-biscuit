@@ -346,7 +346,7 @@ definition.
 | Code | `hint` |
 |---|---|
 | `dm.schema.removed_key` (`RemovedKey`) | the key's `removed(<replacement>)` advice; `path` is the owning object and `offending_property` the key |
-| `dm.schema.unknown_key` (`UnknownKey`) | `` did you mean `name`? `` when one declared key of the object is near the offending key |
+| `dm.schema.unknown_key` (`UnknownKey`) | `` did you mean `name`? `` when one declared key of the object is near the offending key; otherwise ``remove `zzz`, or use one of `name`, `tags` ``, naming the object's declared keys (removed keys and patterns left out) in declaration order, at most eight and then `…` |
 | `dm.schema.near_miss_key` (`NearMissKey`) | `` did you mean `prompt`? ``; advice on an opted-in open object, never a failure (see [`$advise-unknown-keys`](language/objects-and-named-types.md#advice-on-near-miss-keys-advise-unknown-keys)) |
 
 Every suggestion comes from one ranker, `validation::suggest`: lengths under

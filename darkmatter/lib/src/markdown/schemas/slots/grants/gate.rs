@@ -14,7 +14,9 @@
 //!    for this run allows it, whatever `permissions` says (so an approval
 //!    overrides a `!` exclusion);
 //! 4. a file `permissions.file-read` admits, or a URL the network
-//!    permission or `--allow host=HOST` allows, is allowed;
+//!    permission or `--allow host=HOST` allows, is allowed; any other URL
+//!    under a captured `network: deny` is refused
+//!    (`dm.schema.slot_network_denied`), and under `network: ask` goes on;
 //! 5. the approval handler, when there is one, is asked: allow for this run,
 //!    "always allow" (a file, saved to the user's `permissions.file-read`
 //!    and allowed for this run whether or not the save succeeds), or deny
@@ -158,7 +160,15 @@ impl SlotGrants {
                 SlotPermissions::Captured(policy) => policy.file_read(path, reading).is_preapproved().then_some(Ok(())),
                 SlotPermissions::Unconfigured | SlotPermissions::Invalid(_) => None,
             },
-            None => book.network_allows(&target.location).then_some(Ok(())),
+            None if book.network_allows(&target.location) => Some(Ok(())),
+            // A captured `network: deny` refuses outright; `ask` (and a
+            // session with no configuration) leaves the URL to approval.
+            None if matches!(self.permissions, SlotPermissions::Captured(_))
+                && matches!(book.network(), crate::config::network::NetworkPermission::Deny) =>
+            {
+                Some(Err(GateRefusal::NetworkDenied))
+            }
+            None => None,
         }
     }
 

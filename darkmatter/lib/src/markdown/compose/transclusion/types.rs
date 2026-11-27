@@ -610,6 +610,12 @@ pub enum TransclusionError {
     #[error("Remote fetch failed for {url}: {reason}")]
     RemoteFetchFailed { url: String, reason: String },
 
+    /// The URL's host needs an approval (`permissions.network: ask`) this
+    /// run did not give; composition has no prompt for it, so nothing was
+    /// requested.
+    #[error("Remote fetch of {url} was not made: {}", crate::markdown::compose::remote::RemoteReadError::ApprovalRequired { host: host.clone() })]
+    RemoteNeedsApproval { url: String, host: String },
+
     #[error(
         "Invalid frontmatter assignment on '::file' directive at line {line}: {reason} (value: {raw})"
     )]
@@ -1012,6 +1018,14 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     Prose::escape_text_outside_code_spans(reason)
                 ))
                 .hint("Check the URL, the allowed-hosts policy, and network availability."),
+
+            TransclusionError::RemoteNeedsApproval { url, host } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "remote fetch needs approval"))
+                .body(format!(
+                    "The URL <cyan>{}</cyan> was not fetched: `permissions.network` is `ask`, and composition does not ask.",
+                    Prose::escape_text(url)
+                ))
+                .hint(crate::config::network::network_remedy().approval_hint(&Prose::escape_text(host))),
 
             TransclusionError::InvalidFrontmatterAssignment {
                 ctx,

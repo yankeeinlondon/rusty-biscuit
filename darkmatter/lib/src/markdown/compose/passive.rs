@@ -56,11 +56,24 @@ pub enum DeferralReason {
         /// The function's name.
         function: String,
     },
+    /// A URL the captured `permissions.network: ask` leaves needing an
+    /// approval this run did not give; a dry run asks nothing, so the read
+    /// is not made and what depends on it is not checked.
+    NetworkNeedsApproval {
+        /// The URL that would have been fetched.
+        url: String,
+    },
     /// A read the real run would ask the user to approve; a dry run asks
     /// nothing.
     ReadNeedsApproval {
         /// What would have been read.
         target: String,
+    },
+    /// A required input the caller gave no value for; a dry run never asks
+    /// for one, so what reads it stays as written.
+    MissingInput {
+        /// The input's name.
+        name: String,
     },
     /// The value reads another value that is itself deferred.
     DependsOn {
@@ -84,9 +97,13 @@ impl DeferralReason {
             Self::ProviderQuery { function } => {
                 format!("`{function}()` queries a provider's API, which a dry run does not do")
             }
+            Self::NetworkNeedsApproval { url } => {
+                format!("fetching `{url}` needs network approval (`permissions.network: ask`), which a dry run does not ask for")
+            }
             Self::ReadNeedsApproval { target } => {
                 format!("reading {target} needs approval, which a dry run does not ask for")
             }
+            Self::MissingInput { name } => format!("reads `{name}`, which has no value"),
             Self::DependsOn { name } => format!("reads `{name}`, which is not known until the document runs"),
         }
     }
@@ -110,6 +127,9 @@ pub enum DeferredConstruct {
     /// A `$schema` template whose slots could not be resolved without
     /// asking; the schema's checks were not run.
     SchemaTemplate,
+    /// A `::file`/`::code` directive, or a `prologue`/`epilogue` value,
+    /// whose target was not read; its content is not in the output.
+    Transclusion,
 }
 
 /// One thing a dry run left as written.
@@ -134,6 +154,9 @@ pub struct Deferral {
 struct State {
     /// Authored text of each deferred value, mapped to why it is deferred.
     values: BTreeMap<String, DeferralReason>,
+    /// Top-level names with no value, mapped to why a read of one is
+    /// unavailable.
+    absent: BTreeMap<String, DeferralReason>,
     deferrals: Vec<Deferral>,
     seen: HashSet<Deferral>,
 }
@@ -181,6 +204,40 @@ impl PassiveSession {
     #[must_use]
     pub fn deferred_value(&self, text: &str) -> Option<DeferralReason> {
         self.lock().values.get(text).cloned()
+    }
+
+    /// Declares that the top-level value `name` has no value in this dry run
+    /// for `reason` (a missing input, a value only a run writes): a read of
+    /// it, or below it, that finds nothing is unavailable instead of empty,
+    /// and the schema stage does not report it missing.
+    pub fn defer_absent(&self, name: &str, reason: DeferralReason) {
+        self.lock().absent.entry(name.to_string()).or_insert(reason);
+    }
+
+    /// Why the top-level value `name` is declared absent, when it is.
+    #[must_use]
+    pub fn absent_value(&self, name: &str) -> Option<DeferralReason> {
+        self.lock().absent.get(name).cloned()
+    }
+
+    /// Why a `{{ … }}` span `text` holds was left as written, when one was:
+    /// the reason of the first such span recorded. A directive line holding
+    /// one names no target until the value is known.
+    #[must_use]
+    pub fn deferred_span_in(&self, text: &str) -> Option<DeferralReason> {
+        self.lock()
+            .deferrals
+            .iter()
+            .find(|deferral| deferral.construct == DeferredConstruct::Interpolation && text.contains(&deferral.authored))
+            .map(|deferral| deferral.reason.clone())
+    }
+
+    /// Why the `prologue`/`epilogue` value `text` is not known, when it is
+    /// not: it is a deferred value itself, or holds a `{{ … }}` span left as
+    /// written. Such a value names no target.
+    #[must_use]
+    pub fn deferred_reference(&self, text: &str) -> Option<DeferralReason> {
+        self.deferred_value(text).or_else(|| self.deferred_span_in(text))
     }
 
     /// Records `deferral`, once.
@@ -239,6 +296,15 @@ pub(crate) fn check_read<L: crate::markdown::compose::expression::EvaluationLook
         return Ok(());
     };
     if let Some(reason) = unavailable_read(Some(session), path, binding.value()) {
+        return Err(ExpressionError::Unavailable(Box::new(reason)));
+    }
+    // A value declared absent has no binding to read; a read that finds one
+    // (a default, a setter) is an ordinary read.
+    let top = path.strip_prefix("fm.").unwrap_or(path);
+    let top = top.split(['.', '[']).next().unwrap_or(top);
+    if binding.value().is_none_or(serde_json::Value::is_null)
+        && let Some(reason) = session.absent_value(top)
+    {
         return Err(ExpressionError::Unavailable(Box::new(reason)));
     }
     if let Some(root) = dotted_root(path) {

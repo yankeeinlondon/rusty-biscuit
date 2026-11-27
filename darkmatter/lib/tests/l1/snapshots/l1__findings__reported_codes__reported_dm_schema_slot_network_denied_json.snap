@@ -1,0 +1,31 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.schema.slot_network_denied",
+      "severity": "error",
+      "message": "load_data() may not read http://127.0.0.1:9/os.yaml: `permissions.network` is `deny`; allow the host for this run (`--allow host=HOST`), or set `permissions.network` to `ask` or `allow`",
+      "source": {
+        "file": "[ROOT]/work/schema.yaml",
+        "line": 3,
+        "column": 15,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 36,
+        "end": 97
+      },
+      "iteration_path": []
+    }
+  ],
+  "counts": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

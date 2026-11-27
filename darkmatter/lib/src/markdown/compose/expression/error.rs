@@ -60,6 +60,10 @@ pub enum FileRefFailure {
     /// requested. Unlike [`RemoteNotEnabled`](Self::RemoteNotEnabled), no
     /// later pass of the same run can read it.
     RemoteDenied,
+    /// The URL's host needs an approval (`permissions.network: ask`) this
+    /// run did not give, and the read has no prompt to ask with, so nothing
+    /// was requested.
+    RemoteNeedsApproval,
 }
 
 impl FileRefFailure {
@@ -107,6 +111,7 @@ impl FileRefFailure {
             FileRefFailure::FoundElsewhere => "found_elsewhere",
             FileRefFailure::RemoteNotEnabled => "remote_not_enabled",
             FileRefFailure::RemoteDenied => "remote_denied",
+            FileRefFailure::RemoteNeedsApproval => "remote_needs_approval",
         }
     }
 }
@@ -574,6 +579,16 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 .and_then(|url| url.host_str().map(str::to_string))
                 .unwrap_or_default()
         ),
+        (FileRefFailure::RemoteNeedsApproval, _) => format!(
+            "{}(): {}",
+            diagnostic.function,
+            crate::markdown::compose::remote::RemoteReadError::ApprovalRequired {
+                host: url::Url::parse(&diagnostic.reference)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .unwrap_or_default(),
+            }
+        ),
         _ => crate::markdown::errors::with_hint_line(
             format!("invalid file path: {}", diagnostic.reference),
             diagnostic.glob_hint(),
@@ -595,7 +610,9 @@ impl FileReferenceDiagnostic {
         match self.kind {
             FileRefFailure::Malformed => ResolutionFailure::InvalidReference,
             FileRefFailure::NotFound | FileRefFailure::FoundElsewhere => ResolutionFailure::NoMatch,
-            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied => ResolutionFailure::UnsupportedRemote,
+            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied | FileRefFailure::RemoteNeedsApproval => {
+                ResolutionFailure::UnsupportedRemote
+            }
         }
     }
 

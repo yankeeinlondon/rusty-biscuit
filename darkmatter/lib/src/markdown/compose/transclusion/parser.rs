@@ -62,6 +62,33 @@ pub(crate) fn parse_directives_in(
     ctx: SourceContext,
     line_offset: usize,
 ) -> Result<Vec<BlockDirective>, TransclusionError> {
+    parse_directives_deferring(content, data, ctx, line_offset, &|_| None).map(|(directives, _)| directives)
+}
+
+/// A directive line a dry run left as written: its text holds a value the
+/// run could not produce, so it is neither parsed nor resolved.
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredDirective {
+    /// The directive line as written, trimmed.
+    pub(crate) text: String,
+    /// Why the value it holds is not known.
+    pub(crate) reason: crate::markdown::compose::passive::DeferralReason,
+}
+
+/// [`parse_directives_in`], setting aside each directive line `deferred`
+/// gives a reason for instead of parsing it: in a dry run, a line holding a
+/// `{{ … }}` span left as written ([`PassiveSession::deferred_span_in`]),
+/// whose target is no path.
+///
+/// [`PassiveSession::deferred_span_in`]: crate::markdown::compose::passive::PassiveSession::deferred_span_in
+pub(crate) fn parse_directives_deferring(
+    content: &str,
+    data: Option<&DataRanges>,
+    ctx: SourceContext,
+    line_offset: usize,
+    deferred: &dyn Fn(&str) -> Option<crate::markdown::compose::passive::DeferralReason>,
+) -> Result<(Vec<BlockDirective>, Vec<DeferredDirective>), TransclusionError> {
+    let mut set_aside = Vec::new();
     let code_regions = find_code_regions(&structural_view(content, data));
     let mut directives = Vec::new();
 
@@ -86,6 +113,12 @@ pub(crate) fn parse_directives_in(
             if !is_in_code_region(first_non_ws, &code_regions)
                 && authored_directive(data, line_start, first_non_ws + keyword_len)
             {
+                if let Some(reason) = deferred(trimmed) {
+                    set_aside.push(DeferredDirective { text: trimmed.to_string(), reason });
+                    line_start = i.saturating_add(1);
+                    line_number += 1;
+                    continue;
+                }
                 let (kind, raw_target, mut options) =
                     parse_directive_line(trimmed, line_number, &ctx)?;
                 if let Some(data) = data {
@@ -112,7 +145,7 @@ pub(crate) fn parse_directives_in(
         line_number += 1;
     }
 
-    Ok(directives)
+    Ok((directives, set_aside))
 }
 
 /// Parses frontmatter `prologue` and `epilogue` references.

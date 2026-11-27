@@ -75,8 +75,10 @@ Every record in `diagnostics` (from `md`, DMLS, or Claudine's `--dry-run
 `source` (`file`, one-based `line` and `column`, `null` when no authored
 position is proven). Optional fields, omitted when empty: `hint` (the next
 step), `related` (other locations, as `message` + `source`), `notes`
-(supporting lines with no location), and `trail` (how a host reached the
-problem, outermost first; `md` itself never writes it). `iteration_path` and
+(supporting lines with no location), and `trail` (how the problem was
+reached, outermost first: transclusions, `::map`/`::filter` items, and host
+constructs; `md compose` and Claudine write it, while `md validate refs`,
+`md graph`, and other commands keep their older records without it). `iteration_path` and
 `included_via` are kept for compatibility and are projections of the same
 trail. Match on `code`, never on `message` text. A `--deny` or `--allow`
 changes whether a run fails, not a record's `severity` (except that a

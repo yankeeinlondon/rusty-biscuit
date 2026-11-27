@@ -1,0 +1,6 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ⚠ a producer reported a warning without a code

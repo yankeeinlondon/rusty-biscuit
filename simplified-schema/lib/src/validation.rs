@@ -88,7 +88,8 @@ pub struct ValidationProblem {
     pub default: Option<crate::AppliedDefault>,
     /// What to do instead, when the schema proves it: a removed key's
     /// replacement advice, or the declared key an unknown or near-miss key
-    /// most closely resembles (`` did you mean `prompt`? ``). Never part of
+    /// most closely resembles (`` did you mean `prompt`? ``), or else the
+    /// declared keys an unknown key could be replaced by. Never part of
     /// [`message`](Self::message), so a surface may render it as its own
     /// line.
     pub hint: Option<String>,

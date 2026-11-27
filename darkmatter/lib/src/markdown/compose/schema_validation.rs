@@ -749,6 +749,15 @@ pub(crate) fn run_with_registry(
             {
                 return false;
             }
+            // …nor reports a value it declared absent as missing: the dry
+            // run reports that input itself.
+            if let Some(session) = options.passive_session()
+                && p.code == simplified_schema::ValidationProblemCode::MissingRequired
+                && p.instance_path.segments().is_empty()
+                && p.property.as_deref().is_some_and(|name| session.absent_value(name).is_some())
+            {
+                return false;
+            }
             if !defer_shell_pending {
                 return true;
             }
@@ -1166,17 +1175,26 @@ fn defers_template(err: &simplified_schema::SchemaError, options: &crate::markdo
     let defers = (options.defer_shell_pending_schema_problems || reference_check)
         && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_));
     // A dry run is a reference-check session: the schema it could not
-    // resolve without asking is left unchecked, and said so.
+    // resolve without asking is left unchecked, and said so: by the URLs it
+    // needed network approval for, else by the file read it needed
+    // approval for.
     if defers && let Some(session) = options.passive_session() {
-        session.record(crate::markdown::compose::passive::Deferral {
-            construct: crate::markdown::compose::passive::DeferredConstruct::SchemaTemplate,
-            reason: crate::markdown::compose::passive::DeferralReason::ReadNeedsApproval {
-                target: "a file its schema slot names".to_string(),
-            },
-            authored: err.to_string(),
-            key: Some("$schema".to_string()),
-            line: None,
-        });
+        use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
+        let urls = options.slot_session.as_ref().map(|slots| slots.take_unapproved_urls()).unwrap_or_default();
+        let reasons: Vec<DeferralReason> = if urls.is_empty() {
+            vec![DeferralReason::ReadNeedsApproval { target: "a file its schema slot names".to_string() }]
+        } else {
+            urls.into_iter().map(|url| DeferralReason::NetworkNeedsApproval { url }).collect()
+        };
+        for reason in reasons {
+            session.record(Deferral {
+                construct: DeferredConstruct::SchemaTemplate,
+                reason,
+                authored: err.to_string(),
+                key: Some("$schema".to_string()),
+                line: None,
+            });
+        }
     }
     defers
 }

@@ -323,3 +323,29 @@ fn a_refused_remote_target_names_its_directive_line() {
         assert_located(&error, "dm.transclusion.failure", "doc.md", line, directive);
     }
 }
+
+/// A child whose frontmatter does not parse is a failure of its own with no
+/// inclusion site; when composition tolerates it, the warning keeps the
+/// tolerated-transclusion code and is placed at the directive that included
+/// the child. Lines added above the directive move it by as many lines; a
+/// child that parses is transcluded with no warning.
+#[test]
+fn a_tolerated_child_parse_failure_is_reported_at_its_inclusion() {
+    let repo = repository();
+    for n in [0, 2] {
+        std::fs::write(repo.path().join("part.md"), "---\ntitle: [unclosed\n---\npart text\n").unwrap();
+        let md = document(&repo, "doc.md", &format!("{}# Doc\n\n::file ./part.md\n", "\n".repeat(n)));
+        let (_, report) = md.compose_with(&request(repo.path())).expect("a child's failure is tolerated");
+        let records: Vec<_> = report.warnings.iter().map(warning_diagnostic).collect();
+        let [record] = records.as_slice() else { panic!("+{n}: {records:#?}") };
+        assert_eq!(record.code, "dm.transclusion.failure", "+{n}: {record:#?}");
+        let source = record.source.as_ref().unwrap_or_else(|| panic!("{record:#?}"));
+        assert!(source.file.as_ref().is_some_and(|path| path.ends_with("doc.md")), "+{n}: {record:#?}");
+        assert_eq!((source.line, source.column), (Some(3 + n), Some(1)), "+{n}: {record:#?}");
+
+        std::fs::write(repo.path().join("part.md"), "---\ntitle: closed\n---\npart text\n").unwrap();
+        let (composed, report) = md.compose_with(&request(repo.path())).expect("the fixed child composes");
+        assert!(report.warnings.is_empty(), "+{n}: {:#?}", report.warnings);
+        assert!(composed.content().contains("part text"), "+{n}");
+    }
+}

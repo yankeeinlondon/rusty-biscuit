@@ -335,7 +335,9 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 - Remote URL transclusion fails unless the target host is allowed with
   `--allow host=HOST` or the configuration says `network: allow` (see
   [Remote URL References](../topics/remote-url-references.md#allowed-hosts)).
-  Denied hosts are rejected before any network request is attempted.
+  Denied hosts are rejected before any network request is attempted; under
+  `network: ask`, the failure is `dm.transclusion.remote_needs_approval`,
+  since composition does not ask.
 
 ### The combined report
 
@@ -350,7 +352,8 @@ checks that do not depend on the broken reference:
 These run as a dry run: no command, `::shell`, effect, or approval runs, and
 every inclusion whose reference is broken is left out. When they find
 nothing, compose prints the reference report it always printed. When one of
-them adds a finding, compose prints one report for the document instead,
+them adds a finding, or could not reach a verdict, compose prints one report
+for the document instead,
 with the reference findings first, then the others, then the checks that
 could not run, and a closing tally. The exit status is 1 either way.
 
@@ -397,6 +400,7 @@ flowchart TD
     stop[A broken reference stops the run] --> dry[Dry-run composition, broken inclusions left out]
     dry -->|a call is proven wrong| call[call finding; schema and empty body not checked]
     dry -->|the frontmatter fails its schema| schema[schema findings; empty body not checked]
+    dry -->|fails for another reason| failed[empty body not checked]
     dry -->|composes| body{Is anything visible?}
     body -->|yes| none[no finding]
     body -->|only what the dry run left as written| unchecked[empty body not checked]
@@ -410,6 +414,13 @@ flowchart TD
 
   ```text
     ℹ not checked: empty body (reads `draft`, which is not known until the document runs)
+  ```
+- An expression that fails when it is evaluated (`{{ 3 / 0 }}`) is reported
+  by the run that follows once the references are fixed, but it leaves the
+  body without a verdict, so the report says so:
+
+  ```text
+    ℹ not checked: empty body (the document did not compose: interpolation of `3 / 0` failed: division(): Division by zero)
   ```
 - A call the check proves wrong, or a schema violation, can stop the
   reference check itself before it lists the document's references. Compose

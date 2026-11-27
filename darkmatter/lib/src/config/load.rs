@@ -835,8 +835,12 @@ impl Observe<'_> {
         if !problems.is_empty() {
             return Err(ConfigError::new(ConfigErrorKind::InvalidSetting, problems));
         }
-        // The schema admitted only `allow` or `deny`.
-        let network = if value["network"] == "allow" { NetworkAccess::Allow } else { NetworkAccess::Deny };
+        // The schema admitted only `allow`, `ask`, or `deny`.
+        let network = match value["network"].as_str() {
+            Some("allow") => NetworkAccess::Allow,
+            Some("ask") => NetworkAccess::Ask,
+            _ => NetworkAccess::Deny,
+        };
         Ok(PermissionsSetting::Inline(ScopePermissions {
             file_read: Setting { value: file_read, authored: written("file-read") },
             shell_commands: Setting { value: shell_commands, authored: written("shell-commands") },

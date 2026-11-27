@@ -465,7 +465,9 @@ impl ResolutionContext {
     /// - `Ok(Some(body))` when the URL was fetched.
     /// - `Ok(None)` when no remote-fetch runtime is attached.
     /// - [`RemoteTextError::Denied`] when the fetch policy does not allow the
-    ///   URL's host, and [`RemoteTextError::Failed`] when the URL is malformed
+    ///   URL's host, [`RemoteTextError::NeedsApproval`] when the captured
+    ///   `network: ask` leaves it needing an approval, and
+    ///   [`RemoteTextError::Failed`] when the URL is malformed
     ///   or the fetch failed.
     pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, RemoteTextError> {
         let invalid = |e: url::ParseError| {
@@ -499,6 +501,7 @@ impl ResolutionContext {
             ))),
             // An invalid configuration keeps its own located message.
             Err(e) if rf.network().config_error().is_some() => Err(RemoteTextError::Failed(e)),
+            Err(_) if rf.needs_approval(&url) => Err(RemoteTextError::NeedsApproval),
             // A host the policy refuses is never requested; checking the
             // policy first keeps such a failure from ever being typed
             // `Transport`.
@@ -513,6 +516,9 @@ impl ResolutionContext {
 pub(crate) enum RemoteTextError {
     /// The run's fetch policy does not allow the URL's host.
     Denied,
+    /// The URL's host needs an approval (`permissions.network: ask`) this
+    /// run did not give; nothing was requested.
+    NeedsApproval,
     /// Any other failure, typed and worded by the remote runtime.
     Failed(RemoteFetchFailure),
     /// An editor observation has no usable cached body, or ran out of work:

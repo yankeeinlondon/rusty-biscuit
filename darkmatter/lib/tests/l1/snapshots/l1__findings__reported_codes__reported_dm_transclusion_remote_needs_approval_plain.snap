@@ -1,0 +1,11 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ Transclusion error: [ROOT]/work/doc.md:3:1: Remote fetch of
+    http://127.0.0.1:9/child.md was not made: remote read of host '127.0.0.1'
+    needs approval: `permissions.network` is `ask`, and a composition does not
+    ask; allow the host for this run (`--allow host=127.0.0.1`) or set
+    `permissions.network: allow`
+      at doc.md:3:1

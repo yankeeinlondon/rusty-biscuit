@@ -60,12 +60,14 @@ type from); the key is absent when there are none. The file itself is never chan
 
 A problem whose fix the schema proves also carries a `hint` (absent
 otherwise), and the formatted output shows it on a `hint:` line under the
-problem. A key the schema declares `removed(<replacement>)` is a `removed`
-problem whose hint is the replacement; an unknown key near one declared key
-gets `` did you mean `name`? ``:
+problem. A key the schema declares `removed(<replacement>)` is a removed-key
+problem (`kind` `invalid`) whose hint is the replacement; an unknown key near one declared key
+gets `` did you mean `name`? ``, and one near none gets
+``remove `zzz`, or use one of `name`, `tags` `` (the object's declared keys in
+declaration order, at most eight, then `…`):
 
 ```json
-{ "kind": "removed", "property": "fail_fast", "path": "", "line": 3, "column": 1,
+{ "kind": "invalid", "property": "fail_fast", "path": "", "line": 3, "column": 1,
   "message": "key `fail_fast` has been removed",
   "hint": "set fail_fast on a group object", "arm_index": null, "description": null }
 ```

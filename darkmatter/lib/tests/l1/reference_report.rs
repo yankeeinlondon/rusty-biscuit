@@ -231,17 +231,52 @@ fn clean_documents_still_count() {
     assert_eq!(
         report.documents,
         vec![
-            ReferenceReportDocument { source: ComposeSource::File(path.clone()), included_via: Vec::new() },
+            ReferenceReportDocument {
+                source: ComposeSource::File(path.clone()),
+                included_via: Vec::new(),
+                tolerates_invalid_references: false,
+            },
             ReferenceReportDocument {
                 source: ComposeSource::File(fixture.root.join("clean.md")),
                 included_via: vec![darkmatter::markdown::reference::ReferenceTrailStep {
                     file: ComposeSource::File(path.clone()),
                     line: Some(1),
                 }],
+                tolerates_invalid_references: false,
             },
         ]
     );
     assert_eq!(plain(&fixture.view(&path)), "Checked 1 reference across 2 documents: all ok");
+}
+
+/// Each copy records whether composition tolerates an invalid inclusion it
+/// writes, decided on the copy as prepared: its own `ignore_invalid`, else
+/// the one its parent passes down.
+#[test]
+fn each_document_copy_records_whether_it_tolerates_invalid_inclusions() {
+    let fixture = Fixture::new();
+    fixture.write("own.md", "---\nignore_invalid: true\n---\n::file gone.md\n");
+    fixture.write("plain.md", "::file gone.md\n");
+    fixture.write("refuses.md", "---\nignore_invalid: false\n---\n::file gone.md\n");
+    let tolerance = |root: &Path| -> Vec<(String, bool)> {
+        fixture
+            .report(root)
+            .documents
+            .iter()
+            .map(|document| {
+                let ComposeSource::File(path) = &document.source else { panic!("a file copy") };
+                (path.file_name().unwrap().to_string_lossy().into_owned(), document.tolerates_invalid_references)
+            })
+            .collect()
+    };
+
+    let root = fixture.write("root.md", "::file own.md\n::file plain.md\n");
+    assert_eq!(tolerance(&root), [("root.md".into(), false), ("own.md".into(), true), ("plain.md".into(), false)]);
+    let root = fixture.write("tolerant.md", "---\nignore_invalid: true\n---\n::file plain.md\n::file refuses.md\n");
+    assert_eq!(
+        tolerance(&root),
+        [("tolerant.md".into(), true), ("plain.md".into(), true), ("refuses.md".into(), false)]
+    );
 }
 
 #[test]

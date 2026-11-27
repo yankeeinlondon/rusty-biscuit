@@ -370,14 +370,18 @@ impl PermissionPolicy {
         &self.shell
     }
 
-    /// `allow` only when every applicable layer says `allow`. A per-run
-    /// `--allow host=HOST` is added by the caller afterward.
+    /// The most restrictive layer's setting: `deny` when any applicable
+    /// layer says `deny`, else `ask` when any says `ask`, else `allow`. A
+    /// per-run `--allow host=HOST` is added by the caller afterward.
     #[must_use]
     pub fn network(&self) -> NetworkAccess {
-        if self.layers().all(|layer| layer.permissions.network.value == NetworkAccess::Allow) {
-            NetworkAccess::Allow
-        } else {
+        let settings: Vec<NetworkAccess> = self.layers().map(|layer| layer.permissions.network.value).collect();
+        if settings.contains(&NetworkAccess::Deny) {
             NetworkAccess::Deny
+        } else if settings.contains(&NetworkAccess::Ask) {
+            NetworkAccess::Ask
+        } else {
+            NetworkAccess::Allow
         }
     }
 }

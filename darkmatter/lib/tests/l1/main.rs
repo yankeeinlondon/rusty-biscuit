@@ -187,6 +187,7 @@ mod findings;
 mod findings_portable_paths;
 mod reference_suggestions;
 mod passive_compose;
+mod network_approval;
 #[cfg(feature = "effects-instrumentation")]
 mod report_diagnostics;
 mod diagnostic_source_provenance;

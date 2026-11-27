@@ -1,0 +1,3 @@
+Before.
+
+::file ./child.md

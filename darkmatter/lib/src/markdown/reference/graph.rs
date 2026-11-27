@@ -52,12 +52,15 @@ struct ReferenceAnalysisRuntime {
     /// id, in build order: what [`prepared_copy_id`](Self::prepared_copy_id)
     /// compares a new copy with.
     prepared_copies: std::collections::HashMap<NodeId, Vec<PreparedCopy>>,
+    /// The copies that tolerate an invalid inclusion they write.
+    tolerant: std::collections::HashSet<NodeId>,
 }
 
 /// What a node's consumers read of one prepared copy of a document.
 struct PreparedCopy {
     references: ReferenceSet,
     insertions: Vec<ReferenceInsertion>,
+    tolerant: bool,
 }
 
 fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
@@ -128,22 +131,26 @@ impl ReferenceAnalysisRuntime {
         source_id: NodeId,
         references: &ReferenceSet,
         insertions: &[ReferenceInsertion],
+        tolerant: bool,
     ) -> NodeId {
         let copies = self.prepared_copies.entry(source_id.clone()).or_default();
-        let ordinal = match copies
-            .iter()
-            .position(|copy| copy.references == *references && copy.insertions == insertions)
-        {
+        let ordinal = match copies.iter().position(|copy| {
+            copy.references == *references && copy.insertions == insertions && copy.tolerant == tolerant
+        }) {
             Some(index) => index,
             None => {
-                copies.push(PreparedCopy { references: references.clone(), insertions: insertions.to_vec() });
+                copies.push(PreparedCopy { references: references.clone(), insertions: insertions.to_vec(), tolerant });
                 copies.len() - 1
             }
         };
-        match ordinal {
+        let id = match ordinal {
             0 => source_id,
             later => NodeId(format!("{source_id} ({})", later + 1)),
+        };
+        if tolerant {
+            self.tolerant.insert(id.clone());
         }
+        id
     }
 }
 
@@ -205,6 +212,7 @@ fn build_graph_inner(
         trigger_warnings: Vec::new(),
         earlier_warnings: Vec::new(),
         prepared_copies: std::collections::HashMap::new(),
+        tolerant: std::collections::HashSet::new(),
     };
 
     // Seed the runtime with the root node so child documents that
@@ -243,6 +251,7 @@ fn build_graph_inner(
         prepared_headings,
     )
     .with_trigger_warnings(runtime.trigger_warnings)
+    .with_tolerant_nodes(runtime.tolerant)
     .with_earlier_warnings(runtime.earlier_warnings))
 }
 
@@ -310,6 +319,7 @@ fn flatten_node(
     out.documents.push(ReferenceReportDocument {
         source: node.source.clone(),
         included_via: trail.clone(),
+        tolerates_invalid_references: graph.tolerates_invalid(&node.node_id),
     });
 
     // Build an index of child insertions by directive line for interleaving.
@@ -709,8 +719,17 @@ fn build_node(
     // Block directives
     let directives = parsed_inclusions(
         options,
-        crate::markdown::compose::transclusion::parse_directives_in(&prepared_content, body_data, ctx.clone(), 0)
-            .map_err(|error| error.at_authored_directive(&prepared_document, body_origin.as_ref(), 0).into()),
+        // A dry run's directive whose line holds a value it left as written
+        // names no target, as composition leaves it unresolved.
+        crate::markdown::compose::transclusion::parse_directives_deferring(
+            &prepared_content,
+            body_data,
+            ctx.clone(),
+            0,
+            &|line| options.compose.passive_session().and_then(|session| session.deferred_span_in(line)),
+        )
+        .map(|(directives, _)| directives)
+        .map_err(|error| error.at_authored_directive(&prepared_document, body_origin.as_ref(), 0).into()),
     )?;
     for directive in &directives {
         // A false `when=` leaves the directive out, as composition does. A
@@ -1082,11 +1101,18 @@ fn build_node(
         parse_frontmatter_refs(prepared_document.frontmatter().as_map(), md.frontmatter_error_context())
             .map_err(MarkdownError::from),
     )?;
+    // A dry run's value it could not produce names no target, as composition
+    // leaves it unread.
+    let deferred_reference =
+        |value: &str| options.compose.passive_session().is_some_and(|session| session.deferred_reference(value).is_some());
     let value_location = |key: &str, idx: usize, expected: &str| {
         let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
         locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
     };
     for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+        if deferred_reference(prologue) {
+            continue;
+        }
         let is_literal = frontmatter_value_is_inline(prologue);
         let location = value_location("prologue", idx, prologue);
 
@@ -1180,6 +1206,9 @@ fn build_node(
     }
 
     for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
+        if deferred_reference(epilogue) {
+            continue;
+        }
         let is_literal = frontmatter_value_is_inline(epilogue);
         let location = value_location("epilogue", idx, epilogue);
 
@@ -1283,7 +1312,10 @@ fn build_node(
             .sort_by_key(|r| (r.origin.line, r.origin.span.start));
     }
 
-    let node_id = runtime.prepared_copy_id(source_to_id(source), &local_references, &child_insertions);
+    // Composition asks the document that writes an inclusion, as prepared
+    // (its parent's state passed down), whether a failing target is removed.
+    let tolerant = crate::markdown::compose::transclusion::ignores_invalid(&options.compose, &prepared_document);
+    let node_id = runtime.prepared_copy_id(source_to_id(source), &local_references, &child_insertions, tolerant);
     let main_node = ReferenceGraphNode {
         node_id,
         source: source.clone(),

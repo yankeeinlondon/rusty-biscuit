@@ -33,9 +33,10 @@
       "severity": 2,
       "code": "dm.schema.unknown_key",
       "source": "darkmatter.schema",
-      "message": "Additional properties are not allowed ('nope_verb' was unexpected)",
+      "message": "Additional properties are not allowed ('nope_verb' was unexpected); remove `nope_verb`, or use one of `say`, `speak`, `effect`, `message`, `notify`, `stderr`, `stdout`, `info`, …",
       "data": {
-        "instance_path": "/initialize/1"
+        "instance_path": "/initialize/1",
+        "hint": "remove `nope_verb`, or use one of `say`, `speak`, `effect`, `message`, `notify`, `stderr`, `stdout`, `info`, …"
       }
     },
     {

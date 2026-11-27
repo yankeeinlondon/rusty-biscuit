@@ -55,6 +55,7 @@ use crate::markdown::compose::DataRuntime;
 use super::observations::SessionObservations;
 use crate::markdown::compose::context::capture::CapturedObservations;
 use crate::markdown::compose::expression::iteration::IterationLimits;
+use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 use crate::markdown::compose::shell_expansion::ShellApprovalHandler;
@@ -104,6 +105,9 @@ pub struct SlotSession {
     limits: Option<IterationLimits>,
     grants: OnceLock<Arc<SlotGrants>>,
     pinned: Mutex<HashMap<ResolutionKey, Pin>>,
+    /// URLs a reference check left unread because they needed an approval
+    /// it never asks for, not yet taken by [`Self::take_unapproved_urls`].
+    unapproved_urls: Mutex<Vec<String>>,
 }
 
 /// Where a session's permissions come from.
@@ -222,6 +226,7 @@ impl SlotSession {
             limits: None,
             grants: OnceLock::new(),
             pinned: Mutex::new(HashMap::new()),
+            unapproved_urls: Mutex::new(Vec::new()),
         }
     }
 
@@ -428,6 +433,13 @@ impl SlotSession {
         self
     }
 
+    /// The URLs a [`SessionMode::ReferenceCheck`] resolution left unread
+    /// since the last call because they needed an approval it never asks
+    /// for (`permissions.network: ask`), each once, in the order met.
+    pub(crate) fn take_unapproved_urls(&self) -> Vec<String> {
+        std::mem::take(&mut *self.unapproved_urls.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
     /// How far this session resolves.
     pub fn mode(&self) -> SessionMode {
         self.mode
@@ -534,6 +546,12 @@ impl SlotSession {
             Err(SchemaError::SlotResolution(failure))
                 if self.mode == SessionMode::ReferenceCheck && needs_grant(&failure.error) =>
             {
+                let mut unapproved = self.unapproved_urls.lock().unwrap_or_else(PoisonError::into_inner);
+                for url in unapproved_urls(&failure.error) {
+                    if !unapproved.contains(&url) {
+                        unapproved.push(url);
+                    }
+                }
                 Err(unresolved())
             }
             other => other,
@@ -732,6 +750,30 @@ fn needs_grant(error: &SlotResolutionError) -> bool {
         }
         _ => false,
     }
+}
+
+/// The URLs whose reads `error`'s slots needed an approval for.
+fn unapproved_urls(error: &SlotResolutionError) -> Vec<String> {
+    use crate::markdown::compose::expression::read_gate::ReadLocation;
+    let SlotResolutionError::Failed(failed) = error else {
+        return Vec::new();
+    };
+    failed
+        .iter()
+        .filter_map(|(_, failure)| {
+            let mut current: Option<&(dyn std::error::Error + 'static)> = Some(failure.error());
+            while let Some(error) = current {
+                if let Some(ExpressionError::SlotReadRefused { target, refusal: GateRefusal::ApprovalRequired { .. } }) =
+                    error.downcast_ref::<ExpressionError>().map(ExpressionError::without_callbacks)
+                    && let ReadLocation::Remote(url) = &target.location
+                {
+                    return Some(url.to_string());
+                }
+                current = error.source();
+            }
+            None
+        })
+        .collect()
 }
 
 /// The key a template is known by on the resolution stack: the schema file

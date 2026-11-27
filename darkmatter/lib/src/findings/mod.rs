@@ -53,6 +53,23 @@ pub const EMPTY_BODY_CODE: &str = "dm.compose.empty_body";
 pub const FINDING_CODES: &[(&str, &str)] =
     &[(MISSING_DOCUMENT_CODE, "a document reference whose target does not exist")];
 
+/// The codes whose finding rows the report contract pins: each has a fixture
+/// pair (a document producing the finding and a control producing none) and
+/// its plain and JSON report snapshots, which `tests/l1/findings.rs` requires
+/// of every entry. A new or changed report code is added here.
+pub const REPORTED_FINDING_CODES: &[&str] = &[
+    MISSING_DOCUMENT_CODE,
+    simplified_schema::SCHEMA_UNKNOWN_KEY_CODE,
+    simplified_schema::SCHEMA_REMOVED_KEY_CODE,
+    simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE,
+    EMPTY_BODY_CODE,
+    NOT_CHECKED_CODE,
+    crate::markdown::compose::report_diagnostics::UNCODED_WARNING_CODE,
+    crate::markdown::schemas::slots::codes::SLOT_NETWORK_DENIED_CODE,
+    crate::markdown::compose::report_diagnostics::TRANSCLUSION_FAILURE_CODE,
+    crate::markdown::compose::report_diagnostics::TRANSCLUSION_REMOTE_NEEDS_APPROVAL_CODE,
+];
+
 /// Why a composed body is empty, as far as the producer has proven.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]

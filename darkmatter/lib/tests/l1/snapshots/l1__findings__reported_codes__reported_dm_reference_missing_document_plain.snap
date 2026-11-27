@@ -1,0 +1,10 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ the prompt file does not exist
+      prompt: ./metadata.md
+      resolved to metadata.md
+      did you mean: [ROOT]/work/metadata.yaml
+      hint: create metadata.md before a real run, or correct the reference

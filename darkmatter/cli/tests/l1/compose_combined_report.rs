@@ -107,20 +107,150 @@ fn a_true_condition_prints_the_reference_report_alone() {
     );
 }
 
-/// An expression that fails only when it is evaluated belongs to no passive
-/// check: the run prints the reference report alone, and the expression's
-/// error appears once the references are fixed.
+/// An expression that fails when it is evaluated is reported once the
+/// references are fixed, but it leaves the body without a verdict, so the
+/// empty-body check is reported not run beside the broken references.
 #[test]
-fn a_later_expression_failure_keeps_the_reference_report_alone() {
+fn a_later_expression_failure_leaves_the_empty_body_unchecked() {
     let document = "[one](./missing-one.md)\n[two](./missing-two.md)\n\n{{ 1 / 0 }}\n";
     let run = compose("combined-expression", "doc.md", document, &[]);
     assert_eq!(run.status, Some(1), "{}", run.stderr);
     assert_eq!(
-        run.stderr,
-        "Broken references in doc.md\n\ndoc.md\n  file not found in hyperlink  `./missing-one.md`  doc.md:1:1\n  \
-         file not found in hyperlink  `./missing-two.md`  doc.md:2:1\n\n\
-         Checked 2 references across 1 document: 0 ok, 2 broken\n"
+        rows(&run.stderr),
+        [
+            "  ✗ file not found in hyperlink",
+            "  ✗ file not found in hyperlink",
+            "  ℹ not checked: empty body (the document did not compose: interpolation of `1 / 0` failed: division(): Division by zero)",
+        ],
+        "{}",
+        run.stderr
     );
+    assert!(run.stderr.ends_with("Checked doc.md: 2 errors, 0 warnings, 1 check not run\n"), "{}", run.stderr);
+}
+
+/// A broken inclusion beside `{{ 3 / 0 }}`, with content before both.
+const BROKEN_AND_FAILING: &str = "---\ntitle: x\n---\nhello\n\n{{ 3 / 0 }}\n\n::file ./missing.md\n";
+
+/// The row the expression failure leaves for the empty-body check.
+const UNCHECKED_BY_DIVISION: &str =
+    "not checked: empty body (the document did not compose: interpolation of `3 / 0` failed: division(): Division by zero)";
+
+/// The record rows of a combined report (no detail lines).
+fn rows(stderr: &str) -> Vec<&str> {
+    stderr.lines().filter(|line| line.starts_with("  ") && !line.starts_with("   ")).collect()
+}
+
+/// The `code` of every record in a JSON envelope.
+fn codes(stdout: &str) -> Vec<String> {
+    let report: serde_json::Value = serde_json::from_str(stdout).unwrap();
+    report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| record["code"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// The `message` of the record with `code` in a JSON envelope.
+fn message_of(stdout: &str, code: &str) -> String {
+    let report: serde_json::Value = serde_json::from_str(stdout).unwrap();
+    report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["code"] == code)
+        .and_then(|record| record["message"].as_str())
+        .unwrap_or_else(|| panic!("no {code} in {report:#}"))
+        .to_string()
+}
+
+#[test]
+fn a_broken_inclusion_and_a_failing_expression_report_the_unchecked_body() {
+    let plain = compose("combined-division-plain", "doc.md", BROKEN_AND_FAILING, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(plain.stdout, "");
+    assert_eq!(
+        rows(&plain.stderr),
+        ["  ✗ file not found in `::file`", &format!("  ℹ {UNCHECKED_BY_DIVISION}")],
+        "{}",
+        plain.stderr
+    );
+    assert!(plain.stderr.ends_with("Checked doc.md: 1 error, 0 warnings, 1 check not run\n"), "{}", plain.stderr);
+
+    let json = compose("combined-division-json", "doc.md", BROKEN_AND_FAILING, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(json.stderr, "");
+    assert_eq!(codes(&json.stdout), ["dm.reference.missing_transclusion", "dm.check.not_checked"], "{}", json.stdout);
+    assert_eq!(message_of(&json.stdout, "dm.check.not_checked"), UNCHECKED_BY_DIVISION);
+}
+
+/// The lifecycle route keeps the same verdict, after `initialize` ran.
+#[test]
+fn the_lifecycle_route_reports_the_unchecked_body_after_initialize() {
+    let document = BROKEN_AND_FAILING.replace("title: x\n", "title: x\ninitialize:\n  - info: \"event:initialize\"\n");
+    let plain = compose("combined-division-lifecycle-plain", "doc.md", &document, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(plain.stdout, "");
+    let initialize = plain.stderr.find("event:initialize").expect("initialize ran");
+    let report = plain.stderr.find("Checked doc.md: 1 error, 0 warnings, 1 check not run").expect("the combined report");
+    assert!(initialize < report, "{}", plain.stderr);
+    assert_eq!(
+        rows(&plain.stderr),
+        ["  ✗ file not found in `::file`", &format!("  ℹ {UNCHECKED_BY_DIVISION}")],
+        "{}",
+        plain.stderr
+    );
+
+    let json = compose("combined-division-lifecycle-json", "doc.md", &document, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(json.stderr, "");
+    assert_eq!(codes(&json.stdout), ["dm.reference.missing_transclusion", "dm.check.not_checked"], "{}", json.stdout);
+    assert_eq!(message_of(&json.stdout, "dm.check.not_checked"), UNCHECKED_BY_DIVISION);
+    let report: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
+    assert!(report["lifecycle_output"].to_string().contains("event:initialize"), "{report:#}");
+}
+
+/// Fixing the expression leaves the broken inclusion alone: the run prints
+/// the reference report it always printed, with no unchecked row.
+#[test]
+fn fixing_the_expression_leaves_the_reference_report_alone() {
+    let document = BROKEN_AND_FAILING.replace("{{ 3 / 0 }}", "{{ 3 / 1 }}");
+    let plain = compose("combined-division-fixed-plain", "doc.md", &document, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(plain.stdout, "");
+    assert_eq!(
+        plain.stderr,
+        "Broken references in doc.md\n\ndoc.md\n  file not found in `::file`  `./missing.md`  doc.md:8:1\n\n\
+         Checked 1 reference across 1 document: 0 ok, 1 broken\n"
+    );
+
+    let json = compose("combined-division-fixed-json", "doc.md", &document, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(json.stderr, "");
+    assert_eq!(codes(&json.stdout), ["dm.reference.missing_transclusion"], "{}", json.stdout);
+}
+
+/// A missing required property is the schema verdict's own finding; the
+/// empty body it stops is reported not run.
+#[test]
+fn a_missing_required_property_beside_a_broken_reference_reports_both() {
+    let document = "---\n$schema:\n  count: number(required)\n---\nhello\n::file ./missing.md\n";
+    let plain = compose("combined-required-plain", "schema.md", document, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    let rows = rows(&plain.stderr);
+    assert_eq!(rows.len(), 3, "{}", plain.stderr);
+    assert_eq!(rows[0], "  ✗ file not found in `::file`", "{}", plain.stderr);
+    assert!(rows[1].starts_with("  ✗ ") && rows[1].contains("count"), "{}", plain.stderr);
+    assert_eq!(rows[2], "  ℹ not checked: empty body (the frontmatter does not satisfy its schema)", "{}", plain.stderr);
+
+    let json = compose("combined-required-json", "schema.md", document, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(json.stderr, "");
+    let codes = codes(&json.stdout);
+    assert_eq!(codes.len(), 3, "{}", json.stdout);
+    assert_eq!(codes[0], "dm.reference.missing_transclusion", "{}", json.stdout);
+    assert!(codes[1].starts_with("dm.schema."), "{}", json.stdout);
+    assert_eq!(codes[2], "dm.check.not_checked", "{}", json.stdout);
 }
 
 /// A condition that reads a command's output is not known until the document
@@ -180,9 +310,8 @@ fn a_call_refusal_beside_a_broken_reference_reports_both() {
     let document = "---\ntitle: x\n---\n{{ upper(1, 2, 3) }}\n\n::file ./missing.md\n";
     let run = compose("combined-call", "call.md", document, &[]);
     assert_eq!(run.status, Some(1), "{}", run.stderr);
-    let rows: Vec<&str> = run.stderr.lines().filter(|line| line.starts_with("  ") && !line.starts_with("   ")).collect();
     assert_eq!(
-        rows,
+        rows(&run.stderr),
         [
             "  ✗ file not found in `::file`",
             "  ✗ upper: no signature takes 3 arguments; expected upper(x: string | null): string | null",

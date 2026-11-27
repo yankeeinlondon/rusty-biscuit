@@ -445,6 +445,14 @@ pub struct ReferenceReportDocument {
     /// The inclusion path that reached this copy, outermost first; empty for
     /// the root.
     pub included_via: Vec<ReferenceTrailStep>,
+    /// Whether composition removes, with a warning, an inclusion this copy
+    /// writes whose target fails to resolve: the copy tolerates invalid
+    /// references (the request's setting, else its prepared frontmatter's
+    /// `ignore_invalid`, its parent's passed down included, else
+    /// `IGNORE_INVALID`), as composition decides for the document that
+    /// writes the inclusion.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tolerates_invalid_references: bool,
 }
 
 /// Records a child document insertion within a graph node.
@@ -529,6 +537,9 @@ pub struct ReferenceGraph {
     prepared_headings: PreparedHeadingSnapshot,
     /// The skipped-trigger warnings (`dm.schema.invalid_trigger`) the build's
     /// node preparations reported, once per trigger, in discovery order.
+    /// The copies whose own inclusions composition tolerates when invalid
+    /// ([`ReferenceReportDocument::tolerates_invalid_references`]).
+    tolerant_nodes: std::collections::HashSet<NodeId>,
     trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
     /// The warnings a validation that fails hands back: see
     /// [`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings).
@@ -694,6 +705,7 @@ impl ReferenceGraph {
             nodes,
             provenance,
             prepared_headings,
+            tolerant_nodes: std::collections::HashSet::new(),
             trigger_warnings: Vec::new(),
             earlier_warnings: Vec::new(),
         }
@@ -705,6 +717,17 @@ impl ReferenceGraph {
     ) -> Self {
         self.trigger_warnings = warnings;
         self
+    }
+
+    pub(crate) fn with_tolerant_nodes(mut self, nodes: std::collections::HashSet<NodeId>) -> Self {
+        self.tolerant_nodes = nodes;
+        self
+    }
+
+    /// Whether composition tolerates an invalid inclusion the copy `node`
+    /// writes.
+    pub(crate) fn tolerates_invalid(&self, node: &NodeId) -> bool {
+        self.tolerant_nodes.contains(node)
     }
 
     pub(crate) fn with_earlier_warnings(mut self, warnings: Vec<crate::markdown::compose::ComposeWarning>) -> Self {

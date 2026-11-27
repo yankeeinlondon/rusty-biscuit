@@ -56,9 +56,9 @@ impl From<FetchError> for RemoteFetchFailure {
 impl From<RemoteReadError> for RemoteFetchFailure {
     fn from(error: RemoteReadError) -> Self {
         let kind = match &error {
-            RemoteReadError::DeniedByPolicy { .. } | RemoteReadError::InvalidConfiguration { .. } => {
-                RemoteReadKind::Policy
-            }
+            RemoteReadError::DeniedByPolicy { .. }
+            | RemoteReadError::ApprovalRequired { .. }
+            | RemoteReadError::InvalidConfiguration { .. } => RemoteReadKind::Policy,
             RemoteReadError::InvalidUrl { .. } => RemoteReadKind::InvalidReference,
         };
         Self::new(kind, error.to_string())

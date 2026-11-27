@@ -668,10 +668,21 @@ impl RemoteFetchRuntime {
         Ok(ProviderPermit { runtime: self })
     }
 
+    /// Whether `url` is refused only because it needs an approval: the
+    /// configured `network` permission is `ask` and no per-run host allows
+    /// its host. Counts nothing; a dry run asks this before
+    /// [`Self::get_content`] to defer the read instead of failing it.
+    pub(crate) fn needs_approval(&self, url: &Url) -> bool {
+        self.inner.network.requires_approval()
+            && url.host_str().is_some_and(|host| !self.inner.policy.is_allowed(host))
+    }
+
     /// Checks whether a URL is allowed by policy, returning
     /// `RemoteReadError::InvalidConfiguration` when the configured `network`
-    /// permission is invalid (whatever hosts the run allows) and
-    /// `RemoteReadError::DeniedByPolicy` when the host is not allowed.
+    /// permission is invalid (whatever hosts the run allows),
+    /// `RemoteReadError::ApprovalRequired` when it is `ask` and the host is
+    /// not allowed for the run, and `RemoteReadError::DeniedByPolicy` when
+    /// the host is not allowed.
     pub fn check_allowed(&self, url: &Url) -> Result<(), RemoteReadError> {
         let host = url
             .host_str()
@@ -687,6 +698,7 @@ impl RemoteFetchRuntime {
                 message: error.to_string(),
             },
             None if self.inner.policy.is_allowed(host) => return Ok(()),
+            None if self.inner.network.requires_approval() => RemoteReadError::ApprovalRequired { host: host.to_string() },
             None => RemoteReadError::DeniedByPolicy { host: host.to_string() },
         };
         self.inner.stats.lock().unwrap().policy_denials += 1;
@@ -2631,6 +2643,37 @@ mod cache_only_tests {
             "{result:?}"
         );
         assert_eq!(runtime.stats().policy_denials, 1);
+    }
+
+    /// Under `network: ask` a host the run does not allow needs approval:
+    /// refused before the cache is read, typed apart from a `deny` refusal,
+    /// and reported by `needs_approval`, while a host the run allows is
+    /// read as under `deny`.
+    #[tokio::test]
+    async fn an_ask_permission_needs_approval_for_a_host_the_run_does_not_allow() {
+        let fixture = build_fixture(Some(Seed::default())).await;
+        let runtime = RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("example.test"),
+            NetworkPermission::Ask,
+            Some(Arc::clone(&fixture.store)),
+        );
+        assert!(runtime.needs_approval(&fixture.url));
+        let result = observe(&fixture, &runtime).await;
+        assert!(
+            matches!(&result, Err(CacheOnlyPending::Refused(RemoteReadError::ApprovalRequired { host })) if host == "127.0.0.1"),
+            "{result:?}"
+        );
+        assert_eq!(runtime.stats().policy_denials, 1);
+
+        let allowed = RemoteFetchRuntime::cache_only(
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            NetworkPermission::Ask,
+            Some(Arc::clone(&fixture.store)),
+        );
+        assert!(!allowed.needs_approval(&fixture.url));
+        assert!(observe(&fixture, &allowed).await.is_ok());
+        let denied = RemoteFetchRuntime::cache_only(FetchPolicy::deny_all(), NetworkPermission::Deny, None);
+        assert!(!denied.needs_approval(&fixture.url), "`deny` refuses; it never needs approval");
     }
 
     #[tokio::test]

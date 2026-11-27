@@ -218,7 +218,7 @@ record this output prints.
 | `related` | other locations involved in the problem, as `{ "message", "source" }`: the other declarations of a host registration conflict, or the finding that stopped a `dm.check.not_checked` record's check. Each `source` carries its own file and coordinates. Omitted when the diagnostic has no related location |
 | `hint` | how to fix the problem, as one sentence, such as `"create renderers/_frontmatter.md before a real run, or correct the reference"`. Omitted when the producer has no fix to suggest |
 | `notes` | supporting lines a person reads under the message, in order, such as each link of a provider selection chain. Unlike `related`, a note has no location of its own. Omitted when empty |
-| `trail` | how the problem was reached, outermost first, when a host such as Claudine reached it through one of its own constructs; see [Trail](#trail). Omitted otherwise |
+| `trail` | how the problem was reached, outermost first: the transclusions, `::map`/`::filter` items, and host constructs (such as a Claudine task) on the way to it; see [Trail](#trail). Omitted when there are none, and on commands other than `md compose` and `md render` unless a host frame is in it |
 
 `related` is the field for any other location that explains a problem.
 `notes` is an addition to that record: it holds facts with no location of
@@ -261,9 +261,13 @@ outermost first. Three kinds of frame exist:
 Every diagnostic shows Darkmatter's own frames in two fixed fields:
 `iteration_path` lists the iteration frames (`[]` when there are none), and a
 reference problem's `included_via` lists the included frames (`[]` for a
-problem in the root document). The `trail` field is written only when the
-trail holds at least one host frame, and then holds every frame, in order. So
-`md`, which pushes no host frame, never writes `trail`.
+problem in the root document). `md compose` (and `md render`) write the
+`trail` field whenever the trail has a frame, holding every frame in order,
+so a problem in a transcluded file or a `::map` item carries both its fixed
+field and its `trail`. Every other command (`md validate refs`, `md graph`,
+`md schema validate`, …) keeps the form it published before trails existed:
+it writes `trail` only when the trail holds a host frame, which `md` never
+pushes, so those commands never write it.
 
 ```json
 {
@@ -280,7 +284,29 @@ trail holds at least one host frame, and then holds every frame, in order. So
 
 The record above, reported by a Claudine dry run, carries the task that
 reached the failure. The same failure from `md compose` has the same
-`iteration_path` and no `trail`.
+`iteration_path` and a `trail` of only the iteration frame:
+
+```json
+{
+  "code": "dm.collection.callback_failed",
+  "iteration_path": [{ "collection": "teams", "position": 2 }],
+  "trail": [{ "kind": "iteration", "collection": "teams", "position": 2 }]
+}
+```
+
+A missing link in a transcluded file, from `md compose`, has an
+`included_via` step and the matching `included` frame:
+
+```json
+{
+  "code": "dm.reference.missing_hyperlink",
+  "included_via": [{ "file": "/work/docs/root.md", "line": 3 }],
+  "trail": [{ "kind": "included", "file": "/work/docs/root.md", "line": 3 }]
+}
+```
+
+`md validate refs --output json` reports the same problem with the same
+`included_via` and no `trail`.
 
 ### Reference details
 
@@ -302,8 +328,8 @@ listed under [Data errors](#data-errors).
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
 | `included_via` | the transclusion path, outermost first, as `{ "file", "line" }` steps, one per included frame of the [trail](#trail); each `line` is the authored line of the `::file` or `::toc-linking` directive, or `null`. `[]` for a problem in the root document. Written on a reference problem; a failure with no single reference (such as a read-side function's file) omits it |
-| `base` | for a missing document (`dm.reference.missing_document`), the file or directory the reference was resolved against |
-| `resolved` | for a missing document, the one path the reference resolved to |
+| `base` | for a missing document (`dm.reference.missing_document`) or a missing target `md compose` reports, the file or directory the reference was resolved against. `md validate refs` and `md graph --validate` keep their earlier records and never write `base`, `resolved`, `searched`, `suggestions`, or a missing target's `hint` |
+| `resolved` | for a missing document or target, the one path the reference resolved to |
 | `searched` | for a missing document whose reference was looked for in more than one place, or searched recursively (`%`), every path checked, and every directory a recursive search walked, in search order |
 | `suggestions` | up to three existing files near the reference's file name, from the searched directories, in search order. A directory the host's permissions refuse is never read. A name that differs only by case is offered when it is a different file (on a case-sensitive volume, `Notes.md` beside a missing `notes.md`) and never when it is the same directory entry. A suggestion is shown, never used |
 
@@ -396,7 +422,8 @@ classified by what failed:
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
 | `dm.shell.failure` | a shell command fails, times out, or is refused, or a `::shell-block`'s option or command does not parse (located at that line in the file that holds the block) |
 | `dm.reference.missing_transclusion` | a `::file` or `::code` target matches no file; a target that exists but cannot be read is `dm.input.read_failure` |
-| `dm.transclusion.failure` | a transclusion fails for another reason (such as a cycle, an unsupported file type, or a URL while remote execution is disabled); a warning under `ignore_invalid: true`, located at the directive or value that wrote the target |
+| `dm.transclusion.remote_needs_approval` | a remote `::file`, `::code`, or `prologue`/`epilogue` URL was not fetched because `permissions.network` is `ask` and the run did not allow its host (`--allow host=HOST`); no request is sent |
+| `dm.transclusion.failure` | a transclusion fails for another reason (such as a cycle, an unsupported file type, or a URL while remote execution is disabled); a warning under `ignore_invalid: true`, located at the directive or value that wrote the target. A tolerated child failure that has no code of its own (such as a child whose frontmatter does not parse) is reported with this code too, at the including directive |
 | `dm.reference.failure` | a file reference does not resolve or is invalid (such as a bare `@`), from `md compose`, `md validate refs`, and `md graph` alike; a link's or image's record (`[x](@)`, reason `invalid file reference`) names the link's line and column; an inclusion's record names the directive or `prologue`/`epilogue` value that wrote the target, in the file that wrote it (a child's included), and so does the warning when a `::file` tolerates a child's failure |
 | `dm.compose.parameter_binding` | a supplied value does not bind to its parameter |
 | `dm.setter.invalid` | a `key.path=value` setter cannot be applied: its value is an invalid container, its path meets a scalar parent or an index out of range in a document, or a scalar setter overlaps a setter below it. The message names the argument and its path; `source` is null, because a command-line value is in no file |

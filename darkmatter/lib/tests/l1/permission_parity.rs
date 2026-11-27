@@ -22,6 +22,7 @@ use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnaps
 use serde_json::Value;
 
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+const NETWORK_DENIED: &str = "dm.schema.slot_network_denied";
 
 /// A home and a work folder under one temporary directory, the home holding
 /// the fixture's configuration (with `network`) and files.
@@ -88,6 +89,9 @@ impl Fixture {
             Ok(_) => "preapproved",
             Err(error) => {
                 let codes: Vec<String> = error_diagnostics(&error).into_iter().map(|diagnostic| diagnostic.code).collect();
+                if codes.iter().any(|code| code == NETWORK_DENIED) {
+                    return "refused";
+                }
                 assert!(codes.iter().any(|code| code == APPROVAL_REQUIRED), "md: {error} ({codes:?})");
                 "approval-required"
             }

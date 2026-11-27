@@ -1,0 +1,23 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: ::file http://127.0.0.1:9/child.md (fetching `http://127.0.0.1:9/child.md` needs network approval (`permissions.network: ask`), which a dry run does not ask for)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "counts": {
+    "errors": 0,
+    "warnings": 0,
+    "info": 1
+  }
+}

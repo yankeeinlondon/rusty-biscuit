@@ -611,7 +611,7 @@ and the `has_alias` call. `title` composed, because it reads nothing deferred.
 | Construct (`DeferredConstruct`) | Left as written when | Reason (`DeferralReason`) |
 | --- | --- | --- |
 | `FrontmatterValue` | a `$( … )` value, or a value that reads one | `Command`, `DependsOn` |
-| `Interpolation` | a `{{ … }}` span that reads a deferred value or calls an effectful function | `DependsOn`, `ShellProbe`, `NetworkProbe`, `ProviderQuery` |
+| `Interpolation` | a `{{ … }}` span that reads a deferred or absent value or calls an effectful function | `DependsOn`, `MissingInput`, `ShellProbe`, `NetworkProbe`, `ProviderQuery` |
 | `ShellDirective` | a body `::shell` line | `Command` |
 | `ShellBlock` | a body `::shell-block` region | `Command` |
 | `BlockCondition` | a `::block when=…` whose condition reads a deferred value; the whole region stays, directive lines included | `DependsOn` |
@@ -633,6 +633,24 @@ keeps its own text: a span, a whole `::block` region, or a frontmatter value,
 which is then deferred in turn. The session is shared by every clone of the
 options, so a transcluded document, a schema slot, and a callback report
 into the same list.
+
+### Values a host declares absent
+
+A host that reports a missing input itself (Claudine's dry run reports each
+missing required input as its own finding) can declare that name absent
+before composing, with `PassiveSession::defer_absent(name, reason)`. A read
+of an absent name that finds no value is then unavailable for that reason
+(`MissingInput` for a missing input), so it stays as written and spreads
+like any deferred value, and the schema stage does not report the same name
+as a missing required property. A value the read does find (a default, a
+setter) reads as itself:
+
+```rust
+let options = ComposeOptions::new().with_dry_run();
+let session = options.passive_session().cloned().unwrap();
+session.defer_absent("topic", DeferralReason::MissingInput { name: "topic".into() });
+// `Topic is {{ topic }}.` composes as written; `$schema: { topic: string(required) }` passes.
+```
 
 ### What a dry run still refuses
 

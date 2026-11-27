@@ -191,6 +191,14 @@ fn json_output_agrees_with_the_terminal_on_the_failure() {
     let message = diagnostic["message"].as_str().unwrap();
     assert!(message.ends_with("at data[0]"), "{message}");
     assert!(terminal.contains("Iteration path: data[0]"), "{terminal}");
+    // The iteration is the record's whole trail, published beside its
+    // `iteration_path` projection.
+    assert_eq!(diagnostic["iteration_path"], serde_json::json!([{ "collection": "data", "position": 0 }]));
+    assert_eq!(
+        diagnostic["trail"],
+        serde_json::json!([{ "kind": "iteration", "collection": "data", "position": 0 }]),
+        "{report:#}"
+    );
     assert!(document.exists());
 }
 

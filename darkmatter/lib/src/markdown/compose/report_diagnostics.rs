@@ -83,6 +83,9 @@ pub const TRANSCLUSION_HEADING_OVERFLOW_CODE: &str = "dm.transclusion.heading_ov
 pub const SHELL_FAILURE_CODE: &str = "dm.shell.failure";
 /// A transclusion failed for a reason other than its content's own error.
 pub const TRANSCLUSION_FAILURE_CODE: &str = "dm.transclusion.failure";
+/// A remote transclusion was not fetched: its host needs an approval
+/// (`permissions.network: ask`) the run did not give.
+pub const TRANSCLUSION_REMOTE_NEEDS_APPROVAL_CODE: &str = "dm.transclusion.remote_needs_approval";
 /// A file reference failed to resolve.
 pub const REFERENCE_FAILURE_CODE: &str = "dm.reference.failure";
 /// A caller-supplied value did not bind to its parameter.
@@ -154,7 +157,7 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
 /// nearby files, as [`missing_target`](crate::findings::reference::missing_target)
 /// builds them. Listing those nearby files reads the searched directories.
 pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
-    let mut record = reference_issue_record(issue);
+    let mut record = reference_issue_legacy_diagnostic(issue);
     if issue.code != ReferenceIssueCode::MissingLocalTarget {
         return record;
     }
@@ -182,7 +185,11 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
     record
 }
 
-fn reference_issue_record(issue: &ReferenceIssue) -> Diagnostic {
+/// [`reference_issue_diagnostic`] without the resolver evidence and hint a
+/// missing target adds: the record `md validate refs` and
+/// `md graph --validate` publish, whose JSON bytes are a compatibility
+/// contract that predates that evidence.
+pub fn reference_issue_legacy_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
     let code = match issue.code {
         ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget => {
             super::policy::missing_reference_code(issue.kind).unwrap_or(REFERENCE_FAILURE_CODE)
@@ -672,7 +679,7 @@ fn file_reference_details(diagnostic: &FileReferenceDiagnostic) -> ReferenceDeta
     use biscuit_file::{FileReferenceError, ResolutionFailure};
     let failure = diagnostic.resolution_failure();
     let reason = match (diagnostic.kind, failure, diagnostic.source.as_deref()) {
-        (FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied, ..) => {
+        (FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied | FileRefFailure::RemoteNeedsApproval, ..) => {
             Some(ReferenceIssueCode::RemoteDisallowed)
         }
         (_, ResolutionFailure::NoMatch, _) => Some(ReferenceIssueCode::MissingLocalTarget),
@@ -1108,6 +1115,7 @@ pub(crate) fn transclusion_code(error: &TransclusionError) -> &'static str {
             crate::markdown::compose::policy::MISSING_TRANSCLUSION_CODE
         }
         TransclusionError::Io(_) => INPUT_READ_CODE,
+        TransclusionError::RemoteNeedsApproval { .. } => TRANSCLUSION_REMOTE_NEEDS_APPROVAL_CODE,
         _ => TRANSCLUSION_FAILURE_CODE,
     }
 }

@@ -313,7 +313,9 @@ pub(crate) fn interpolation_block(
     // A refused host was reported as a generic evaluation failure before it
     // was typed, and still renders as one. A contract import renders like the
     // data file it belongs to.
-    let file_reference = cause.file_reference_diagnostic().filter(|diagnostic| diagnostic.kind != FileRefFailure::RemoteDenied);
+    let file_reference = cause.file_reference_diagnostic().filter(|diagnostic| {
+        !matches!(diagnostic.kind, FileRefFailure::RemoteDenied | FileRefFailure::RemoteNeedsApproval)
+    });
     match cause {
         ExpressionError::Callback { function, position, source: inner } => {
             interpolation_block(key, expression, source, inner)

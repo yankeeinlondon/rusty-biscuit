@@ -1315,7 +1315,8 @@ fn collect_document(
 ///
 /// Registers the URL on demand (the eager pre-scan only covers the root) and
 /// blocks until the fetch completes. Returns `None` when the URL was not
-/// registered or produced no body. A failed fetch is composition's own
+/// registered, produced no body, or needs a network approval (`ask`) the run
+/// did not give, which is never fetched. A failed fetch is composition's own
 /// [`RemoteFetchFailed`](transclusion::TransclusionError::RemoteFetchFailed),
 /// at the inclusion `site` that named the URL.
 fn fetch_remote_child_body(
@@ -1323,6 +1324,11 @@ fn fetch_remote_child_body(
     remote_fetch: &remote_fetch::RemoteFetchRuntime,
     site: Option<transclusion::InclusionSite>,
 ) -> MarkdownResult<Option<String>> {
+    // A child whose host needs an approval is never fetched, so it has no
+    // commands to approve; composition reports (or a dry run defers) it.
+    if remote_fetch.needs_approval(url) {
+        return Ok(None);
+    }
     remote_fetch.register_nested(url.clone());
     remote_fetch.get_content(url).map_err(|reason| {
         transclusion::TransclusionError::RemoteFetchFailed { url: url.to_string(), reason }.at_inclusion(site).into()

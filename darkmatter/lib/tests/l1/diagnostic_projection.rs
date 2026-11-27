@@ -102,12 +102,14 @@ fn a_record_with_no_reference_details_omits_those_fields() {
 }
 
 /// The trail is the one stored copy of iteration and inclusion context;
-/// `iteration_path` and `included_via` are serialized from it.
+/// `iteration_path` and `included_via` are serialized from it. A record
+/// publishes a non-empty trail whole; the legacy projection `md`'s older
+/// commands use publishes it only with a host frame.
 mod trail_projections {
     use darkmatter::findings::{ReferenceDetails, Trail, TrailFrame};
     use darkmatter::markdown::compose::ComposeSource;
     use darkmatter::markdown::compose::expression::iteration::{IterationFrame, IterationPath, IterationPosition};
-    use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+    use darkmatter::markdown::compose::expression::{Diagnostic, LegacyTrailProjection, Severity};
     use darkmatter::markdown::reference::ReferenceTrailStep;
     use serde_json::json;
 
@@ -135,15 +137,47 @@ mod trail_projections {
     const PREFIX: &str = r#"{"code":"dm.test.code","severity":"error","message":"message","source":null,"expected_type":null,"actual_type":null,"span":null,"#;
 
     #[test]
-    fn iteration_frames_serialize_as_the_iteration_path_and_publish_no_trail() {
+    fn the_legacy_projection_writes_iteration_frames_only_as_the_iteration_path() {
         let found = record().with_iteration_path(&teams_then_lead());
 
         assert_eq!(
-            serde_json::to_string(&found).unwrap(),
+            serde_json::to_string(&LegacyTrailProjection(&found)).unwrap(),
             format!(
                 r#"{PREFIX}"iteration_path":[{{"collection":"teams","position":2}},{{"collection":"members","position":"lead"}}]}}"#
             )
         );
+    }
+
+    #[test]
+    fn an_iteration_only_trail_is_published_beside_the_iteration_path() {
+        let found = record().with_iteration_path(&teams_then_lead());
+
+        let value = serde_json::to_value(&found).unwrap();
+
+        assert_eq!(
+            value["trail"],
+            json!([
+                { "kind": "iteration", "collection": "teams", "position": 2 },
+                { "kind": "iteration", "collection": "members", "position": "lead" },
+            ]),
+            "{value:#}"
+        );
+        assert_eq!(
+            value["iteration_path"],
+            json!([{ "collection": "teams", "position": 2 }, { "collection": "members", "position": "lead" }]),
+            "{value:#}"
+        );
+        assert!(value.get("included_via").is_none(), "not a reference record: {value:#}");
+    }
+
+    #[test]
+    fn an_empty_trail_is_never_published() {
+        let found = record().with_reference_details(reference(true));
+
+        let value = serde_json::to_value(&found).unwrap();
+
+        assert!(value.get("trail").is_none(), "{value:#}");
+        assert_eq!(serde_json::to_value(LegacyTrailProjection(&found)).unwrap(), value);
     }
 
     #[test]
@@ -167,14 +201,57 @@ mod trail_projections {
     }
 
     #[test]
-    fn included_frames_serialize_in_order_as_file_and_line_steps() {
+    fn the_legacy_projection_writes_included_frames_only_as_file_and_line_steps() {
         let found = record().with_reference_details(reference(true)).with_trail(Trail::included(&two_steps()));
 
         assert_eq!(
-            serde_json::to_string(&found).unwrap(),
+            serde_json::to_string(&LegacyTrailProjection(&found)).unwrap(),
             format!(
                 r#"{PREFIX}"iteration_path":[],"reference":"./gone.md","included_via":[{{"file":"/w/root.md","line":3}},{{"file":"/w/child.md","line":null}}]}}"#
             )
+        );
+    }
+
+    #[test]
+    fn an_inclusion_only_trail_is_published_beside_the_inclusion_path() {
+        let found = record().with_reference_details(reference(true)).with_trail(Trail::included(&two_steps()));
+
+        let value = serde_json::to_value(&found).unwrap();
+
+        assert_eq!(
+            value["trail"],
+            json!([
+                { "kind": "included", "file": "/w/root.md", "line": 3 },
+                // A trail frame omits an unknown line; `included_via` keeps its null.
+                { "kind": "included", "file": "/w/child.md" },
+            ]),
+            "{value:#}"
+        );
+        assert_eq!(
+            value["included_via"],
+            json!([{ "file": "/w/root.md", "line": 3 }, { "file": "/w/child.md", "line": null }]),
+            "{value:#}"
+        );
+        assert_eq!(value["iteration_path"], json!([]), "{value:#}");
+    }
+
+    #[test]
+    fn an_inclusion_trail_on_a_record_reporting_no_inclusion_path_still_omits_included_via() {
+        let found = record().with_reference_details(reference(false)).with_trail(Trail::included(&two_steps()[..1]));
+
+        let value = serde_json::to_value(&found).unwrap();
+
+        assert_eq!(value["trail"], json!([{ "kind": "included", "file": "/w/root.md", "line": 3 }]), "{value:#}");
+        assert!(value.get("included_via").is_none(), "{value:#}");
+    }
+
+    #[test]
+    fn the_legacy_projection_still_publishes_a_trail_with_a_host_frame() {
+        let found = record().with_iteration_path(&teams_then_lead()).with_trail(Trail::host("task", "find", "sequence[0]"));
+
+        assert_eq!(
+            serde_json::to_value(LegacyTrailProjection(&found)).unwrap(),
+            serde_json::to_value(&found).unwrap()
         );
     }
 

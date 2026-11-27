@@ -321,7 +321,9 @@ fn transcluded_bare_sidecar_rejection_is_a_transclusion_warning() {
     assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
     let warning = &report.warnings[0];
     assert_eq!(warning.stage, "transclusion");
-    assert_eq!(warning.code, None);
+    // A tolerated child failure no other code describes keeps the
+    // tolerated-transclusion code.
+    assert_eq!(warning.code.as_deref(), Some(crate::markdown::compose::report_diagnostics::TRANSCLUSION_FAILURE_CODE));
     let schema_name = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
     assert!(
         warning.message.contains(&format!(
