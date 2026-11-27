@@ -104,7 +104,7 @@ use action_shape::*;
 pub use action_shape::{action_value_to_expr, closest_spelling};
 pub(crate) use action_shape::{edit_flag_problem, edit_target_problem};
 pub use authored_order::AuthoredOrder;
-pub use created_files::{CreatedFile, FILE_CREATING_VERBS, created_files};
+pub use created_files::{CreatedFile, created_files, file_change};
 pub use context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason, LifecycleTiming};
 pub use effects::{LifecycleEffects, dispatch_communication, render_prose_line, render_status_line};
 pub use envelope::{

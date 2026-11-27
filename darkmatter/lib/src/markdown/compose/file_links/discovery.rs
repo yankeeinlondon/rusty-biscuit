@@ -74,6 +74,37 @@ pub fn discover(
     })
 }
 
+/// In a dry run, why the files `directive` lists may differ when the run
+/// lists them: the run's initializer may create a file the listing selects
+/// ([`PassiveSession::changes_listing`](crate::markdown::compose::passive::PassiveSession::changes_listing)).
+/// Rewriting a file already listed changes no listing.
+pub(crate) fn changes_at_launch(
+    directive: &FileLinksDirective,
+    source: &ComposeSource,
+    document_context: &FileResolutionContext,
+    session: &crate::markdown::compose::passive::PassiveSession,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    match &directive.mode {
+        FileLinksMode::Glob(glob) => {
+            let globs = GlobReference::new([glob]).ok()?;
+            session.changes_listing(&globs.roots(document_context), |path| {
+                has_allowed_extension(path) && globs.matches(path, document_context)
+            })
+        }
+        FileLinksMode::Dir { path, depth } => {
+            let source_path = require_source_file(source, directive.line).ok()?;
+            let folder = crate::markdown::compose::passive::lexically_absolute(&source_path.parent()?.join(path))?;
+            // `depth` counts the folders below `folder` the walk descends.
+            let reaches = |candidate: &Path| {
+                candidate.strip_prefix(&folder).is_ok_and(|rest| rest.components().count() <= *depth as usize + 1)
+            };
+            session.changes_listing(std::slice::from_ref(&folder), |candidate| {
+                has_allowed_extension(candidate) && reaches(candidate)
+            })
+        }
+    }
+}
+
 /// Extracts the source file path, erroring for non-file sources.
 fn require_source_file(source: &ComposeSource, line: usize) -> Result<PathBuf, FileLinksError> {
     match source {

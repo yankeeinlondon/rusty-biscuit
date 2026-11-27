@@ -892,6 +892,13 @@ fn build_node(
     let transclusion_options = options.compose.transclusion_options();
 
     for directive in &toc_directives {
+        // A dry run's target the run's initializer creates or changes first
+        // is selected, and its headings read, only by the run.
+        if let Some(session) = options.compose.passive_session()
+            && toc_linking::changed_at_launch(directive, source, &transclusion_options, ctx.clone(), session).is_some()
+        {
+            continue;
+        }
         let ref_id = make_reference_id(source, directive.line, directive.span.start);
 
         // Section context is always available from the parent document's

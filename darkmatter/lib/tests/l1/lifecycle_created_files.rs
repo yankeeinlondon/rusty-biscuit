@@ -36,7 +36,7 @@ fn every_file_creating_effect_with_a_literal_target_is_listed_in_authored_order(
         { "append_line": ["c.yaml", "kind: task"] },
         { "append_jsonl": ["d.jsonl", "{{ record }}"] },
         { "when": "flag", "then": [{ "ensure_file": "e.md" }], "else": [{ "append_line": ["f.md", "x"] }] },
-        // Not a file a read can find, or a target known only when it runs.
+        // Not a file a read can find.
         { "ensure_dir": "folder" },
         { "set_frontmatter": ["g.md", "k", "v"] },
         { "ensure_file": "{{ folder }}/h.md" },
@@ -52,12 +52,14 @@ fn every_file_creating_effect_with_a_literal_target_is_listed_in_authored_order(
             ("append_jsonl", "d.jsonl", false, false),
             ("ensure_file", "e.md", true, false),
             ("append_line", "f.md", true, false),
+            ("set_frontmatter", "g.md", false, false),
             ("ensure_file", "{{ folder }}/h.md", false, true),
         ]
     );
     assert_eq!(found[0].change(), InitializerChange::CreatesIfAbsent);
     assert_eq!(found[2].change(), InitializerChange::CreatesOrAppends);
     assert_eq!(found[3].change(), InitializerChange::CreatesOrAppends);
+    assert_eq!(found[6].change(), InitializerChange::ChangesExisting);
     assert_eq!(found[0].path.to_string(), "initialize[0].ensure_file");
 }
 
@@ -459,4 +461,177 @@ macro_rules! preflight_walks {
 preflight_walks! {
     the_preflight_walk_skips_an_appended_inclusion: "::file part.md\n";
     the_preflight_walk_skips_an_appended_prologue: "---\nprologue: part.md\n---\n\nBody.\n";
+}
+
+/// Every effect the catalog classifies as writing a file is listed, with
+/// the catalog's effect; the frontmatter verbs rewrite an existing file.
+#[test]
+fn every_file_writing_effect_in_the_catalog_is_listed_with_its_change() {
+    let verbs = [
+        ("set_frontmatter", json!(["g.md", "k", "v"])),
+        ("merge_frontmatter", json!(["g.md", "{{ patch }}"])),
+        ("delete_frontmatter", json!(["g.md", "k"])),
+        ("increment_frontmatter", json!(["g.md", "k"])),
+        ("decrement_frontmatter", json!(["g.md", "k"])),
+        ("append_frontmatter", json!(["g.md", "k", "v"])),
+        ("prepend_frontmatter", json!(["g.md", "k", "v"])),
+    ];
+    for (verb, args) in verbs {
+        let found = initialize(json!([{ verb: args }]));
+        assert_eq!(found.len(), 1, "{verb}");
+        assert_eq!(found[0].change(), InitializerChange::ChangesExisting, "{verb}");
+        assert_eq!(darkmatter::lifecycle::file_change(verb), Some(InitializerChange::ChangesExisting));
+    }
+    // Every catalogued verb is classified; only these write no file.
+    let silent: Vec<&str> = darkmatter::effects::EFFECT_DESCRIPTORS
+        .iter()
+        .filter(|descriptor| descriptor.file_change.is_none())
+        .map(|descriptor| descriptor.signature)
+        .collect();
+    assert_eq!(silent, ["set(key, value)", "ensure_dir(dir)", "http_post(url, body)"]);
+}
+
+/// Two writes to one destination keep both effects.
+#[test]
+fn two_writes_to_one_destination_combine_their_effects() {
+    use InitializerChange::{ChangesExisting, CreatesIfAbsent, CreatesOrAppends};
+    assert_eq!(CreatesIfAbsent.combine(CreatesIfAbsent), CreatesIfAbsent);
+    assert_eq!(CreatesIfAbsent.combine(CreatesOrAppends), CreatesOrAppends);
+    assert_eq!(CreatesIfAbsent.combine(ChangesExisting), CreatesOrAppends);
+    assert_eq!(ChangesExisting.combine(ChangesExisting), ChangesExisting);
+    assert_eq!(CreatesOrAppends.combine(ChangesExisting), CreatesOrAppends);
+}
+
+/// A frontmatter rewrite changes an existing file's content and never
+/// makes an absent file exist.
+#[test]
+fn a_frontmatter_rewrite_changes_an_existing_file_but_creates_none() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("facts.md"), "").unwrap();
+    let session = PassiveSession::new();
+    session.declare_initializer_write(&dir.path().join("facts.md"), REWRITES, created("facts.md"));
+    session.declare_initializer_write(&dir.path().join("gen/absent.md"), REWRITES, created("gen/absent.md"));
+
+    assert_eq!(session.initializer_changes(&dir.path().join("facts.md")), Some(changed("facts.md")));
+    assert_eq!(session.created_file(&dir.path().join("gen/absent.md")), None, "a rewrite refuses an absent file");
+    assert_eq!(session.initializer_changes(&dir.path().join("gen/absent.md")), None);
+    assert_eq!(session.changes_listing(&[dir.path().join("gen")], |_| true), None);
+}
+
+/// One page block over a rewritten file, read through the shapes a reader
+/// can take; an unrelated rewrite leaves the empty verdict.
+#[test]
+fn a_read_of_a_rewritten_file_waits_for_launch() {
+    for text in [
+        "::file facts.md\n",
+        "::block when=\"frontmatter('facts.md').ready\"\nRead.\n::end-block\n",
+        "::block when=\"try_frontmatter('facts.md').value.ready\"\nRead.\n::end-block\n",
+    ] {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("facts.md"), "---\nready: false\n---\n").unwrap();
+        std::fs::write(dir.path().join("other.md"), "").unwrap();
+        let (composed, session) = dry_compose_writes(dir.path(), text, &[("facts.md", REWRITES)]);
+        composed.unwrap();
+        assert!(deferred(&session).iter().any(|(_, reason)| *reason == changed("facts.md")), "{text}: {:?}", deferred(&session));
+
+        let (_, session) = dry_compose_writes(dir.path(), text, &[("other.md", REWRITES)]);
+        assert!(deferred(&session).is_empty(), "{text}: {:?}", deferred(&session));
+    }
+}
+
+/// A destination pattern ensured and then appended to changes an existing
+/// file as an append alone does, in either order.
+#[test]
+fn a_repeated_destination_pattern_keeps_its_strongest_effect() {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join("gen")).unwrap();
+    std::fs::write(dir.path().join("gen/facts.md"), "").unwrap();
+    let source = dir.path().join("doc.md");
+    let context = biscuit_file::FileResolutionContext::new(dir.path()).with_repository_root(dir.path());
+    let ensured = initialize(json!([{ "ensure_file": "gen/{{ dest }}.md" }, { "append_line": ["gen/{{ dest }}.md", "x"] }]));
+    for order in [[0, 1], [1, 0]] {
+        let session = PassiveSession::new();
+        for index in order {
+            let write = &ensured[index];
+            session.declare_unresolved_write(write.pattern(&source, &context, dir.path()).unwrap(), write.change(), created(&write.reference));
+        }
+        assert!(session.initializer_changes(&dir.path().join("gen/facts.md")).is_some(), "{order:?}");
+    }
+    let session = PassiveSession::new();
+    session.declare_unresolved_write(ensured[0].pattern(&source, &context, dir.path()).unwrap(), ensured[0].change(), created("x"));
+    assert!(session.initializer_changes(&dir.path().join("gen/facts.md")).is_none(), "ensure_file alone keeps the file");
+}
+
+const REWRITES: InitializerChange = InitializerChange::ChangesExisting;
+
+/// `::toc-linking` selects its target and reads its headings only at
+/// launch when the run creates or changes that target first; an unrelated
+/// write keeps the composed verdict.
+#[test]
+fn a_toc_target_the_run_writes_first_is_left_unchecked() {
+    let missing = |declared: &str| {
+        let dir = TempDir::new().unwrap();
+        let (composed, session) = dry_compose_writes(dir.path(), "::toc-linking ./gen/facts.md\n", &[(declared, ENSURES)]);
+        (composed.unwrap().contains("::toc-linking"), deferred(&session).len())
+    };
+    assert_eq!(missing("gen/facts.md"), (true, 1));
+    // The reference check reports the miss
+    // (`the_reference_graph_leaves_a_created_toc_target_to_launch`).
+    assert_eq!(missing("gen/other.md"), (false, 0), "an unrelated creation leaves the target missing");
+
+    let blank = |change: InitializerChange| {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("facts.md"), "").unwrap();
+        let (composed, session) = dry_compose_writes(dir.path(), "::toc-linking ./facts.md\n", &[("facts.md", change)]);
+        composed.unwrap();
+        deferred(&session)
+    };
+    assert_eq!(blank(APPENDS), [(DeferredConstruct::Transclusion, changed("facts.md"))]);
+    assert_eq!(blank(REWRITES), [(DeferredConstruct::Transclusion, changed("facts.md"))]);
+    assert!(blank(ENSURES).is_empty(), "ensure_file leaves the headings as they are");
+}
+
+/// The reference check does not report a `::toc-linking` target the run
+/// creates first as missing.
+#[test]
+fn the_reference_graph_leaves_a_created_toc_target_to_launch() {
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+
+    let issues = |declared: &str| {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, "::toc-linking ./gen/facts.md\n").unwrap();
+        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), ""))
+            .with_source_file(path.clone())
+            .with_dry_run();
+        options.passive_session().unwrap().defer_created(&dir.path().join(declared), created(declared));
+        let request = crate::request_support::request(options);
+        let validation = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&request));
+        Markdown::try_from(path.as_path()).unwrap().validate_references(validation).unwrap().issues.len()
+    };
+    assert_eq!(issues("gen/facts.md"), 0);
+    assert_eq!(issues("gen/other.md"), 1);
+}
+
+/// A `::file-links` listing the run may add a file to first is left
+/// unchecked, in either listing form; appending to a listed file or
+/// creating one elsewhere keeps the listing.
+#[test]
+fn a_file_listing_the_run_may_extend_is_left_unchecked() {
+    for text in ["::file-links ./gen/*.md\n", "::file-links --dir gen\n"] {
+        let listing = |writes: &[(&str, InitializerChange)]| {
+            let dir = TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join("gen")).unwrap();
+            std::fs::create_dir_all(dir.path().join("elsewhere")).unwrap();
+            std::fs::write(dir.path().join("gen/old.md"), "").unwrap();
+            let (composed, session) = dry_compose_writes(dir.path(), text, writes);
+            composed.unwrap();
+            deferred(&session)
+        };
+        assert_eq!(listing(&[("gen/new.md", ENSURES)]), [(DeferredConstruct::Transclusion, created("gen/new.md"))], "{text}");
+        assert!(listing(&[("elsewhere/new.md", ENSURES)]).is_empty(), "{text}");
+        assert!(listing(&[("gen/old.md", APPENDS)]).is_empty(), "{text}");
+        assert!(listing(&[("gen/new.json", ENSURES)]).is_empty(), "{text}: not a listed extension");
+    }
 }

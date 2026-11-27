@@ -2,8 +2,11 @@
 //!
 //! A dry run never runs an event, yet a real run's `initialize` can create a
 //! file that a later read needs (`ensure_file: generated/notes.md` before a
-//! `::file generated/notes.md`), or append to one that exists. [`created_files`]
-//! lists the files a parsed stack's file-writing side effects name, literal
+//! `::file generated/notes.md`), append to one that exists, or rewrite its
+//! frontmatter. [`created_files`] lists the files a parsed stack's
+//! file-writing side effects name (every verb whose
+//! [`EffectDescriptor::file_change`](crate::effects::EffectDescriptor::file_change)
+//! is set), literal
 //! or templated, and [`CreatedFile::target`] resolves each literal one exactly
 //! as the effect resolves it when it runs ([`CreatedFile::target_as`] does
 //! the same for a template a host resolved, [`CreatedFile::pattern`] bounds
@@ -20,16 +23,24 @@ use super::executor::is_template_operand;
 use crate::markdown::compose::expression::{Expr, ExpressionFinder};
 use crate::markdown::compose::passive::{InitializerChange, WritePattern};
 
-/// The side effects that create their file (operand 0) when it is missing.
-/// The frontmatter verbs need an existing file, and `ensure_dir` creates a
-/// folder, which no file read finds.
-pub const FILE_CREATING_VERBS: &[&str] = &["ensure_file", "append_line", "append_jsonl"];
+/// What the side effect `verb` does to the file its first operand names, as
+/// the effect catalog classifies it; `None` for a verb that writes no file
+/// or is not an effect.
+#[must_use]
+pub fn file_change(verb: &str) -> Option<InitializerChange> {
+    crate::effects::EFFECT_DESCRIPTORS
+        .iter()
+        .find(|descriptor| descriptor.signature.split('(').next() == Some(verb))
+        .and_then(|descriptor| descriptor.file_change)
+}
 
-/// A file a lifecycle stack creates, as authored.
+/// A file a lifecycle stack writes, as authored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedFile {
-    /// The side effect (`ensure_file`, `append_line`, `append_jsonl`).
+    /// The side effect (`ensure_file`, `append_line`, `set_frontmatter`, …).
     pub verb: String,
+    /// What the effect does to its file.
+    change: InitializerChange,
     /// The file operand as written (`generated/notes.md`, `{{ target }}`).
     pub reference: String,
     /// Whether the operand is a template, resolved only when the event
@@ -77,7 +88,7 @@ impl CreatedFile {
     /// What the effect does to its file.
     #[must_use]
     pub fn change(&self) -> InitializerChange {
-        if self.verb == "ensure_file" { InitializerChange::CreatesIfAbsent } else { InitializerChange::CreatesOrAppends }
+        self.change
     }
 
     /// The locations a template operand may name, for a host that cannot
@@ -124,7 +135,7 @@ impl CreatedFile {
     }
 }
 
-/// Every file-creating side effect in `nodes` ([`FILE_CREATING_VERBS`]) whose
+/// Every file-writing side effect in `nodes` ([`file_change`]) whose
 /// file operand is text, in authored order, through both branches of every
 /// conditional. A `{{ … }}` operand is listed as a
 /// [`CreatedFile::template`]; a whole-value expression operand is left out.
@@ -147,9 +158,7 @@ fn collect(nodes: &[LifecycleNode], conditional: bool, found: &mut Vec<CreatedFi
                     LifecycleActionKind::ExpressionFunction(function) => (function.function.as_str(), &function.args),
                     _ => continue,
                 };
-                if !FILE_CREATING_VERBS.contains(&verb) {
-                    continue;
-                }
+                let Some(change) = file_change(verb) else { continue };
                 let (reference, template) = match args.first() {
                     Some(Expr::StringLiteral(reference)) => (reference.clone(), is_template_operand(&args[0])),
                     // A whole-value `{{ … }}` operand reaches the stack
@@ -162,6 +171,7 @@ fn collect(nodes: &[LifecycleNode], conditional: bool, found: &mut Vec<CreatedFi
                 }
                 found.push(CreatedFile {
                     verb: verb.to_string(),
+                    change,
                     reference,
                     template,
                     conditional,

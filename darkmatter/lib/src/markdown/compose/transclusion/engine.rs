@@ -1617,6 +1617,17 @@ impl<'a> TransclusionEngine<'a> {
                 directive,
             } => {
                 let transclusion_opts = options.transclusion_options();
+                if let Some(session) = options.passive_session()
+                    && let Some(reason) = toc_linking::changed_at_launch(
+                        &directive,
+                        &options.source,
+                        &transclusion_opts,
+                        self.markdown.source_context_for_errors(),
+                        session,
+                    )
+                {
+                    return Ok(self.left_unchecked(order, span, reason, session));
+                }
                 let replacement = if let Some((display_target, path)) =
                     toc_linking::resolve_target_chain(
                         &directive,
@@ -1703,6 +1714,31 @@ impl<'a> TransclusionEngine<'a> {
         }
     }
 
+    /// A dry run's directive at `span` whose result the run's initializer
+    /// changes first: recorded as a [`Transclusion`](crate::markdown::compose::passive::DeferredConstruct::Transclusion)
+    /// deferral and left as written, unread and not checked, as an
+    /// inclusion of a changed file is.
+    fn left_unchecked(
+        &self,
+        order: usize,
+        span: std::ops::Range<usize>,
+        reason: crate::markdown::compose::passive::DeferralReason,
+        session: &crate::markdown::compose::passive::PassiveSession,
+    ) -> ResolvedTransclusion {
+        let written = self.markdown.content()[span.clone()].to_string();
+        let inclusion = transclusion::InclusionSite::of_directive(self.markdown, &self.directive_site(&span));
+        session.record(crate::markdown::compose::passive::Deferral {
+            construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+            reason,
+            authored: written.trim_end().to_string(),
+            key: None,
+            line: inclusion.as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+        });
+        let mut report = ComposeReport::new();
+        report.transclusions_skipped = 1;
+        ResolvedTransclusion { order, target: ApplyTarget::Replace(span), content: Some(written), report, source_file: None }
+    }
+
     /// Resolves a single `::file-links` directive in the concurrent stage.
     ///
     /// Discovery runs here (not during preparation) so directives parallelize.
@@ -1719,6 +1755,12 @@ impl<'a> TransclusionEngine<'a> {
         directive: file_links::FileLinksDirective,
         options: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ResolvedTransclusion> {
+        if let Some(session) = options.passive_session()
+            && let Some(reason) =
+                file_links::changes_at_launch(&directive, &options.source, &options.source_file_resolution_context(), session)
+        {
+            return Ok(self.left_unchecked(order, span, reason, session));
+        }
         let skipped_replace = |replacement: String, report: ComposeReport| {
             Ok(ResolvedTransclusion {
                 order,

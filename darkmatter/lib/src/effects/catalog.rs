@@ -5,6 +5,7 @@
 //! constructing or reading it performs no host probes, no I/O, and no runtime
 //! context capture.
 use crate::catalog::{Described, Example, ExampleVerification};
+use crate::markdown::compose::passive::InitializerChange;
 
 
 /// Safety classification for a side-effect capability.
@@ -31,6 +32,12 @@ pub struct EffectDescriptor {
     pub description: &'static str,
     /// Safety classification.
     pub safety: EffectSafety,
+    /// What the effect does to the file its first operand names, `None` for
+    /// one that writes no file. A dry run reads this to know which reads a
+    /// lifecycle event can change before they happen
+    /// ([`created_files`](crate::lifecycle::created_files)), so a new verb
+    /// cannot be left out of that list.
+    pub file_change: Option<InitializerChange>,
     /// Logical grouping category.
     pub category: &'static str,
     /// Stable display order within the category.
@@ -64,6 +71,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "set(key, value)",
         description: "Sets a top-level key in the in-memory state map (no disk write). Returns the prior value (or null).",
         safety: EffectSafety::InMemoryState,
+        file_change: None,
         category: "State Mutation",
         order: 1,
 
@@ -74,6 +82,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "set_frontmatter(file, prop, value)",
         description: "Sets a frontmatter property. Returns the prior value (or null).",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 1,
 
@@ -84,6 +93,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "merge_frontmatter(file, obj)",
         description: "Shallow-merges an object into the document's frontmatter. Returns the merged object.",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 2,
 
@@ -95,6 +105,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "delete_frontmatter(file, prop)",
         description: "Removes a frontmatter property. Returns the removed value (or null).",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 3,
 
@@ -106,6 +117,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "increment_frontmatter(file, prop)",
         description: "Increments a numeric frontmatter property. Missing becomes 1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 4,
 
@@ -117,6 +129,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "decrement_frontmatter(file, prop)",
         description: "Decrements a numeric frontmatter property. Missing becomes -1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 5,
 
@@ -128,6 +141,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "append_frontmatter(file, prop, value)",
         description: "Appends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 6,
 
@@ -139,6 +153,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "prepend_frontmatter(file, prop, value)",
         description: "Prepends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
+        file_change: Some(InitializerChange::ChangesExisting),
         category: "Frontmatter Mutations",
         order: 7,
 
@@ -151,6 +166,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "ensure_file(file)",
         description: "Creates an empty file if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
+        file_change: Some(InitializerChange::CreatesIfAbsent),
         category: "File & Directory",
         order: 1,
 
@@ -162,6 +178,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "ensure_file(file, content)",
         description: "Creates a file with content if missing. Existing files are unchanged. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
+        file_change: Some(InitializerChange::CreatesIfAbsent),
         category: "File & Directory",
         order: 2,
 
@@ -173,6 +190,8 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "ensure_dir(dir)",
         description: "Creates a directory and all parents if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
+        // A folder: no file read finds it, and it adds no file to a listing.
+        file_change: None,
         category: "File & Directory",
         order: 3,
 
@@ -184,6 +203,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "append_line(file, text)",
         description: "Appends text and a newline to a file. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
+        file_change: Some(InitializerChange::CreatesOrAppends),
         category: "File & Directory",
         order: 4,
 
@@ -195,6 +215,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "append_jsonl(file, obj)",
         description: "Serializes an object as JSON and appends it as a line. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
+        file_change: Some(InitializerChange::CreatesOrAppends),
         category: "File & Directory",
         order: 5,
 
@@ -207,6 +228,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         signature: "http_post(url, body)",
         description: "Sends an HTTP POST request. Returns an object with status and body.",
         safety: EffectSafety::Network,
+        file_change: None,
         category: "Network",
         order: 1,
 

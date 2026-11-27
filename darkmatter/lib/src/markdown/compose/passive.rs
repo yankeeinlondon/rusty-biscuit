@@ -411,7 +411,8 @@ impl PassiveSession {
     /// reads it, with the effect `change`, for `reason`. Every reader asks
     /// [`Self::initializer_changes`] (content), [`Self::created_file`]
     /// (existence), or [`Self::changes_listing`] (a folder listing) before it
-    /// treats what it finds now as a verdict. Every session made with
+    /// treats what it finds now as a verdict. Two writes to one destination
+    /// keep both effects ([`InitializerChange::combine`]). Every session made with
     /// [`Self::sharing_observations`] shares the declaration. `path` is a
     /// location resolved in the request's context (as
     /// [`CreatedFile::target`](crate::lifecycle::CreatedFile::target)
@@ -421,10 +422,9 @@ impl PassiveSession {
         let Some(lexical) = created::lexically_absolute(path) else { return };
         let mut created = self.created.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(held) = created.files.iter_mut().find(|held| held.identity == identity) {
-            // An append anywhere in the stack makes the file's content
-            // change, whatever else creates it first.
-            if change == InitializerChange::CreatesOrAppends && held.change == InitializerChange::CreatesIfAbsent {
-                held.change = change;
+            let combined = held.change.combine(change);
+            if combined != held.change {
+                held.change = combined;
                 held.reason = reason;
             }
             return;
@@ -439,9 +439,17 @@ impl PassiveSession {
     /// a pattern never reaches beyond it.
     pub fn declare_unresolved_write(&self, pattern: WritePattern, change: InitializerChange, reason: DeferralReason) {
         let mut created = self.created.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !created.patterns.iter().any(|(held, _, _)| *held == pattern) {
-            created.patterns.push((pattern, change, reason));
+        // The same pattern twice (one path variable ensured, then appended
+        // to) keeps both effects, as a resolved destination does.
+        if let Some((_, held, held_reason)) = created.patterns.iter_mut().find(|(held, _, _)| *held == pattern) {
+            let combined = held.combine(change);
+            if combined != *held {
+                *held = combined;
+                *held_reason = reason;
+            }
+            return;
         }
+        created.patterns.push((pattern, change, reason));
     }
 
     /// Why a read of the absent file `path` is unavailable, when the run
@@ -449,8 +457,9 @@ impl PassiveSession {
     /// once both are created, judged by the identity of the nearest
     /// existing folder above each and the names below it, compared without
     /// case on a volume that opens one name under another case, or it
-    /// matches an unresolved destination. `None` for a file that exists:
-    /// no initializer effect removes one, so its existence is proven.
+    /// matches an unresolved destination, and the write can create a file
+    /// ([`InitializerChange::creates`]). `None` for a file that exists: no
+    /// initializer effect removes one, so its existence is proven.
     #[must_use]
     pub fn created_file(&self, path: &std::path::Path) -> Option<DeferralReason> {
         let created = self.created.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -458,7 +467,7 @@ impl PassiveSession {
             return None;
         }
         if let Some(identity) = created::CreatedIdentity::of(path)
-            && let Some(held) = created.files.iter().find(|held| held.identity == identity)
+            && let Some(held) = created.files.iter().find(|held| held.identity == identity && held.change.creates())
         {
             return Some(held.reason.clone());
         }
@@ -478,9 +487,10 @@ impl PassiveSession {
     /// Why a verdict about what the file at `path` holds is unavailable,
     /// when the run's initializer changes it first: an absent file the run
     /// may create ([`Self::created_file`]), or an existing one a declared
-    /// append targets ([`InitializerChange::CreatesOrAppends`]). An existing
-    /// file that only an `ensure_file` names is read as it is: that effect
-    /// leaves an existing file unchanged. The one rule every content reader
+    /// append or frontmatter rewrite targets
+    /// ([`InitializerChange::changes_existing`]). An existing file that only
+    /// an `ensure_file` names is read as it is: that effect leaves an
+    /// existing file unchanged. The one rule every content reader
     /// (transclusion, data, frontmatter, schema, graph) asks.
     #[must_use]
     pub fn initializer_changes(&self, path: &std::path::Path) -> Option<DeferralReason> {
@@ -494,7 +504,7 @@ impl PassiveSession {
                     && let Some(held) = created
                         .files
                         .iter()
-                        .find(|held| held.identity == identity && held.change == InitializerChange::CreatesOrAppends)
+                        .find(|held| held.identity == identity && held.change.changes_existing())
                 {
                     let path = match &held.reason {
                         DeferralReason::CreatedAtLaunch { path } | DeferralReason::ChangedAtLaunch { path } => path.clone(),
@@ -529,14 +539,16 @@ impl PassiveSession {
         if created.is_empty() {
             return None;
         }
-        if let Some(held) = created.files.iter().find(|held| std::fs::symlink_metadata(&held.lexical).is_err() && matches(&held.lexical)) {
+        if let Some(held) =
+            created.files.iter().find(|held| held.change.creates() && std::fs::symlink_metadata(&held.lexical).is_err() && matches(&held.lexical))
+        {
             return Some(held.reason.clone());
         }
         let folders: Vec<std::path::PathBuf> = folders.iter().filter_map(|folder| created::lexically_absolute(folder)).collect();
         created
             .patterns
             .iter()
-            .find(|(pattern, _, _)| folders.iter().any(|folder| pattern.may_lie_below(folder)))
+            .find(|(pattern, change, _)| change.creates() && folders.iter().any(|folder| pattern.may_lie_below(folder)))
             .map(|(_, _, reason)| reason.clone())
     }
 
@@ -587,6 +599,8 @@ impl PassiveSession {
     }
 }
 
+pub(crate) use created::lexically_absolute;
+
 mod created {
     //! The identity of a file that does not exist yet.
 
@@ -620,16 +634,16 @@ mod created {
         }
 
         /// The reason of the first unresolved destination `path` matches:
-        /// for an existing file (`exists`), only one that appends.
+        /// for an existing file (`exists`), only one that changes an
+        /// existing file's content; for an absent one, only one that may
+        /// create it.
         pub(super) fn pattern_matching(&self, path: &Path, exists: bool) -> Option<DeferralReason> {
             let path = lexically_absolute(path)?;
             self.patterns
                 .iter()
-                .find(|(pattern, change, _)| (!exists || *change == InitializerChange::CreatesOrAppends) && pattern.matches(&path))
-                .map(|(_, change, reason)| match (exists, change, reason) {
-                    (true, InitializerChange::CreatesOrAppends, DeferralReason::CreatedAtLaunch { path }) => {
-                        DeferralReason::ChangedAtLaunch { path: path.clone() }
-                    }
+                .find(|(pattern, change, _)| if exists { change.changes_existing() } else { change.creates() } && pattern.matches(&path))
+                .map(|(_, _, reason)| match (exists, reason) {
+                    (true, DeferralReason::CreatedAtLaunch { path }) => DeferralReason::ChangedAtLaunch { path: path.clone() },
                     _ => reason.clone(),
                 })
         }
@@ -674,7 +688,7 @@ mod created {
     }
 
     /// The absolute `path` with `.` and `..` folded; `None` when relative.
-    pub(super) fn lexically_absolute(path: &Path) -> Option<PathBuf> {
+    pub(crate) fn lexically_absolute(path: &Path) -> Option<PathBuf> {
         if !path.is_absolute() {
             return None;
         }
@@ -723,6 +737,35 @@ pub enum InitializerChange {
     /// `append_line`, `append_jsonl`: creates an absent file and appends to
     /// an existing one, so an existing file's content changes too.
     CreatesOrAppends,
+    /// The frontmatter verbs (`set_frontmatter`, `merge_frontmatter`, …):
+    /// rewrite an existing file and refuse an absent one, so only an
+    /// existing file's content changes, never whether a file exists.
+    ChangesExisting,
+}
+
+impl InitializerChange {
+    /// Whether the write can make an absent file exist.
+    #[must_use]
+    pub fn creates(self) -> bool {
+        self != Self::ChangesExisting
+    }
+
+    /// Whether the write can change what an existing file holds.
+    #[must_use]
+    pub fn changes_existing(self) -> bool {
+        self != Self::CreatesIfAbsent
+    }
+
+    /// The effect of two writes to one destination: every file either may
+    /// create, and every existing file either may change.
+    #[must_use]
+    pub fn combine(self, other: Self) -> Self {
+        match (self.creates() || other.creates(), self.changes_existing() || other.changes_existing()) {
+            (true, false) => Self::CreatesIfAbsent,
+            (false, _) => Self::ChangesExisting,
+            (true, true) => Self::CreatesOrAppends,
+        }
+    }
 }
 
 /// The locations a write may reach when its destination cannot be resolved

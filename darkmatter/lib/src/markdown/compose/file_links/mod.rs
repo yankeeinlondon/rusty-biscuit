@@ -30,6 +30,6 @@ mod types;
 
 pub use types::{FileLinksDirective, FileLinksError, FileLinksMode, FileLinksRender, FileLinksResult};
 
-pub(crate) use discovery::discover;
+pub(crate) use discovery::{changes_at_launch, discover};
 pub(crate) use parser::{parse_file_links_directives, parse_file_links_directives_in};
 pub(crate) use render::build_included_tree;
