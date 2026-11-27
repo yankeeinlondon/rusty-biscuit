@@ -5,43 +5,56 @@ findings:
   - id: R1-F1
     priority: high
     description: Sequence source expressions can start a shell during a dry run
+    result: fixed
   - id: R1-F2
     priority: high
     description: A bad row in a root sequence source hides valid siblings
+    result: fixed
   - id: R1-F3
     priority: high
     description: Required inputs suppress independent checks and previews
+    result: fixed
   - id: R1-F4
     priority: high
     description: Provider prediction treats runtime-written values as settled
+    result: fixed
   - id: R1-F5
     priority: high
     description: Remote reads cannot defer on network approval
+    result: fixed
   - id: R1-F6
     priority: high
     description: Legacy reference JSON baselines were changed
+    result: fixed
   - id: R1-F7
     priority: high
     description: Schema key findings lose task occurrences and duplicate parser findings
+    result: fixed
   - id: R1-F8
     priority: high
     description: Live inline sequence steps can corrupt a YAML source
+    result: fixed
   - id: R1-F9
     priority: high
     description: Native Windows Level 1 timings exceed the review limit
+    result: fixed
   - id: R1-F10
     priority: high
     description: Sequence load findings drop structured source locations
+    result: fixed
   - id: R1-F11
     priority: high
     description: The report fixture guard does not cover the scoped diagnostic catalog
+    result: fixed
   - id: R1-F12
     priority: high
     description: Darkmatter drops the unchecked body verdict after a failed preparation
+    result: fixed
   - id: R1-F13
     priority: high
     description: Available file choices are reported as hard failures
-human-review: false
+    result: fixed
+human-review: true
 human-in-the-loop: null
 has-blocked-findings: false
 blocked: false
@@ -49,9 +62,15 @@ reviewed-by: codex/gpt-6.2-sol
 recurrence: false
 created: "2026-11-26T21:04:07+00:00"
 spec: 2026-11-22-better-errors-and-dry-run/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-11-22-better-errors-and-dry-run/spec.md`"
 feature: 2026-11-22-better-errors-and-dry-run/review-1.md
+human-review-items:
+  - "R1-F5: under `permissions.network: ask` a real run's composition reads (`::file`, `::code`, `prologue`, read functions) now fail before any request with a typed error naming the setting, because no approval prompt exists for them; schema slots reuse the existing slot prompt."
+  - "R1-F5.4: a schema slot URL under `permissions.network: deny` is now refused (`dm.schema.slot_network_denied`) instead of asking for approval as before."
+implemented-by: claude/opus
+repaired-on: "2026-11-26T21:18:26+00:00"
+next: 2026-11-22-better-errors-and-dry-run/review-2.md
 ---
 
 # Review 1 — Better errors and a diagnostic dry run
@@ -364,6 +383,9 @@ The local probes used disposable homes and directories, a loopback HTTP server, 
 | R1-F3.6 | Provided input controls: stay clean | clean | Each route test has a supplied-input and repaired-reference control: exit 0 and the expected composed text. |
 | R1-F3.7 | Sibling found: severity policy for missing inputs ignored `--silent` | fixed | The input grading ignored `--silent`; the unit test in `document_check/tests.rs` injects terminal state: askable → warning; stdin or stderr redirected, `--silent`, prompting disabled, non-collectable shape → error. |
 | R1-F3.8 | Sibling found: duplicate input row for a referenced sequence body | fixed | A referenced sequence document's missing owner input was reported by both the owner and its body task; now it is reported once and the body previews. |
+| R1-F3.9 | Consumer found at the area gate: duplicate unlocated schema row from the input check | fixed | The passive input check pushed a preparation's aggregate `composition.schema_validation` before the preview reported the same problems with typed, located rows, which `entry_point_parity::claudine_entry_points_agree_on_every_reference_shard_10` caught (first row had no failure class). `prompt_inputs` now leaves only `CompositionError::SchemaValidation` to the preview, which always runs next on the same document; other errors keep their located input-check row (inline `3 / 0` keeps line 4). `dry_run_check::another_schema_problem_beside_an_empty_agent_list_keeps_its_row` now asserts the typed `yolo` row and 2 errors. |
+| R1-F3.10 | Consumer found at the area gate: real-run combined report count | fixed | `sequence_referenced_state::a_{root,nested}_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event` expected 3 errors; the report now gives exactly one row per missing input (`topic`, `reviewer`), as the spec requires, so the count is 2 and the existing subject/location assertions pass unchanged. |
+| R1-F3.11 | Consumer found at the area gate: repository file-size guard | fixed | `test_placement::repository_test_placement` failed: `document_check/tasks.rs` reached 1,086 production lines (limit 800). The schema-key collector moved to `document_check/keys.rs` (with `key_owner_tests`) and input rows to `document_check/inputs.rs`, leaving `tasks.rs` at 755 lines, with no behavior change. |
 | R1-F4 | Provider prediction treats runtime-written values as settled | fixed | Class: a launch-time dependency (a key a lifecycle `set` writes, `seq.*`, `loop.*`) is stripped from provider/model prediction before target selection. The dry-run walk copied predictions before `Loader::finish` deferred them; `Loader::runtime_written_keys` is now shared and `check_sequence_tree` applies `defer_runtime_written` after the walk, using the graph's dependency closures for chains. Consumers checked: provider rows, `provider_unknown` / `provider_not_installed` / `provider_unresolved`, `model_required`, nested and group tasks, enclosing-document fallback, real-run failure report (reuses the check), real run (unchanged). Lib `provider_dependencies` asserts dry-walk/real-graph parity on 7 placements; removing the deferral call fails 4 of 7 CLI tests and the parity cases. |
 | R1-F4.1 | Prompt frontmatter agent hint overwritten by earlier `success` set: provider and model unchecked | fixed | `dry_run_launch_hints::a_frontmatter_agent_reading_a_written_key_is_unchecked`: no `provider_unknown`; `not checked: provider, model requirement (known only at launch …)`; exit 0. |
 | R1-F4.2 | Task `with.agent` through chained document inputs: verdict deferred until launch | fixed | `a_with_agent_through_a_chain_to_a_written_key_is_unchecked` (no Claude-not-installed error) and `the_real_run_of_the_chain_launches_the_written_provider` (stub Goose launched twice). |
@@ -418,6 +440,7 @@ The local probes used disposable homes and directories, a loopback HTTP server, 
 | R1-F9.4 | `a_task_file_yaml_error_names_the_file_and_the_parse_stage`: measured on native Windows | fixed | Measured on native Windows: 3.04 s; its live-stop test 2.10 s (Linux 2.04 s / 1.01 s). |
 | R1-F9.5 | Earlier split tests: keep structure | clean | Earlier split tests kept; all under 5 s on Windows. |
 | R1-F9.6 | Sibling found: other multi-spawn dry-run tests | fixed | Split `dry_run_check::codes::*` into finding and `codes::control` tests (`CODES` guards unchanged); `a_bad_row_in_a_root_source_leaves_its_siblings_previewed` into per-route tests; real run of `an_exclusive_executable_…` into `a_real_run_stops_at_the_exclusive_executable_step`; `compose_checks_the_provider_and_its_model_requirement` into three tests; clean control of `a_tolerated_transclusion_failure_is_a_warning_row` into `a_valid_transcluded_part_is_a_clean_report`. Windows maximum 3.48 s. |
+| R1-F9.7 | Native Windows package-run timings across every touched package | fixed | Full native-Windows package runs (`just cross-check <pkg> --os windows`) after all repairs: simplified-schema 2645/2645, darkmatter 13384/13384 (0 slow), claudine 7309/7309 (7 at 5.2–8.3 s), claudine-cli 4479/4479 (18 at 5.0–8.6 s, none in this cycle's modules). Serial (`--test-threads 1`) remeasurement on build-win (12 logical CPUs, 3% CPU idle-load afterward): all 18 CLI tests 2.7–4.8 s and 6 of the lib tests 2.3–4.0 s, cleared under the loaded-run rule. `claudine_schemas::shared_payload_properties_have_identical_types` was 5.47 s alone (6 bundle discoveries in one process) and was split into 6 per-path tests (each holding its `include_str!` literal) plus a roster guard `every_payload_path_has_a_case`; Windows 1.4–2.7 s, Linux 0.9–1.6 s. |
 | R1-F10 | Sequence load findings drop structured source locations | fixed | Class: a known authored position is flattened into message text or discarded at projection. `SequenceSite` gained an optional proven `position` (1-based, in the file's frame); `push_error` projects it into `source.line`/`source.column` and the `at file:line:column` row in dry-run and real preflight reports. The new `CompositionError::presented()` traverses display wrappers for site, resolution class, hint and projection. Lifecycle `err.*` is unchanged. Sites checked: data loaders (YAML, frontmatter, JSON/JSON5, JSONL/NDJSON), executable reference validation, root data selections, formal reference rows, task-file load fallback, tolerated transclusion warnings, all `locate_authored` lookups in the task check. A multi-line YAML mapping value is located at its first authored key, where the mapping begins (a proven position, not a guess). |
 | R1-F10.1 | Referenced YAML and Markdown loaders: structured line/column | fixed | Lib `check_tree::load_positions::*`: YAML duplicate key (3,5), trailing syntax (5,3); Markdown frontmatter in the file's frame (`child.md:4:5`); N leading lines shift the line by N with the same code; the fixed file loads. |
 | R1-F10.2 | JSON/JSON5 and JSONL/NDJSON loaders: structured coordinate | fixed | JSON/JSON5 trailing token (1,38), duplicate key (1,20); JSONL repeated key on line 3 after a blank line reports (3,23), malformed record (2,8); shift tests included. Duplicate JSON keys are located at the value, the only position the biscuit-file locators prove. |
@@ -452,3 +475,23 @@ The local probes used disposable homes and directories, a loopback HTTP server, 
 | R1-F13.6 | Required variant: non-interactive refusal | fixed | Redirected run: bare root is the missing-document error with the real refusal note (`autocomplete requires an interactive terminal`); `--silent` still pends for the root because the real picker checks only stdin/stderr. |
 | R1-F13.7 | Sibling found: dry run invented a provider failure for a file the real run refuses as not a sequence | fixed | The dry run treated a document with no `sequence` as a one-task body sequence (missing provider, or `no_executable` for YAML) while the real run refused it with an untyped error. New typed `CompositionError::SequenceUndefined`, registered as `composition.sequence_undefined` (`dry_run_report: true`; fixture and both snapshots; registry count 63; `error_guards` corpus entry), is raised by `phase1c.rs` and reported by the check as a root error with one `not checked: tasks` row; `RootList::Body` removed. `sequence_dry_run_parity::*` pairs real and dry runs: `.md`/`.yaml` without `sequence`, `kind: sequence` without it, `sequence: []` (clean, exit 0), null, `.json` root, top-level YAML list all match. `dry_run_missing_inputs::a_sequence_body_is_previewed_beside_its_missing_input` now uses a one-step body sequence. |
 | R1-F13.8 | Sibling found: discovery swallowed sequence owners' non-missing preparation failures | fixed | Discovery kept only a failed owner's index and dropped its error; `FailedOwner`/`OwnerFailure` now carry it. Each refusal is reported under its owner (root, or the `sequence:` task reaching a referenced document) with its typed code at the refused value (e.g. `child.md:3:8`), and dependents get one linked `not checked: inputs and preview` row. Provider checks still run, matching the real run's order. Parity pairs cover root `count: abc`, nested `child.md`, root reference `child.yaml`, two-level nesting, and a missing input beside an invalid value. A sweep of `.ok()`/empty fallbacks in `check.rs`, `inputs.rs` and `document_check/` found none that drops an otherwise unreported failure. Lib `an_owners_own_schema_failure_is_recorded_at_its_owner`. |
+
+### Outcome
+
+**Complete.** Elapsed: 7 h 38 min (2026-11-26T21:18:26Z to 2026-11-27T04:56:27Z).
+
+Parent findings: 13 total = 13 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed. Every child row is closed: 95 fixed and 24 clean, including the sibling and consumer rows the sweeps added. No finding or child row is open.
+
+Two decisions touch trust and are listed in `human-review-items`: the real-run `ask` refusal for composition reads (R1-F5) and a slot under `deny` now refusing instead of asking (R1-F5.4).
+
+Final verification (Linux, load average 11.7–15.7 on 16 cores during the last run):
+
+| Command | Result |
+| --- | --- |
+| `cd simplified-schema && just test` | pass, 4,868 tests (two binaries), 0 slow |
+| `cd darkmatter && just test` | pass, 18,516 tests, 0 slow |
+| `cd claudine && just test` (after the last change) | pass, 13,344 tests, 0 slow; `just slow-tests fresh` reports `slow: 0` |
+| `just lint` in `simplified-schema`, `darkmatter`, `claudine` | pass |
+| `just check-tier-coverage` for `claudine`, `darkmatter`, `simplified-schema` | pass |
+| `just publish-skills` in `darkmatter` and `claudine` | published `use-darkmatter`, `use-dmls`, `use-claudine` |
+| `just cross-check <pkg> --os windows` for simplified-schema, darkmatter, claudine, claudine-cli | pass: 2,645 / 13,384 / 7,309 / 4,479 tests; the package-run slow tests cleared by serial remeasurement, and the one test still over 5 s alone was split (R1-F9.7) |

@@ -2184,7 +2184,7 @@ prompt inside a `task:` file is not located at the referencing site).
   checked. Owner inputs (root, root reference, nested owners) come from the walk's inventory. Each missing value is
   one `composition.missing_properties` row under its task, graded once the whole cohort is known
   (`missing_input_severity`: warning only when the run could prompt and every missing shape is promptable). A task
-  with a missing input leaves its preview not checked.
+  with a missing input now previews its available content and marks reads of the missing value.
 - `not checked` remains only for a command-backed list (root `$( … )`), a value known at launch (a command-backed
   or `{{ }}` input), a check blocked by another finding (provider and inputs after an unreadable prompt), and the
   `shell:`/`side_effect:` tasks a dry run never runs.
@@ -2199,7 +2199,7 @@ Behavior → test map (L1 unless noted):
 | Nested groups: bad leg at its own identity, frames outermost first | `check_tree_tests::nested_groups_record_a_bad_leg_at_its_own_identity` |
 | Catalog identity: authored index and name kept; an undefined entry fails only its task; `groups` not a list | `check_tree_tests::a_catalog_entry_keeps_its_authored_place`, `…::a_catalog_without_a_groups_list_fails_its_task` |
 | Cycles fail only the closing task | `check_tree_tests::a_cycle_fails_only_the_task_that_closes_it` |
-| Repeated references: one record and one finding per occurrence, file read once | `check_tree_tests::a_repeated_reference_is_checked_at_each_occurrence`, `dry_run_check::nested_occurrences_and_missing_inputs_are_reported_under_their_task` |
+| Repeated references: one graph record and one finding per occurrence. CLI previews use the prompt handed off by the graph. Review 3 observed two opens before its repair. The graph now captures and parses the prompt from one open | `check_tree_tests::a_repeated_reference_is_checked_at_each_occurrence`, `dry_run_check::nested_occurrences_and_missing_inputs_are_reported_under_their_task`, and the dated read trace below |
 | Dynamic (command-backed) root list left unread | `check_tree_tests::a_command_backed_root_list_is_left_unread` |
 | Root shape: wrong whole type, authored null, empty list, absent key | `check_tree_tests::the_root_list_shape_decides_what_is_read` |
 | Item validators: null, number, list, nameless, two executables (incl. `sequence`), empty and null references, empty and wrong-type names; all-invalid list | `check_tree_tests::invalid_root_items_keep_their_positions`, `…::an_all_invalid_root_list_reports_every_item` |
@@ -2742,9 +2742,9 @@ directory was OOM-killed.)
   its warnings once, before task one, unless `--silent`. Because selection and inputs are skipped, no advisory depends
   on an answer the run collected; that is how "recheck only answer-dependent findings after collection" is met.
 - Found while pinning the inputs case: the passive check reported a root's missing input twice, once as the input and
-  once from previewing the root's own body task without it (`"topic" is a required property`). A root body task
-  (both the `RootList::Body` root and a body step of the root) now waits like a held prompt task: selection is
-  checked, the preview is one `not checked` row. `Check::root_waits` ignores inputs the root's `initialize` writes.
+  once from previewing the root's own body task without it (`"topic" is a required property`). The first repair
+  keeps one missing-input finding, checks selection, and previews available content with missing reads marked.
+  The root initializer runs only in the live command.
 
 ### Verification against the Phase 3 baselines
 
@@ -2926,11 +2926,11 @@ then the orchestrator integrated, fixed what they flagged, and ran the gates alo
   `level2_lifecycle_control.rs` (identity header) and `level2_initialize_generated_transclusion.rs` (comment).
 - Found by the Darkmatter audit and fixed in Claudine: a dry run printed "0 errors and 0 warnings" for a document whose
   `::file` target did not parse or could not be read, because the preview dropped the preparation's warnings (the real
-  run prints them and composes the `_Could not transclude_` notice). `document_check/preview.rs` now reports each
-  preparation warning (skipped triggers excepted, which are reported once elsewhere) as a warning row with the task's
+  run prints them and composes the `_Could not transclude_` notice). When its first preparation succeeds,
+  `document_check/preview.rs` reports the applicable warnings as rows with the task's
   trail, located in the including document. Test: `dry_run_check::a_tolerated_transclusion_failure_is_a_warning_row`
-  (control, human, JSON). The tolerated parse-failure warning itself still has no code (`dm.compose.warning`) and no
-  line; that is Darkmatter's tolerated-failure projection and was left as is.
+  (control, human, JSON). The earlier untyped and unlocated projection was replaced by a typed
+  `dm.transclusion.failure` at the directive. Both successful preparation paths now project the warnings.
 
 ### Verify Portable Paths
 
@@ -3044,3 +3044,27 @@ Phase 8 is implementation complete; every plan checkbox is ticked.
 - The final Windows paragraph counted passing assertions without stating the Level 1 gate result. Its recorded
   11.0 s fleet-graph test exceeds even the loaded-host limit, so the test gate failed. The assertion count and the
   timings above remain the original observations.
+
+### 2026-11-27 review corrections
+
+- Review 2 observed per-preview prompt rereads and repeated requests to one allowed URL. After its repair, the CLI
+  reuses the graph's parsed prompt across occurrences. A Linux read-open trace in review 3 observed two opens of
+  `ask.md` for either one or two occurrences before the repair. The graph then opened it separately to capture bytes and parse Markdown.
+  The Level 1 loopback tests now show one request per permitted URL in the shared-observation cases.
+- The missing-input notes described the pre-repair preview. The Linux Level 1 missing-input fixtures now verify available
+  text is composed and the missing read is marked.
+- Review 2 found that a successful recovery preview dropped the tolerant child's warning when an independent
+  inclusion was missing. The same projection now serves both preparation paths. Review 3 reran the direct, inline,
+  and sequence Level 1 recovery fixtures, which report both the independent failure and the tolerant child's warning.
+- Review 2's tmux capture failed because it expected the retired block header. Review 3 reran the repaired capture
+  with `just test-l2 level2_sequence_preflight_note`. It passed and verified the note before the consolidated
+  report, the finding at `target.md:7:1`, the real exit code, and no launch. Direct and proxy typed-block controls passed.
+
+### 2026-11-27 review 4 correction
+
+The repeated-reference behavior table and the previous correction described two prompt opens as current.
+That was the pre-repair observation. The graph now shares one open across capture, parse and the CLI
+handoff. Review 4 reran `a_prompt_two_tasks_compose_is_read_once_and_handed_to_the_check` and
+`one_or_two_prompt_tasks_open_each_source_once` through `just test` in Claudine. Both assert one
+open for one and two prompt occurrences. The library test also checks that the source-read counter
+agrees with the open count.
