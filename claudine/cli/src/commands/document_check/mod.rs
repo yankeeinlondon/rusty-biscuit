@@ -29,7 +29,7 @@ use darkmatter::findings::{
     NOT_CHECKED_CODE, Severity, Subject, SubjectId, Trail,
 };
 use darkmatter::markdown::compose::ContextRequirements;
-use darkmatter::markdown::compose::passive::DeferralReason;
+use darkmatter::markdown::compose::passive::{DeferralReason, PassiveSession};
 use serde_json::{Map, Value};
 
 use super::compose::SharedComposeArgs;
@@ -67,6 +67,9 @@ pub(crate) const INVALID_ARGUMENTS: &str = "composition.invalid_arguments";
 /// A file reference that names no file but matches files a real run on
 /// this terminal would ask the caller to choose from.
 pub(crate) const FILE_CHOICE_PENDING: &str = "composition.file_choice_pending";
+/// An optional schema property whose value fails its schema, which the real
+/// run drops with a warning and runs without.
+pub(crate) const OPTIONAL_DROPPED: &str = "composition.optional_dropped";
 /// An error no projector classifies: a defect in Claudine.
 pub(crate) const INTERNAL_BUG: &str = "internal.bug";
 
@@ -123,7 +126,40 @@ pub(crate) fn run(mode: Mode, shared: &SharedComposeArgs, args: &[String]) -> i3
     let mut check = Check::new(mode, shared.clone(), stderr_is_tty);
     #[cfg(feature = "test-fixtures")]
     check.observe_scripted_terminal();
+    // Every local source the check reads on this thread (the root, a
+    // prompt, an inclusion, a `$schema` file, a referenced sequence file)
+    // comes from the invocation's one observation of local files, which
+    // each pass's session shares.
+    let _shared_reads = simplified_schema::resolve::buffers::enter_shared_reads(
+        check.observations.observations().local_reads().clone(),
+    );
     check.run(args);
+    check.report_trigger_findings();
+    emit(check, format, stderr_is_tty)
+}
+
+/// The dry run of a request that could not be captured (the launch
+/// directory cannot be read): `error` is its one finding.
+pub(crate) fn run_unprepared(mode: Mode, shared: &SharedComposeArgs, error: &(dyn std::error::Error + 'static)) -> i32 {
+    let format = if shared.json { Format::Json } else { Format::Human };
+    let stderr_is_tty = std::io::stderr().is_terminal();
+    let mut check = Check::new(mode, shared.clone(), stderr_is_tty);
+    let subject = check.root_subject();
+    check.sink.push(
+        subject,
+        Diagnostic::actionable(
+            "io.read_failed",
+            Severity::Error,
+            error.to_string(),
+            "run the command from a directory that exists and can be read",
+        ),
+    );
+    emit(check, format, stderr_is_tty)
+}
+
+/// Writes `check`'s report (and, for a person, its previews) and returns
+/// the dry run's exit code.
+fn emit(check: Check, format: Format, stderr_is_tty: bool) -> i32 {
     let launch_dir = check.launch_dir.clone();
     let outcome = check.finish();
 
@@ -170,6 +206,49 @@ struct PromptTask<'a> {
     /// run (an input its sequence is missing, a value only the run writes),
     /// with why; the preview keeps what reads them as written.
     absent: Vec<(String, DeferralReason)>,
+    /// Values the run writes before the task composes (a key a lifecycle
+    /// `set` writes, a launch-time `seq` member such as `seq.outputs`):
+    /// whatever they hold now, a read of one is known only at launch, and a
+    /// schema problem with one is not judged.
+    written: Vec<String>,
+    /// Whether the task runs inside a looping container, whose `loop`
+    /// values only its pass knows.
+    in_loop: bool,
+    /// Whether the task runs inside a group, whose `group` values are bound
+    /// only at the group's start (so `group` is also in [`Self::written`]).
+    in_group: bool,
+    /// Whether the real route judges the prompt's schema as a direct
+    /// composition does, dropping an invalid optional value with a warning
+    /// (`compose`, `inline-compose`, a root step composing the root), rather
+    /// than refusing it at a prompt task's pre-launch barrier.
+    drops_invalid_optionals: bool,
+    /// The pass that composes this prompt in a real run before any task
+    /// starts, against the state the run has then.
+    earlier: EarlierCheck,
+}
+
+/// A real sequence's pass over a task's prompt before any task starts. A
+/// run reaching the task only after it, its preview's state is a later one:
+/// a value the run writes first (`seq.outputs`, a key a lifecycle `set`
+/// writes) is known only at launch there, but holds its value before the
+/// run here, so what this pass refuses with it stops the run first.
+enum EarlierCheck {
+    /// No such pass: a task whose prompt first composes at its turn.
+    None,
+    /// `compose` or `inline-compose`: the approval discovery of the
+    /// document ([`composition::discover_document_shell`]) before it
+    /// composes, with the caller's values.
+    Approval,
+    /// A `prompt:` task: the approval discovery of its document
+    /// ([`composition::prompt_discovery_failure`]), with no `seq`, `loop`,
+    /// or `group` bound.
+    Discovery(claudine::composition::PromptReference),
+    /// A root step composing the root: Phase 1c's probe, with the step's
+    /// position, no outputs yet, and the root `initialize` writes, which
+    /// a dry run does not make, so each key of `written` is known only at
+    /// launch; and, before it, the root's approval discovery, as for
+    /// [`EarlierCheck::Approval`].
+    Probe { written: Vec<String> },
 }
 
 /// What a [`Check`] is run for.
@@ -218,6 +297,11 @@ struct Check {
     waiting_prompts: std::collections::HashMap<(PathBuf, String), Vec<String>>,
     /// The root's missing inputs, which a body task of the root reads.
     root_absent: Vec<(String, DeferralReason)>,
+    /// Every key the sequence graph's lifecycle may write before a task
+    /// launches ([`SequenceCheck::runtime_written`]).
+    runtime_written: Vec<String>,
+    /// The identity of each task that runs inside a looping container.
+    looping: std::collections::HashSet<String>,
     /// The missing inputs of each referenced sequence document, by its
     /// path, which a body task composing that document reads.
     owner_missing: std::collections::HashMap<PathBuf, Vec<String>>,
@@ -241,7 +325,40 @@ struct Check {
     owner_blocks: Vec<(Option<String>, FindingId, PathBuf)>,
     /// The owner failure the task being checked waits on.
     owner_blocked: Option<(FindingId, PathBuf)>,
+    /// Each `(document, property)` a dropped-optional row was reported for:
+    /// a sequence drops the root's at its start and again at every root
+    /// step, which is one row.
+    dropped_reported: std::collections::HashSet<(PathBuf, String)>,
+    /// Each `(subject, document)` whose `$schema` the input check could not
+    /// prepare and reported: the preview's preparation meets the same
+    /// failure, which is not a second row.
+    schema_reported: std::collections::HashSet<(SubjectId, PathBuf)>,
+    /// The Claudine configuration's load error, read before the root (whose
+    /// file choice reads the configuration) and reported under it.
+    config_error: Option<claudine::error::ClaudineError>,
+    /// The invocation's configuration findings (the Claudine load, the
+    /// Darkmatter load or its permission verdict), each once under the root:
+    /// a check that meets the same cause again, at the same location, is
+    /// that finding, never a second row.
+    config_rows: Vec<(ConfigLocation, FindingId)>,
+    /// The files the Claudine configuration load reported: a Darkmatter
+    /// problem in one of them (a `permissions` reference to Claudine's file)
+    /// is the Claudine finding's cause, judged by the same schema.
+    claudine_config_files: std::collections::HashSet<biscuit_file::PathIdentity>,
+    /// The captured permission verdict's error and its finding, when the
+    /// verdict is invalid: a refusal that error caused relates to it.
+    permission_error: Option<(String, FindingId)>,
+    /// The invocation's observations of external sources: every pass's
+    /// session ([`Self::session`]) shares them, so a file or URL the input
+    /// check, the reference walk, the preview, its retry, and every task
+    /// occurrence read is read once.
+    observations: PassiveSession,
+    /// Each document [`Self::load_document`] read, by path.
+    loaded: std::collections::HashMap<PathBuf, ResolvedCompositionSource>,
 }
+
+/// Where a configuration finding is located: its file, line, and column.
+type ConfigLocation = (Option<PathBuf>, Option<usize>, Option<usize>);
 
 impl Check {
     fn new(mode: Mode, shared: SharedComposeArgs, stderr_is_tty: bool) -> Self {
@@ -266,13 +383,103 @@ impl Check {
             sequence_documents: std::collections::HashMap::new(),
             waiting_prompts: std::collections::HashMap::new(),
             root_absent: Vec::new(),
+            runtime_written: Vec::new(),
+            looping: std::collections::HashSet::new(),
             owner_missing: std::collections::HashMap::new(),
             agent_reported: std::collections::HashSet::new(),
             subject_trails: std::collections::HashMap::new(),
             keyed: std::collections::HashMap::new(),
             key_problem_paths: std::collections::HashMap::new(),
+            schema_reported: std::collections::HashSet::new(),
             owner_blocks: Vec::new(),
             owner_blocked: None,
+            dropped_reported: std::collections::HashSet::new(),
+            config_error: None,
+            config_rows: Vec::new(),
+            claudine_config_files: std::collections::HashSet::new(),
+            permission_error: None,
+            observations: PassiveSession::new(),
+            loaded: std::collections::HashMap::new(),
+        }
+    }
+
+    /// A new passive session for one pass, reading through the
+    /// invocation's shared observations.
+    fn session(&self) -> PassiveSession {
+        self.observations.sharing_observations()
+    }
+
+    /// Declares to every pass ([`Self::observations`]) each file the root's
+    /// own `initialize` writes ([`darkmatter::lifecycle::created_files`]),
+    /// resolved as the action resolves it when it runs, with the kind of
+    /// change its effect makes (`ensure_file` creates an absent file,
+    /// `append_line`/`append_jsonl` also change an existing one). A real
+    /// `compose`, `inline-compose`, or `sequence` runs that stack before it
+    /// reads any inclusion, prompt, sequence file, schema, or data file, so
+    /// a verdict that depends on what one of those files holds, or whether
+    /// it exists, is not checked instead of judged on the file as it is now.
+    ///
+    /// A templated destination (`ensure_file: ["{{ target }}", …]`) is
+    /// resolved from the root's own values under the caller's setters when
+    /// it reads nothing only the event knows
+    /// ([`claudine::composition::lifecycle::prewarm::resolve_initializer_template`]);
+    /// otherwise no particular file is claimed, and the locations its fixed
+    /// text allows ([`darkmatter::lifecycle::CreatedFile::pattern`]) are
+    /// treated as possibly written, so no missing-file error is reported
+    /// for a file the run may create. An action under a `when:` counts: the
+    /// dry run cannot tell whether its branch runs, so it cannot prove the
+    /// file absent or unchanged. A target the effect refuses (outside the
+    /// mutation root) is not written, so a read of it is checked as it is.
+    /// A prompt's own `initialize` and any task run after the sequence
+    /// pre-flight, so their files are not declared.
+    fn declare_initialized_files(&self) {
+        let (Some(invocation), Some(root)) = (&self.invocation, &self.root) else { return };
+        let Ok(source) = invocation.derive_composition_source(root) else { return };
+        let mut frontmatter: Map<String, Value> =
+            root.markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+        let Ok(config) = composition::parse_lifecycle_config(&Value::Object(frontmatter.clone()), &root.resolved_path) else { return };
+        let mut written = std::collections::HashSet::new();
+        if let Some(initialize) = frontmatter.get("initialize") {
+            claudine::composition::collect_written_keys(initialize, &mut written);
+        }
+        frontmatter.extend(self.setters.iter().map(|(key, value)| (key.clone(), value.clone())));
+        let frontmatter = Value::Object(frontmatter);
+        // A launch whose mutation root is unknown fails before `initialize`
+        // (its own root row), so it creates nothing.
+        let context = source.file_resolution_context();
+        let Ok(mutation_root) = claudine::invocation_context::lifecycle_mutation_root(Some(invocation), context) else { return };
+        // The destination's `ctx` reads are left unresolved, but the
+        // evaluation still needs a context: the invocation's own launch
+        // capture, taken once and only for a templated destination.
+        let mut launch_context = None;
+        for created in darkmatter::lifecycle::created_files(config.stack(composition::LifecycleSignal::Initialize)) {
+            let change = created.change();
+            if !created.template {
+                if let Some(target) = created.target(&root.resolved_path, context, mutation_root) {
+                    self.observations.declare_initializer_write(&target, change, DeferralReason::CreatedAtLaunch { path: created.reference });
+                }
+                continue;
+            }
+            let resolved = claudine::composition::lifecycle::prewarm::resolve_initializer_template(
+                &created.reference,
+                &frontmatter,
+                &written,
+                launch_context
+                    .get_or_insert_with(|| invocation.capture_launch_context(&ContextRequirements::for_document(&root.markdown)))
+                    .clone(),
+            );
+            match resolved {
+                Some(resolved) => {
+                    if let Some(target) = created.target_as(&resolved, &root.resolved_path, context, mutation_root) {
+                        self.observations.declare_initializer_write(&target, change, DeferralReason::CreatedAtLaunch { path: resolved });
+                    }
+                }
+                None => {
+                    if let Some(pattern) = created.pattern(&root.resolved_path, context, mutation_root) {
+                        self.observations.declare_unresolved_write(pattern, change, DeferralReason::CreatedAtLaunch { path: created.reference });
+                    }
+                }
+            }
         }
     }
 
@@ -362,7 +569,10 @@ impl Check {
         self.launch_dir = Some(invocation.launch_cwd().to_path_buf());
         self.read_config(&invocation);
         self.invocation = Some(invocation);
-        let Some(root) = self.load_root(&file, &context) else { return };
+        let Some(root) = self.load_root(&file, &context) else {
+            self.report_configuration();
+            return;
+        };
         // Arguments after the file are owned against the document as
         // authored, exactly as the real command owns them.
         let owned = match self.invocation.as_ref().map(|invocation| invocation.derive_composition_source(&root)) {
@@ -376,6 +586,7 @@ impl Check {
             None => Ok(Vec::new()),
         };
         self.root = Some(root);
+        self.report_configuration();
         let parsed = match owned
             .and_then(|owned| super::compose::parse_composition_positionals(&[args, owned.as_slice()].concat()))
         {
@@ -415,6 +626,8 @@ impl Check {
                 return;
             }
         }
+        // Templated destinations read the caller's setters too.
+        self.declare_initialized_files();
         match self.mode {
             Mode::Sequence => self.check_sequence(),
             Mode::Compose | Mode::InlineCompose => self.check_single(),
@@ -504,7 +717,13 @@ impl Check {
             // schema's verdict on the same value says less.
             return None;
         }
-        let mut projected = error_diagnostics(error);
+        // A slot refusal is reported by each slot's own typed, located
+        // record, as the preview's preparation reports it; the launch-time
+        // wrapper names neither.
+        let mut projected = match error.downcast_ref::<CompositionError>() {
+            Some(CompositionError::SchemaSlotFailed { slots, .. }) if !slots.is_empty() => slots.clone(),
+            _ => error_diagnostics(error),
+        };
         with_document_fallback(&mut projected, document);
         let unclassified = matches!(projected.as_slice(), [only] if only.code == COMPOSE_FAILURE_CODE);
         // Darkmatter's catch-all is never the answer: Claudine's own code
@@ -513,6 +732,13 @@ impl Check {
         if !projected.is_empty() && !unclassified {
             let mut first = None;
             for diagnostic in projected {
+                // The invocation's configuration is reported once, under the
+                // root; a task meeting it again is that finding.
+                if let Some(held) = self.held_config_row(&diagnostic) {
+                    first.get_or_insert(held);
+                    continue;
+                }
+                let diagnostic = self.relate_to_permissions(diagnostic);
                 let diagnostic = if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail.clone()) };
                 let id = self.sink.push(subject, diagnostic);
                 first.get_or_insert(id);
@@ -574,6 +800,16 @@ impl Check {
                 None => DiagnosticSource::file_only(Some(file)),
             });
         }
+        match error {
+            // At the `$schema` the document wrote, when it wrote one.
+            CompositionError::SchemaLoad { source_path, .. } => {
+                return Some(self.locate_in(source_path, "$schema", None, true));
+            }
+            CompositionError::SchemaParse { source_path, property, .. } => {
+                return Some(self.locate_in(source_path, "$schema", property.as_deref(), true));
+            }
+            _ => {}
+        }
         let CompositionError::MarkdownLoad { path, source } = error else { return None };
         let located = match source {
             // Darkmatter places a frontmatter failure in its file's frame.
@@ -616,6 +852,11 @@ impl Check {
             seq: None,
             // A value the caller is still to choose reads as absent.
             absent: chosen.into_iter().map(|name| (name.clone(), DeferralReason::MissingInput { name })).collect(),
+            written: Vec::new(),
+            in_loop: false,
+            in_group: false,
+            drops_invalid_optionals: true,
+            earlier: EarlierCheck::Approval,
         };
         let mut rows = Vec::new();
         self.check_task_prompt(&task, &mut rows);
@@ -625,6 +866,16 @@ impl Check {
     /// The provider, model, and preview checks of one prompt task.
     fn check_prompt_task(&mut self, task: &PromptTask<'_>) {
         self.check_selection(task);
+        // A body step composes the document whose own verdict already
+        // failed, and the real run stops at that verdict: the preview would
+        // meet the same failure again.
+        if let Some((blocker, document)) = self.owner_blocked.clone()
+            && document == task.prompt.resolved_path
+        {
+            let reason = self.blocked_reason(blocker, &document);
+            self.not_checked(task.subject, "preview", &reason, Some(blocker));
+            return;
+        }
         self.preview(task, &[]);
     }
 
@@ -637,28 +888,162 @@ impl Check {
     }
 
     /// Reads the user configuration passively (nothing is created,
-    /// converted, or backed up), recording an invalid one as a root finding.
-    /// Its notes (a missing file read as its defaults, a legacy file read as
-    /// its conversion) are context, not findings.
+    /// converted, or backed up), keeping a load error for
+    /// [`Self::report_configuration`]. Its notes (a missing file read as its
+    /// defaults, a legacy file read as its conversion) are context, not
+    /// findings.
     fn read_config(&mut self, invocation: &InvocationContext) {
         let repository = invocation.launch_repository();
         match claudine::dispatch::loader::load_claudine_config_passive(None, repository.repo_root()) {
             Ok(loaded) => self.config = Some(loaded.config),
-            Err(error) => {
-                let subject = self.root_subject();
-                let source = config_source(&error);
-                let finding = match claudine::diagnostics::as_diagnostic(&error) {
-                    Some(known) => Diagnostic::actionable(
-                        known.code(),
-                        Severity::Error,
-                        error.to_string(),
-                        "fix the configuration file; a real run refuses it before it starts",
-                    ),
-                    None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
+            Err(error) => self.config_error = Some(error),
+        }
+    }
+
+    /// Reports the invocation-wide prerequisites once, under the root (read
+    /// by then, so the subject names it): the Claudine configuration's load
+    /// error, the Darkmatter configuration's load error or, in a dry run,
+    /// its captured permission verdict when that is invalid (a real run
+    /// refuses only what asks for the invalid permission, so a local prompt
+    /// still runs, but the setting is wrong whatever the prompt reads), and
+    /// a failed launch-repository discovery, which a real run refuses before
+    /// any lifecycle runs.
+    fn report_configuration(&mut self) {
+        let Some(invocation) = self.invocation.clone() else { return };
+        if let Some(error) = self.config_error.take() {
+            let subject = self.root_subject();
+            let source = config_source(&error);
+            let finding = match claudine::diagnostics::as_diagnostic(&error) {
+                Some(known) => Diagnostic::actionable(
+                    known.code(),
+                    Severity::Error,
+                    error.to_string(),
+                    "fix the configuration file; a real run refuses it before it starts",
+                ),
+                None => Diagnostic::actionable(INTERNAL_BUG, Severity::Error, error.to_string(), BUG_HINT),
+            };
+            if let claudine::error::ClaudineError::ConfigInvalid { problems }
+            | claudine::error::ClaudineError::ConfigConversion { problems } = &error
+            {
+                self.claudine_config_files
+                    .extend(problems.iter().filter_map(|problem| problem.file.as_deref().map(biscuit_file::PathIdentity::new)));
+            }
+            let id = self.sink.push(subject, finding.with_source(source.clone()));
+            self.config_rows.push(((source.file, source.line, source.column), id));
+        }
+        let derived = self.root.as_ref().and_then(|root| invocation.derive_composition_source(root).ok());
+        let context = derived
+            .as_ref()
+            .map_or_else(|| invocation.launch_file_resolution_context(), |source| source.file_resolution_context());
+        let (error, verdict) = match invocation.darkmatter_config_for(context) {
+            Err(error) => (Some(error), false),
+            Ok(snapshot) if self.purpose == Purpose::DryRun => (snapshot.policy().err(), true),
+            Ok(_) => (None, false),
+        };
+        if let Some(error) = error {
+            let subject = self.root_subject();
+            let mut first = None;
+            let hint = if verdict {
+                "fix the setting; a real run refuses every read and command that needs the permission"
+            } else {
+                "fix the configuration file; a real run refuses it before it starts"
+            };
+            let diagnostics = darkmatter::markdown::compose::report_diagnostics::config_error_diagnostics(&error);
+            for (problem, mut diagnostic) in error.problems().iter().zip(diagnostics) {
+                diagnostic.hint.get_or_insert_with(|| hint.to_string());
+                // A problem in Claudine's own file, or a reference to it,
+                // is what Claudine's load, judging that file by the same
+                // schema, already reported.
+                let in_claudine = self.is_claudine_config(&problem.file)
+                    || problem.reference_target.as_deref().is_some_and(|target| self.is_claudine_config(target));
+                let id = if in_claudine {
+                    self.config_rows.first().map(|(_, id)| *id)
+                } else {
+                    let location = diagnostic
+                        .source
+                        .as_ref()
+                        .map_or((None, None, None), |source| (source.file.clone(), source.line, source.column));
+                    let id = self.sink.push(subject, diagnostic);
+                    self.config_rows.push((location, id));
+                    Some(id)
                 };
-                self.sink.push(subject, finding.with_source(source));
+                first = first.or(id);
+            }
+            if verdict && let Some(id) = first {
+                self.permission_error = Some((error.to_string(), id));
             }
         }
+        if self.purpose == Purpose::DryRun
+            && let Err(error) =
+                claudine::invocation_context::lifecycle_mutation_root(Some(&invocation), invocation.launch_file_resolution_context())
+        {
+            let subject = self.root_subject();
+            self.push_error(subject, &error, Trail::default());
+        }
+    }
+
+    /// Reports each schema trigger the invocation's discovery skipped as
+    /// invalid, once, under the root, as the real run warns once per
+    /// invocation; each preview leaves them out of its own rows.
+    fn report_trigger_findings(&mut self) {
+        let Some(invocation) = self.invocation.clone() else { return };
+        for warning in invocation.trigger_findings().warnings() {
+            let subject = self.root_subject();
+            let mut finding = Diagnostic::actionable(
+                darkmatter::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE,
+                Severity::Warning,
+                warning.message,
+                "fix or remove the trigger file; a real run skips it with this warning",
+            );
+            if let Some(path) = warning.source.path() {
+                finding = finding.with_source(DiagnosticSource::file_only(Some(path.to_path_buf())));
+            }
+            self.sink.push(subject, finding);
+        }
+    }
+
+    /// Whether `file` is a Claudine configuration file its load reported.
+    fn is_claudine_config(&self, file: &Path) -> bool {
+        self.claudine_config_files.contains(&biscuit_file::PathIdentity::new(file))
+    }
+
+    /// The configuration finding `diagnostic` restates: a configuration
+    /// record at the location of one already reported for the invocation,
+    /// or in a file the Claudine load reported.
+    fn held_config_row(&self, diagnostic: &Diagnostic) -> Option<FindingId> {
+        if !diagnostic.code.starts_with("dm.config.") {
+            return None;
+        }
+        let source = diagnostic.source.as_ref()?;
+        if source.file.as_deref().is_some_and(|file| self.is_claudine_config(file)) {
+            return self.config_rows.first().map(|(_, id)| *id);
+        }
+        let location = (source.file.clone(), source.line, source.column);
+        self.config_rows.iter().find(|(held, _)| *held == location).map(|(_, id)| *id)
+    }
+
+    /// `diagnostic`, relating it to the invalid permission verdict's finding
+    /// when it is a refusal that verdict caused: Darkmatter words every such
+    /// refusal with the configuration error it holds.
+    fn relate_to_permissions(&self, mut diagnostic: Diagnostic) -> Diagnostic {
+        if let Some((error, id)) = &self.permission_error
+            && diagnostic.message.contains(error.as_str())
+            && let Some(held) = self.sink.get(*id)
+            && let Some(source) = held.source.clone()
+            && !diagnostic.related.iter().any(|related| related.source == source)
+        {
+            diagnostic.related.push(darkmatter::findings::DiagnosticRelated { message: held.message.clone(), source });
+        }
+        diagnostic
+    }
+
+    /// Why a check of a task owned by a document whose own preparation
+    /// failed (`blocker`) did not run.
+    pub(super) fn blocked_reason(&self, blocker: FindingId, document: &Path) -> String {
+        if self.config_rows.iter().any(|(_, id)| *id == blocker) {
+            return "the configuration does not load".to_string();
+        }
+        format!("{} failed its own checks", shown(document, self.launch_dir.as_deref()))
     }
 
 }
@@ -698,6 +1083,7 @@ fn run_for(purpose: Purpose, state: &RunState<'_>) -> FindingReport {
     check.read_config(state.invocation);
     check.invocation = Some(state.invocation.clone());
     check.root = Some(state.root.clone());
+    check.report_configuration();
     check.setters = state.values.clone();
     check.check_sequence();
     check.sink.finish()

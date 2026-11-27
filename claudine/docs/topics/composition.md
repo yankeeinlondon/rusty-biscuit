@@ -1087,7 +1087,14 @@ A dry run is passive. Even with `--yolo` it:
 - runs no command: `$( … )` values, `::shell` lines and blocks, and sequence
   `shell:` and `side_effect:` tasks are skipped, and no approval is asked for;
 - fires no lifecycle event, follows no `proxy`, and runs no `prep` target or
-  loop pass;
+  loop pass; a file the document's own `initialize` creates
+  (`ensure_file: [gen/notes.md, "…"]`, a `{{ … }}` target resolved from
+  the document's values) and that does not exist yet, or appends to, is
+  read as known only at launch: an inclusion, `$schema`, `load_data`,
+  `file_exists`, `find_files`, or another reader whose verdict the write
+  changes is a not-checked row, not a missing file or a verdict on its
+  current bytes
+  (see [Files the root's `initialize` creates](flow-control/sequences.md#files-the-roots-initialize-creates));
 - launches no provider and asks no question (no agent picker, no
   missing-input prompt, no provider review screen);
 - writes nothing: no configuration file is created or migrated, no cache or
@@ -1103,12 +1110,16 @@ fetched when the configured `network` permission allows its host, and
 stored in no cache; under `network: deny` it is the same refusal a real run
 reports; under `network: ask` no request is sent and the read is a
 not-checked row ("needs network approval"), since a dry run asks nothing.
+Each file and URL is read once per dry run, however many of its checks
+(inputs, inclusions, preview) and tasks read it, so every row judges the
+same bytes: a prompt, an included file, a `$schema` file, and a referenced
+sequence file are each opened once; see [`claudine sequence` → Dry run](../cli/sequence.md#dry-run).
 
 Whatever needs one of those effects is left as written in the preview,
 marked `[not evaluated in a dry run]`, and reported as a not-checked row,
 while everything that does not depend on it is composed as usual. Anything
-else that reads such a value (a `::block` condition, an interpolation) is
-marked the same way:
+else that reads such a value (a `::block` condition, an interpolation, a
+`::map`/`::filter` collection, kept whole) is marked the same way:
 
 ```text
 release.md
@@ -1132,11 +1143,38 @@ release.md
             <provider>`
 ```
 
+Before it composes, a real run walks the document to approve its
+commands, and the dry run makes the same walk. That walk refuses a
+command or inclusion whose shape depends on a value it cannot evaluate as
+composition will, whatever the value is: here `topic` holds a shell
+probe, so `::file ./{{ topic }}.md` is an error row (`dm.shell.failure`,
+"dynamic command shape") in the dry run and stops the real run with exit
+`1`. A literal `topic`, or one supplied with `--set`, is not refused.
+
+```markdown
+---
+topic: "{{ has_alias('zz') }}"
+---
+::file ./{{ topic }}.md
+```
+
+A run the walk stops never composes, so the preview's composition warnings
+are not reported beside that error.
+
 On a terminal, a choice a real run would ask for (no provider, several
 listed providers installed, a missing input it can prompt for) is a warning;
-without a terminal it is an error, since the real run fails there. An
-invalid configuration file is reported as an error, and the check goes on
-with the defaults.
+without a terminal it is an error, since the real run fails there.
+
+What every prompt of the run shares is reported once, under the root
+document, never repeated per task: a configuration file that does not load
+(Claudine's, or `~/.darkmatter.yaml`), an invalid `permissions` setting
+(`network: aswk` is an error even for a prompt that reads nothing remote,
+and a remote read it refuses names that setting as its related location), a
+schema trigger that fails to load, the repository's retired inline
+guardrails, and a launch directory whose repository or folder cannot be
+read. An absent or `null` setting takes its default and is no finding. The
+check goes on with the defaults after a Claudine configuration error. See
+[`claudine sequence` — Dry run](../cli/sequence.md#dry-run) for each case.
 
 A sequence is read the way its preflight reads it, and a problem in one task
 does not hide the problems in the others. See
@@ -1403,9 +1441,49 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Present and valid      | continue                                                            | continue                                                                                |
 | Present as `null`      | takes the default if one is declared; otherwise judged by its type, so `string(required)` is a hard `SchemaValidation` abort and a null-admitting type is valid | takes the default if one is declared; otherwise treated as absent (valid) |
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
-| Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
+| Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context with a warning, and composition retries once |
 
-The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line. It applies only to an optional, non-eager property of the authored `$schema`; an invalid Claudine control fails the launch instead.
+The drop-and-retry for invalid optionals is automatic, and each drop prints a
+warning naming the value and why it failed:
+
+```text
+warning: dropped optional schema property `topic` (from frontmatter, at pre-validation): "missing" is not one of "a"
+```
+
+It applies only to an optional, non-eager property of the authored `$schema`;
+an invalid Claudine control fails the launch instead. It also depends on the
+route that composes the document:
+
+| Route | Invalid optional value |
+| --- | --- |
+| `compose`, `inline-compose` | dropped with a warning |
+| a `sequence` document's own values, and a root step that composes its body | dropped with a warning |
+| a sequence `prompt:` task's document, and a body step of a nested or referenced sequence | refused: the task fails before it launches |
+
+A `--dry-run` grades the value the way its route does: a value the run would
+drop is a `composition.optional_dropped` warning row with the same message
+(and, like every warning, exits 2), and one the run would refuse is the
+schema's error row.
+
+An invalid **required** value stops the run before anything is dropped, so
+its error lists that value alone. A dry run shows the same error and, beside
+it, the warning for each invalid optional the run drops once the required
+value is fixed:
+
+```yaml
+---
+topic: "{{ 'missing' }}"   # optional, enum(a)
+count: many                # required number
+$schema:
+  topic: enum(a)
+  count: number(required)
+---
+```
+
+```text
+⚠ dropped optional schema property `topic` (from frontmatter, at composition): "missing" is not one of "a"
+✗ "many" is not of type "number"
+```
 
 `Missing` means a top-level property is absent. A field missing *inside* a
 value is that value's problem, routed by the property's own row: with

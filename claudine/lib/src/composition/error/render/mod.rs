@@ -714,6 +714,7 @@ impl Diagnostic for CompositionError {
                 source_path,
                 slot_code,
                 message,
+                ..
             } => {
                 base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["slot_code"] = json!(slot_code);

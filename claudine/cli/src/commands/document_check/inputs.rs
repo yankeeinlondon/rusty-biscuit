@@ -2,7 +2,7 @@
 //! passively, and each owning sequence document's, graded as one cohort.
 
 use claudine::composition::{MissingProperty, SequenceCheck};
-use darkmatter::markdown::compose::passive::PassiveSession;
+use darkmatter::markdown::compose::passive::DeferralReason;
 
 use super::*;
 use super::tasks::{MISSING_INPUT, missing_input_severity, site_trail};
@@ -30,8 +30,20 @@ impl Check {
             self.not_checked(task.subject, &format!("input {}", keys.join(", ")), "a `with:` value is known only when the task runs", None);
         }
         // A value that comes from a command stays as written; an input it
-        // would supply still counts as given.
-        let Some(options) = self.passive_prepare_options(task, PassiveSession::new()) else { return };
+        // would supply still counts as given. A value the run writes before
+        // the task is read as it will be then: known only at launch.
+        let session = self.session();
+        for name in &task.written {
+            session.defer_written(name, DeferralReason::WrittenAtLaunch { name: name.clone() });
+        }
+        // A schema the run's initializer writes first decides the inputs
+        // only at launch; the preview waits for it too.
+        if let Some(reason) = self.schema_created_later(task) {
+            self.schema_reported.insert((task.subject, task.prompt.resolved_path.clone()));
+            self.not_checked(task.subject, "schema", &reason.describe(), None);
+            return;
+        }
+        let Some(options) = self.passive_prepare_options(task, session) else { return };
         // Judged by the mode the task composes in, so an inline prompt's
         // completion-only required value may stay absent, as at its launch.
         let mode = if self.composes_inline(task) {
@@ -46,6 +58,15 @@ impl Check {
                 // missing input) is reported once, by its owner.
                 let waits = |name: &str| task.absent.iter().any(|(absent, _)| absent == name) || task.with_late.iter().any(|key| key == name);
                 for property in missing.into_iter().filter(|property| !waits(&property.name)) {
+                    if task.written.contains(&property.name) {
+                        self.not_checked(
+                            task.subject,
+                            &format!("input `{}`", property.name),
+                            "the run writes it before this task, so it is known only at launch",
+                            None,
+                        );
+                        continue;
+                    }
                     let hint = if self.mode == Mode::Sequence {
                         format!("add `{}` to the task's `with:`, or pass `{}=<value>` after the file", property.name, property.name)
                     } else {
@@ -65,10 +86,46 @@ impl Check {
             // own typed, located row, where this copy would be a second,
             // unlocated one.
             Err(CompositionError::SchemaValidation { .. }) => {}
+            // A `$schema` that cannot be prepared is this check's to report,
+            // by the class the real launch check gives it (a slot by each
+            // slot's own record); the preview meets it again.
+            Err(
+                error @ (CompositionError::SchemaLoad { .. }
+                | CompositionError::SchemaParse { .. }
+                | CompositionError::SchemaSlotFailed { .. }),
+            ) => {
+                self.schema_reported.insert((task.subject, task.prompt.resolved_path.clone()));
+                self.push_error(task.subject, &error, task.trail.clone());
+            }
             Err(error) => {
                 self.push_error(task.subject, &error, task.trail.clone());
             }
         }
+    }
+
+    /// Why `task`'s `$schema` is not checked, when a file reference it names
+    /// (the value, or an entry of a list of them) is a file the root's
+    /// `initialize` writes before this task: one that resolves to no file
+    /// and whose candidate the run creates
+    /// ([`PassiveSession::created_among`]), or an existing one it appends
+    /// to ([`PassiveSession::initializer_changes`]).
+    pub(super) fn schema_created_later(&self, task: &PromptTask<'_>) -> Option<DeferralReason> {
+        let invocation = self.invocation.as_ref()?;
+        let context = invocation.derive_composition_source(task.prompt).ok()?;
+        let context = context.file_resolution_context().for_source(&task.prompt.resolved_path);
+        let references: Vec<&str> = match task.prompt.markdown.frontmatter().as_map().get("$schema")? {
+            Value::String(reference) => vec![reference.as_str()],
+            Value::Array(entries) => entries.iter().filter_map(Value::as_str).collect(),
+            _ => return None,
+        };
+        references.into_iter().find_map(|raw| {
+            let reference = FileReference::new(raw).ok()?;
+            let detailed = reference.resolve_detailed(&context);
+            match detailed.matched_path() {
+                Some(path) => self.observations.initializer_changes(path),
+                None => self.observations.created_among(detailed.probed_paths()),
+            }
+        })
     }
 
     /// The missing inputs of every owning sequence document: the root's

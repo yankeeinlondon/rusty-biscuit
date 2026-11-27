@@ -232,6 +232,53 @@ fn resolve(text: &Expr, (view, globals): Bindings, inputs: &PrewarmInputs) -> Cl
     }
 }
 
+/// The text the lifecycle operand template `text` (an `initialize`
+/// action's file operand) holds when its event runs, when that is known
+/// before any event runs: the template is early (literal text and reads of
+/// the document's own values, no function call, shell expansion, `ctx`, or
+/// `env`), and every value it reads is in `frontmatter` (the document's
+/// values under the caller's setters) as data, not itself a `{{ … }}` or
+/// `$( … )` value, and is no key in `written` (the keys a `set` of the
+/// stack writes, which change it before the action may run). `None`
+/// whenever the event alone can tell; nothing is run to decide.
+#[must_use]
+pub fn resolve_initializer_template(
+    text: &str,
+    frontmatter: &Value,
+    written: &std::collections::HashSet<String>,
+    context: ComposeContext,
+) -> Option<String> {
+    let values = frontmatter.as_object().cloned().unwrap_or_default();
+    let expr = Expr::StringLiteral(text.to_string());
+    let prepared = prepare_value(&Value::String(text.to_string()), AuthoredMode::InterpolatedValue).ok()?;
+    let (view, _) = runtime_bindings_enclosed(
+        LifecycleScope::Event(darkmatter::lifecycle::LifecycleSignal::Initialize),
+        LifecycleValues::default(),
+        EnclosingLoop::Pending,
+    );
+    for expression in prepared.expressions() {
+        let mut reads = Vec::new();
+        frontmatter_reads(expression.expr(), &view, &mut reads);
+        for read in reads {
+            let FrontmatterRead::Key(key) = read else { return None };
+            let value = values.get(&key)?;
+            if written.contains(&key) || crate::composition::sequence::preflight::providers::reads_expression(value) {
+                return None;
+            }
+        }
+    }
+    let inputs = PrewarmInputs {
+        frontmatter: SharedFrontmatter::from(values),
+        context: DocumentContext::Pending(context),
+        sequence_injected_keys: BTreeSet::new(),
+    };
+    let bindings = early_reads(LifecycleScope::Event(darkmatter::lifecycle::LifecycleSignal::Initialize), &expr, &inputs).ok()?;
+    match resolve(&expr, bindings, &inputs) {
+        Classification::Early(resolved) => Some(resolved),
+        Classification::Skip(_) => None,
+    }
+}
+
 /// Whether `expr` calls a function anywhere, including untaken branches.
 fn contains_call(expr: &SpannedExpr) -> bool {
     match &expr.kind {

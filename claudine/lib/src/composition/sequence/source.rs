@@ -107,6 +107,41 @@ pub(crate) fn reference_finding(
     Some(finding)
 }
 
+/// In a sequence check, why the reference `raw`, authored in `source_path`,
+/// that resolves to no file is not checked instead of missing: a candidate
+/// it would resolve to is a file the run creates first, which the check's
+/// passive session declares
+/// ([`PassiveSession::defer_created`](darkmatter::markdown::compose::passive::PassiveSession::defer_created)).
+/// `None` outside a check and for every other reference.
+pub(crate) fn created_reference(
+    raw: &str,
+    source_path: &Path,
+    request_context: &FileResolutionContext,
+) -> Option<darkmatter::markdown::compose::passive::DeferralReason> {
+    let session = crate::composition::passive_scope::current()?;
+    let reference = FileReference::new(raw).ok()?;
+    let detailed = reference.resolve_detailed(&request_context.for_source(source_path));
+    session.created_among(detailed.probed_paths())
+}
+
+/// In a sequence check, why the existing file `path` a reference resolved
+/// to is not read now: the run's root initializer appends to it first
+/// ([`PassiveSession::initializer_changes`](darkmatter::markdown::compose::passive::PassiveSession::initializer_changes)),
+/// so its rows, or its text, are known only at launch. `None` outside a
+/// check and for every other file.
+pub(crate) fn changed_reference(path: &Path) -> Option<darkmatter::markdown::compose::passive::DeferralReason> {
+    crate::composition::passive_scope::current()?.initializer_changes(path)
+}
+
+/// The failure a check records for a file [`changed_reference`] withholds;
+/// the walk reports the deferral beside it, never this error.
+pub(crate) fn changed_reference_failure(path: &Path) -> CompositionError {
+    CompositionError::sequence_invalid(
+        "the run's initializer writes this file before it is read",
+        crate::composition::SequenceSite::file(path),
+    )
+}
+
 /// Load a referenced sequence source and normalize it into a plan.
 ///
 /// `invocation_path` is the resolved path of the document that referenced this

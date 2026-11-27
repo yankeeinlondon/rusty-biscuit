@@ -534,6 +534,17 @@ pub const CODES: &[CodeSpec] = &[
         severity_override: Some(Severity::Warning),
         detail: &[],
     },
+    // An optional schema property whose value fails its schema, which the
+    // real run drops with a warning and runs without.
+    CodeSpec {
+        code: "composition.optional_dropped",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        dry_run_report: true,
+        severity_override: Some(Severity::Warning),
+        detail: &[],
+    },
     CodeSpec {
         code: "composition.failed",
         category: Category::Composition,
@@ -886,7 +897,7 @@ mod tests {
         // A launch-only refusal: the dry run reports a slot by its own code.
         assert!(!code_spec("composition.schema_slot_failed").unwrap().dry_run_report);
         assert!(!code_spec("internal.bug").unwrap().dry_run_report);
-        assert_eq!(scoped.len(), 12, "{scoped:?}");
+        assert_eq!(scoped.len(), 13, "{scoped:?}");
     }
 
     #[test]
@@ -907,8 +918,9 @@ mod tests {
         // check's `composition.schema_slot_failed` → 61, plus the dry run's
         // pending file choice (`composition.file_choice_pending`) → 62, plus
         // a sequence run of a file with no `sequence`
-        // (`composition.sequence_undefined`) → 63.
+        // (`composition.sequence_undefined`) → 63, plus the dry run's
+        // dropped optional (`composition.optional_dropped`) → 64.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 63);
+        assert_eq!(CODES.len(), 64);
     }
 }

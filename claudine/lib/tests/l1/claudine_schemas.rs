@@ -1915,12 +1915,32 @@ fn graph_parity_compares_definitions_through_a_bijective_reference_mapping() {
 /// each trigger selected from the whole bundle, on disk and embedded. Each comparison
 /// follows every definition the property reaches, so this holds whether a
 /// definition is inlined or shared, and however its key is spelled.
-#[test]
-fn shared_payload_properties_have_identical_types() {
-    let shipped = shipped_bundle!();
+/// The payload paths [`shared_payload_case`] compares, as (label, bundle,
+/// frontmatter, installed): each trigger alone, then each selected from the
+/// whole bundle, compiled in and installed; the two never select one
+/// document. The first is the reference the others are compared with.
+fn shared_payload_paths(shipped: &[BundleFile]) -> Vec<(&'static str, Vec<BundleFile>, &'static str, bool)> {
     let without = |dropped: &[&str]| -> Vec<BundleFile> {
         shipped.iter().filter(|(name, _)| !dropped.contains(name)).cloned().collect()
     };
+    vec![
+        ("composition.yaml alone", without(&["inline-composition.yaml"]), "---\nagent: claude\n---\n", false),
+        ("inline-composition.yaml alone", without(&["composition.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("the shipped bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
+        ("the shipped bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
+        ("the installed bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
+        ("the installed bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
+    ]
+}
+
+/// `prompt`, `hash`, and `last_updated` resolve through payload path
+/// `index` to the same type graph as through the reference path and the
+/// library itself (`library_yaml`, `registration/document.yaml`), and the
+/// path accepts and rejects the same values. Each comparison follows every
+/// definition the property reaches, so this holds whether a definition is
+/// inlined or shared, and however its key is spelled.
+fn shared_payload_case(library_yaml: &str, index: usize) {
+    let shipped = shipped_bundle!();
     let effective_of = |discovered: &Discovered, repo: &SchemaRepo, name: &str, frontmatter: &str| {
         let path = repo.write_document(name, frontmatter);
         let markdown = Markdown::try_from(path.as_path())
@@ -1928,9 +1948,15 @@ fn shared_payload_properties_have_identical_types() {
             .with_source(ComposeSource::File(path.clone()));
         discovered.schemas.effective_for(&markdown).expect("effective").expect("schema")
     };
+    let payload_of = |(label, bundle, frontmatter, installed): &(&'static str, Vec<BundleFile>, &'static str, bool)| {
+        let repo = SchemaRepo::new(bundle);
+        let discovered =
+            if *installed { repo.discover_installed() } else { repo.discover() }.expect("the bundle loads");
+        (*label, effective_of(&discovered, &repo, "metadata.md", frontmatter))
+    };
 
     // The library's own types, imported by a document's `$schema`.
-    let library_repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../registration/document.yaml").to_string())]);
+    let library_repo = SchemaRepo::new(&[("document.yaml", library_yaml.to_string())]);
     let mut imports = String::from("---\n$schema:\n");
     for property in DOCUMENT_METADATA {
         imports.push_str(&format!("    {property}: {property}@../registration/document.yaml\n"));
@@ -1939,26 +1965,9 @@ fn shared_payload_properties_have_identical_types() {
     let library = effective_of(&library_repo.discover().expect("discovery"), &library_repo, "library.md", &imports);
     let library: &Value = &library.json_schema;
 
-    // (label, bundle, frontmatter, installed): each trigger alone, then each
-    // selected from the whole bundle, compiled in and installed; the two
-    // never select one document.
-    let paths: [(&str, Vec<BundleFile>, &str, bool); 6] = [
-        ("composition.yaml alone", without(&["inline-composition.yaml"]), "---\nagent: claude\n---\n", false),
-        ("inline-composition.yaml alone", without(&["composition.yaml"]), "---\nprompt: hi\n---\n", false),
-        ("the shipped bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
-        ("the shipped bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
-        ("the installed bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
-        ("the installed bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
-    ];
-    let mut payloads = Vec::new();
-    for (label, bundle, frontmatter, installed) in paths {
-        let repo = SchemaRepo::new(&bundle);
-        let discovered =
-            if installed { repo.discover_installed() } else { repo.discover() }.expect("the bundle loads");
-        payloads.push((label, effective_of(&discovered, &repo, "metadata.md", frontmatter)));
-    }
-
-    let (first_label, first) = &payloads[0];
+    let paths = shared_payload_paths(&shipped);
+    let (first_label, first) = payload_of(&paths[0]);
+    let (label, payload) = if index == 0 { (first_label, first.clone()) } else { payload_of(&paths[index]) };
     let first: &Value = &first.json_schema;
     for property in DOCUMENT_METADATA {
         let first_fragment = &first["properties"][property];
@@ -1968,16 +1977,16 @@ fn shared_payload_properties_have_identical_types() {
         // graph. Inside a root union's arm (`inline-composition.yaml`) the
         // arm that requires the property declares it without the optional
         // null arm, so there the declarations are compared without it.
-        for (label, payload) in &payloads[1..] {
-            let payload: &Value = &payload.json_schema;
-            let (fragment, in_arm) = declared_fragment(payload, property);
+        if index != 0 {
+            let schema: &Value = &payload.json_schema;
+            let (fragment, in_arm) = declared_fragment(schema, property);
             assert!(!fragment.is_null(), "{label} declares `{property}`");
             let (mut expected, mut found) = (first_fragment.clone(), fragment.clone());
             if in_arm {
                 strip_optional_null_keeping_annotations(&mut expected);
                 strip_optional_null_keeping_annotations(&mut found);
             }
-            GraphParity::new(first, payload).assert_same(&expected, &found, &format!("`{property}`: {first_label} vs {label}"));
+            GraphParity::new(first, schema).assert_same(&expected, &found, &format!("`{property}`: {first_label} vs {label}"));
         }
 
         // And it is the library's type, apart from the optional null arm.
@@ -2000,10 +2009,63 @@ fn shared_payload_properties_have_identical_types() {
         (json!({ "prompt": "hi", "hash": { "kind": "bogus" } }), false),
         (json!({ "prompt": ["hi"] }), false),
     ] {
-        for (label, payload) in &payloads {
-            let report = payload.validate(&value);
-            assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
-        }
+        let report = payload.validate(&value);
+        assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
+    }
+}
+
+/// One `#[test]` per payload path, so nextest spreads the six bundle
+/// discoveries across cores. Each names the library schema itself, so a
+/// change to it schedules every case.
+mod shared_payload_properties_have_identical_types {
+    use super::*;
+
+    /// The case names, in path order, for the roster guard.
+    const SHARED_PAYLOAD_CASES: &[&str] = &[
+        "composition_alone",
+        "inline_composition_alone",
+        "shipped_bundle_composition",
+        "shipped_bundle_inline_composition",
+        "installed_bundle_composition",
+        "installed_bundle_inline_composition",
+    ];
+
+    #[test]
+    fn composition_alone() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 0);
+    }
+
+    #[test]
+    fn inline_composition_alone() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 1);
+    }
+
+    #[test]
+    fn shipped_bundle_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 2);
+    }
+
+    #[test]
+    fn shipped_bundle_inline_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 3);
+    }
+
+    #[test]
+    fn installed_bundle_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 4);
+    }
+
+    #[test]
+    fn installed_bundle_inline_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 5);
+    }
+
+    /// Every payload path has its case, so a path added to the table is
+    /// never left untested.
+    #[test]
+    fn every_payload_path_has_a_case() {
+        let shipped = shipped_bundle!();
+        assert_eq!(shared_payload_paths(&shipped).len(), SHARED_PAYLOAD_CASES.len(), "{SHARED_PAYLOAD_CASES:?}");
     }
 }
 

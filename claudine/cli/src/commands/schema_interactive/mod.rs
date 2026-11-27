@@ -412,13 +412,7 @@ fn merge_overrides(
 /// behavior is auditable on every run.
 pub fn emit_dropped_optional_warnings(drops: &[DroppedOptional]) {
     for drop in drops {
-        log::warn(&format!(
-            "dropped optional schema property `{property}` (from {source}, at {stage}): {reason}",
-            property = drop.property,
-            source = drop.source.label(),
-            stage = drop.stage.label(),
-            reason = drop.reason,
-        ));
+        log::warn(&drop.message());
     }
 }
 

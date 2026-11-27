@@ -232,6 +232,7 @@ fn checked_predictions(path: &Path, dir: &Path, setters: Option<&Value>, content
         source_context: &source_context,
         caller_layers: layers.as_ref(),
         launch_dir: Some(dir),
+        session: None,
     });
     check.tasks.into_iter().filter_map(|task| Some((task.site.name, task.provider?))).collect()
 }

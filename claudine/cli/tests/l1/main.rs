@@ -85,16 +85,42 @@ mod dry_run_check;
 // Copies the compiled fake Goose, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
 mod dry_run_launch_hints;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_later_state;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_initialized_files;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_collection_deferrals;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_group_scope;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_dropped_optionals;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_discovery_shapes;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_schema_reference_template;
 mod dry_run_missing_inputs;
+mod dry_run_one_row_per_cause;
 // Grades the check on an injected terminal through the
 // `CLAUDINE_TEST_DRY_RUN_TERMINAL` seam, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
 mod dry_run_file_choices;
 mod dry_run_independent_references;
+mod dry_run_recovered_warnings;
 mod dry_run_portable_paths;
 mod dry_run_schema_key_occurrences;
 mod dry_run_source_effects;
 mod dry_run_network_approval;
+mod dry_run_recovery_wrappers;
+mod dry_run_shared_observations;
+mod dry_run_invocation_prerequisites;
 // Reads the `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS` seam, which only
 // `test-fixtures` builds compile into the binary.
 #[cfg(feature = "test-fixtures")]

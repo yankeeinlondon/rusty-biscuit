@@ -1,0 +1,31 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/doc.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.optional_dropped",
+      "severity": "warning",
+      "message": "dropped optional schema property `topic` (from frontmatter, at pre-validation): \"python\" is not one of \"rust\" or \"go\"",
+      "source": {
+        "file": "/work/doc.md",
+        "line": 5,
+        "column": 8,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "give `topic` a value its schema accepts, or remove it"
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 1,
+    "info": 0
+  }
+}

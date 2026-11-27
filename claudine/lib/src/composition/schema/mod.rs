@@ -248,6 +248,69 @@ pub(crate) fn prepare_values_with_schema(
     prepare_with_schema(source, options, PrepareMode::Values(mode))
 }
 
+/// A dry run's [`prepare_direct_with_schema`] (or
+/// [`prepare_inline_with_schema`] for an inline `mode`): a composition the
+/// schema refuses is classified exactly as there, so an invalid optional a
+/// real run drops is dropped and the composition retried. Returns the
+/// preparation, or its failure, beside every drop it made.
+///
+/// A failure the classifier refuses without dropping anything is returned as
+/// the composition reported it, with each problem typed and located, less
+/// the invalid optionals beside an invalid required value: the run's error
+/// lists only the required problems, and each such optional is returned as
+/// the drop the run makes once that value is fixed. One met after a drop is
+/// the retry's, as a real run meets it. The post-shell
+/// re-validation is not made: a passive composition expands no `$( … )` and
+/// leaves what reads a value it does not know as written, so its completed
+/// frontmatter holds no final values to judge again.
+pub fn prepare_passive_with_schema(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> (Result<PreparedComposition, CompositionError>, Vec<DroppedOptional>) {
+    let mode = match mode {
+        CompositionMode::InlineFrontmatterPrompt => PrepareMode::Inline(None),
+        CompositionMode::ChainedDocument => PrepareMode::Direct(PromptSource::ComposedBody, None),
+    };
+    let mut dropped = Vec::new();
+    let failure = match run_prepare(source, options.clone(), &mode) {
+        Ok(prepared) => return (Ok(prepared), dropped),
+        Err(failure) => failure,
+    };
+    let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed { problems, summary, .. }) = &failure
+    else {
+        return (Err(failure), dropped);
+    };
+    if problems.is_empty() {
+        return (Err(failure), dropped);
+    }
+    let beside = translate::refusal_beside_optionals(source, &options, &mode, problems);
+    let recovered =
+        translate::translate_schema_failure(source, options, &mode, problems.clone(), summary.clone(), None, &mut dropped);
+    match recovered {
+        Ok(mut prepared) => {
+            prepared.dropped_optionals.clone_from(&dropped);
+            (Ok(prepared), dropped)
+        }
+        Err(retried) if !dropped.is_empty() => (Err(retried), dropped),
+        // An invalid required value refuses before any optional is dropped:
+        // the run's error lists the required problems alone, each kept as
+        // the composition typed and located it, and an optional beside them
+        // is the drop it warns about once the required value is fixed.
+        Err(CompositionError::SchemaValidation { .. }) => match beside {
+            Some((required, drops)) => {
+                let mut narrowed = failure;
+                if let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed { problems, .. }) = &mut narrowed {
+                    problems.retain(|problem| required.contains(&problem.path));
+                }
+                (Err(narrowed), drops)
+            }
+            None => (Err(failure), dropped),
+        },
+        Err(_) => (Err(failure), dropped),
+    }
+}
+
 /// The preparation a schema-aware entry runs (and reruns after dropping an
 /// invalid optional), with its identity selector, if any.
 #[derive(Clone)]

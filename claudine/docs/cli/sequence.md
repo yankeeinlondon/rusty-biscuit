@@ -577,6 +577,20 @@ What the check does:
   A sequence source (`sequence: "{{ load_data(…) }}"`) reads local files
   only, under every setting, so a URL there is a finding and is never
   fetched.
+- Each file and URL is read once per dry run. The check looks at a prompt
+  several times (its inputs, its inclusions, its preview, and a second
+  preview past a missing inclusion), and a sequence may run the same prompt
+  in several tasks; all of them use the one read, so every row judges the
+  same bytes. The same holds for the files a prompt reads (a `::file` or
+  `::code` target, a `prologue`/`epilogue`, its `$schema` file) and for a
+  referenced sequence, task, group, or catalog file. For example, two tasks running `./ask.md`, whose body calls
+  `load_data('https://example.com/data.json')`, read `ask.md` once and send
+  one request, and each task still gets its own rows. A URL that one
+  setting allowed is never served to a read whose `network` setting refuses
+  it: that read gets its own refusal. A prompt's schema is likewise prepared
+  once and reused by every check and task that uses it, while each task's
+  values are still judged by that schema on their own; a schema with
+  `{{ … }}` slots is prepared again for each use.
 - A sequence document whose own values its `$schema` refuses (the root's
   `count: abc` under `count: number(required)`, or a referenced
   `sequence: ./child.md` whose frontmatter does) is the error the real run
@@ -624,6 +638,81 @@ What the check does:
   provider, in a dry run and a real run alike. A `model` decided at launch
   under a provider that is known leaves only the model requirement
   unchecked.
+- A prompt's own checks read the same launch-time values the same way. A
+  value the run writes before the task composes is not judged on what it
+  holds now: a key any lifecycle `set` in the sequence may write (an
+  earlier task's `success`, the root's `initialize`), a `with:` value
+  derived from such a key, a later step's `seq.outputs`, `seq.run_id`, and
+  a loop pass's `loop.*`. Here `writer.md` writes `topic: a` on success,
+  and `reader.md` holds `topic: missing`, wholly guarded by
+  `::block when="topic == 'a'"`:
+
+  ```text
+  task reader (sequence[1])
+    ℹ not checked: `::block` condition (reads `topic`, which the run writes
+      before this point, so it is known only at launch)
+  ```
+
+  The preview keeps the block as written, marked `[not evaluated in a dry
+  run]`, instead of calling the prompt empty, and a schema problem with
+  `topic` is `not checked: schema check` instead of an error. A `::map` or
+  `::filter` whose source, callback, `when=`, `filter=`, `while=`,
+  `until=`, or `sort=` reads such a value (or calls an effectful function
+  such as `has_alias`) is kept whole the same way, its opening line marked,
+  and reported once:
+
+  ```text
+  task reader (sequence[1])
+    ℹ not checked: `::map`/`::filter` collection (reads `seq.outputs`, which
+      the run writes before this point, so it is known only at launch)
+  ```
+
+  The same collection over values known before the run is composed, and an
+  error on them (a sort key that is a boolean) is still reported. When the
+  writer sets some other key, `topic` is known before the run and the empty
+  prompt (or the schema error) is the proven error a real run also stops
+  at. The step's position (`seq.index`, `seq.name`, `seq.previous`, …), the
+  first step's empty `seq.outputs`, and literal values stay checked, and an
+  inclusion (`::file ./{{ topic }}.md`) is still resolved with the value it
+  holds before the run, because a real run's preflight requires the file
+  before any task runs. Two more passes read the values as they are before
+  any task: shell approval discovery composes each `prompt:` task's
+  frontmatter with no `seq` bound, so `ready: "{{ length(seq.outputs) > 0 ?
+  'yes' : 'no' }}"` fails there (`length` of `null`), as does
+  `step: "{{ seq.index + 1 }}"`, since the step's position is not bound
+  there either, and the pre-run probe
+  of a root body step composes the root's body with no outputs and nothing
+  a task writes, so a body wholly guarded by `length(seq.outputs) > 0` is
+  empty there. The dry run reports each as the error the real run stops at,
+  and still leaves the later value unchecked.
+- Approval discovery also refuses a document's shape, whatever its values:
+  `::file ./{{ topic }}.md` beside its own `topic: "{{ has_alias('zz') }}"`
+  names a file the walk cannot know, so a `prompt:` task or a root body
+  step built that way is an error row (`dm.shell.failure`, "dynamic
+  command shape") in the dry run and stops the real run. The same probe in
+  the task's `with:` is data the walk reads, so that inclusion is only
+  `not checked`.
+- A schema problem is graded by the route that meets it. An optional
+  property whose value fails its schema is dropped with a warning where the
+  real command drops it (`compose`, `inline-compose`, the sequence
+  document's own values, and a root step composing its body), so the dry run
+  reports the same warning as a `composition.optional_dropped` row and
+  previews without the value. Here `topic: missing` sits beside
+  `$schema: { topic: enum(a) }`:
+
+  ```text
+  doc.md
+    ⚠ dropped optional schema property `topic` (from frontmatter, at pre-
+      validation): "missing" is not one of "a"
+        at doc.md:3:8
+        hint: give `topic` a value its schema accepts, or remove it
+  ```
+
+  A sequence `prompt:` task's document, and a body step of a nested or
+  referenced sequence, are composed by the task's pre-launch check, which
+  refuses the value, so there it is the schema's error, as the task fails in
+  a real run. A required property's invalid or missing value is an error on
+  every route.
 - The whole tree is read the way a real run's preflight reads it: every root
   task, group leg, nested or referenced sequence, `task:` file, and selected
   catalog entry. A problem is reported under the task or leg it belongs to,
@@ -759,7 +848,17 @@ What the check does:
 
   Passing `topic=docs` removes only the input's finding, and creating
   `gone.md` only the inclusion's; the inclusion a dry run cannot read is
-  left out of the preview. A task whose sequence is missing an input reads
+  left out of the preview. A file the root's `initialize` creates
+  (`ensure_file: [gen/notes.md, "…"]`, or `["{{ target }}", "…"]` with
+  `target: gen/notes.md`) is not missing: every read of it that does not
+  exist yet (an inclusion, a `prompt:`/`task:`/`group:`/`sequence:` file, a
+  `$schema`, `load_data`, `file_exists`, `find_files`) is one
+  `ℹ not checked` row, known only at launch, and what depends on it is
+  not checked either. A file it appends to (`append_line`, `append_jsonl`)
+  that exists already still exists, but what reads its content waits for
+  launch the same way. A prompt's own `initialize` and an earlier task
+  create their files too late for this; see
+  [Files the root's `initialize` creates](../topics/flow-control/sequences.md#files-the-roots-initialize-creates). A task whose sequence is missing an input reads
   the answer the real run would collect: the input is reported once, by the
   sequence, and the task's preview marks what reads it, including a
   `with:` value derived from it, while the task's other checks still run.
@@ -880,6 +979,13 @@ What the check does:
     ⚠ Transclusion error: …/child.md:6:1: I/O error: File not found: ./missing.md
   ```
 
+  The warning stays when another inclusion is broken too. If `doc.md`
+  first includes a `./first.md` that does not exist, that inclusion is an
+  error and the preview is composed again with it left out, so the child's
+  warning is still reported beside it: one error and one warning. Creating
+  `first.md` leaves the warning alone, and creating the child's file too
+  makes the check clean.
+
   An inclusion whose target reads a value the check does not have (a
   missing input, a `$( … )` value, the result of a function it does not
   call) names no file yet. It is left in the preview as written, with one
@@ -902,8 +1008,34 @@ What the check does:
 
   Passing `topic=docs` makes it an ordinary inclusion, checked like any
   other.
-- An invalid configuration file is reported as an error, and the check goes
-  on with the defaults.
+- What the whole run shares is reported once, under the root document,
+  never again under each task that depends on it:
+
+  | Shared prerequisite | Reported as |
+  |---|---|
+  | `~/.claudine/config.yaml` (or the repository's) does not load | one error at the problem; the check goes on with the defaults |
+  | `~/.darkmatter.yaml` does not load (broken YAML, a duplicate key, a second document) | one `dm.config.invalid` error at the problem; each task's inputs and preview are `not checked (the configuration does not load)` |
+  | a `permissions` setting is invalid (`network: aswk`, `network: ""`, `network: [allow]`, a bad `file-read` or `shell-commands` entry) | one error at the value, even when the prompt reads nothing remote; a remote read the setting refuses is still its own error, with the configuration problem as its related location, and no request is sent |
+  | a schema trigger in a schema root fails to load | one `dm.schema.invalid_trigger` warning naming the trigger file |
+  | `.claudine/inline-compose.md` still holds retired instructions | one warning at that file, however many inline prompts read it |
+  | the launch directory's `.git` names no repository | one error, since a real run refuses to start |
+  | the launch directory cannot be read | one `io.read_failed` error, still in the dry run's report |
+
+  An absent or `null` setting is never an error: it takes its default. A
+  `permissions` block in `~/.claudine/config.yaml` that `~/.darkmatter.yaml`
+  points to is reported once, by Claudine's own configuration check.
+
+  For example, with `network: aswk` in `~/.darkmatter.yaml`, a dry run of a
+  local prompt exits 2 with one row, although a real run of that prompt
+  succeeds (it reads nothing remote):
+
+  ```text
+  doc.md
+    ✗ ~/.darkmatter.yaml:2:12 at `/permissions/network`: "aswk" is not one
+      of "allow", "ask" or "deny"
+        hint: fix the setting; a real run refuses every read and command
+              that needs the permission
+  ```
 - No configuration, cache, or other file is created, and nothing is
   migrated.
 

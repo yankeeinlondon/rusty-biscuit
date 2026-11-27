@@ -178,6 +178,7 @@ pub struct InputDiscoveryOptions<'a> {
     invocation: Option<(&'a InvocationContext, &'a SourceContext)>,
     leave_verdicts: bool,
     recover: bool,
+    prompt_memo: Option<&'a super::PromptMemo>,
 }
 
 impl<'a> InputDiscoveryOptions<'a> {
@@ -190,7 +191,7 @@ impl<'a> InputDiscoveryOptions<'a> {
     ) -> Self {
         Self {
             file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false,
-            recover: false,
+            recover: false, prompt_memo: None,
         }
     }
 
@@ -223,6 +224,14 @@ impl<'a> InputDiscoveryOptions<'a> {
     #[must_use]
     pub fn recovering(mut self) -> Self {
         self.recover = true;
+        self
+    }
+
+    /// Read each prompt document through `memo`, which a check shares with
+    /// its other passes, so a prompt is read once per check.
+    #[must_use]
+    pub(crate) fn with_prompt_memo(mut self, memo: &'a super::PromptMemo) -> Self {
+        self.prompt_memo = Some(memo);
         self
     }
 
@@ -266,6 +275,7 @@ pub fn discover_sequence_inputs(
     if let Some(Value::Object(setters)) = options.caller_layers.and_then(|layers| layers.set_overrides.as_ref()) {
         loader.caller_setters = setters.clone();
     }
+    loader.prompt_memo = options.prompt_memo.cloned();
     let root_path = source.resolved_path.clone();
     loader.ancestry.push((loader.source_path.clone(), None));
     let mut discovery = Discovery { loader, options, inventory: SequenceInputInventory::default() };

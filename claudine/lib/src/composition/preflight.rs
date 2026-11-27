@@ -99,6 +99,28 @@ pub(crate) fn resolve_document_shell_approvals(
     resolve_approvals(Some((document, compose_request)), approval_options, None, None, prompt)
 }
 
+/// The condition-blind discovery walk of `document`'s template surface, as
+/// approval makes it: a failure is the document's own (named by its file,
+/// else `fallback_path`), published at the inline `prompt` when there is one.
+pub(crate) fn discover_document_surface(
+    document: &Markdown,
+    request: &ComposeRequest,
+    fallback_path: Option<&Path>,
+    prompt: Option<&PromptOrigin<'_>>,
+) -> Result<darkmatter::markdown::compose::ComposePreflightReport, CompositionError> {
+    document.compose_preflight(request).map_err(|error| {
+        let source_path = match document.source() {
+            Some(darkmatter::markdown::compose::ComposeSource::File(path)) => path.as_path(),
+            _ => fallback_path.unwrap_or(Path::new("")),
+        };
+        let error = discovery_failed(source_path, error);
+        match prompt {
+            Some(prompt) => prompt.composition_error(error),
+            None => error,
+        }
+    })
+}
+
 fn resolve_approvals(
     document: Option<(&Markdown, &ComposeRequest)>,
     approval_options: &ShellApprovalOptions,
@@ -114,17 +136,7 @@ fn resolve_approvals(
     // any document state (including dead branches). Claudine authorizes the
     // union of these plus lifecycle stack commands below.
     if let Some((md, opts)) = document {
-        let preflight = md.compose_preflight(opts).map_err(|error| {
-            let source_path = match md.source() {
-                Some(darkmatter::markdown::compose::ComposeSource::File(path)) => path.as_path(),
-                _ => lifecycle_source_path.unwrap_or(Path::new("")),
-            };
-            let error = discovery_failed(source_path, error);
-            match prompt {
-                Some(prompt) => prompt.composition_error(error),
-                None => error,
-            }
-        })?;
+        let preflight = discover_document_surface(md, opts, lifecycle_source_path, prompt)?;
         publish_discovered(preflight, prompt, &mut all_commands, &mut candidates);
     }
 
@@ -202,19 +214,9 @@ pub fn resolve_graph_shell_approvals(
         } else {
             super::CompositionMode::ChainedDocument
         };
-        let with = serde_json::Value::Object(reference.with.clone());
         let original_text = document.markdown.as_string();
-        let generated = super::prepare::document_for_mode(&document.markdown, &document.path, mode, Some(&with))?;
         let prompt = PromptOrigin::for_mode(mode, &document.path, &original_text);
-        let preflight = generated
-            .compose_preflight(&options)
-            .map_err(|error| {
-                let error = discovery_failed(&document.path, error);
-                match &prompt {
-                    Some(prompt) => prompt.composition_error(error),
-                    None => error,
-                }
-            })?;
+        let preflight = discover_prompt_document(&document.markdown, &document.path, mode, &reference.with, &options)?;
         publish_discovered(preflight, prompt.as_ref(), &mut all_commands, &mut candidates);
         // Resolve only frontmatter data; discovery never executes document shells.
         let roots = lifecycle_document_roots(&document.markdown, &reference.deferred_shell_roots());
@@ -249,6 +251,93 @@ pub fn resolve_graph_shell_approvals(
     let result = approve_commands(all_commands, &candidates, approval_options)?;
     graph.record_shell_authorization(result.approved_commands.clone(), approval_options.permissions.clone());
     Ok(result)
+}
+
+/// The approval discovery of one referenced prompt document, which a real
+/// sequence makes of every prompt before any task runs: the document `mode`
+/// composes, with the task's approval-time `with` as data, walked by
+/// Darkmatter's condition-blind [`Markdown::compose_preflight`] under
+/// `request`. No `seq`, `loop`, or `group` value is bound yet, so a value
+/// derived from one reads `null` here. A dry run makes the same walk, under
+/// a passive request, to report what stops the run here.
+///
+/// ## Errors
+///
+/// [`CompositionError::PreFlightDiscoveryFailed`] (or the removed-loop-read
+/// refusal) for a walk failure, published at the inline `prompt` when the
+/// failure is in its generated body.
+pub fn discover_prompt_document(
+    markdown: &Markdown,
+    path: &Path,
+    mode: super::CompositionMode,
+    with: &serde_json::Map<String, serde_json::Value>,
+    request: &ComposeRequest,
+) -> Result<darkmatter::markdown::compose::ComposePreflightReport, CompositionError> {
+    let with = serde_json::Value::Object(with.clone());
+    let original_text = markdown.as_string();
+    let generated = super::prepare::document_for_mode(markdown, path, mode, Some(&with))?;
+    let prompt = PromptOrigin::for_mode(mode, path, &original_text);
+    generated.compose_preflight(request).map_err(|error| {
+        let error = discovery_failed(path, error);
+        match &prompt {
+            Some(prompt) => prompt.composition_error(error),
+            None => error,
+        }
+    })
+}
+
+/// Whether `markdown` reads `seq`, `loop`, or `group` as a host global
+/// anywhere [`discover_prompt_document`] might evaluate it: a frontmatter
+/// value (an inline `prompt:` included), a body interpolation or directive
+/// target, or a `::map`/`::filter` source, callback, or option. The walk
+/// binds none of them, so only a document that reads one can compose there
+/// differently from its turn, when they are bound. Static and
+/// over-inclusive (every branch, code blocks, conditions, and any document
+/// that includes another): a `true` costs one more discovery, never a
+/// missed one. `fm.seq` is authored data, not the namespace.
+pub fn reads_sequence_late_root(markdown: &Markdown) -> bool {
+    use darkmatter::markdown::compose::collection_blocks::scan_collection_regions_lenient;
+    use darkmatter::markdown::compose::expression::{
+        ExpressionFinder, parse, parse_callback_spanned, static_access_reads, static_callback_reads,
+    };
+    use super::sequence::preflight::SEQUENCE_LATE_ROOTS;
+
+    let late = |root: &str| SEQUENCE_LATE_ROOTS.contains(&root);
+    let expression = |text: &str| {
+        parse(text.trim()).is_ok_and(|expr| static_access_reads(&expr).iter().any(|read| late(read.root())))
+            || parse_callback_spanned(text.trim())
+                .is_ok_and(|callback| static_callback_reads(&callback, &[]).iter().any(|read| late(read.root())))
+    };
+    let text_reads = |text: &str| {
+        ExpressionFinder::find_all_plain(text).iter().any(|span| expression(&span.expression))
+            || (text.contains("::")
+                && scan_collection_regions_lenient(text).regions.iter().any(|region| {
+                    let header = &region.header;
+                    late(header.source.value.split('.').next().unwrap_or_default())
+                        || [&header.callback, &header.when, &header.filter, &header.sort, &header.while_predicate, &header.until_predicate]
+                            .into_iter()
+                            .flatten()
+                            .any(|quoted| expression(&quoted.text))
+                }))
+    };
+    fn any_string(value: &serde_json::Value, reads: &impl Fn(&str) -> bool) -> bool {
+        match value {
+            serde_json::Value::String(text) => reads(text),
+            serde_json::Value::Array(items) => items.iter().any(|item| any_string(item, reads)),
+            serde_json::Value::Object(map) => map.values().any(|item| any_string(item, reads)),
+            _ => false,
+        }
+    }
+    // An inclusion's own document is not scanned here, so a prompt that
+    // includes anything is walked too.
+    let includes = ["prologue", "epilogue"].into_iter().any(|key| markdown.frontmatter().as_map().contains_key(key))
+        || markdown.content().lines().any(|line| {
+            let line = line.trim_start();
+            ["::file", "::code", "::template"].into_iter().any(|directive| line.starts_with(directive))
+        });
+    includes
+        || markdown.frontmatter().as_map().values().any(|value| any_string(value, &text_reads))
+        || text_reads(markdown.content())
 }
 
 /// A command to approve by its bytes, with the file and place it was

@@ -127,7 +127,9 @@ impl Check {
             let text = if is_root {
                 self.root_ref().original_text.clone()
             } else {
-                match std::fs::read_to_string(file) {
+                // The bytes the walk read, from the check's one
+                // observation of local files.
+                match composition::read_local_text(file) {
                     Ok(text) => text,
                     Err(_) => return Vec::new(),
                 }
@@ -224,6 +226,7 @@ mod key_owner_tests {
             with: Map::new(),
             with_evaluated: Map::new(),
             with_late: Vec::new(),
+            reference: None,
             provider: None,
             sequence_document: None,
             seq: None,

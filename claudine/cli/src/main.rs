@@ -322,6 +322,8 @@ fn main() -> Result<()> {
     }
     #[cfg(feature = "test-fixtures")]
     commands::wrap::exec::completion_fixture::initialize()?;
+    #[cfg(feature = "test-fixtures")]
+    claudine::composition::source_open_log::install();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -498,6 +500,17 @@ async fn async_main(
     shutdown::finish(code).await
 }
 
+/// The exit code of a dry run `cli` asks for whose request could not be
+/// captured (`error`), reported as its only finding; `None` when `cli` is
+/// not a dry run.
+fn unprepared_dry_run(cli: &Cli, error: &(dyn std::error::Error + 'static)) -> Option<i32> {
+    if cli.help {
+        return None;
+    }
+    let (mode, shared, _) = cli.command.as_ref().and_then(commands::document_check::dry_run_request)?;
+    Some(commands::document_check::run_unprepared(mode, shared, error))
+}
+
 /// Parse the CLI and run the selected command, returning its exit code.
 async fn dispatch(
     argv: Vec<OsString>,
@@ -522,8 +535,15 @@ async fn dispatch(
     } else {
         claudine::child_environment::LaunchDirectoryMode::Ordinary
     };
-    let launch_dir = claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
-    request::initialize(launch_dir)?;
+    // A dry run reports even an unreadable launch directory as its one
+    // finding, never through the standard error report.
+    let launch_dir = match claudine::child_environment::initialize_process_launch_directory(launch_mode) {
+        Ok(launch_dir) => launch_dir,
+        Err(error) => return unprepared_dry_run(&cli, &error).map_or_else(|| Err(error.into()), Ok),
+    };
+    if let Err(error) = request::initialize(launch_dir) {
+        return unprepared_dry_run(&cli, &error).map_or_else(|| Err(error.into()), Ok);
+    }
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_caller_arguments(&mut cli, caller_arguments);

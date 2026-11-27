@@ -70,6 +70,12 @@ const ALLOWLIST: &[Allowance] = &[
         "`test-fixtures` hook that records the registration module's file-system calls for CLI tests",
     ),
     ambient(
+        "composition/source_open_log.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records every shared source open and schema preparation for CLI read-once tests",
+    ),
+    ambient(
         "composition/sequence/task/group/branch.rs",
         "std::env::var",
         1,

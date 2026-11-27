@@ -496,7 +496,26 @@ then previews on stdout; exit 0 or `EXIT_USAGE` (2), never 1. Configuration
 is read with `dispatch::loader::load_claudine_config_passive` (YAML, else the
 legacy `config.json` projected by `json_conversion::project_legacy`, else
 defaults with a note; never writes, converts, or backs up); a load error is a
-root finding and the check continues on defaults. Provider findings come from
+root finding and the check continues on defaults. Invocation-wide
+prerequisites are one root row each, reported by `Check::report_configuration`
+after the root is read (so the subject names it, never "command line"): the
+Claudine load error, the Darkmatter config (`darkmatter_config_for` the
+root's context: a load error, or in `Purpose::DryRun` the captured
+`ConfigSnapshot::policy()` error, so `network: aswk` is an error for a local
+prompt), and a failed launch discovery (`lifecycle_mutation_root`). Their
+`(file, line, column)` are `config_rows`; `push_error_in` drops a later
+`dm.config.*` record at one of them (or in a file Claudine's load reported;
+a Darkmatter `ConfigProblem::reference_target` naming Claudine's file is not
+reported twice) and returns the held id, so a task's preview is
+`not checked (the configuration does not load)` (`blocked_reason`). A
+refusal whose text holds the invalid verdict's error gets `related` to it
+(`relate_to_permissions`; Darkmatter flattens the typed cause to text).
+Skipped triggers (`report_trigger_findings`, from `trigger_findings()`) and
+the retired-guardrails warning (`RETIRED_GUARDRAILS_STAGE`, `path` = the
+file) are root rows too; an unreadable launch directory or failed
+`request::initialize` is `run_unprepared`'s one `io.read_failed` row
+(`main.rs::unprepared_dry_run`). Tests:
+`cli/tests/l1/dry_run_invocation_prerequisites.rs`. Provider findings come from
 the real selectors: `wrap/sequence/providers.rs::select_traced` for sequence
 sites (`SelectionSite.consulted` lists every enclosing document, so the trace
 names one with no `agent`) and `wrap/composition/target.rs::decide_target`
@@ -516,6 +535,47 @@ baseline rehearsal and lifecycle refusals are the real ones) with
 turns that into Darkmatter's `with_passive_session` (no command, shell probe,
 packet, provider query, approval, or cache), and the inline guardrails are
 read with `guardrails::load_guardrails_passively` (never created).
+Every pass of one check shares one observation of each source: `Check::session()`
+is `Check::observations.sharing_observations()` (Darkmatter's
+`PassiveObservations`: one `load_data` memo and one remote runtime per fetch
+policy), used by the input check, `reference_rows`, both preview
+preparations, and the walk (`SequenceCheckRequest::session`); a failed
+verdict's classification session reads through it too
+(`composition::slot_session_observing`). Local files are observed once
+too: `PassiveObservations::local_reads()` (a `simplified_schema::resolve::buffers::SharedReads`)
+is put in force on the check's thread by `document_check::run` and on the
+walk's by `passive_scope::enter`, and Darkmatter reads through it in every
+passive composition; Claudine's readers call `composition::read_local_source`/
+`read_local_text` (the root and prompt loads in `resolve.rs`, the graph's
+`capture_source` and `load_prompt`, whose one read is both the captured
+bytes and the parse, `data.rs::load_document`, `NestedSources`, `keys.rs`,
+`tasks.rs::locate_in`), and `Markdown::try_from` reads through the scope in
+force. A real run holds no scope, so its reads and freshness checks
+(`sources_unchanged`, `PreparedDeclaration::current`) are unchanged. The
+walk reads each prompt once
+(`preflight::PromptMemo`, shared by both discovery passes and the walk,
+check-only) and hands it over as `SequenceCheck::prompts`, which
+`tasks.rs::load_document` consults before reading (other documents are read
+once per check, `Check::loaded`). `Work::CompositionSourceRead` counts each
+open `read_local_source` makes (a shared hit is none). Effective schemas are
+prepared once per distinct input for the whole check too: Darkmatter's
+`DarkmatterSchemas::site_schema_with_override` consults a
+`schemas/preparation_memo.rs` memo carried by the `SharedReads` in force
+(`SharedReads::memo`, only under `buffers::shared_reads_alone`), keyed by the
+`$schema` value, document path/folder, context, caller origins, baseline,
+matched registered/root triggers, and checked against the xxHash of every
+schema file the preparation read; a template preparation (slot session) is
+never kept, and verdicts stay per occurrence (`Work::EffectivePreparation`/
+`EffectivePreparationReuse`; seam `CLAUDINE_TEST_SCHEMA_PREPARATIONS`,
+`dry_run_shared_observations.rs::one_preparation_per_schema`;
+`darkmatter/lib/tests/l1/shared_schema_preparation.rs`). Tests:
+`cli/tests/l1/dry_run_shared_observations.rs` (requests per URL, repeats
+counted; `one_open_per_source` counts opens through the `test-fixtures`
+seam `CLAUDINE_TEST_SOURCE_OPENS`, `composition/source_open_log.rs`),
+`check_tree.rs::a_prompt_two_tasks_compose_is_read_once_and_handed_to_the_check`,
+`distinct_prompts_are_each_opened_once`,
+`referenced_data_documents_are_opened_once_for_each_occurrence_count`
+(`simplified_schema::work_counters::source_opens`).
 `document_check/preview.rs` turns each `session.deferrals()` entry into a
 `not checked` row and marks the construct in the human preview
 (`[not evaluated in a dry run]`); `ComposedBodyEmpty { cause }` becomes
@@ -532,7 +592,104 @@ list). Tests: `cli/tests/l1/dry_run_source_effects.rs`. A prompt task's
 the setters), recorded by `Loader::note_prepared_with` from the walk's own
 `record_prompt_reference`; `with_late` keys (including a `with:` value whose
 evaluation recorded a deferral in the walk's session) are not input-checked
-and are declared absent in the preview. A missing input never gates the rest:
+and are declared absent in the preview. The preview and input check also
+read launch-time values as launch-time: `SequenceCheck::runtime_written` is
+`Loader::runtime_written_keys` (the rule `defer_runtime_written` uses), and
+`check_sequence_tree` moves a `with:` value whose step-view closure
+(`providers::with_value_scope`, recorded per task by `note_prepared_with`)
+reaches one into `with_late`. `tasks.rs::written_before` adds
+`LAUNCH_TIME_SEQ_MEMBERS` (`seq.outputs` except for a first step outside a
+loop, `seq.run_id`); `preview.rs::preview_session` declares each with
+Darkmatter's `PassiveSession::defer_written` (`DeferralReason::WrittenAtLaunch`;
+a read of it or below it is unavailable whatever it holds, and a schema
+problem with it is a `DeferredConstruct::SchemaCheck` deferral), plus `loop`
+inside a looping container (`Check::looping`, placeholder `loop_values`) or
+a loop document. Inside a group (`CheckedTask::in_group`: the graph's
+`PromptReference::in_group`, else an enclosing `group:` frame; a nested
+sequence in a leg included) `written_before` adds the whole `group` root,
+so the input check and both previews defer it, and
+`passive_prepare_options` binds an empty placeholder `lifecycle_group` so
+the host global is in scope; outside every group a read stays
+`claudine.outside-group` (`cli/tests/l1/dry_run_group_scope.rs`).
+`reference_rows` uses `preflight_session` without them,
+and clears `sequence_binding`, `loop_values`, and `lifecycle_group`, since a real run's
+preflight resolves inclusions first, with no step position, loop pass, or
+group bound (its compose options declare no `seq` global): giving the walk the
+step's overlay made `seq.index == 2 ? 'a' : 'missing'` pass a walk the real
+run refuses. The same holds for the two passes that compose a prompt before
+any task (`PromptTask::earlier`, `preview.rs::earlier_rows`): a `prompt:`
+task's approval discovery is `composition::discover_prompt_document` (shared
+with `resolve_graph_shell_approvals`) over the CLI's
+`wrap/sequence::approval_compose_request` made passive, with the walk's
+`CheckedTask::reference`; a root body step's Phase 1c probe is the preview
+with only the root `initialize` keys and `seq.run_id` deferred. Either runs
+when the preview deferred a `WrittenAtLaunch` read; discovery also runs when
+`composition::reads_sequence_late_root` (Darkmatter's
+`static_access_reads`/`static_callback_reads` over frontmatter values, body
+spans, and `::map`/`::filter` headers) finds a `seq`/`loop`/`group` read,
+since it binds none, so a static `seq.index + 1` in frontmatter fails there
+while the preview composes it. A prompt reading no host root gets no extra
+pass (`reads_sequence_late_root` also counts any inclusion, whose reads it
+cannot see). Its refusal is the row (exit 2), while the preview's own
+deferral rows stay. `compose`/`inline-compose` (`EarlierCheck::Approval`)
+and a root body step (`Probe`) also make, unconditionally, the approval
+discovery `approve_document_shell` makes, through
+`composition::discover_document_shell` (same request and text, schema
+verdict deferred since the route drops invalid optionals first; shared
+`preflight::discover_document_surface` error mapping): it refuses a shape
+discovery cannot approve whatever the value (`collect.rs`'s
+`detect_unevaluated_dependency_shape`/`detect_dynamic_command_shape`: a
+target or `::shell` built from a shell probe, lazy `current`, pending
+`$(…)`, or a key reading one; a caller override makes it observable, so a
+`with:` value is only unknown). Its refusal suppresses the preview's
+`warning_rows` (the run never composes). Tests:
+`cli/tests/l1/dry_run_discovery_shapes.rs`. A standalone
+document's own `initialize` writes do not reach its composition, so
+compose/inline-compose declare nothing. Files are different: the root's
+`initialize` (the document's own for compose/inline-compose) runs before
+any read, so `document_check/mod.rs::declare_initialized_files` (called
+after the setters are merged) lists its `ensure_file`/`append_line`/
+`append_jsonl` writes (`darkmatter::lifecycle::created_files`, literal and
+`template: true` operands; `CreatedFile::change()` is
+`InitializerChange::CreatesIfAbsent` or `CreatesOrAppends`). A literal
+resolves with `CreatedFile::target`, a template through
+`prewarm::resolve_initializer_template` (root frontmatter under the
+setters; no call, `ctx`/`env`, `set`-written key, or `{{`/`$(` value) then
+`target_as`, all under `lifecycle_mutation_root` (a target the effect refuses
+as outside it is not declared); each is
+`PassiveSession::declare_initializer_write(path, change, reason)`. An
+unresolvable template is `declare_unresolved_write(CreatedFile::pattern(…))`:
+its literal text with wildcards, the whole mutation root when it starts
+with a span (an unresolved append then defers content of every existing
+file there). The passes that compose before any task (`earlier_rows`:
+approval discovery through Darkmatter's `compose_preflight`, the Phase 1c
+probe) read the same unknown values as deferred: `compose_preflight` sets
+aside a directive or `prologue`/`epilogue` naming one, and
+`prepare.rs::section_deferred` keeps a passive composition whose section
+was set aside from being `ComposedBodyEmpty`. Readers share one rule on the
+session: `initializer_changes(path)` (content: an absent file it may
+create, or an existing one an append targets → `ChangedAtLaunch`),
+`created_file`/`created_among` (existence: absent only; an existing file
+always exists), `changes_listing(folders, matches)` (a `find_files`
+listing). Darkmatter's transclusion engine (`::file`/`::code`,
+prologue/epilogue, on a miss via `created_before_read` and on a hit via
+`initializer_changes`), pre-flight collect
+(`transclusion::changed_before_read`), the reference graph
+(`load_inclusion`), reference validation, `load_data`, `load_markdown`
+(`frontmatter`, `try_frontmatter`, `markdown_title`, `markdown_body_empty`,
+`validate_schema`'s document), `validate_schema`'s schema files and imports
+(`observed.read`/`searched`), `file_exists`, `find_files`; Claudine's
+sequence `Loader` (`source.rs::created_reference` on a miss,
+`changed_reference` on a hit in `resolve_reference` and the root list,
+`CheckState.pending_created` → `CheckFailure.pending`, `RootList::Deferred`)
+and `inputs.rs::schema_created_later` for `$schema` (asked before the input
+check and the preview prepare). A prompt's own `initialize` and earlier
+tasks never count (they run after pre-flight). Tests:
+`cli/tests/l1/dry_run_initialized_files.rs`,
+`darkmatter/lib/tests/l1/lifecycle_created_files.rs`. Tests:
+`cli/tests/l1/dry_run_later_state.rs`,
+`preflight/tests/check_tree.rs::a_with_value_reading_a_runtime_write_*`.
+A missing input never gates the rest:
 the preview session declares each missing name with Darkmatter's
 `PassiveSession::defer_absent` (`DeferralReason::MissingInput`), so a read of
 it stays as written (marked `[missing input]`, no `not checked` row) and the
@@ -546,8 +703,13 @@ owner's missing names absent in its scope session, so an owner's derived
 value is deferred instead of computed from nothing. A preview that fails is
 retried once with `PrepareOptions::allow_missing_transclusions` (dry run
 only), so the text beside a missing inclusion is still previewed, and the
-retry's own other failure is a finding too. Tests:
-`cli/tests/l1/dry_run_missing_inputs.rs`. Inclusion references never
+retry's own other failure is a finding too. Both success branches project
+the preparation through the one `preview.rs::warning_rows` (deferrals,
+warnings, prompt), so a tolerated child's warning survives the retry; the
+retry's warning for the inclusion it left out is the walk's refusal
+(`refused_by_walk`: same code and file, line where both carry one, since an
+inline prompt's body inclusions carry none). Tests:
+`cli/tests/l1/dry_run_missing_inputs.rs`, `dry_run_recovered_warnings.rs`. Inclusion references never
 depend on the preview: `preview.rs::reference_rows` runs
 `composition::unresolved_inclusions` (the canonical request with
 `for_reference_check`, no call check, deferred schema verdict, and
@@ -558,7 +720,11 @@ it tolerates invalid references, read from Darkmatter's
 with composition's own `transclusion::ignores_invalid` on the prepared copy,
 so a child's `ignore_invalid` (own or passed down) decides for its
 inclusions; an inline prompt's generated body is given the source path)
-before preparing, and `reported_by_walk` keeps the preview's own failure on
+before preparing. `prepare.rs::document_for_mode` names the source file's
+text as the generated document's frontmatter (Darkmatter's
+`Markdown::with_frontmatter_authored_in`), so an inline `prologue:`/`epilogue:`
+failure is the section's, at its authored value, in the walk and the
+preparation alike, and and `reported_by_walk` keeps the preview's own failure on
 the same reference (code, reference, resolved target, line when both have
 one) from being a second row, as `refused_by_walk` does for a tolerated-child
 warning at a reference the walk refused. A preview error naming no file is
@@ -571,6 +737,12 @@ in the transclusion phase and the reference graph) is a
 `DeferredConstruct::Transclusion` deferral: left as written, one mark, and a
 `not checked` row even for a missing input. Tests:
 `cli/tests/l1/dry_run_independent_references.rs`.
+A `::map`/`::filter` whose gate, source, callback, or option meets an
+unavailable value is one `DeferredConstruct::Collection` deferral (`authored`
+is the whole region): `check_name` gives "`::map`/`::filter` collection",
+`marked` marks its opening line, and a missing-input reason only marks it,
+as for a `::block` condition. Tests: `cli/tests/l1/dry_run_collection_deferrals.rs`
+(every option site, direct/inline/sequence-inline effectful callbacks).
 The walk is the real preflight `Loader` with `check: Some(CheckState)`:
 `check_task` records a task before its children and turns its failure into a
 record instead of an early return; lists normalize through
@@ -654,7 +826,24 @@ variant has its own arm in `render/sequence.rs`, and its passive-check row
 carries the same hint. Wording changes keep the old facets
 (`cli/tests/l1/sequence_error_blocks.rs`). The dry-run preview reports the
 preparation's `warnings` (a tolerated transclusion failure) as warning rows
-(`document_check/preview.rs`).
+(`document_check/preview.rs`). A schema problem takes its route's severity
+from the real classifier, never a second one: where the real route drops an
+invalid optional (`compose`, `inline-compose`, a root step composing the root,
+`PromptTask::drops_invalid_optionals`), the preview runs
+`composition::drop_invalid_optionals` then `prepare_passive_with_schema` (the
+composition-stage `translate_schema_failure`, no post-shell pass; a refusal
+keeps the composition's located error, narrowed by
+`translate::refusal_beside_optionals` to the invalid required problems when
+an invalid optional sits beside them, which becomes the drop the run makes
+once the required value is fixed), and `check_sequence` runs the root's
+`drop_invalid_optionals` as `commands/sequence.rs` does; each drop is one
+`composition.optional_dropped` warning per `(document, property)`
+(`DroppedOptional::message`, the run's own warning; dry run only, never in a
+preflight failure report). A `prompt:` task, or a nested or referenced body
+step, stays strict, since the real run's barrier
+(`task_run.rs::validate` → `validate_document_shell_late_values`) refuses before
+its JIT pre-validation could drop. Tests:
+`cli/tests/l1/dry_run_dropped_optionals.rs`.
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,
@@ -734,7 +923,17 @@ CLI's terminal approval handler, `wrap::launch_slot_session`), and hands that
 session to the first run's preparation through `PrepareOptions::slot_session`
 (compose, inline-compose, and a sequence step's JIT compose; a later loop pass
 resolves afresh). A slot refusal is `composition.schema_slot_failed` with the
-slot's code in `detail.slot_code`. Tests: `cli/tests/l1/launch_network_slots.rs`.
+slot's code in `detail.slot_code`; its `slots` field keeps Darkmatter's typed,
+located record of each failed slot, which the dry run's `push_error_in`
+reports in its place. Tests: `cli/tests/l1/launch_network_slots.rs`.
+**One row per cause.** The dry run's passes (walk, input check, preview and
+retry, owner verdict) each can meet one cause; ownership is fixed: a schema
+validation verdict is the preview's (located problems), a `$schema` that
+cannot be prepared (`SchemaLoad`/`SchemaParse`/`SchemaSlotFailed`) the input
+check's (`Check::schema_reported`; `error_source` locates it at `$schema`),
+an inclusion the walk's, and a sequence document's own failed verdict its
+owner row: a body step composing that document (`check_prompt_task`) is
+`not checked: preview`. Tests: `cli/tests/l1/dry_run_one_row_per_cause.rs`.
 
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not

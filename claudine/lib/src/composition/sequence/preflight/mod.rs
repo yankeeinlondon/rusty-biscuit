@@ -65,7 +65,7 @@ pub use inputs::{
     SequenceInputInventory, discover_sequence_inputs,
 };
 pub use check::{
-    CheckFailure, CheckedTask, LoadedDocument, OwnerFailure, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
+    CheckFailure, CheckedTask, LAUNCH_TIME_SEQ_MEMBERS, LoadedDocument, OwnerFailure, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use reapproval::PreflightApproval;
 pub use shape::{
@@ -398,8 +398,11 @@ fn site_source_context(site: &PreparedShellSite) -> biscuit_terminal::errors::So
 }
 
 impl PreflightGraph {
+    /// Captures `path`'s bytes as the walk reads them: in a check, from the
+    /// observation of local files every reader of the check shares.
     fn capture_source(&mut self, path: &Path) {
-        self.authored_sources.entry(path.to_path_buf()).or_insert_with(|| std::fs::read(path).ok());
+        self.authored_sources.entry(path.to_path_buf())
+            .or_insert_with(|| crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec()));
     }
 
     /// Whether every file in `paths` still holds the bytes this graph's walk
@@ -477,7 +480,7 @@ impl PreflightGraph {
     pub fn prepare_whole_document(
         &self, path: &Path, options: crate::composition::PrepareOptions, invocation: Option<&InvocationContext>,
     ) -> Result<super::document::SequenceDocumentPreparation, CompositionError> {
-        let read = std::fs::read(path).ok();
+        let read = crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec());
         let document = self.nested_sources.document(path, read.as_deref())?;
         let root = expect_object(&document.value, "sequence document", path)?;
         let source = source_resolution::whole_document_source(path, root, &document.orders)?;
@@ -497,7 +500,7 @@ impl PreflightGraph {
     /// The document's load error, and [`CompositionError::SequenceInvalid`]
     /// when its root is not a mapping.
     pub fn authored_document(&self, path: &Path) -> Result<Map<String, Value>, CompositionError> {
-        let read = std::fs::read(path).ok();
+        let read = crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec());
         let document = self.nested_sources.document(path, read.as_deref())?;
         Ok(expect_object(&document.value, "sequence document", path)?.clone())
     }
@@ -813,7 +816,7 @@ impl std::fmt::Debug for NestedSources {
 
 impl NestedSources {
     fn load(&self, path: &Path) -> Result<Arc<NestedSource>, CompositionError> {
-        let text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
+        let text = crate::composition::read_local_text(path).map_err(|source| CompositionError::MarkdownLoad {
             path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
         })?;
         let key = canonical(path);
@@ -847,7 +850,9 @@ impl NestedSources {
             return Ok(cached.schema.clone());
         }
         let schema = PreparedSequenceSchema::prepare(declaration, source_path, property, resolution)?;
-        let dependencies = schema.dependencies().iter().map(|path| (path.clone(), std::fs::read(path).ok())).collect();
+        let dependencies = schema.dependencies().iter()
+            .map(|path| (path.clone(), crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec())))
+            .collect();
         if let Ok(mut entries) = self.schemas.lock() {
             entries.insert(key, Arc::new(PreparedDeclaration {
                 declaration: declaration.clone(), schema: schema.clone(), dependencies,
@@ -1211,7 +1216,14 @@ struct Loader<'a> {
     /// recorded at it and the walk continues with its siblings. `None` for
     /// every real run, whose first failure ends the walk.
     check: Option<Box<check::CheckState>>,
+    /// A check's prompt documents, shared by its discovery passes and its
+    /// walk, so each prompt file is read once per check. `None` for every
+    /// real run.
+    prompt_memo: Option<PromptMemo>,
 }
+
+/// The prompt documents one check has read, by canonical path.
+pub(crate) type PromptMemo = Arc<std::sync::Mutex<HashMap<PathBuf, PromptDocument>>>;
 
 /// Where in the sequence a task being loaded sits.
 #[derive(Clone, Copy)]
@@ -1256,6 +1268,7 @@ impl<'a> Loader<'a> {
             refresh: false,
             owner_values: HashMap::new(),
             check: None,
+            prompt_memo: None,
         }
     }
 
@@ -1305,6 +1318,7 @@ impl<'a> Loader<'a> {
             refresh: false,
             owner_values: HashMap::new(),
             check: None,
+            prompt_memo: None,
         }
     }
 
@@ -2337,17 +2351,35 @@ impl<'a> Loader<'a> {
     /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
         let path = self.resolve_reference(reference, origin, ExecutableField::Prompt)?;
-        self.capture_source(&path);
-        if let Some(existing) = self.graph.prompt_document(&path) {
-            let _ = existing;
+        if self.graph.prompt_document(&path).is_none()
+            && let Some(document) = self.memoized_prompt(&path)
+        {
+            // Another pass of this check read it: its bytes are the
+            // captured source, and its parse the graph's document.
+            if let Some(text) = document.markdown.loaded_text() {
+                self.graph.authored_sources.entry(path.clone()).or_insert_with(|| Some(text.as_bytes().to_vec()));
+            }
+            self.graph.push_prompt_document(document);
+        }
+        if self.graph.prompt_document(&path).is_some() {
+            self.capture_source(&path);
             return Ok(path);
         }
+        // One read is both the captured source and the parsed document, so
+        // the graph never pairs one revision's bytes with another's parse.
+        let read = crate::composition::read_local_source(&path).ok();
+        self.graph.authored_sources.entry(path.clone()).or_insert_with(|| read.as_ref().map(|read| read.bytes.to_vec()));
+        self.capture_log.push(path.clone());
         self.check_cycle(&path)?;
 
         // The referenced document is loaded through the ordinary Markdown load
         // error so a malformed prompt reports the same typed parse failure it
         // would when composed directly, rather than a preflight-shaped string.
-        let markdown = Markdown::try_from(path.as_path()).map_err(|e| {
+        let loaded = match &read {
+            Some(read) => Markdown::from_read_source(&path, read),
+            None => Markdown::try_from(path.as_path()),
+        };
+        let markdown = loaded.map_err(|e| {
             CompositionError::MarkdownLoad {
                 path: path.clone(),
                 source: super::super::error::MarkdownLoadCause::Parse(Box::new(e)),
@@ -2365,13 +2397,18 @@ impl<'a> Loader<'a> {
         let inline_compose = matches!(frontmatter.as_map().get("prompt"), Some(Value::String(_)));
         let has_schema = frontmatter.as_map().contains_key("$schema");
 
-        self.graph.push_prompt_document(PromptDocument {
-            path: path.clone(),
-            markdown,
-            inline_compose,
-            has_schema,
-        });
+        let document = PromptDocument { path: path.clone(), markdown, inline_compose, has_schema };
+        if let Some(memo) = &self.prompt_memo {
+            memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path.clone(), document.clone());
+        }
+        self.graph.push_prompt_document(document);
         Ok(path)
+    }
+
+    /// The prompt document at `path` another pass of this check read.
+    fn memoized_prompt(&self, path: &Path) -> Option<PromptDocument> {
+        let memo = self.prompt_memo.as_ref()?;
+        memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(path).cloned()
     }
 
     /// Prepare a task's `shell:` value: one site per command, with the bytes
@@ -3077,6 +3114,7 @@ impl<'a> Loader<'a> {
             with_origin: origin.to_path_buf(),
             deferred_with: deferred.clone(),
         };
+        self.note_prepared_with(with, &reference, &deferred);
         let bucket = self.prompt_reference_index
             .entry((reference.path.clone(), reference.position, reference.in_group))
             .or_default();
@@ -3085,7 +3123,6 @@ impl<'a> Loader<'a> {
             bucket.push(self.graph.prompt_references.len());
             self.graph.prompt_references.push(reference);
         }
-        self.note_prepared_with(&evaluated, &deferred);
         PreparedWith { evaluated, deferred, failed }
     }
 
@@ -3231,6 +3268,15 @@ impl<'a> Loader<'a> {
             .map(|p| canonical(&p));
         if resolved.is_err() && self.checking() {
             self.note_unresolved_reference(reference, origin, field);
+        }
+        // A file the run's initializer appends to holds other text by the
+        // time the run reads it: the task is not checked.
+        if let Ok(path) = &resolved
+            && self.checking()
+            && let Some(reason) = source_resolution::changed_reference(path)
+        {
+            self.note_changed_reference(reason);
+            return Err(source_resolution::changed_reference_failure(path));
         }
         resolved
     }

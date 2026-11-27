@@ -17,6 +17,11 @@ use tracing::warn;
 /// Relative path (from repo root) to the user-customizable guardrails file.
 const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/inline-compose.md";
 
+/// The `stage` of the warning an inline preparation adds when the
+/// repository's guardrails file still holds retired instructions; its `path`
+/// names that file, which every inline prompt in the repository reads.
+pub const RETIRED_GUARDRAILS_STAGE: &str = "inline_guardrails";
+
 /// Token a guardrail template may use for the active document's native
 /// absolute path; [`render_guardrails`] replaces it with a code span.
 pub const DOCUMENT_PATH_PLACEHOLDER: &str = "{document_path}";

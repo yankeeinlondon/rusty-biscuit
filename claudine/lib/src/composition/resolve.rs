@@ -210,18 +210,24 @@ pub fn resolve_composition_source_in_context(
         ));
     }
 
-    let original_text = fs::read_to_string(&resolved_path).map_err(|e| {
-        CompositionError::MarkdownLoad {
-            path: resolved_path.clone(),
-            source: MarkdownLoadCause::Read(e),
-        }
+    // One read gives the original text and the parse, so the two never
+    // describe different revisions.
+    let read = super::read_local_source(&resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+        path: resolved_path.clone(),
+        source: MarkdownLoadCause::Read(e),
     })?;
+    let original_text = std::str::from_utf8(&read.bytes)
+        .map_err(|_| CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8")),
+        })?
+        .to_string();
 
     // Parse fallibly so malformed frontmatter surfaces as a real error. The
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
     // empty-frontmatter document, which downstream looks like a *missing*
     // `prompt` property — hiding the actual YAML syntax error from the user.
-    let markdown = Markdown::try_from(resolved_path.as_path())
+    let markdown = Markdown::from_read_source(&resolved_path, &read)
         .map_err(|e| map_load_error(&resolved_path, e))?
         .with_source(ComposeSource::File(resolved_path.clone()));
 
@@ -438,7 +444,7 @@ pub fn reload_authored_source(
     source: &ResolvedCompositionSource,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
     let original_text =
-        fs::read_to_string(&source.resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+        super::read_local_text(&source.resolved_path).map_err(|e| CompositionError::MarkdownLoad {
             path: source.resolved_path.clone(),
             source: MarkdownLoadCause::Read(e),
         })?;
@@ -659,7 +665,7 @@ fn read_source_text_for_enrichment_in_context(
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return None;
     }
-    fs::read_to_string(resolved_path).ok()
+    super::read_local_text(&resolved_path).ok()
 }
 
 /// Validate that the resolved file is readable and writable.

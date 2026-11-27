@@ -135,7 +135,24 @@ sequence:
   `shell: "echo {{{ who }}}"` under `who: string(default(ada))` as `echo ada`.
 - An empty `sequence: []` still validates its `$schema` and `$state`.
 - A dry run judges inputs, `$schema`, and `$state`; an inline container's
-  `$schema` is judged only at its turn in a real run.
+  `$schema` is judged only at its turn in a real run. A value the run
+  writes before a task composes (a key any lifecycle `set` may write, a
+  `with:` value derived from one, a later step's `seq.outputs`,
+  `seq.run_id`, `loop.*`, `group.*` inside a group) is reported `not checked` wherever a prompt reads
+  it: a `::block` on it previews as conditional, and its schema check is not
+  run. `seq.index` and the other position fields stay checked, and so do
+  `::file` targets, which must exist before the sequence starts.
+- The one exception is a file the root's `initialize` writes with
+  `ensure_file`, `append_line`, or `append_jsonl` (a literal target, or a
+  `{{{ … }}}` one resolved from the root's values): it exists before anything
+  reads it, so a dry run reports each read of it that does not exist yet
+  (`::file`/`::code`, `prologue`/`epilogue`, a `prompt:`, `task:`,
+  `group:`, catalog, or `sequence:` file, `$schema`, `load_data`,
+  `file_exists`, `find_files`) `not checked`, known only at launch, and
+  what depends on it too. An append to a file that exists leaves what
+  reads its content unchecked the same way; its existence stays proven. A
+  prompt's own `initialize` or an earlier task creates its file too late:
+  both runs refuse the missing file.
 
 ## Results
 
@@ -205,6 +222,10 @@ file with no `sequence` key (`composition.sequence_undefined`, which a real run
 refuses too), …),
 then exits `2` if any is an error or warning, else `0`. On a terminal a
 choice the run would ask about is a warning; without one it is an error.
+An optional `$schema` value that fails its schema is graded as the run
+treats it: the sequence's own values and a root body step drop it with a
+warning (`composition.optional_dropped`), while a `prompt:` task's document
+refuses it (the schema's error).
 A dry run never exits `1`; a refused command line (`--json` without
 `--dry-run`, `--dry-run-shell`) exits `2` with a usage message and no
 report. In `--json`, match findings by `code`, never by message text.

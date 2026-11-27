@@ -97,7 +97,7 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
     if is_markdown(path) {
         return load_markdown_document(path).map(|(document, _)| document);
     }
-    let text = std::fs::read_to_string(path).map_err(|source| CompositionError::SequenceSourceRead {
+    let text = crate::composition::read_local_text(path).map_err(|source| CompositionError::SequenceSourceRead {
         field: None,
         path: path.to_path_buf(),
         site: Box::new(SequenceSite::file(path)),

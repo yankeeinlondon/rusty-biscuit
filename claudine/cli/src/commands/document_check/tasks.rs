@@ -180,6 +180,23 @@ impl Check {
                 return;
             }
         };
+        // The real run drops the root's invalid optional values, with a
+        // warning, before it reads any task (`commands/sequence.rs`).
+        if self.purpose == Purpose::DryRun {
+            let (_, _, dropped) = composition::drop_invalid_optionals(
+                root.clone(),
+                (!self.setters.is_empty()).then(|| Value::Object(self.setters.clone())),
+                Some(invocation.launch_cwd()),
+                source_context.file_resolution_context(),
+                invocation.trigger_findings(),
+            );
+            for drop in &dropped {
+                if self.dropped_reported.insert((root.resolved_path.clone(), drop.property.clone())) {
+                    let row = super::preview::dropped_row(self, &root.resolved_path, drop);
+                    self.sink.push(root_subject, row);
+                }
+            }
+        }
         let compose_context = invocation.capture_launch_context(&ContextRequirements::for_document(&root.markdown));
         let layers = (!self.setters.is_empty()).then(|| {
             CallerInputLayers::from_caller_overrides(
@@ -187,14 +204,17 @@ impl Check {
                 invocation.launch_file_resolution_context().clone(),
             )
         });
-        let check = check_sequence_tree(SequenceCheckRequest {
+        let mut check = check_sequence_tree(SequenceCheckRequest {
             source: &root,
             compose_context,
             invocation: &invocation,
             source_context: &source_context,
             caller_layers: layers.as_ref(),
             launch_dir: self.launch_dir.as_deref(),
+            session: Some(&self.observations),
         });
+        // Every task composing a prompt is checked against the walk's read.
+        self.loaded.extend(std::mem::take(&mut check.prompts));
         // Each loaded document is judged once, however many tasks use it,
         // and each verdict goes to every occurrence it belongs to.
         for file in &check.files {
@@ -297,6 +317,11 @@ impl Check {
             }
             Err(_) => Vec::new(),
         };
+        self.runtime_written = check.runtime_written.clone();
+        self.looping = check.tasks.iter()
+            .filter(|task| self.in_loop(task, &check.tasks))
+            .map(|task| task.site.identity.as_str().to_string())
+            .collect();
         self.sequence_documents = check.tasks.iter()
             .filter_map(|task| Some((task.site.identity.as_str().to_string(), task.sequence_document.clone()?)))
             .collect();
@@ -371,7 +396,9 @@ impl Check {
         }
         // An expression a dry run could not evaluate without an effect is
         // not a defect: what depends on it is not checked.
-        if let Some(reason) = failure.error.deferral_reason() {
+        // A reference to a file the run creates before this point (a root
+        // `initialize` `ensure_file`) is not missing either.
+        if let Some(reason) = failure.error.deferral_reason().or(failure.pending.as_ref()) {
             let check = if subject == self.root_subject() { "tasks" } else { "task" };
             self.not_checked(subject, check, &reason.describe(), None);
             return None;
@@ -400,7 +427,7 @@ impl Check {
         if is_root {
             return self.locate(&path, value);
         }
-        let located = std::fs::read_to_string(file).ok().and_then(|text| locate_authored(file, &text, &path, value));
+        let located = composition::read_local_text(file).ok().and_then(|text| locate_authored(file, &text, &path, value));
         match located {
             Some((line, column)) => DiagnosticSource::at(Some(file.to_path_buf()), line, column),
             None => DiagnosticSource::file_only(Some(file.to_path_buf())),
@@ -438,7 +465,7 @@ impl Check {
             return self.push_failure(subject, &owner.failure, trail, None);
         };
         let path: Vec<YamlPathSegment> = pointer_segments(first).into_iter().map(YamlPathSegment::Key).collect();
-        let source = match std::fs::read_to_string(source_path).ok().and_then(|text| locate_authored(source_path, &text, &path, true)) {
+        let source = match composition::read_local_text(source_path).ok().and_then(|text| locate_authored(source_path, &text, &path, true)) {
             Some((line, column)) => DiagnosticSource::at(Some(source_path.clone()), line, column),
             None => DiagnosticSource::file_only(Some(source_path.clone())),
         };
@@ -586,8 +613,15 @@ impl Check {
                     selection: self.task_hints(task),
                     label: site.name.clone(),
                     task_path: site.file.clone(),
+                    written: self.written_before(task),
+                    in_loop: self.looping.contains(task.site.identity.as_str()),
+                    in_group: task.in_group(),
                     seq: task.seq.clone(),
                     absent,
+                    // A prompt task's barrier composes its document before
+                    // the run drops anything, and refuses an invalid value.
+                    drops_invalid_optionals: false,
+                    earlier: task.reference.clone().map_or(EarlierCheck::None, EarlierCheck::Discovery),
                 };
                 self.check_task_prompt(&prompt_task, rows);
             }
@@ -702,7 +736,18 @@ impl Check {
             selection: selection::TaskHints::Body { document: own },
             label: site.name.clone(),
             task_path: site.file.clone(),
+            written: self.written_before(task),
+            in_loop: self.looping.contains(task.site.identity.as_str()),
+            in_group: task.in_group(),
             seq: task.seq.clone(),
+            // A root step composes the root as a direct composition does; a
+            // nested body step runs through a prompt task's barrier.
+            drops_invalid_optionals: is_root && task.site.frames.is_empty(),
+            earlier: if is_root && task.site.frames.is_empty() {
+                EarlierCheck::Probe { written: self.probe_written(&document) }
+            } else {
+                EarlierCheck::None
+            },
             // The document's own inputs are its owner's, reported once.
             absent: if is_root {
                 self.root_absent.clone()
@@ -722,13 +767,71 @@ impl Check {
         }
     }
 
+    /// What `task`'s prompt reads that the run writes before the task
+    /// composes: every key the graph's lifecycle may write (the graph's one
+    /// rule, which also moves provider prediction to launch), the whole
+    /// `group` root inside a group (bound at the group's start, from the
+    /// `variables` it rereads then), and, for a sequence step, the
+    /// `seq` members only its turn knows. The step's position, name, and
+    /// neighbors stay known, and so do the outputs of a first step outside
+    /// any loop: none yet.
+    fn written_before(&self, task: &CheckedTask) -> Vec<String> {
+        let mut written = self.runtime_written.clone();
+        if task.in_group() {
+            written.push("group".to_string());
+        }
+        if let Some(seq) = &task.seq {
+            let first = seq.get("index").and_then(Value::as_u64) == Some(1)
+                && !self.looping.contains(task.site.identity.as_str());
+            written.extend(
+                claudine::composition::LAUNCH_TIME_SEQ_MEMBERS
+                    .iter()
+                    .filter(|member| !(first && **member == "seq.outputs"))
+                    .map(|member| (*member).to_string()),
+            );
+        }
+        written
+    }
+
+    /// What Phase 1c's probe of a root step reads as known only at launch:
+    /// the keys the root's `initialize` writes, which a dry run does not
+    /// make, and the run token. The step's position and its empty outputs
+    /// are the probe's own.
+    fn probe_written(&self, root: &ResolvedCompositionSource) -> Vec<String> {
+        let mut written = std::collections::HashSet::new();
+        if let Some(initialize) = root.markdown.frontmatter().as_map().get("initialize") {
+            claudine::composition::sequence::preflight::providers::collect_written_keys(initialize, &mut written);
+        }
+        written.insert("seq.run_id".to_string());
+        let mut written: Vec<String> = written.into_iter().collect();
+        written.sort();
+        written
+    }
+
+    /// Whether `task` runs inside a looping container: the root, an inline
+    /// container or group object, or a referenced sequence document that
+    /// declares `loop:`. Its `loop.*` values are its pass's.
+    fn in_loop(&self, task: &CheckedTask, tasks: &[CheckedTask]) -> bool {
+        let loops = |value: &Value| value.get("loop").is_some_and(|value| !value.is_null());
+        self.root.as_ref().is_some_and(|root| root.markdown.frontmatter().as_map().get("loop").is_some_and(|value| !value.is_null()))
+            || task.site.frames.iter().any(|frame| {
+                tasks.iter().find(|enclosing| enclosing.site.identity == frame.identity).is_some_and(|enclosing| {
+                    loops(&enclosing.item)
+                        || enclosing.item.get("group").is_some_and(loops)
+                        || enclosing.sequence_document.as_ref().is_some_and(|(_, frontmatter)| {
+                            frontmatter.get("loop").is_some_and(|value| !value.is_null())
+                        })
+                })
+            })
+    }
+
     /// The provider, model, inputs, and preview checks of a task's prompt.
     /// A missing input is its own finding; the preview keeps what reads it
     /// as written and composes the rest.
     pub(super) fn check_task_prompt(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
         self.check_selection(task);
         if let Some((blocker, document)) = self.owner_blocked.clone() {
-            let reason = format!("{} failed its own checks", shown(&document, self.launch_dir.as_deref()));
+            let reason = self.blocked_reason(blocker, &document);
             self.not_checked(task.subject, "inputs and preview", &reason, Some(blocker));
             return;
         }
@@ -741,12 +844,20 @@ impl Check {
         self.preview(task, &missing);
     }
 
-    /// Reads the document at `path`, recording why it could not be read.
+    /// The document at `path`: the walk's read of a prompt, else this
+    /// check's one read of the file, recording why it could not be read at
+    /// each occurrence that needs it.
     fn load_document(&mut self, subject: SubjectId, path: &Path, trail: &Trail) -> Option<ResolvedCompositionSource> {
+        if let Some(document) = self.loaded.get(path) {
+            return Some(document.clone());
+        }
         let invocation = self.invocation.clone()?;
         let raw = path.to_string_lossy().into_owned();
         match composition::resolve_composition_source_in_context(&raw, invocation.launch_file_resolution_context()) {
-            Ok(document) => Some(document),
+            Ok(document) => {
+                self.loaded.insert(path.to_path_buf(), document.clone());
+                Some(document)
+            }
             Err(error) => {
                 self.push_error(subject, &error, trail.clone());
                 None

@@ -252,6 +252,12 @@ and the composition reuses that result:
 | `ask` | asks on a terminal; with none, fails with `dm.schema.slot_approval_required` | sends nothing; a `not checked` row |
 | `deny` | fails with `dm.schema.slot_network_denied`, sending nothing | the same refusal as an error row |
 
+An invalid `network` value (`aswk`, `""`, a list) is not one of these three:
+a real run still runs a prompt that reads nothing remote, refuses every remote
+read with the configuration error, and sends nothing; a dry run reports the
+setting once as an error at its value, whatever the prompt reads. An absent or
+`null` value is `deny`.
+
 ```yaml
 # schema.yaml, referenced as `$schema: ./schema.yaml`
 kind: schema
@@ -264,6 +270,11 @@ A refused slot stops the run with `composition.schema_slot_failed`, whose
 the cases apart (`when: "err.detail.slot_code == 'dm.schema.slot_network_denied'"`).
 Claudine has no per-run host allowance, so its refusals name the
 `permissions.network` setting as the remedy.
+
+A `--dry-run` reports a refused slot by the slot's own code, at the slot in
+the schema file, once for each task that reads the schema (for example
+`dm.schema.slot_forbidden_binding at schema.yaml:3:20` for a slot that reads a
+bare document key), never also as `composition.schema_slot_failed`.
 
 It does not limit the agent's own network access once it runs.
 

@@ -50,6 +50,10 @@ pub struct SequenceCheckRequest<'a> {
     /// Where the command was run: a reference finding's hint names paths
     /// relative to it.
     pub launch_dir: Option<&'a Path>,
+    /// The dry run's session, whose observations of external sources the
+    /// walk reads through so the host's later passes reuse them; `None`
+    /// gives the walk observations of its own.
+    pub session: Option<&'a darkmatter::markdown::compose::passive::PassiveSession>,
 }
 
 /// How the root's `sequence` reads.
@@ -67,6 +71,13 @@ pub enum RootList {
     Unread,
 }
 
+/// The members of a sequence step's `seq` binding a check cannot know
+/// before the run: the outputs earlier tasks produce (none before a first
+/// step outside any loop) and the run's token. The rest (`index`, `name`,
+/// `count`, `previous`, `next`, authored step fields) is fixed by the plan
+/// and reads as it will at the step's turn.
+pub const LAUNCH_TIME_SEQ_MEMBERS: &[&str] = &["seq.outputs", "seq.run_id"];
+
 /// A failure, with the finding a check reports in place of the typed error
 /// when one describes it better (a reference with no match).
 #[derive(Debug)]
@@ -76,6 +87,10 @@ pub struct CheckFailure {
     /// The reference finding for it, when the failure is a reference with
     /// no match.
     pub finding: Option<Diagnostic>,
+    /// Why the failure is not a defect but not checked, when the reference
+    /// names a file the run creates before this point (a root `initialize`
+    /// `ensure_file`): the task and what depends on it are not checked.
+    pub pending: Option<darkmatter::markdown::compose::passive::DeferralReason>,
 }
 
 /// An enclosing task of a [`TaskSite`]: the group or sequence a task sits in.
@@ -160,8 +175,13 @@ pub struct CheckedTask {
     /// [`Self::with_late`] or failed to evaluate.
     pub with_evaluated: Map<String, Value>,
     /// The `with:` keys whose values read a value known only at the task's
-    /// turn (a prior task's output, `seq.*`, …), sorted.
+    /// turn (a prior task's output, `seq.*`, a key some lifecycle `set` in
+    /// the graph may write, …), sorted.
     pub with_late: Vec<String>,
+    /// A `prompt:` task's reference as the real run's approval discovery
+    /// walks its document ([`super::PromptReference`]); `None` for any other
+    /// task.
+    pub reference: Option<super::PromptReference>,
     /// A `prompt:` task's provider prediction, as the real run's selector
     /// reads it.
     pub provider: Option<super::providers::ProviderPrediction>,
@@ -177,6 +197,20 @@ pub struct CheckedTask {
     /// reference read, in read order: what a verdict on such a file that no
     /// task inside it owns belongs to.
     pub loaded: Vec<LoadedDocument>,
+}
+
+impl CheckedTask {
+    /// Whether the task runs inside a lexically established group (a leg,
+    /// at any depth below one, whatever file declared the group), so its
+    /// document reads `group` at its turn: the graph's own placement for a
+    /// `prompt:` task ([`super::PromptReference::in_group`]), else an
+    /// enclosing `group:` task.
+    pub fn in_group(&self) -> bool {
+        self.reference.as_ref().map_or_else(
+            || self.site.frames.iter().any(|frame| frame.executable == Some(ExecutableField::Group)),
+            |reference| reference.in_group,
+        )
+    }
 }
 
 /// A data file a task's reference read, and the part of it the task uses.
@@ -207,6 +241,17 @@ pub struct SequenceCheck {
     /// other than a missing input (a value its `$schema` refuses): a real run
     /// stops there, after the graph and provider checks and before any task.
     pub owner_failures: Vec<OwnerFailure>,
+    /// Every key the walked graph's lifecycle may write before a task
+    /// launches, sorted: the graph's own rule
+    /// (`Loader::runtime_written_keys`), which also moves a provider
+    /// prediction and a `with:` value reading one to launch. A prompt's
+    /// preview reads each as known only at launch. Empty when no task list
+    /// was walked.
+    pub runtime_written: Vec<String>,
+    /// Each prompt document the walk loaded, by its resolved path, as it
+    /// read it: every task composing that prompt is checked against this
+    /// one read, never a reread of the file.
+    pub prompts: std::collections::HashMap<PathBuf, ResolvedCompositionSource>,
 }
 
 /// The walk's record while a [`Loader`] reads in check mode.
@@ -219,12 +264,18 @@ pub(super) struct CheckState {
     files: Vec<PathBuf>,
     memo: ListingMemo,
     pending_finding: Option<Diagnostic>,
+    /// Why the reference that failed last names a file the run creates
+    /// first ([`CheckFailure::pending`]).
+    pending_created: Option<darkmatter::markdown::compose::passive::DeferralReason>,
     launch_dir: Option<PathBuf>,
     /// `root_ordinals[i]` is the authored position of the root plan's step
     /// `i`.
     pub(super) root_ordinals: Vec<usize>,
     /// The root items the plan set aside: position, item, and failure.
     pub(super) root_item_failures: Vec<(usize, Value, CompositionError)>,
+    /// For the task at each index of [`Self::tasks`], the read closure of
+    /// each evaluated `with:` value that reads the step's state.
+    with_scopes: std::collections::HashMap<usize, Vec<(String, super::providers::DependencyScope)>>,
 }
 
 /// Where a task sits relative to the walk's innermost frame.
@@ -261,9 +312,11 @@ impl CheckState {
             files: Vec::new(),
             memo: ListingMemo::new(),
             pending_finding: None,
+            pending_created: None,
             launch_dir: launch_dir.map(Path::to_path_buf),
             root_ordinals: Vec::new(),
             root_item_failures: Vec::new(),
+            with_scopes: std::collections::HashMap::new(),
         }
     }
 
@@ -276,7 +329,7 @@ impl CheckState {
     }
 
     fn failure(&mut self, error: CompositionError) -> CheckFailure {
-        CheckFailure { error, finding: self.pending_finding.take() }
+        CheckFailure { error, finding: self.pending_finding.take(), pending: self.pending_created.take() }
     }
 
     fn push(&mut self, seed: SiteSeed<'_>) -> usize {
@@ -296,6 +349,7 @@ impl CheckState {
             with: Map::new(),
             with_evaluated: Map::new(),
             with_late: Vec::new(),
+            reference: None,
             provider: None,
             sequence_document: None,
             seq: seed.seq,
@@ -325,11 +379,32 @@ impl Loader<'_> {
 
     /// In check mode, records the open task's evaluated and late `with:`
     /// values.
-    pub(super) fn note_prepared_with(&mut self, evaluated: &Map<String, Value>, late: &[String]) {
-        let Some(check) = self.check.as_mut() else { return };
+    ///
+    /// Each evaluated value that reads the step's state keeps what it read
+    /// (its closure over the step view), so one that reaches a key the run
+    /// writes before the task's turn moves to [`CheckedTask::with_late`] once
+    /// the whole graph is known.
+    pub(super) fn note_prepared_with(
+        &mut self,
+        with: &Map<String, Value>,
+        reference: &super::PromptReference,
+        late: &[String],
+    ) {
+        let evaluated = &reference.with;
+        let Some(check) = self.check.as_ref() else { return };
         let Some(&slot) = check.open.last() else { return };
+        let scopes: Vec<(String, super::providers::DependencyScope)> = evaluated
+            .keys()
+            .filter_map(|key| {
+                let value = with.get(key).filter(|value| super::providers::reads_expression(value))?;
+                Some((key.clone(), super::providers::with_value_scope(key, value, &self.step_authored, &self.step_frontmatter, None)))
+            })
+            .collect();
+        let check = self.check.as_mut().expect("checked above");
         check.tasks[slot].with_evaluated = evaluated.clone();
         check.tasks[slot].with_late = late.to_vec();
+        check.tasks[slot].reference = Some(reference.clone());
+        check.with_scopes.insert(slot, scopes);
     }
 
     /// In check mode, record `error` as the root's and continue; otherwise
@@ -352,10 +427,26 @@ impl Loader<'_> {
             .map_or_else(|| self.file_resolution_context.clone(), |context| context.file_resolution_context().clone());
         let Some(check) = self.check.as_mut() else { return };
         let (construct, noun) = construct_of(field);
+        // A file the run creates before reading it is not missing: the task
+        // is not checked.
+        if let Some(reason) = super::super::source::created_reference(raw, origin, &resolution) {
+            check.pending_finding = None;
+            check.pending_created = Some(reason);
+            return;
+        }
         let launch_dir = check.launch_dir.clone();
         let construct = DocumentConstruct { construct, noun, launch_dir: launch_dir.as_deref() };
         check.pending_finding =
             super::super::source::reference_finding(raw, origin, &resolution, construct, &mut check.memo);
+    }
+
+    /// Note that the reference resolved last names a file the run's
+    /// initializer changes first, so the failure the walk records next is
+    /// not checked.
+    pub(super) fn note_changed_reference(&mut self, reason: darkmatter::markdown::compose::passive::DeferralReason) {
+        let Some(check) = self.check.as_mut() else { return };
+        check.pending_finding = None;
+        check.pending_created = Some(reason);
     }
 
     /// In check mode, record `error` at the task being read and continue;
@@ -417,6 +508,7 @@ impl Loader<'_> {
     pub(super) fn record_item_failure(&mut self, seed: SiteSeed<'_>, error: CompositionError) {
         let Some(check) = self.check.as_mut() else { return };
         check.pending_finding = None;
+        check.pending_created = None;
         let slot = check.push(seed);
         let failure = check.failure(error);
         check.tasks[slot].failures.push(failure);
@@ -432,6 +524,7 @@ impl Loader<'_> {
     ) -> Result<Option<PreflightTask>, CompositionError> {
         let Some(check) = self.check.as_mut() else { return run(self) };
         check.pending_finding = None;
+        check.pending_created = None;
         let slot = check.push(seed);
         let frame = {
             let site = &check.tasks[slot].site;
@@ -508,10 +601,13 @@ pub(super) fn item_executable(item: &Value) -> Option<ExecutableField> {
 /// is not decided ([`RootList::Deferred`]).
 #[must_use]
 pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
-    let SequenceCheckRequest { source, compose_context, invocation, source_context, caller_layers, launch_dir } = request;
+    let SequenceCheckRequest { source, compose_context, invocation, source_context, caller_layers, launch_dir, session } = request;
     // Every evaluator the walk reaches builds its expression context under
     // this session, so an effectful function is refused, not called.
-    let session = darkmatter::markdown::compose::passive::PassiveSession::new();
+    let session = session.map_or_else(
+        darkmatter::markdown::compose::passive::PassiveSession::new,
+        darkmatter::markdown::compose::passive::PassiveSession::sharing_observations,
+    );
     let _passive = crate::composition::passive_scope::enter(session.clone());
     let mut state = CheckState::new(launch_dir);
     let fail = |state: &mut CheckState, error: CompositionError| {
@@ -536,10 +632,13 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     // Discovery prepares every owner passively, and its parses are reused by
     // the walk. A failed discovery leaves only the inputs unchecked: the walk
     // reports the failure at its task.
+    // Discovery and the walk read each prompt once between them.
+    let prompt_memo = super::PromptMemo::default();
     let mut discovery = InputDiscoveryOptions::new(resolution, &compose_context)
         .with_invocation(invocation, source_context)
         .leaving_verdicts()
-        .recovering();
+        .recovering()
+        .with_prompt_memo(&prompt_memo);
     if let Some(layers) = caller_layers {
         discovery = discovery.with_caller_layers(layers);
     }
@@ -585,6 +684,7 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     }
     loader.caller_setters = setters;
     loader.caller_layers = caller_layers.cloned();
+    loader.prompt_memo = Some(Arc::clone(&prompt_memo));
     state.root_ordinals = ordinals;
     state.root_item_failures = item_failures;
     loader.check = Some(Box::new(state));
@@ -599,16 +699,54 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     for prediction in state.tasks.iter_mut().filter_map(|task| task.provider.as_mut()) {
         prediction.defer_runtime_written(&written);
     }
+    // The same rule for the values a task's prompt reads: a `with:` value
+    // evaluated from such a key is the value before the write, so it is
+    // known only at the task's turn, and the prompt's own reads of a written
+    // key are the preview's to leave unchecked (`SequenceCheck::runtime_written`).
+    for (index, scopes) in std::mem::take(&mut state.with_scopes) {
+        let task = &mut state.tasks[index];
+        for (key, scope) in scopes {
+            if scope.reaches(&written) && task.with_evaluated.remove(&key).is_some() {
+                task.with_late.push(key);
+            }
+        }
+        task.with_late.sort();
+        task.with_late.dedup();
+    }
+    let mut runtime_written: Vec<String> = written.into_iter().collect();
+    runtime_written.sort();
     // A real run judges every referenced prompt's lifecycle literals once
     // the graph is built (`validate_prompt_lifecycle_literals`); a check
     // records the refusal at each task that composes the prompt.
     for task in &mut state.tasks {
         let Some(document) = task.prompt.as_deref().and_then(|path| loader.graph.prompt_document(path)) else { continue };
         if let Err(error) = super::validate_lifecycle_literals(&document.markdown, &document.path) {
-            task.failures.push(CheckFailure { error, finding: None });
+            task.failures.push(CheckFailure { error, finding: None, pending: None });
         }
     }
-    finish(state, list, inventory)
+    let mut check = finish(state, list, inventory);
+    check.runtime_written = runtime_written;
+    check.prompts = loader
+        .graph
+        .prompt_documents
+        .iter()
+        .map(|document| (document.path.clone(), prompt_source(document)))
+        .collect();
+    check
+}
+
+/// `document` as the source a composition of it reads, from the walk's own
+/// read.
+fn prompt_source(document: &super::PromptDocument) -> ResolvedCompositionSource {
+    ResolvedCompositionSource {
+        original_ref: document.path.to_string_lossy().into_owned(),
+        resolved_path: document.path.clone(),
+        original_text: document.markdown.loaded_text().unwrap_or_default().to_string(),
+        markdown: document
+            .markdown
+            .clone()
+            .with_source(darkmatter::markdown::compose::ComposeSource::File(document.path.clone())),
+    }
 }
 
 /// The root refusals a real run makes before it reads any task list
@@ -662,7 +800,7 @@ fn finish(
     state.tasks.sort_by_key(|task| identity_order(&task.site.identity));
     let mut check = SequenceCheck {
         list, root_failures: state.root_failures, tasks: state.tasks, inventory, files: state.files,
-        owner_failures: Vec::new(),
+        owner_failures: Vec::new(), runtime_written: Vec::new(), prompts: std::collections::HashMap::new(),
     };
     // A file with no list (or one not read) stops the real run before any
     // owner's own verdict.
@@ -703,7 +841,7 @@ fn owner_failures(check: &mut SequenceCheck) -> Vec<OwnerFailure> {
                 .map(|task| task.site.identity.clone()),
             _ => None,
         };
-        OwnerFailure { document: owner.path.clone(), task, failure: CheckFailure { error: failed.error, finding: None } }
+        OwnerFailure { document: owner.path.clone(), task, failure: CheckFailure { error: failed.error, finding: None, pending: None } }
     }).collect()
 }
 
@@ -818,8 +956,20 @@ fn root_plan(
             let path = match super::super::source::resolve_sequence_reference(
                 &reference.reference, ExecutableField::Sequence, &source.resolved_path, options.file_resolution_context(),
             ) {
+                // A list file the run's initializer appends to has other
+                // rows by then: the task list is not checked.
+                Ok(path) if let Some(reason) = super::super::source::changed_reference(&path) => {
+                    state.pending_created = Some(reason);
+                    return unread_list(state, super::super::source::changed_reference_failure(&path));
+                }
                 Ok(path) => path,
                 Err(error) => {
+                    if let Some(reason) = super::super::source::created_reference(
+                        &reference.reference, &source.resolved_path, options.file_resolution_context(),
+                    ) {
+                        state.pending_created = Some(reason);
+                        return unread_list(state, located(error));
+                    }
                     let mut memo = std::mem::take(&mut state.memo);
                     let launch_dir = state.launch_dir.clone();
                     state.pending_finding = super::super::source::reference_finding(
@@ -866,8 +1016,9 @@ fn unread_list(
     state: &mut CheckState,
     error: CompositionError,
 ) -> (RootList, Option<(SequencePlan, Vec<usize>, Vec<(usize, Value, CompositionError)>)>) {
-    let list = if error.deferral_reason().is_some() { RootList::Deferred } else { RootList::Unread };
     let failure = state.failure(error);
+    let list =
+        if failure.error.deferral_reason().is_some() || failure.pending.is_some() { RootList::Deferred } else { RootList::Unread };
     state.root_failures.push(failure);
     (list, None)
 }

@@ -29,6 +29,7 @@ fn check(dir: &Path, root: &str) -> SequenceCheck {
         source_context: &source_context,
         caller_layers: None,
         launch_dir: Some(dir),
+        session: None,
     })
 }
 
@@ -728,4 +729,135 @@ fn an_owners_own_schema_failure_is_recorded_at_its_owner() {
         .map(|owner| (owner.task.as_ref().map(|task| task.as_str().to_string()), owner.document.file_name().unwrap().to_owned()))
         .collect();
     assert_eq!(owners, [(Some("tasks[1]".to_string()), std::ffi::OsString::from("child.md"))]);
+}
+
+/// The check reads the graph's runtime writes as the real graph does: it
+/// lists every key a lifecycle `set` may write before a task, and a `with:`
+/// value that reads one, directly or through the sequence's own derived
+/// values, is known only at the task's turn. A value reading an unrelated
+/// key, and a literal, stay evaluated.
+#[test]
+fn a_with_value_reading_a_runtime_write_is_known_only_at_the_tasks_turn() {
+    let files = [
+        (
+            "seq.md",
+            "---\ntopic: missing\nchoice: \"{{ topic }}\"\nplain: fixed\nsequence:\n  - name: first\n    prompt: ./writer.md\n  - name: reader\n    prompt: ./ok.md\n    with: { subject: \"{{ choice }}\", label: \"{{ plain }}\", literal: a }\n---\n",
+        ),
+        ("writer.md", "---\nsuccess:\n  - set:\n      topic: a\n---\nWrite.\n"),
+        OK,
+    ];
+    let check = check_files(&files);
+
+    assert!(check.runtime_written.contains(&"topic".to_string()), "{:?}", check.runtime_written);
+    let reader = check.tasks.iter().find(|task| task.site.name == "reader").unwrap();
+    assert_eq!(reader.with_late, ["subject"]);
+    assert_eq!(reader.with_evaluated.get("label"), Some(&serde_json::json!("fixed")));
+    assert_eq!(reader.with_evaluated.get("literal"), Some(&serde_json::json!("a")));
+
+    let control = check_files(&[(files[0].0, files[0].1), ("writer.md", "---\nsuccess:\n  - set:\n      other: a\n---\nWrite.\n"), OK]);
+    let reader = control.tasks.iter().find(|task| task.site.name == "reader").unwrap();
+    assert!(reader.with_late.is_empty(), "{:?}", reader.with_late);
+    assert_eq!(reader.with_evaluated.get("subject"), Some(&serde_json::json!("missing")));
+}
+
+/// The walk of `root` in `dir` with the session its check holds, and how
+/// many times each of `watched` was opened during it (the root is read
+/// before the walk starts).
+#[cfg(feature = "work-counters")]
+fn walk_counting_opens(dir: &Path, root: &str, watched: &[&str]) -> (SequenceCheck, Vec<usize>, u64) {
+    let source = crate::composition::resolve_fixture_source(&dir.join(root).display().to_string()).unwrap();
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), dir).unwrap();
+    let source_context = invocation.derive_composition_source(&source).unwrap();
+    let compose_context = invocation.capture_launch_context(&ContextRequirements::for_document(&source.markdown));
+    let opens = |name: &str| simplified_schema::work_counters::source_opens(&dir.join(name));
+    let before: Vec<usize> = watched.iter().map(|name| opens(name)).collect();
+    let work = crate::work_counters::snapshot();
+
+    let check = check_sequence_tree(SequenceCheckRequest {
+        source: &source,
+        compose_context,
+        invocation: &invocation,
+        source_context: &source_context,
+        caller_layers: None,
+        launch_dir: Some(dir),
+        session: None,
+    });
+
+    let reads = crate::work_counters::snapshot().since(&work).get(crate::work_counters::Work::CompositionSourceRead);
+    (check, watched.iter().zip(before).map(|(name, before)| opens(name) - before).collect(), reads)
+}
+
+/// R2-F5.6/R2-F5.11: one and two task occurrences of one prompt open it
+/// once, and that one read is the graph's captured source, its parse, and
+/// the document handed to the check; the read counter counts the open.
+#[cfg(feature = "work-counters")]
+#[test]
+fn a_prompt_two_tasks_compose_is_read_once_and_handed_to_the_check() {
+    for occurrences in [1, 2] {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "ask.md", "---\nagent: claude\n---\nAsk.\n");
+        let steps = (0..occurrences).map(|index| format!("  - name: t{index}\n    prompt: ./ask.md\n")).collect::<String>();
+        write(dir.path(), "seq.md", &format!("---\nsequence:\n{steps}---\nBody.\n"));
+
+        let (check, opens, reads) = walk_counting_opens(dir.path(), "seq.md", &["ask.md", "seq.md"]);
+
+        // The walk captures the root it was handed, opened before it began.
+        assert_eq!(opens, [1, 1], "{occurrences} occurrence(s): the prompt is opened once");
+        assert_eq!(reads, 2, "{occurrences} occurrence(s): the counter counts those opens");
+        let prompts: Vec<_> = check.tasks.iter().filter_map(|task| task.prompt.clone()).collect();
+        assert_eq!(prompts.len(), occurrences);
+        assert!(prompts.iter().all(|prompt| *prompt == prompts[0]));
+        let loaded = check.prompts.get(&prompts[0]).expect("the walk hands its read over");
+        assert_eq!(check.prompts.len(), 1);
+        assert_eq!(loaded.original_text, "---\nagent: claude\n---\nAsk.\n");
+        assert_eq!(loaded.markdown.content().trim(), "Ask.");
+    }
+}
+
+/// Two different prompts are two sources: each is opened once.
+#[cfg(feature = "work-counters")]
+#[test]
+fn distinct_prompts_are_each_opened_once() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "ask.md", "---\nagent: claude\n---\nAsk.\n");
+    write(dir.path(), "other.md", "---\nagent: claude\n---\nOther.\n");
+    write(
+        dir.path(),
+        "seq.md",
+        "---\nsequence:\n  - name: a\n    prompt: ./ask.md\n  - name: b\n    prompt: ./other.md\n  - name: c\n    prompt: ./ask.md\n---\nBody.\n",
+    );
+
+    let (check, opens, reads) = walk_counting_opens(dir.path(), "seq.md", &["ask.md", "other.md", "seq.md"]);
+
+    assert_eq!(opens, [1, 1, 1]);
+    assert_eq!(reads, 3);
+    assert_eq!(check.prompts.len(), 2);
+}
+
+/// R3-F4.4: a referenced sequence, task, group, and selected catalog
+/// entry, reached once or twice, are each opened once by the walk.
+#[cfg(feature = "work-counters")]
+#[test]
+fn referenced_data_documents_are_opened_once_for_each_occurrence_count() {
+    let files = [
+        ("x.md", "---\nagent: claude\n---\nDo x.\n"),
+        ("child.yaml", "kind: sequence\nsequence:\n  - name: c1\n    prompt: ./x.md\n"),
+        ("t.yaml", "kind: task\nprompt: ./x.md\n"),
+        ("g.yaml", "kind: group\ntasks:\n  - name: leg\n    prompt: ./x.md\n"),
+        ("cat.yaml", "kind: group-catalog\ngroups:\n  - name: first\n    tasks:\n      - name: a\n        prompt: ./x.md\n  - name: second\n    tasks:\n      - name: b\n        prompt: ./x.md\n"),
+    ];
+    let steps = "  - name: sNN\n    sequence: ./child.yaml\n  - name: tNN\n    task: ./t.yaml\n  - name: gNN\n    group: ./g.yaml\n  - name: cNN\n    group: first@cat.yaml\n";
+    for occurrences in [1, 2] {
+        let dir = TempDir::new().unwrap();
+        for (name, text) in files {
+            write(dir.path(), name, text);
+        }
+        let list = (0..occurrences).map(|index| steps.replace("NN", &index.to_string())).collect::<String>();
+        write(dir.path(), "seq.md", &format!("---\nsequence:\n{list}---\nBody.\n"));
+
+        let (check, opens, _) = walk_counting_opens(dir.path(), "seq.md", &["x.md", "child.yaml", "t.yaml", "g.yaml", "cat.yaml"]);
+
+        assert!(check.root_failures.is_empty(), "{:?}", rows(&check));
+        assert_eq!(opens, [1, 1, 1, 1, 1], "{occurrences} occurrence(s)");
+    }
 }

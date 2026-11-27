@@ -492,10 +492,11 @@ exit 0"#,
     );
 }
 
-/// Dry-run composes against empty `outputs` and no mutations, so a late-binding
-/// reference renders as it would for the very first step — every step alike.
+/// Dry-run composes the first step against its empty `outputs`, which are
+/// known before the run; a later step's `seq.outputs` are what the earlier
+/// steps produce, so its read is left as written and marked.
 #[test]
-fn dry_run_composes_every_step_against_the_initial_state() {
+fn dry_run_composes_only_the_first_steps_outputs() {
     let fixture = CliProcessFixture::named("sequence-jit");
     fake_goose(&fixture, "exit 0");
     let md = fixture.cwd().join("seq.md");
@@ -513,9 +514,13 @@ fn dry_run_composes_every_step_against_the_initial_state() {
     assert_eq!(code, 0, "dry-run should succeed; stderr:\n{stderr}");
     assert_eq!(
         stdout.matches("Prior was [].").count(),
-        2,
-        "both rendered documents must show the initial empty accumulator; \
-         stdout:\n{stdout}"
+        1,
+        "only the first step shows the empty accumulator; stdout:\n{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("Prior was [{{ last(seq.outputs) }} [not evaluated in a dry run]].").count(),
+        1,
+        "the second step's outputs are known only at its turn; stdout:\n{stdout}"
     );
 }
 

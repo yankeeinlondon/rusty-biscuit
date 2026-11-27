@@ -241,35 +241,36 @@ mod compose_checks_the_provider_and_its_model_requirement {
     }
 }
 
-/// A transcluded file the real run would replace with a notice and warn
-/// about (it does not parse) is a warning row of the dry run in the
-/// including document, not a clean report; the same document with a valid
+/// A transcluded file whose frontmatter does not parse stops a real run at
+/// its approval discovery, before composition could replace it with a
+/// notice and warn, so the dry run reports that one refusal, at the part,
+/// and no composition warning beside it; the same document with a valid
 /// part is the control ([`a_valid_transcluded_part_is_a_clean_report`]).
 #[test]
-fn a_tolerated_transclusion_failure_is_a_warning_row() {
-    let fixture = transclusion_fixture("dry-run-tolerated-transclusion");
+fn a_transcluded_part_that_does_not_parse_stops_the_run_before_it_composes() {
+    let fixture = transclusion_fixture("dry-run-unparsed-transclusion");
     fs::write(fixture.cwd().join("part.md"), "---\ntitle: [unclosed\n---\npart text\n").unwrap();
     let human = run(&fixture, &["compose", "doc.md", "--dry-run"]);
     assert_eq!(human.status.code(), Some(2), "stderr:\n{}", human.stderr);
     assert!(prose(&human.stderr).contains("Failed to parse frontmatter in"), "stderr:\n{}", human.stderr);
-    assert!(human.stderr.contains("Dry run found 0 errors and 1 warning"), "stderr:\n{}", human.stderr);
-    assert!(human.stdout.contains("_Could not transclude `part.md`_"), "stdout:\n{}", human.stdout);
+    assert!(human.stderr.contains("Dry run found 1 error and 0 warnings"), "stderr:\n{}", human.stderr);
 
     let json = run(&fixture, &["compose", "doc.md", "--dry-run", "--json"]);
     assert_eq!(json.status.code(), Some(2), "stdout:\n{}", json.stdout);
     let envelope: Value = serde_json::from_str(&json.stdout).unwrap();
     let diagnostics = envelope["diagnostics"].as_array().unwrap();
     assert_eq!(diagnostics.len(), 1, "{}", json.stdout);
-    assert_eq!(diagnostics[0]["severity"], "warning", "{}", json.stdout);
-    // R1-F10.7: the tolerated child failure keeps its class, at the
-    // inclusion that was left out.
-    assert_eq!(diagnostics[0]["code"], "dm.transclusion.failure", "{}", json.stdout);
-    assert!(diagnostics[0]["source"]["file"].as_str().unwrap().ends_with("doc.md"), "{}", json.stdout);
-    assert_eq!((&diagnostics[0]["source"]["line"], &diagnostics[0]["source"]["column"]), (&Value::from(6), &Value::from(1)), "{}", json.stdout);
-    assert_eq!(envelope["summary"]["warnings"], 1, "{}", json.stdout);
+    assert_eq!(diagnostics[0]["severity"], "error", "{}", json.stdout);
+    assert_eq!(diagnostics[0]["code"], "dm.frontmatter.yaml_parse", "{}", json.stdout);
+    assert!(diagnostics[0]["source"]["file"].as_str().unwrap().ends_with("part.md"), "{}", json.stdout);
+    assert_eq!((&diagnostics[0]["source"]["line"], &diagnostics[0]["source"]["column"]), (&Value::from(3), &Value::from(1)), "{}", json.stdout);
+
+    let real = run(&fixture, &["compose", "doc.md"]);
+    assert_eq!(real.status.code(), Some(1), "stderr:\n{}", real.stderr);
+    assert!(real.stderr.contains("frontmatter parse failed"), "stderr:\n{}", real.stderr);
 }
 
-/// The control of [`a_tolerated_transclusion_failure_is_a_warning_row`]: a
+/// The control of [`a_transcluded_part_that_does_not_parse_stops_the_run_before_it_composes`]: a
 /// part that parses is transcluded and the report is clean.
 #[test]
 fn a_valid_transcluded_part_is_a_clean_report() {
@@ -814,6 +815,7 @@ mod codes {
         invalid_arguments,
         missing_properties,
         file_choice_pending,
+        optional_dropped,
     );
 
     /// The scope comes from the registry: every code it marks

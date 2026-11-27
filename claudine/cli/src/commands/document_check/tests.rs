@@ -14,6 +14,7 @@ fn check_codes_are_cataloged_unique_and_disjoint_from_darkmatter_findings() {
         MODEL_REQUIRED,
         INVALID_ARGUMENTS,
         FILE_CHOICE_PENDING,
+        OPTIONAL_DROPPED,
         INTERNAL_BUG,
     ];
     for code in CHECK_CODES {

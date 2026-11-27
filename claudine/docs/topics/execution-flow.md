@@ -743,8 +743,9 @@ unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
 `--silent` suppresses per-step status messages.
 
 `--dry-run` never reaches this executor: it is the passive check, which
-reads the tree as preflight does, composes each prompt against initial state
-with every command withheld, and runs no task, lifecycle event, or provider.
+reads the tree as preflight does, composes each prompt against the state
+before the run (a value the run writes first is left unchecked) with every
+command withheld, and runs no task, lifecycle event, or provider.
 See [Sequences — Dry run](flow-control/sequences.md#dry-run).
 
 ### Per-step runtime bindings

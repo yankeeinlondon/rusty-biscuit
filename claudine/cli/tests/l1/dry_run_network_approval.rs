@@ -51,11 +51,14 @@ impl Responder {
                 let route = request_line.split_whitespace().nth(1).unwrap_or_default().to_string();
                 *counter.lock().unwrap().entry(route.clone()).or_default() += 1;
                 let body = match route.as_str() {
-                    "/data.json" => "[\"a\", \"b\"]",
+                    "/data.json" | "/other.json" => "[\"a\", \"b\"]",
                     "/rows.json" => "[\"./ask.md\"]",
                     "/child.md" => "Remote child.",
+                    "/prologue.md" => "Remote prologue.",
+                    "/epilogue.md" => "Remote epilogue.",
                     "/snippet.rs" => "fn remote() {}",
                     "/os.yaml" => "- macOS\n- Linux\n",
+                    "/facts.md" => "---\ntitle: Remote facts\n---\nRemote body.\n",
                     _ => "",
                 };
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
@@ -74,6 +77,16 @@ impl Responder {
         self.hits.lock().unwrap().len()
     }
 
+    /// How many requests `route` received, repeats included.
+    pub(crate) fn hits(&self, route: &str) -> usize {
+        self.hits.lock().unwrap().get(route).copied().unwrap_or_default()
+    }
+
+    /// Every requested route and how many times it was requested.
+    pub(crate) fn all_hits(&self) -> HashMap<String, usize> {
+        self.hits.lock().unwrap().clone()
+    }
+
     pub(crate) fn requests(&self) -> usize {
         self.hits.lock().unwrap().values().sum()
     }
@@ -81,7 +94,7 @@ impl Responder {
 
 /// A fixture whose home says `network: <setting>`, with a provider stub the
 /// check only looks up.
-fn fixture(setting: &str) -> CliProcessFixture {
+pub(crate) fn fixture(setting: &str) -> CliProcessFixture {
     let fixture = CliProcessFixture::named("dry-run-network");
     fs::write(fixture.home().join(".darkmatter.yaml"), format!("permissions:\n  network: {setting}\n")).unwrap();
     let claude = fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
@@ -96,7 +109,7 @@ fn fixture(setting: &str) -> CliProcessFixture {
 
 /// `claudine <command> <file> --dry-run --json`: the exit code and the
 /// envelope.
-fn dry_run(fixture: &CliProcessFixture, command: &str, file: &str) -> (Option<i32>, Value) {
+pub(crate) fn dry_run(fixture: &CliProcessFixture, command: &str, file: &str) -> (Option<i32>, Value) {
     let output = fixture.command().args([command, file, "--dry-run", "--json"]).output().unwrap();
     assert!(!fixture.audio_spool().exists());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -104,7 +117,7 @@ fn dry_run(fixture: &CliProcessFixture, command: &str, file: &str) -> (Option<i3
     (output.status.code(), envelope)
 }
 
-fn rows(envelope: &Value) -> Vec<(String, String, String)> {
+pub(crate) fn rows(envelope: &Value) -> Vec<(String, String, String)> {
     envelope["diagnostics"]
         .as_array()
         .unwrap()

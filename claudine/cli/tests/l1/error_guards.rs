@@ -1121,6 +1121,7 @@ mod corpus {
                     source_path: PathBuf::from("run.md"),
                     slot_code: "dm.schema.slot_network_denied".to_string(),
                     message: "remote read denied for host example.com".to_string(),
+                    slots: Vec::new(),
                 }),
             ),
             (

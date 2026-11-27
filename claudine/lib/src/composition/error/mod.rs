@@ -3138,6 +3138,10 @@ pub enum CompositionError {
         slot_code: String,
         /// Human-readable description of the failure.
         message: String,
+        /// Darkmatter's typed record of each failed slot, at the slot where
+        /// its position is proven: what a dry run reports in place of this
+        /// launch-time wrapper.
+        slots: Vec<darkmatter::findings::Diagnostic>,
     },
 
     /// A `$schema` declaration could not be *parsed* or lowered to a JSON Schema.
@@ -3836,6 +3840,20 @@ pub struct DroppedOptional {
     pub stage: DroppedOptionalStage,
     /// Human-readable reason (the underlying validator message).
     pub reason: String,
+}
+
+impl DroppedOptional {
+    /// The warning a run prints for this drop, which a dry run reports as its
+    /// warning row too.
+    pub fn message(&self) -> String {
+        format!(
+            "dropped optional schema property `{property}` (from {source}, at {stage}): {reason}",
+            property = self.property,
+            source = self.source.label(),
+            stage = self.stage.label(),
+            reason = self.reason,
+        )
+    }
 }
 
 /// Where the invalid value originated.

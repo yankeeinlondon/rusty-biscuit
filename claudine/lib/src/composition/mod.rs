@@ -42,6 +42,8 @@ pub mod provider_tail;
 pub mod registration;
 pub mod ownership;
 pub(crate) mod passive_scope;
+pub mod source_open_log;
+pub use passive_scope::{read_local_source, read_local_text};
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -87,7 +89,7 @@ pub use error::{
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
-pub use guardrails::{document_path_span, native_document_path};
+pub use guardrails::{RETIRED_GUARDRAILS_STAGE, document_path_span, native_document_path};
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use lifecycle::runtime::{
     EvaluationMode, IterationSummarySignals, LifecycleCatchExecution, LifecycleCatchProtocol,
@@ -129,13 +131,13 @@ pub use looping::{
 };
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{
-    PreFlightResult, resolve_graph_shell_approvals, resolve_lifecycle_shell_approvals,
+    PreFlightResult, discover_prompt_document, reads_sequence_late_root, resolve_graph_shell_approvals, resolve_lifecycle_shell_approvals,
     resolve_shell_approvals,
 };
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    approve_document_shell, unresolved_inclusions, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    approve_document_shell, discover_document_shell, unresolved_inclusions, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
     prepare_bootstrap, prepare_direct, prepare_document, prepare_document_selecting, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
     read_selection_hints, replace_env_overrides, ResolvedIdentitySelector,
 };
@@ -161,7 +163,7 @@ pub use schema::{
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,
     prepare_direct_with_schema, prepare_direct_with_schema_selecting,
     prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
-    prepare_inline_with_schema_selecting, render_optional_line,
+    prepare_inline_with_schema_selecting, prepare_passive_with_schema, render_optional_line,
     render_required_line, schema_status_report_prose,
 };
 pub use select::{
@@ -180,7 +182,7 @@ pub use sequence::preflight::{
     FailedOwner, InputOwner, InputOwnerRole, InputPrompt, OwnerFailure, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots, validate_lifecycle_literals,
     providers::collect_written_keys,
-    CheckFailure, CheckedTask, LoadedDocument, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
+    CheckFailure, CheckedTask, LAUNCH_TIME_SEQ_MEMBERS, LoadedDocument, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
@@ -274,9 +276,24 @@ pub fn launch_slot_session(
     context: &biscuit_file::FileResolutionContext,
     handler: Option<std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>>,
 ) -> Result<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>, CompositionError> {
+    slot_session_observing(invocation, context, handler, None)
+}
+
+/// [`launch_slot_session`] reading through a dry run's shared
+/// `observations` when given, so its slots read a source the run's other
+/// passes already read once.
+pub(crate) fn slot_session_observing(
+    invocation: Option<&crate::invocation_context::InvocationContext>,
+    context: &biscuit_file::FileResolutionContext,
+    handler: Option<std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>>,
+    observations: Option<&darkmatter::markdown::compose::passive::PassiveObservations>,
+) -> Result<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>, CompositionError> {
     use darkmatter::markdown::schemas::slots::SlotSession;
-    let mut session =
-        SlotSession::for_context(darkmatter::markdown::compose::DataRuntime::new(), context);
+    let data = observations.map_or_else(darkmatter::markdown::compose::DataRuntime::new, |shared| shared.data());
+    let mut session = SlotSession::for_context(data, context);
+    if let Some(shared) = observations {
+        session = session.with_passive_observations(shared.clone());
+    }
     if let Some(invocation) = invocation {
         let snapshot = invocation.darkmatter_config_for(context).map_err(|source| {
             CompositionError::from(darkmatter::markdown::compose::ContextBuildError::Config {

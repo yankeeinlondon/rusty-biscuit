@@ -190,21 +190,29 @@ fn a_prologue_target_reading_a_missing_input_is_not_checked() {
     assert_eq!((code, codes), (Some(0), Vec::<String>::new()));
 }
 
-/// A directive target that reads a `$( … )` value the dry run did not run
-/// is not checked, nothing else; a literal value is checked, its missing
-/// file reported.
+/// A directive target that reads a `$( … )` value names a command whose
+/// shape the approval discovery cannot know, so a real run refuses it
+/// before anything runs, whatever the command prints, and the dry run
+/// reports that refusal; a literal value is checked, its missing file
+/// reported.
 #[test]
-fn a_directive_target_reading_a_command_value_is_not_checked() {
+fn a_directive_target_reading_a_command_value_is_the_discovery_refusal() {
     let fixture = fixture("dry-run-refs-command-target");
     let doc = |topic: &str| format!("---\ntitle: x\nagent: claude\ntopic: {topic}\n---\nIntro.\n\n::file ./{{{{ topic }}}}.md\n");
     fs::write(fixture.cwd().join("doc.md"), doc("$(echo a)")).unwrap();
+    fs::write(fixture.cwd().join("a.md"), "Included.\n").unwrap();
 
     let (code, rows) = check_rows(&fixture, &["compose", "doc.md"]);
-    assert_eq!(code, Some(0), "{rows:?}");
-    let codes: Vec<&str> = rows.iter().map(|row| row["code"].as_str().unwrap()).collect();
-    assert!(codes.iter().all(|held| *held == NOT_CHECKED), "{rows:?}");
-    assert!(rows.iter().any(|row| row["message"].as_str().unwrap().starts_with("not checked: transclusion (reads `topic`")), "{rows:?}");
+    assert_eq!(code, Some(2), "{rows:?}");
+    let errors: Vec<&Value> = rows.iter().filter(|row| row["severity"] == "error").collect();
+    assert_eq!(errors.len(), 1, "{rows:?}");
+    assert_eq!(errors[0]["code"], "dm.shell.failure", "{rows:?}");
+    assert!(errors[0]["message"].as_str().unwrap().starts_with("dynamic command shape"), "{rows:?}");
+    let real = fixture.command().args(["compose", "doc.md"]).output().unwrap();
+    assert_eq!(real.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&real.stderr).contains("dynamic command shape"));
 
+    fs::remove_file(fixture.cwd().join("a.md")).unwrap();
     fs::write(fixture.cwd().join("doc.md"), doc("a")).unwrap();
     let (code, codes) = check(&fixture, &["compose", "doc.md"]);
     assert_eq!((code, codes), (Some(2), vec![REFERENCE.to_string()]));
@@ -229,6 +237,94 @@ fn a_directive_target_reading_an_effectful_with_value_is_not_checked() {
     fs::write(fixture.cwd().join("seq.md"), seq("zz")).unwrap();
     let (code, codes) = check(&fixture, &["sequence", "seq.md"]);
     assert_eq!((code, codes), (Some(2), vec![REFERENCE.to_string()]));
+}
+
+/// A sequence whose one task runs `./task.md` with `topic` as its `with:`.
+fn effectful_task(topic: &str) -> String {
+    format!("---\nagent: claude\nsequence:\n  - name: write\n    prompt: ./task.md\n    with:\n      topic: \"{topic}\"\n---\n")
+}
+
+const EFFECTFUL: &str = "{{ has_alias('zz') }}";
+
+/// The approval discovery a real run makes of `task.md` before any task
+/// reads the `with:` value as it is then; the dry run has no value for an
+/// effectful one, so a `prologue:` naming a file by it names no file there
+/// either. A literal value names a file both runs find missing.
+#[test]
+fn a_prologue_target_reading_an_effectful_with_value_is_not_checked() {
+    let fixture = fixture("dry-run-refs-effectful-prologue");
+    fs::write(fixture.cwd().join("seq.md"), effectful_task(EFFECTFUL)).unwrap();
+    fs::write(fixture.cwd().join("task.md"), "---\n$schema:\n  topic: string(required)\nprologue: \"./{{ topic }}.md\"\n---\nT\n").unwrap();
+
+    let (code, rows) = check_rows(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert!(rows.iter().all(|row| row["code"] == NOT_CHECKED), "{rows:?}");
+    assert!(rows.iter().any(|row| row["message"].as_str().unwrap().starts_with("not checked: transclusion (reads `topic`")), "{rows:?}");
+
+    fs::write(fixture.cwd().join("seq.md"), effectful_task("zz")).unwrap();
+    let (code, codes) = check(&fixture, &["sequence", "seq.md"]);
+    assert_eq!((code, codes), (Some(2), vec![REFERENCE.to_string()]));
+}
+
+/// `::code` shares the discovery walk's directive reading with `::file`.
+#[test]
+fn a_code_target_reading_an_effectful_with_value_is_not_checked() {
+    let fixture = fixture("dry-run-refs-effectful-code");
+    fs::write(fixture.cwd().join("seq.md"), effectful_task(EFFECTFUL)).unwrap();
+    fs::write(fixture.cwd().join("task.md"), "---\n$schema:\n  topic: string(required)\n---\nT\n\n::code ./{{ topic }}.md\n").unwrap();
+
+    let (code, rows) = check_rows(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert!(rows.iter().all(|row| row["code"] == NOT_CHECKED), "{rows:?}");
+
+    fs::write(fixture.cwd().join("seq.md"), effectful_task("zz")).unwrap();
+    let (code, codes) = check(&fixture, &["sequence", "seq.md"]);
+    assert_eq!((code, codes), (Some(2), vec![REFERENCE.to_string()]));
+}
+
+/// A prompt whose only content is a `prologue:` the dry run left unread is
+/// not proven empty: the real run includes whatever the value names. With
+/// no `prologue:` it is.
+#[test]
+fn an_empty_body_beside_an_unread_prologue_is_not_proven_empty() {
+    let fixture = fixture("dry-run-refs-unread-prologue-body");
+    fs::write(fixture.cwd().join("seq.md"), effectful_task(EFFECTFUL)).unwrap();
+    let task = |front: &str| format!("---\n$schema:\n  topic: string(required)\n{front}---\n");
+    fs::write(fixture.cwd().join("task.md"), task("prologue: \"./{{ topic }}.md\"\n")).unwrap();
+
+    let (code, rows) = check_rows(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert!(rows.iter().all(|row| row["code"] == NOT_CHECKED), "{rows:?}");
+
+    fs::write(fixture.cwd().join("task.md"), task("")).unwrap();
+    let (code, codes) = check(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(2), "{codes:?}");
+    assert!(codes.iter().any(|held| held == "dm.compose.empty_body"), "{codes:?}");
+}
+
+/// Phase 1c's probe of a root body step composes it before any task, with
+/// no outputs yet, so its block is left out there; a root `prologue:` the
+/// dry run cannot read keeps that composition from being proven empty. With
+/// no `prologue:` the probe's empty body is the refusal.
+#[test]
+fn a_root_body_probe_beside_an_unread_prologue_is_not_proven_empty() {
+    let fixture = fixture("dry-run-refs-probe-unread-prologue");
+    let seq = |front: &str| {
+        format!(
+            "---\nagent: claude\ntopic: \"{EFFECTFUL}\"\n{front}sequence:\n  - name: first\n    prompt: writer.md\n  - name: body\n---\n\n::block when=\"length(seq.outputs) > 0\"\nRead.\n::end-block\n"
+        )
+    };
+    fs::write(fixture.cwd().join("writer.md"), "Write.\n").unwrap();
+    fs::write(fixture.cwd().join("seq.md"), seq("prologue: \"./{{ topic }}.md\"\n")).unwrap();
+
+    let (code, rows) = check_rows(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert!(rows.iter().all(|row| row["severity"] != "error"), "{rows:?}");
+
+    fs::write(fixture.cwd().join("seq.md"), seq("")).unwrap();
+    let (code, codes) = check(&fixture, &["sequence", "seq.md"]);
+    assert_eq!(code, Some(2), "{codes:?}");
+    assert!(codes.iter().any(|held| held == "dm.compose.empty_body"), "{codes:?}");
 }
 
 /// A child's own `ignore_invalid: true` tolerates its broken inclusion as

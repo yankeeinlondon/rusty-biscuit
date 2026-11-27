@@ -352,10 +352,11 @@ fn a_document_without_initialize_still_fails_eagerly_on_a_missing_include() {
     assert!(!staged.prompt.exists(), "{output}");
 }
 
-/// Dry run is unchanged: no `initialize` side effect, and the include only
-/// `initialize` would create is still reported missing.
+/// A dry run has no `initialize` side effect, and the include only
+/// `initialize` creates is not checked as known only at launch, never
+/// reported missing.
 #[test]
-fn a_dry_run_never_runs_initialize_and_still_reports_the_missing_include() {
+fn a_dry_run_never_runs_initialize_and_leaves_the_initialized_include_unchecked() {
     let staged = Staged::new("staged-boot-dry-run");
     staged.install_compose_provider();
     let doc = staged.write_doc("doc.md", &creating_doc("phase: 1\n"));
@@ -363,8 +364,9 @@ fn a_dry_run_never_runs_initialize_and_still_reports_the_missing_include() {
     let (success, output) =
         staged.run(&["compose", doc.to_str().unwrap(), "--dry-run", "--claude"]);
 
-    assert!(!success, "{output}");
-    assert!(output.contains("file not found in `::file`"), "{output}");
+    assert!(success, "{output}");
+    assert!(!output.contains("file not found in `::file`"), "{output}");
+    assert!(output.contains("not checked: transclusion"), "{output}");
     assert!(staged.events().is_empty(), "dry run fires no lifecycle event:\n{output}");
     assert!(!staged.generated_exists(), "dry run must not create the file:\n{output}");
     assert!(!staged.prompt.exists(), "{output}");

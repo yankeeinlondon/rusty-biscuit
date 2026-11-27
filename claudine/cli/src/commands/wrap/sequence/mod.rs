@@ -112,60 +112,11 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |reference: &composition::PromptReference| -> Result<
-        darkmatter::markdown::compose::ComposeRequest,
-        claudine::composition::CompositionError,
-    > {
-        let path = reference.path.as_path();
-        composing.replace(Some(path.to_path_buf()));
-        let source_context = invocation
-            .derive_source(path)
-            .expect("resolved prompt document always has a parent directory");
-        let document = darkmatter::markdown::Markdown::try_from(path)
+    let compose_options = |reference: &composition::PromptReference| {
+        composing.replace(Some(reference.path.clone()));
+        let document = darkmatter::markdown::Markdown::try_from(reference.path.as_path())
             .expect("preflight graph already loaded the prompt document");
-        // The graph's launch snapshot, extended with any group this referenced
-        // document needs: plain `ctx.*` stays launch-anchored no matter where
-        // the prompt document is stored, while the document's own
-        // `SourceContext` below still drives its file resolution.
-        let requirements =
-            darkmatter::markdown::compose::ContextRequirements::for_document(&document);
-        let mut context = graph_context.clone();
-        approval_epoch.extend_launch_context(&mut context, &requirements);
-        let mut opts = claudine::composition::compose_options_with_context(context)
-            .with_context_authority(approval_epoch.compose_context_authority())
-            .with_source_file(path)
-            .with_deferred_schema_verdict(true)
-            // Defer the lifecycle subtree exactly as the per-step template
-            // preflight does: this pass exists to discover `::shell`
-            // directives, and resolving a deferred `success:`/`failure:` read
-            // -side file reference here would trip on a file that event has
-            // not created yet.
-            .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
-            .with_deferred_shell_roots(reference.deferred_shell_roots());
-        // The task's approval-time `with` reaches its document as data, as
-        // it does at the task's turn, and a relative file value in it
-        // resolves from the file that authored it, never the launch folder.
-        if !reference.with.is_empty() {
-            let with = serde_json::Value::Object(reference.with.clone());
-            let with_source_context = invocation
-                .derive_source(&reference.with_origin)
-                .expect("a preflight task always has an authoring source");
-            let records = composition::CallerInputLayers::from_caller_overrides(
-                Some(with.clone()),
-                with_source_context.file_resolution_context().clone(),
-            )
-            .caller_input_records;
-            opts = composition::LayeredOverrides::data(Some(&with))
-                .apply_to(opts)
-                .with_caller_input_records(records);
-        }
-        if let Some(area) = launch_area {
-            opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
-        }
-        Ok(claudine::composition::compose_request(
-            opts,
-            source_context.file_resolution_context().clone(),
-        )?)
+        approval_compose_request(invocation, graph_context, &approval_epoch, launch_area, reference, &document)
     };
 
     let result =
@@ -178,6 +129,68 @@ fn approve_preflight_graph(
                 }
             })?;
     Ok(result.approved_commands)
+}
+
+/// The request a sequence's approval discovery composes `reference`'s
+/// document with ([`composition::resolve_graph_shell_approvals`]): the
+/// graph's launch snapshot extended for the document, the lifecycle subtree
+/// excluded, the schema verdict deferred, the sequence's late roots and the
+/// task's late `with` keys declared, and its approval-time `with` as data.
+/// No `seq`, `loop`, or `group` value is bound. A dry run builds its own
+/// discovery with this request too, made passive.
+#[allow(clippy::result_large_err)]
+pub(crate) fn approval_compose_request(
+    invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
+    approval_epoch: &claudine::invocation_context::DocumentEpoch,
+    launch_area: Option<&std::path::Path>,
+    reference: &composition::PromptReference,
+    document: &darkmatter::markdown::Markdown,
+) -> Result<darkmatter::markdown::compose::ComposeRequest, claudine::composition::CompositionError> {
+    let path = reference.path.as_path();
+    let source_context = invocation
+        .derive_source(path)
+        .expect("resolved prompt document always has a parent directory");
+    // The graph's launch snapshot, extended with any group this referenced
+    // document needs: plain `ctx.*` stays launch-anchored no matter where
+    // the prompt document is stored, while the document's own
+    // `SourceContext` below still drives its file resolution.
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(document);
+    let mut context = graph_context.clone();
+    approval_epoch.extend_launch_context(&mut context, &requirements);
+    let mut opts = claudine::composition::compose_options_with_context(context)
+        .with_context_authority(approval_epoch.compose_context_authority())
+        .with_source_file(path)
+        .with_deferred_schema_verdict(true)
+        // Defer the lifecycle subtree exactly as the per-step template
+        // preflight does: this pass exists to discover `::shell`
+        // directives, and resolving a deferred `success:`/`failure:` read
+        // -side file reference here would trip on a file that event has
+        // not created yet.
+        .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
+        .with_deferred_shell_roots(reference.deferred_shell_roots());
+    // The task's approval-time `with` reaches its document as data, as
+    // it does at the task's turn, and a relative file value in it
+    // resolves from the file that authored it, never the launch folder.
+    if !reference.with.is_empty() {
+        let with = serde_json::Value::Object(reference.with.clone());
+        let with_source_context = invocation
+            .derive_source(&reference.with_origin)
+            .expect("a preflight task always has an authoring source");
+        let records = composition::CallerInputLayers::from_caller_overrides(
+            Some(with.clone()),
+            with_source_context.file_resolution_context().clone(),
+        )
+        .caller_input_records;
+        opts = composition::LayeredOverrides::data(Some(&with))
+            .apply_to(opts)
+            .with_caller_input_records(records);
+    }
+    if let Some(area) = launch_area {
+        opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
+    }
+    Ok(claudine::composition::compose_request(opts, source_context.file_resolution_context().clone())?)
 }
 
 /// Submit every early lifecycle phrase the preflight graph reaches for TTS

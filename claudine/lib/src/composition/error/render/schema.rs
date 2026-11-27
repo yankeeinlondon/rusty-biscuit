@@ -35,6 +35,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             source_path,
             slot_code,
             message,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             StatusBlock::new(StatusState::Error)

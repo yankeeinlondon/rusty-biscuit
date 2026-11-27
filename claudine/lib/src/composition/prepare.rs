@@ -754,6 +754,40 @@ pub fn approve_document_shell(
     )
 }
 
+/// The approval discovery [`approve_document_shell`] makes of the document a
+/// preparation in `mode` composes, without approving anything: the same
+/// request and text, walked condition-blind. What it refuses (a command or
+/// directive target whose shape depends on a value discovery does not
+/// evaluate, for one) stops a real run before it composes, whatever the
+/// value. A dry run makes the walk under a passive request. The schema
+/// verdict is deferred: a real route judges it, and drops an invalid
+/// optional, before this walk, and the preparation reports it.
+///
+/// ## Errors
+///
+/// As [`approve_document_shell`], less the approval failures.
+pub fn discover_document_shell(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: CompositionMode,
+) -> Result<(), CompositionError> {
+    let Ok(document) = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref()) else {
+        return Ok(());
+    };
+    let ctx = derive_compose_context(source, options);
+    let request = prepared_request(
+        canonical_compose_options(source, &ctx, options, schema_phase_for(mode)).with_deferred_schema_verdict(true),
+        options,
+    )?;
+    super::preflight::discover_document_surface(
+        &document,
+        &request,
+        Some(&source.resolved_path),
+        PromptOrigin::for_mode(mode, &source.resolved_path, &source.original_text).as_ref(),
+    )
+    .map(drop)
+}
+
 /// The inclusion references of the document a preparation in `mode` composes
 /// (body `::file`/`::code`, `prologue:`/`epilogue:`, and every child they
 /// reach) that fail to resolve, found condition-blind as the pre-flight walk
@@ -838,7 +872,9 @@ pub fn unresolved_inclusions(
 /// misses the ones that do.
 ///
 /// The generated document carries the context identity [`PromptOrigin`]
-/// recognizes, so its failures can be reported at `path`'s `prompt`.
+/// recognizes, so its body's failures can be reported at `path`'s `prompt`,
+/// and names `path`'s text as its frontmatter's, so a `prologue:`/`epilogue:`
+/// failure is the section's, at its authored value.
 ///
 /// ## Errors
 ///
@@ -855,10 +891,14 @@ pub(super) fn document_for_mode<'a>(
         CompositionMode::InlineFrontmatterPrompt => {
             let frontmatter = markdown.frontmatter();
             let prompt = inline_prompt_text(frontmatter, set_overrides)?;
-            Ok(std::borrow::Cow::Owned(
-                Markdown::with_frontmatter(frontmatter.clone(), prompt)
-                    .with_context_identity(PromptOrigin::context_identity(path)),
-            ))
+            let generated = Markdown::with_frontmatter(frontmatter.clone(), prompt)
+                .with_context_identity(PromptOrigin::context_identity(path));
+            // The frontmatter is still the file's: a `prologue:`/`epilogue:`
+            // failure names its key at the value the file wrote.
+            Ok(std::borrow::Cow::Owned(match markdown.source_text() {
+                Some(text) => generated.with_frontmatter_authored_in(path, text),
+                None => generated,
+            }))
         }
     }
 }
@@ -1177,6 +1217,21 @@ use super::types::{
     LaunchSchema, PreparedComposition, ResolvedCompositionSource,
 };
 use simplified_schema::SchemaPhase;
+
+/// Whether a dry run left a `prologue:` or `epilogue:` unread because its
+/// target reads a value it could not produce. The section adds nothing to
+/// the passive composition, though the real run includes whatever it
+/// names, so an empty result there proves no empty prompt.
+fn section_deferred(options: &PrepareOptions) -> bool {
+    use darkmatter::markdown::compose::passive::DeferredConstruct;
+    options.passive.as_ref().is_some_and(|session| {
+        session.deferrals().iter().any(|deferral| {
+            deferral.construct == DeferredConstruct::Transclusion
+                && matches!(deferral.key.as_deref(), Some("prologue" | "epilogue"))
+        })
+    })
+}
+
 /// Why a composed prompt is empty, from its `authored` text, the `rendered`
 /// result, and the blocks the composition left out.
 fn empty_body_cause(
@@ -1607,7 +1662,7 @@ fn prepare_direct_on(
             let prompt = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
                 composed.content(),
             );
-            if prompt.trim().is_empty() && !options.allow_empty_body {
+            if prompt.trim().is_empty() && !options.allow_empty_body && !section_deferred(&options) {
                 return Err(CompositionError::ComposedBodyEmpty {
                     source_path: source.resolved_path.clone(),
                     mode: CompositionMode::ChainedDocument,
@@ -1770,7 +1825,7 @@ fn prepare_inline_on(
     let body = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
         composed.content(),
     );
-    if body.trim().is_empty() && !options.allow_empty_body {
+    if body.trim().is_empty() && !options.allow_empty_body && !section_deferred(&options) {
         // The prompt is the body here: its own text is what was authored.
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
@@ -1822,13 +1877,17 @@ fn prepare_inline_on(
         warning
     }));
     if let Some(path) = retired_guardrails {
-        warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
-            "inline_guardrails",
+        let mut warning = darkmatter::markdown::compose::ComposeWarning::new(
+            super::guardrails::RETIRED_GUARDRAILS_STAGE,
             format!(
                 "{} still contains retired response-harvesting instructions. Migrate it to tell the agent to edit {{document_path}} directly; Claudine preserved the customization and continued this run.",
                 biscuit_file::to_forward_slash_string(&path)
             ),
-        ));
+        );
+        // The repository's guardrails file, not the prompt, is what the
+        // warning is about: every inline prompt there meets it.
+        warning.path = Some(path);
+        warnings.push(warning);
     }
 
     Ok(PreparedComposition {
