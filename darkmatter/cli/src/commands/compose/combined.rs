@@ -117,14 +117,18 @@ pub(crate) fn after_refusal(
 /// an inclusion target it could not resolve (`error`). The references are
 /// listed again with page blocks left in place, which finds the inclusion
 /// inside a block whatever its condition; when that finds no refusal, the
-/// stop's own record stands for it. `None` when `error` is no inclusion
-/// failure, or when the passive checks add nothing.
+/// stop's own record stands for it. The warnings that listing reports stay
+/// in it, in its order, as a refusal's report keeps them, unless
+/// `warnings_delivered` (a data output already holds the reference check's
+/// own). `None` when `error` is no inclusion failure, or when the passive
+/// checks add nothing.
 pub(crate) fn after_inclusion_stop(
     md: &Markdown,
     request: &ComposeRequest,
     policy: &ResolvedPolicy,
     error: &Report,
     launch_dir: &Path,
+    warnings_delivered: bool,
 ) -> Option<CombinedReport> {
     let records = crate::output::report::failure_diagnostics(error);
     if !records.iter().any(|record| record.code.starts_with("dm.reference.")) {
@@ -134,20 +138,22 @@ pub(crate) fn after_inclusion_stop(
     let blind = request
         .clone()
         .map_options(|options| options.disable(darkmatter::markdown::compose::ComposeOperation::PageBlocks));
-    let refused: Vec<Diagnostic> = match super::validate(md, &blind) {
-        Some(report) => report
-            .issues
-            .iter()
-            .filter(|issue| {
-                issue.kind == ReferenceKind::Transclusion
-                    && issue.severity == ReferenceSeverity::Error
-                    && !super::recovers_missing(policy, issue)
-            })
-            .map(reference_finding)
-            .collect(),
-        None => Vec::new(),
+    let refuses = |issue: &ReferenceIssue| {
+        issue.kind == ReferenceKind::Transclusion
+            && issue.severity == ReferenceSeverity::Error
+            && !super::recovers_missing(policy, issue)
     };
-    collector.references(if refused.is_empty() { records } else { refused });
+    let report = super::validate(md, &blind);
+    let listed: Vec<&ReferenceIssue> = report
+        .iter()
+        .flat_map(|report| &report.issues)
+        .filter(|issue| refuses(issue) || (!warnings_delivered && issue.is_reported_warning()))
+        .collect();
+    let mut references: Vec<Diagnostic> = listed.iter().map(|issue| reference_finding(issue)).collect();
+    if !listed.iter().any(|issue| refuses(issue)) {
+        references.extend(records);
+    }
+    collector.references(references);
     collector.passive_checks(md, request);
     collector.finish()
 }
@@ -398,14 +404,18 @@ fn body_verdict(
 }
 
 /// `rendered` less what a dry run left as written: deferred `{{ … }}` spans,
-/// `::shell` lines, and `::shell-block` regions, and every `::block` region
-/// whose condition it could not decide, with the blocks nested in it.
+/// `::shell` lines, `::shell-block` and `::map`/`::filter` regions, and
+/// every `::block` region whose condition it could not decide, with the
+/// blocks nested in it.
 fn without_deferred(rendered: &str, deferrals: &[Deferral]) -> String {
     let mut text = rendered.to_string();
     for deferral in deferrals {
         if matches!(
             deferral.construct,
-            DeferredConstruct::Interpolation | DeferredConstruct::ShellDirective | DeferredConstruct::ShellBlock
+            DeferredConstruct::Interpolation
+                | DeferredConstruct::ShellDirective
+                | DeferredConstruct::ShellBlock
+                | DeferredConstruct::Collection
         ) && !deferral.authored.is_empty()
         {
             text = text.replace(&deferral.authored, "");
@@ -504,6 +514,14 @@ mod tests {
             deferral(DeferredConstruct::ShellDirective, "::shell git log"),
         ];
         assert_eq!(without_deferred(rendered, &deferrals).trim(), "kept");
+    }
+
+    #[test]
+    fn a_deferred_collection_region_is_left_out() {
+        let region = "::map items \"i => i\"\n- {{ i }}\n::end-map\n";
+        let rendered = format!("{region}after\n");
+        let deferrals = [deferral(DeferredConstruct::Collection, region)];
+        assert_eq!(without_deferred(&rendered, &deferrals).trim(), "after");
     }
 
     #[test]

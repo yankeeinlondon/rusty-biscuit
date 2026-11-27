@@ -102,12 +102,23 @@ pub(crate) fn run_stage(
         Ok(expansion) => expansion,
         Err(Halt::Blocked) => return Err(stopped.expect("the stop recorded its error")),
         Err(Halt::Failed(error)) => return Err(anchor(markdown, body, *error)),
+        // The page block or collection that met it keeps its text; one
+        // reaching here is a traversal defect.
+        Err(Halt::Unavailable(reason)) => {
+            return Err(MarkdownError::Transform(format!(
+                "internal error: a dry-run deferral ({}) escaped the collection traversal",
+                reason.describe()
+            )));
+        }
     };
     report.unknown_root_candidates.relocate_from(recorded, |locus| match locus {
         CandidateLocus::BodyLine(line) => super::super::unknown_identifiers::directive_locus(markdown, *line),
         other => other.clone(),
     });
     body.expand(markdown.content(), &expansion.splices, &expansion.output, expansion.scopes)?;
+    if !expansion.inert.is_empty() {
+        body.data = body.data.with_data(&expansion.output, &expansion.inert);
+    }
     *markdown.content_mut() = expansion.output;
     Ok(())
 }

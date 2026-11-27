@@ -202,6 +202,56 @@ fn a_missing_target_names_its_inclusion_site() {
     }
 }
 
+/// A body a host generated beneath a file's frontmatter (an inline prompt)
+/// is composed apart from the file. Named with the file's text
+/// (`with_frontmatter_authored_in`), a missing `prologue`/`epilogue` target
+/// is still the section's (its message names the key) at the value the file
+/// wrote, in composition, the pre-flight walk, and reference validation;
+/// without it, the failure keeps no position.
+#[test]
+fn a_generated_body_keeps_its_files_section_sites() {
+    let repo = repository();
+    let path = repo.path().join("notes.md");
+    // The generated body has no folder of its own to resolve from, so the
+    // targets are written whole.
+    let target = |name: &str| repo.path().join(name).display().to_string();
+    let text = format!(
+        "---\ntitle: x\nprologue: '{}'\nepilogue:\n  - '{}'\n  - '{}'\nprompt: Hello.\n---\n",
+        target("gone.md"),
+        target("side.md"),
+        target("lost.md"),
+    );
+    let text = text.as_str();
+    std::fs::write(&path, text).unwrap();
+    let loaded = Markdown::try_from(path.as_path()).unwrap();
+    let generated = || Markdown::with_frontmatter(loaded.frontmatter().clone(), "Hello.\n").with_context_identity("<prompt of notes.md>");
+    let located = generated().with_frontmatter_authored_in(&path, text);
+    for reader in [Reader::Compose, Reader::Preflight] {
+        let error = read(&repo, &located, reader).expect_err("the prologue is missing");
+        assert_located(&error, MISSING_TRANSCLUSION, "notes.md", 3, &format!("{reader:?}"));
+        assert!(error_diagnostics(&error)[0].message.contains("prologue:"), "{reader:?}: {error}");
+        let unlocated = read(&repo, &generated(), reader).expect_err("the prologue is missing");
+        let records = error_diagnostics(&unlocated);
+        assert!(records[0].source.as_ref().is_none_or(|source| source.line.is_none()), "{reader:?}: {records:#?}");
+    }
+    let request = request(repo.path());
+    let filed = located.with_source(darkmatter::markdown::compose::ComposeSource::File(path.clone()));
+    let report = filed
+        .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&request)))
+        .unwrap();
+    let rows: Vec<_> = report.issues.iter().map(reference_issue_diagnostic).collect();
+    let sites: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let construct = row.reference_details.as_ref().and_then(|details| details.construct.clone()).unwrap_or_default();
+            (construct, row.source.as_ref().and_then(|source| source.line.zip(source.column)))
+        })
+        .collect();
+    assert_eq!(sites.len(), 2, "{rows:#?}");
+    assert!(sites[0].0.contains("prologue:") && sites[0].1.is_some_and(|(line, _)| line == 3), "{rows:#?}");
+    assert!(sites[1].0.contains("epilogue:") && sites[1].1.is_some_and(|(line, _)| line == 6), "{rows:#?}");
+}
+
 /// R12-F2.4: a nested child's incomplete target names the child and its
 /// line, never the input document: each reader that refuses it, and the
 /// warning composition reports when it tolerates the child's failure.

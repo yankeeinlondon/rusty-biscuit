@@ -101,6 +101,7 @@ impl PolicyLayer {
                     line: None,
                     column: None,
                     message,
+                    reference_target: None,
                 },
             )
         };

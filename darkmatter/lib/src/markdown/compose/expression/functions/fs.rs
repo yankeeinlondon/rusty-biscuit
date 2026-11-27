@@ -246,7 +246,12 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
     match &found {
         Some(path) => ctx.data.observe_existence(path, true),
         None if ctx.editor.is_some() => {}
-        None => record_probed_candidates(&file_ref, ctx),
+        None => {
+            if let Some(unavailable) = created_before_read(&file_ref, ctx) {
+                return Err(unavailable);
+            }
+            record_probed_candidates(&file_ref, ctx);
+        }
     }
     Ok(Value::Bool(found.is_some()))
 }
@@ -255,6 +260,22 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
 /// file is an observation too, and creating any of them would change the
 /// answer. A recursive (`%`) reference's candidates are search folders, not
 /// files, so it records nothing.
+/// In a dry run, why a read of `file_ref`, which resolved to no file, is
+/// unavailable instead of missing: a candidate it would resolve to is a file
+/// the run creates before this composition
+/// ([`PassiveSession::created_among`](crate::markdown::compose::passive::PassiveSession::created_among)),
+/// so whether it exists, and what it holds, are known only at launch.
+pub(crate) fn created_before_read(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) -> Option<ExpressionError> {
+    let session = ctx.passive.as_ref()?;
+    if file_ref.class().recursive {
+        return None;
+    }
+    let candidates =
+        file_ref.candidate_plan_with_order(&ctx.file_context(), biscuit_file::CandidatePlanOrder::Resolution).ok()?;
+    let reason = session.created_among(candidates.iter().map(biscuit_file::ResolutionCandidate::path))?;
+    Some(ExpressionError::Unavailable(Box::new(reason)))
+}
+
 pub(crate) fn record_probed_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) {
     if file_ref.class().recursive {
         return;
@@ -1122,10 +1143,17 @@ pub(super) fn load_markdown(
     let Some(path) = resolve_arg(fname, raw, ctx)? else {
         // Creating any probed candidate would change the answer.
         if let Ok(file_ref) = parse_file_ref(fname, raw, ctx) {
+            if let Some(unavailable) = created_before_read(&file_ref, ctx) {
+                return Err(unavailable);
+            }
             record_probed_candidates(&file_ref, ctx);
         }
         return Err(file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None));
     };
+    // A file the run's initializer appends to holds other bytes by then.
+    if let Some(reason) = ctx.passive.as_ref().and_then(|session| session.initializer_changes(&path)) {
+        return Err(ExpressionError::Unavailable(Box::new(reason)));
+    }
     ctx.authorize_slot_read(fname, ReadKind::Content, || {
         Some(crate::markdown::compose::expression::read_gate::ReadLocation::Local(path.clone()))
     })?;
@@ -1189,6 +1217,11 @@ pub fn frontmatter_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
 /// null, error: <message> }`, so a document can report the problem instead of
 /// failing its composition. Parsing is `frontmatter()`'s: an opening fence
 /// that never closes is body text, which reads as empty frontmatter.
+///
+/// A read that has no result yet is not a failed read and stays an error
+/// ([`ExpressionError::withholds_result`]): in a dry run, a URL that needs
+/// network approval or a file the launch creates leaves the caller's
+/// construct unchecked instead of reading `ok` as `false`.
 pub fn try_frontmatter_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
@@ -1203,8 +1236,9 @@ pub fn try_frontmatter_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
                 .collect();
             (true, Value::Object(object), Value::Null)
         }
-        // A slot's refused read is never turned into a value.
-        Err(error @ ExpressionError::SlotReadRefused { .. }) => return Err(error),
+        // A read with no result yet (a dry run's deferral, a pending editor
+        // observation, a slot's refusal) is never turned into a value.
+        Err(error) if error.withholds_result() => return Err(error),
         Err(error) => (false, Value::Null, Value::String(error.to_string())),
     };
     let mut outcome = serde_json::Map::new();
@@ -1255,6 +1289,14 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
             ctx.authorize_slot_read("find_files", ReadKind::Listing, || {
                 Some(crate::markdown::compose::expression::read_gate::ReadLocation::Local(root))
             })?;
+        }
+    }
+    // A file the run's initializer creates first may join the listing, so
+    // what is listed now is no verdict.
+    if let Some(session) = ctx.passive.as_ref() {
+        let file_context = ctx.file_context();
+        if let Some(reason) = session.changes_listing(&globs.roots(&file_context), |path| globs.matches(path, &file_context)) {
+            return Err(ExpressionError::Unavailable(Box::new(reason)));
         }
     }
     let mut listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
@@ -1397,6 +1439,16 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
     }
     if let Some(refusal) = refusal {
         return Err(refusal);
+    }
+    // A schema file or named-type import the run's initializer creates or
+    // appends to first decides the verdict only at launch, whether the
+    // preparation failed on its absence or read its current bytes.
+    if let Some(session) = ctx.passive.as_ref()
+        && let Some(reason) = session
+            .initializer_changes_among(&observed.read)
+            .or_else(|| validated.is_err().then(|| session.created_among(&observed.searched)).flatten())
+    {
+        return Err(ExpressionError::Unavailable(Box::new(reason)));
     }
     let report = validated.map_err(|e| {
         let message = format!("validate_schema() error for {raw:?}: {e}");

@@ -71,6 +71,50 @@ A dry run (`ComposeOptions::with_dry_run()`) forces `Off` and gives remote
 reads no persistent store, so it neither reads nor writes any cache; see
 [Dry runs](../inline/preflight-checks.md#dry-runs).
 
+A dry run still reads each source once. Its `PassiveSession` carries
+`PassiveObservations`: an in-memory `load_data` memo, one remote-fetch
+runtime per fetch policy, and one observation of local files
+(`local_reads()`), which holds the bytes of every included document,
+`::code` target, `prologue`/`epilogue`, and `$schema` file a pass opened.
+A host that checks one invocation in several passes (Claudine's input
+check, reference walk, preview, and every task that runs the same prompt)
+gives each pass `PassiveSession::sharing_observations()`, so a file or URL
+they all read is read once, and every pass judges the same bytes:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::passive::PassiveSession;
+
+let first = PassiveSession::new();
+let check = ComposeOptions::new().with_passive_session(first.clone());
+let preview = ComposeOptions::new().with_passive_session(first.sharing_observations());
+// `check` and `preview` fetch a URL, and open a file, they both read once.
+```
+
+Sharing never widens a read. A runtime is shared only between compositions
+whose host policy, `network` setting, and transport settings are identical,
+and every read is still judged by its own policy and schema-slot gate before
+the shared memo is consulted, so a `deny` pass never receives a body an
+`allow` pass fetched. A local file is the same: a schema slot's file-read
+grant is checked before the shared bytes are served, and each pass still
+evaluates the file with its own values. Only a dry run shares local files;
+an ordinary composition reads a file as it is when it reaches it. A dry run that joins a command's existing remote
+runtime (`md compose`'s combined report after a reference stop) shares that
+runtime's fetches but writes nothing to its transport store.
+
+The passes also share each prepared schema. While a dry run's shared local
+reads are the only source of every schema file read on a thread (no read
+guard and no editor buffer is in force), an effective schema is prepared
+once for each distinct set of inputs: the `$schema` value as written, the
+document's file and folder, the request context, the caller origins, the
+baseline, and the triggers the document's values match. A later pass, even
+with a new `DarkmatterSchemas`, gets that preparation, and judges its own
+values with it, so two tasks running `./ask.md` with different `with:`
+values share one preparation of `ask.md`'s `$schema` and still get their
+own verdicts. A schema holding `{{ … }}` slots depends on its slot
+session's values and approvals, so its preparation is never shared. An
+ordinary composition shares nothing and prepares every time.
+
 ### Run-local keys
 
 A composed `::file` child is keyed on:

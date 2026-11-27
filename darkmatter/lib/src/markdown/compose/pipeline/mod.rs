@@ -98,6 +98,10 @@ impl Markdown {
             remote_fetch,
         )
         .with_iteration_limits(options.iteration_limits());
+        // A dry run reads each local source once for all of its passes.
+        runtime.cache = runtime.cache.clone().with_shared_reads(
+            options.passive_session().map(|session| session.observations().local_reads().clone()),
+        );
         // Discovery reads collections to find children; it consumes none of
         // the execution allowances.
         if options.nested_compose.is_discovery() {
@@ -239,6 +243,11 @@ impl Markdown {
         mut hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> MarkdownResult<ComposeReport> {
         let entered = node.is_some();
+        // A dry run's schema files, and every other source this node reads
+        // on this thread, come from its one observation of local files.
+        let _shared_reads = options.passive_session().map(|session| {
+            simplified_schema::resolve::buffers::enter_shared_reads(session.observations().local_reads().clone())
+        });
         if let Some((id, path)) = node {
             runtime.transclusion.enter(id, path, 1)?;
         }

@@ -758,6 +758,23 @@ pub(crate) fn run_with_registry(
             {
                 return false;
             }
+            // …nor judges a value the run writes before this composition:
+            // what it holds now is not what the run reads.
+            if let Some(session) = options.passive_session()
+                && let Some(name) = top_level_pointer_segment(&p.path).or_else(|| {
+                    (p.instance_path.segments().is_empty()).then(|| p.property.clone()).flatten()
+                })
+                && let Some(reason) = session.written_value(&name)
+            {
+                session.record(crate::markdown::compose::passive::Deferral {
+                    construct: crate::markdown::compose::passive::DeferredConstruct::SchemaCheck,
+                    reason,
+                    authored: name.clone(),
+                    key: Some(name),
+                    line: None,
+                });
+                return false;
+            }
             if !defer_shell_pending {
                 return true;
             }

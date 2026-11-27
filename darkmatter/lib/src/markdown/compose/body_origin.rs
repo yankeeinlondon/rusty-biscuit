@@ -390,6 +390,13 @@ impl DataRanges {
         }
     }
 
+    /// This map with `ranges` of the text it describes marked as data too.
+    pub(crate) fn with_data(&self, text: &str, ranges: &[Range<usize>]) -> Self {
+        let mut all: Vec<Range<usize>> = self.ranges.iter().chain(ranges).cloned().collect();
+        all.sort_by_key(|range| range.start);
+        Self::covering(text, all)
+    }
+
     /// Whether this map was built for exactly `text`.
     pub(crate) fn describes(&self, text: &str) -> bool {
         self.text_len == text.len() && self.text_hash == hash_text(text)
@@ -711,6 +718,11 @@ impl ScopeRanges {
         self.0[index].range.end = end;
     }
 
+    /// Drops every range opened after the first `len`.
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+
     /// These ranges carried past a stage that applied `edits` (sorted and
     /// non-overlapping) to the text they describe.
     pub(crate) fn after_edits(&self, edits: &[TextEdit]) -> Self {
@@ -765,6 +777,18 @@ pub(crate) struct ExpansionWriter<'a> {
     owners: Vec<ExpansionOwner>,
     open_ranges: Vec<usize>,
     next_owner: u64,
+    /// Output runs copied as inert text (see [`Self::copy_inert`]).
+    inert: Vec<Range<usize>>,
+}
+
+/// What an [`ExpansionWriter`] had written at one point, for
+/// [`ExpansionWriter::rewind`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WriterMark {
+    output: usize,
+    splices: usize,
+    scopes: usize,
+    inert: usize,
 }
 
 impl<'a> ExpansionWriter<'a> {
@@ -777,7 +801,44 @@ impl<'a> ExpansionWriter<'a> {
             owners: Vec::new(),
             open_ranges: Vec::new(),
             next_owner: 0,
+            inert: Vec::new(),
         }
+    }
+
+    /// The point [`rewind`](Self::rewind) returns to. Take it with no
+    /// iteration or expansion opened since that is still open at the rewind.
+    pub(crate) fn mark(&self) -> WriterMark {
+        WriterMark {
+            output: self.output.len(),
+            splices: self.splices.len(),
+            scopes: self.scopes.len(),
+            inert: self.inert.len(),
+        }
+    }
+
+    /// Discards everything written since `mark`. The byte allowance already
+    /// reserved for it stays spent.
+    pub(crate) fn rewind(&mut self, mark: WriterMark) {
+        self.output.truncate(mark.output);
+        self.splices.truncate(mark.splices);
+        self.scopes.truncate(mark.scopes);
+        self.inert.truncate(mark.inert);
+    }
+
+    /// [`copy`](Self::copy), recording the copy as inert: later stages read
+    /// it as data, so no directive, expression, or inclusion in it runs. A
+    /// dry run copies a collection it could not expand this way, since its
+    /// body reads names only an expansion binds.
+    pub(crate) fn copy_inert(
+        &mut self,
+        content: &str,
+        input: Range<usize>,
+        path: &super::expression::iteration::IterationPath,
+    ) -> Result<(), super::expression::iteration::IterationError> {
+        let start = self.output.len();
+        self.copy(content, input, path)?;
+        self.inert.push(start..self.output.len());
+        Ok(())
     }
 
     /// Begins one collection invocation's expansion; bytes written until the
@@ -831,8 +892,10 @@ impl<'a> ExpansionWriter<'a> {
         }
     }
 
-    pub(crate) fn finish(self) -> (String, Vec<Splice>, ScopeRanges) {
-        (self.output, self.splices, self.scopes)
+    /// The text, its splices, the repeated bodies' scopes, and the inert
+    /// runs, in output order.
+    pub(crate) fn finish(self) -> (String, Vec<Splice>, ScopeRanges, Vec<Range<usize>>) {
+        (self.output, self.splices, self.scopes, self.inert)
     }
 }
 
@@ -1464,7 +1527,7 @@ mod tests {
                 writer.copy(content, body.clone(), &path).unwrap();
             }
             writer.copy(content, body.end..content.len(), &path).unwrap();
-            let (output, splices, _) = writer.finish();
+            let (output, splices, _, _) = writer.finish();
             assert_eq!(output, "head\nbody {{ x }}\nbody {{ x }}\ntail\n");
             let carried = origin.after_splices(&splices, &output);
             let authored = span_of(loaded, "{{ x }}");
@@ -1502,7 +1565,7 @@ mod tests {
             writer.copy("abcdefgh", 4..5, &path).unwrap();
             writer.close_iteration();
             writer.close_expansion();
-            let (_, _, ranges) = writer.finish();
+            let (_, _, ranges, _) = writer.finish();
             assert_eq!(ranges.at(0).unwrap().range, 0..5);
             assert_eq!(ranges.at(3).unwrap().range, 2..4);
             assert_eq!(ranges.at(4).unwrap().range, 0..5, "after the inner copy the outer one holds again");
@@ -1519,7 +1582,7 @@ mod tests {
             writer.open_iteration(scope(), path.clone());
             writer.copy("aa{{x}}bb", 0..9, &path).unwrap();
             writer.close_iteration();
-            let (_, _, ranges) = writer.finish();
+            let (_, _, ranges, _) = writer.finish();
             let carried = ranges.after_edits(&[TextEdit::data(2..7, 1)]);
             assert_eq!(carried.at(0).unwrap().range, 0..5, "the replacement shrinks the copy");
         }

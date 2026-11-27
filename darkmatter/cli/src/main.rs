@@ -60,6 +60,7 @@ fn main() {
     // Reset SIGPIPE to default (terminate) so piping to `head`, `md toc`, etc.
     // exits cleanly instead of panicking on write to a closed pipe.
     reset_sigpipe();
+    darkmatter_cli::source_open_log::install();
 
     CompleteEnv::with_factory(Cli::command).shells(darkmatter_cli::completion_shells::SHELLS).complete();
 

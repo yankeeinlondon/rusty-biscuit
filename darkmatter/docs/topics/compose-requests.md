@@ -67,7 +67,12 @@ inclusion (body `::file` and `::code`, `prologue`, `epilogue`), and the file
 its errors name. Only the path is attached; the text judged is always the
 buffer. Text a host generated from a file and marked with
 `Markdown::with_context_identity` is not that file's text, so it keeps no
-source and its errors keep naming the identity.
+source and its errors keep naming the identity. When that text sits beneath
+the file's own frontmatter (an inline prompt), name the file and its text with
+`Markdown::with_frontmatter_authored_in(path, text)`: a missing `prologue` or
+`epilogue` target is then reported as that key's, at the value the file
+wrote (`file not found in prologue:` at `notes.md:4:11`), while the body's own
+failures keep naming the identity.
 
 `from_process` takes the home directory from `biscuit_file::home_dir()`:
 `HOME` on macOS and Linux, `USERPROFILE` on native Windows (`HOME` alone does
@@ -333,6 +338,14 @@ their reference check, pre-flight, lifecycle expressions, and composition
 read through one memo. A root composition run from a library with none
 attached builds its own for that run, so two separate compositions never
 share a memo or a read set.
+
+`md compose` attaches its remote-fetch runtime before the reference check
+too (`ComposeOptions::with_shared_remote_fetch_under`, built under the
+command's `--allow host=HOST` values, cache root, and `network` setting
+without handing the reference check the configuration's other grants), so a
+URL that the frontmatter reads and the body shows is requested once, by the
+reference check, and reused by composition and by the passive composition of
+a combined failure report.
 
 ### Reading the read set
 

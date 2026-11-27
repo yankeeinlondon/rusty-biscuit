@@ -48,6 +48,10 @@ command collectors, the approval and slot-approval entries,
 `transclusions_with_options`) first calls `admitted_document(document)`: that
 plus, for a source-less `Markdown` (not one with `with_context_identity`),
 the request's admitted file path, attached without re-reading the buffer.
+A generated body beneath a file's frontmatter (Claudine's inline prompt)
+names that file and its text with `with_frontmatter_authored_in`, read only
+by `InclusionSite::of_frontmatter_value` and the graph's `prologue`/`epilogue`
+`value_location`, so a section failure keeps its key and authored position.
 Never decide file identity from the raw `Markdown` source at a root; never
 call `admitted_document` for `as_markdown` content or inside the pipeline
 (nested content composes against the root source without being that file).
@@ -176,6 +180,35 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 `same_instance`, the observation log (`read_mark`, `observations_since`),
 `memo_generation`, and `record_entry` (cache replay into the read set).
 
+A dry run's `PassiveSession` carries `PassiveObservations` (`passive.rs`):
+one `DataRuntime`, one `simplified_schema::resolve::buffers::SharedReads`
+(`local_reads()`: every local source's bytes, keyed by `SourceBuffers::key`,
+first read wins, failures not kept), and one `RemoteFetchRuntime` per authorization
+(`RemoteFetchRuntime::authorizes_like`: policy, `network`, concurrency,
+freshness, cache-only, store). `with_passive_session` attaches its data
+runtime when none is attached, `build_remote_fetch_runtime` returns the held
+runtime for its policy, an already attached runtime is kept as
+`RemoteFetchRuntime::without_store` (its slot map shared, nothing persisted),
+and `SlotSession::for_request` (or `with_passive_observations`) fetches slot
+URLs through the held runtime for the grants' policy. A host checking one
+invocation in several passes gives each `session.sharing_observations()`
+(fresh deferrals, same observations); Claudine's `document_check::Check::session`
+and `SequenceCheckRequest::session` do. Authorization is per read: the
+runtime's own policy check and the slot gate run before any memo is consulted.
+Local readers in a dry run read through `local_reads()`: `RunLocalCache`
+(`with_shared_reads`, set from the session by the root pipeline and
+`graph.rs::make_cache`) for document and heading loads, `passive::read_local_source`
+for `::code`, `Markdown::load_observed` in pre-flight collect, and the
+thread scope (`buffers::enter_shared_reads`, entered by
+`run_compose_pipeline_node`, `build_graph_inner`, and `validate`) for schema
+files (`buffers::read` consults it after guards) and `Markdown::try_from`,
+which reads through the scope in force. `verify_descendants` opens afresh.
+The one open is `buffers::open_source` (counted per path by
+`simplified_schema::work_counters::source_opens`; `md`'s `test-fixtures`
+seam `MD_TEST_SOURCE_OPENS`, `cli/src/source_open_log.rs`, logs each).
+Tests: `lib/tests/l1/passive_shared_observations.rs`,
+`cli/tests/l1/compose_shared_observations.rs`.
+
 A `SlotSession` owns one `DataRuntime` too (`SlotSession::new(data)`, or the
 request's via `options.data_runtime()`), and `observe_properties` (DMLS
 property observation) runs every property of one pass over that runtime and
@@ -209,7 +242,7 @@ every surface").
   unnameable input is refused). Frontmatter interpolation always excludes
   `$schema` (`with_schema_excluded`): only the slot resolver evaluates slots.
   `ExpressionError::SlotReadRefused` is never recovered (`try_frontmatter`
-  re-raises it). With no gate nothing changes.
+  re-raises it, with every `withholds_result()` failure). With no gate nothing changes.
 
 - **Memo shape** (`runtime.rs`): contracts are prepared once per document
   context and written text. Three layers share one generation: a raw source

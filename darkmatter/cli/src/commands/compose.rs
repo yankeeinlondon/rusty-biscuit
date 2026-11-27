@@ -387,6 +387,18 @@ pub fn run_compose(
         sink.reads_from(&data_runtime);
     }
     options = options.with_data_runtime(data_runtime);
+    // Likewise one single-flight remote-fetch runtime for every pass (the
+    // reference check, a combined report's passive composition, pre-flight,
+    // and composition), so each URL is fetched once. It is built under the
+    // remote-read configuration and cache root, and after the configuration
+    // snapshot so it fetches under the configured `network` permission; the
+    // configuration itself (its ICMP grants) reaches only composition.
+    if let Some(cache_root) = cache_root {
+        options = options.with_cache_root(cache_root);
+    }
+    options = options
+        .with_config_snapshot(std::sync::Arc::clone(&config_snapshot))
+        .with_shared_remote_fetch_under(&remote_config);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
         ComposeRequest::with_context(
             options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)),
@@ -518,20 +530,10 @@ pub fn run_compose(
     options = options.with_perf(perf);
     options = options.with_remote_read_config(remote_config);
     options = options.with_allow_remote_transclusion(true);
-    if let Some(cache_root) = cache_root {
-        options = options.with_cache_root(cache_root);
-    }
     // `--indent` only parses 2, 4, or 8.
     if let Some(indentation) = indent.and_then(Indentation::from_spaces) {
         options = options.with_indentation(indentation);
     }
-    // Share one single-flight remote-fetch runtime between the pre-flight
-    // approval walk and the compose pass so each remote URL is fetched once,
-    // not once per stage. Must follow the remote-read-config and cache-root
-    // wiring above so the shared runtime inherits both, and follow the
-    // configuration snapshot so it fetches under the configured `network`
-    // permission.
-    options = options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)).with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
     perf_stage("build options", build_options_dur);
@@ -621,7 +623,7 @@ pub fn run_compose(
         // join the stop's report.
         match check_request
             .as_ref()
-            .and_then(|check_request| combined::after_inclusion_stop(&md, check_request, policy, &error, &launch_dir))
+            .and_then(|check_request| combined::after_inclusion_stop(&md, check_request, policy, &error, &launch_dir, sink.is_some()))
         {
             Some(combined) => {
                 combined.deliver(sink, &launch_dir);

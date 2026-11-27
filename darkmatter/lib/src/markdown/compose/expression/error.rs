@@ -780,6 +780,29 @@ impl ExpressionError {
         }
     }
 
+    /// Whether this failure means the read has no result yet, rather than a
+    /// failed one: a dry run did not attempt it ([`Unavailable`]), an editor
+    /// cannot observe it yet ([`ObservationPending`]), or a schema slot's gate
+    /// refused it before anything was opened ([`SlotReadRefused`]). Looks
+    /// through collection callback wrappers.
+    ///
+    /// Every wrapper that turns a failure into data (`try_frontmatter`'s
+    /// `{ ok: false }`, `try`'s fallback) must propagate such a failure
+    /// unchanged, so the surface that started the evaluation keeps its
+    /// deferral instead of settling on a value the run may never produce.
+    /// [`is_recoverable_read_failure`](Self::is_recoverable_read_failure) is
+    /// `false` for each of them.
+    ///
+    /// [`Unavailable`]: ExpressionError::Unavailable
+    /// [`ObservationPending`]: ExpressionError::ObservationPending
+    /// [`SlotReadRefused`]: ExpressionError::SlotReadRefused
+    pub fn withholds_result(&self) -> bool {
+        matches!(
+            self.without_callbacks(),
+            Self::Unavailable(_) | Self::ObservationPending { .. } | Self::SlotReadRefused { .. }
+        )
+    }
+
     /// Whether `try(expr, fallback)` may replace this failure of `expr` with
     /// its fallback: a typed failure to read a source that the request was
     /// allowed to read.
@@ -1284,6 +1307,21 @@ mod tests {
                     false,
                 ),
                 ("UnknownFunction", ExpressionError::UnknownFunction { name: "lenght".into() }, false),
+                (
+                    "Unavailable",
+                    ExpressionError::Unavailable(Box::new(
+                        crate::markdown::compose::passive::DeferralReason::NetworkNeedsApproval { url: "https://x/a.md".into() },
+                    )),
+                    false,
+                ),
+                (
+                    "ObservationPending",
+                    ExpressionError::ObservationPending {
+                        function: "frontmatter".into(),
+                        reason: crate::markdown::compose::expression::editor_reads::PendingReason::RemoteUnavailable,
+                    },
+                    false,
+                ),
                 ("Parse", ExpressionError::Parse("unexpected".into()), false),
                 ("InvalidCallback", ExpressionError::InvalidCallback { span: 0..1, message: "x".into() }, false),
                 ("Callback over a non-read failure", callback(other("upper")), false),
@@ -1450,6 +1488,22 @@ mod tests {
                 assert_eq!(error.is_recoverable_read_failure(), recoverable, "{name}");
                 let wrapped = callback(callback(error));
                 assert_eq!(wrapped.is_recoverable_read_failure(), recoverable, "{name} inside two callbacks");
+            }
+        }
+
+        /// The variants with no result yet are exactly the three that no
+        /// recovery wrapper may absorb, and `try` never recovers one.
+        #[test]
+        fn only_a_read_with_no_result_yet_withholds_its_result_and_try_never_recovers_one() {
+            let withholding = ["Unavailable", "ObservationPending", "SlotReadRefused"];
+            for (name, error, _) in cases() {
+                let expected = withholding.iter().any(|variant| name.starts_with(variant));
+                assert_eq!(error.withholds_result(), expected, "{name}");
+                let wrapped = callback(callback(error));
+                assert_eq!(wrapped.withholds_result(), expected, "{name} inside two callbacks");
+                if expected {
+                    assert!(!wrapped.is_recoverable_read_failure(), "{name}");
+                }
             }
         }
 

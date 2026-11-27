@@ -92,6 +92,9 @@ pub struct SlotSession {
     data: DataRuntime,
     observations: Arc<SessionObservations>,
     remote: Option<RemoteFetchRuntime>,
+    /// A dry run's shared observations: the slots' remote runtime for a
+    /// fetch policy is the one every pass of the invocation reads through.
+    shared: Option<crate::markdown::compose::passive::PassiveObservations>,
     hosts: Vec<String>,
     network: Option<NetworkPermission>,
     repository_root: Option<PathBuf>,
@@ -213,6 +216,7 @@ impl SlotSession {
             data,
             observations: Arc::new(SessionObservations::supplied(CapturedObservations::default())),
             remote: None,
+            shared: None,
             hosts: Vec::new(),
             network: None,
             repository_root: None,
@@ -275,6 +279,7 @@ impl SlotSession {
             SessionObservations::for_request_in_checkout(options.context(), options.context_authority(), checkout)
         });
         session.remote = options.remote_fetch.clone();
+        session.shared = options.passive_session().map(|passive| passive.observations().clone());
         session.configuration = Configuration::CapturedFor(
             Arc::clone(request.config_snapshot()),
             Box::new(request.resolution_context().clone()),
@@ -306,6 +311,18 @@ impl SlotSession {
         session.configuration = Configuration::LoadFor(Box::new(context.clone()));
         session.observations = Arc::new(SessionObservations::for_context(context));
         session
+    }
+
+    /// Fetches the slots' URLs through a dry run's shared runtime for the
+    /// slots' fetch policy, so a URL the run's other passes fetched under
+    /// the same decision is not requested again. Each read is still judged
+    /// by this session's gate first. A session built
+    /// [`for_request`](Self::for_request) of a dry run shares its
+    /// observations already.
+    #[must_use]
+    pub fn with_passive_observations(mut self, observations: crate::markdown::compose::passive::PassiveObservations) -> Self {
+        self.shared = Some(observations);
+        self
     }
 
     /// Resolves no further than `mode`.
@@ -642,10 +659,22 @@ impl SlotSession {
         outcome
     }
 
+    /// The runtime slots fetch through: the grants' own policy, and in a
+    /// dry run the invocation's runtime for that policy, so a URL another
+    /// pass fetched under the same decision is not requested again. The
+    /// slot gate still judges each read before the fetch.
+    fn slot_remote(&self, grants: &SlotGrants) -> RemoteFetchRuntime {
+        let runtime = grants.remote_runtime(self.remote.as_ref());
+        match &self.shared {
+            Some(shared) => shared.remote(runtime),
+            None => runtime,
+        }
+    }
+
     fn evaluator(&self, grants: &Arc<SlotGrants>, gates: Arc<dyn SlotGates>) -> SlotEvaluator {
         let evaluator = SlotEvaluator::new(self.data.clone())
             .with_gates(gates)
-            .with_remote(grants.remote_runtime(self.remote.as_ref()))
+            .with_remote(self.slot_remote(grants))
             .with_session_observations(Arc::clone(&self.observations));
         match self.limits {
             Some(limits) => evaluator.with_limits(limits),

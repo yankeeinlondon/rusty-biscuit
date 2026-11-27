@@ -290,6 +290,7 @@ impl Source<'_> {
                 target.display()
             )),
         )
+        .with_reference_target(target)
     }
 
     /// The target's own problems, followed by the reference that led there.
@@ -299,6 +300,9 @@ impl Source<'_> {
             self.reference.reference,
             target.display()
         )));
+        if let Some(reference) = problems.last_mut() {
+            reference.reference_target = Some(target.to_path_buf());
+        }
         ConfigError::new(ConfigErrorKind::InvalidReference, problems)
     }
 }

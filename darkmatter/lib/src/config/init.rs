@@ -826,4 +826,5 @@ fn reference_error(declared_in: &Path, revision: ConfigRevision, reference: &str
         revision,
         format!("the `permissions` reference `{reference}` names `{}`, {what}", target.display()),
     )
+    .with_reference_target(target)
 }

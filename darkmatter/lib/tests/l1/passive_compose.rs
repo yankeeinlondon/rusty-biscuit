@@ -341,6 +341,159 @@ fn a_value_declared_absent_leaves_only_its_readers_as_written() {
     assert!(matches!(control, MarkdownError::SchemaValidationFailed { .. }), "{control:?}");
 }
 
+/// A value declared written at launch (a key the run writes before this
+/// composition, or a member such as `seq.outputs`) is unavailable whatever
+/// it holds now: a `::block` reading it stays whole as a conditional, and a
+/// schema problem with it is set aside as one `SchemaCheck` deferral. The
+/// same document with nothing declared is judged on the value it holds.
+#[test]
+fn a_value_declared_written_is_read_as_known_only_at_launch() {
+    let dir = TempDir::new().unwrap();
+    let text = "---\ntopic: missing\n$schema:\n  topic: enum(a)\n---\n\n::block when=\"topic == 'a'\"\nGuarded.\n::end-block\n";
+    let path = write(dir.path(), "doc.md", text);
+    let options = options_in(dir.path(), &path).with_dry_run();
+    let session = options.passive_session().cloned().unwrap();
+    let written = DeferralReason::WrittenAtLaunch { name: "topic".into() };
+    session.defer_written("topic", written.clone());
+
+    let composed = compose(&path, options).unwrap_or_else(|error| panic!("the dry run failed: {error}"));
+
+    let body = composed.content();
+    assert!(body.contains("::block when=\"topic == 'a'\""), "{body}");
+    assert!(body.contains("Guarded."), "{body}");
+    let deferrals = session.deferrals();
+    for construct in [DeferredConstruct::BlockCondition, DeferredConstruct::SchemaCheck] {
+        assert!(
+            deferrals.iter().any(|deferral| deferral.construct == construct && deferral.reason == written),
+            "{construct:?}: {deferrals:?}"
+        );
+    }
+    assert_eq!(session.written_value("fm.topic"), Some(written));
+
+    let control = compose(&path, options_in(dir.path(), &path).with_dry_run()).expect_err("an undeclared value is judged");
+    assert!(matches!(control, MarkdownError::SchemaValidationFailed { .. }), "{control:?}");
+}
+
+/// A written member is deferred by what a read selects, not by how it is
+/// spelled: with the host's `seq.outputs` declared written, dotted,
+/// bracket, parenthesized, and computed-key reads of it stay as written in
+/// an interpolation and a `::block` condition, while the same spellings of
+/// the static `seq.index` compose. The document's own `seq:` property,
+/// read through `fm.` in any spelling, is not the host's and composes too.
+#[test]
+fn a_written_member_is_deferred_in_every_spelling_of_its_selection() {
+    use darkmatter::markdown::compose::expression::{Availability, BindingView, HostGlobals, RuntimeBinding, ScopeId};
+
+    let deferred = ["seq.outputs", "seq['outputs']", "(seq).outputs", "seq['out' + 'puts']", "seq.outputs[0]"];
+    let composed = [
+        ("seq.index", "2"),
+        ("seq['index']", "2"),
+        ("(seq).index", "2"),
+        ("seq['in' + 'dex']", "2"),
+        ("fm.seq.outputs[0]", "static"),
+        ("fm['seq'].outputs[0]", "static"),
+        ("fm.seq['outputs'][0]", "static"),
+    ];
+    let mut text = String::from("---\nseq:\n  outputs: [static]\n---\n");
+    for read in deferred.iter().chain(composed.iter().map(|(read, _)| read)) {
+        text.push_str(&format!("Read <{{{{ {read} }}}}>.\n\n::block when=\"{read} != null\"\nGuarded by {read}.\n::end-block\n\n"));
+    }
+    let dir = TempDir::new().unwrap();
+    let path = write(dir.path(), "doc.md", &text);
+    let globals = || {
+        let view = BindingView::builder(ScopeId::new("host.sequence"))
+            .declare("seq", "The step's sequence values.", Availability::Available)
+            .build()
+            .unwrap();
+        HostGlobals::associate(
+            std::sync::Arc::new(view),
+            [("seq".to_string(), RuntimeBinding::eager(serde_json::json!({ "index": 2, "outputs": [] })))],
+        )
+        .unwrap()
+    };
+    let options = options_in(dir.path(), &path).with_host_globals(globals()).with_dry_run();
+    let session = options.passive_session().cloned().unwrap();
+    let written = DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() };
+    session.defer_written("seq.outputs", written.clone());
+
+    let body = compose(&path, options).unwrap_or_else(|error| panic!("the dry run failed: {error}")).content().to_string();
+
+    for read in deferred {
+        assert!(body.contains(&format!("Read <{{{{ {read} }}}}>.")), "`{read}` must stay as written: {body}");
+        assert!(body.contains(&format!("::block when=\"{read} != null\"")), "`{read}` must stay conditional: {body}");
+    }
+    for (read, value) in composed {
+        assert!(body.contains(&format!("Read <{value}>.")), "`{read}` must compose to `{value}`: {body}");
+        assert!(body.contains(&format!("Guarded by {read}.")) && !body.contains(&format!("when=\"{read} != null\"")), "{read}: {body}");
+    }
+    let deferrals = session.deferrals();
+    for construct in [DeferredConstruct::Interpolation, DeferredConstruct::BlockCondition] {
+        let count = deferrals.iter().filter(|deferral| deferral.construct == construct && deferral.reason == written).count();
+        assert_eq!(count, deferred.len(), "{construct:?}: {deferrals:#?}");
+    }
+
+    // The control: nothing declared written, so every spelling composes.
+    let control = compose(&path, options_in(dir.path(), &path).with_host_globals(globals()).with_dry_run()).unwrap();
+    assert!(!control.content().contains("{{"), "{}", control.content());
+}
+
+/// A `::map`/`::filter` callback and its options read a written member
+/// through the same selection rule: every spelling of `seq.outputs` meets
+/// the dry run's unavailable value exactly as the dotted one does (how a
+/// collection grades it is its own rule), while the same spellings of the
+/// static `seq.index` compose the items.
+#[test]
+fn a_collection_callback_reads_a_written_member_alike_in_every_spelling() {
+    use darkmatter::markdown::compose::expression::{Availability, BindingView, HostGlobals, RuntimeBinding, ScopeId};
+    use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+
+    let dir = TempDir::new().unwrap();
+    let globals = || {
+        let view = BindingView::builder(ScopeId::new("host.sequence"))
+            .declare("seq", "The step's sequence values.", Availability::Available)
+            .build()
+            .unwrap();
+        HostGlobals::associate(
+            std::sync::Arc::new(view),
+            [("seq".to_string(), RuntimeBinding::eager(serde_json::json!({ "index": 2, "outputs": [] })))],
+        )
+        .unwrap()
+    };
+    // The body, or the codes of the failure, of each site reading `read`.
+    let outcome = |read: &str, written: bool| -> Vec<Result<String, Vec<String>>> {
+        [
+            format!("::filter items \"i => {read}\"\n- {{{{i}}}}\n::end-filter\n"),
+            format!("::map items \"i => i\" filter=\"i => {read}\"\n- {{{{i}}}}\n::end-map\n"),
+            format!("::map items \"i => i\" when=\"{read}\"\n- {{{{i}}}}\n::end-map\n"),
+        ]
+        .iter()
+        .map(|site| {
+            let path = write(dir.path(), "doc.md", &format!("---\n$schema:\n  items: \"number[]\"\nitems: [1, 2]\n---\n{site}"));
+            let options = options_in(dir.path(), &path).with_host_globals(globals()).with_dry_run();
+            if written {
+                let session = options.passive_session().cloned().unwrap();
+                session.defer_written("seq.outputs", DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() });
+            }
+            compose(&path, options)
+                .map(|composed| composed.content().replace(read, "READ"))
+                .map_err(|error| error_diagnostics(&error).into_iter().map(|diagnostic| diagnostic.code).collect())
+        })
+        .collect()
+    };
+
+    let dotted = outcome("length(seq.outputs) == 0", true);
+    assert_ne!(dotted, outcome("length(seq.outputs) == 0", false), "the dotted read must meet the written value");
+    for read in ["length(seq['outputs']) == 0", "length((seq).outputs) == 0", "length(seq['out' + 'puts']) == 0"] {
+        assert_eq!(outcome(read, true), dotted, "`{read}` must read the written member as the dotted form does");
+    }
+    for read in ["seq.index == 2", "seq['index'] == 2", "(seq).index == 2"] {
+        for site in outcome(read, true) {
+            let body = site.unwrap_or_else(|codes| panic!("`{read}` must compose: {codes:?}"));
+            assert!(body.contains("- 1") && body.contains("- 2"), "`{read}`: {body}");
+        }
+    }
+}
+
 /// An inclusion whose target reads a value the dry run left as written (a
 /// declared-absent input, a `$( … )` value) names no path: the `::file` and
 /// `::code` lines stay as written, `prologue`/`epilogue` contribute nothing,
@@ -383,4 +536,198 @@ fn an_inclusion_whose_target_reads_a_deferred_value_is_left_as_written() {
     let composed = compose(&path, options_in(dir.path(), &path).with_dry_run()).unwrap();
     assert_eq!(composed.content().matches("Included.").count(), 3, "{}", composed.content());
     assert!(composed.content().contains("fn a() {}"));
+}
+
+/// A host's `seq` global, `{ index: 2, outputs: [] }`, as a sequence step
+/// binds it.
+fn sequence_globals() -> darkmatter::markdown::compose::expression::HostGlobals {
+    use darkmatter::markdown::compose::expression::{Availability, BindingView, HostGlobals, RuntimeBinding, ScopeId};
+    let view = BindingView::builder(ScopeId::new("host.sequence"))
+        .declare("seq", "The step's sequence values.", Availability::Available)
+        .build()
+        .unwrap();
+    HostGlobals::associate(
+        std::sync::Arc::new(view),
+        [("seq".to_string(), RuntimeBinding::eager(serde_json::json!({ "index": 2, "outputs": [] })))],
+    )
+    .unwrap()
+}
+
+/// What a dry run of `body` under `items: [1, 2]`, with the host's `seq`
+/// and `written` declared written at launch, produced: the composed body
+/// and the deferrals, or the codes of its failure.
+fn collection_dry_run(dir: &Path, body: &str, written: &[&str]) -> Result<(String, Vec<Deferral>), Vec<String>> {
+    use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+    let text = format!("---\n$schema:\n  items: \"number[]\"\nitems: [1, 2]\ntitle: Kept\n---\nBefore {{{{ title }}}}.\n\n{body}\nAfter {{{{ title }}}}.\n");
+    let path = write(dir, "doc.md", &text);
+    let options = options_in(dir, &path).with_host_globals(sequence_globals()).with_dry_run();
+    let session = options.passive_session().cloned().unwrap();
+    for name in written {
+        session.defer_written(name, DeferralReason::WrittenAtLaunch { name: (*name).to_string() });
+    }
+    compose(&path, options)
+        .map(|composed| (composed.content().to_string(), session.deferrals()))
+        .map_err(|error| error_diagnostics(&error).into_iter().map(|diagnostic| diagnostic.code).collect())
+}
+
+/// Asserts `region` stayed as written and inert beside composed text, with
+/// exactly one `Collection` deferral for `reason`.
+fn assert_collection_deferred(outcome: Result<(String, Vec<Deferral>), Vec<String>>, region: &str, reason: &DeferralReason) {
+    let (body, deferrals) = outcome.unwrap_or_else(|codes| panic!("`{region}` must defer, not fail: {codes:?}"));
+    assert!(body.contains(region), "`{region}` must stay as written: {body}");
+    assert!(body.contains("Before Kept.") && body.contains("After Kept."), "{body}");
+    let collections: Vec<&Deferral> =
+        deferrals.iter().filter(|deferral| deferral.construct == DeferredConstruct::Collection).collect();
+    assert_eq!(collections.len(), 1, "{deferrals:#?}");
+    assert_eq!(&collections[0].reason, reason, "{region}");
+    assert_eq!(collections[0].authored, region);
+    assert!(collections[0].line.is_some(), "{:?}", collections[0]);
+}
+
+/// A collection whose source the run writes before this composition is
+/// left whole and inert: its body's `{{ i }}` and `::file` target, which
+/// read a name only the expansion binds, are not evaluated or read. A
+/// write to an unrelated key leaves the collection to compose.
+#[test]
+fn a_collection_whose_source_is_written_at_launch_is_left_whole_and_inert() {
+    let dir = TempDir::new().unwrap();
+    for region in [
+        "::map items \"i => i * 10\"\n- {{ i }}\n::file ./{{ i }}.md\n::end-map\n",
+        "::filter items \"i => i > 1\"\n- {{ i }}\n::file ./{{ i }}.md\n::end-filter\n",
+    ] {
+        let reason = DeferralReason::WrittenAtLaunch { name: "items".into() };
+        assert_collection_deferred(collection_dry_run(dir.path(), region, &["items"]), region, &reason);
+
+        let control = region.replace("::file ./{{ i }}.md\n", "");
+        let (body, _) = collection_dry_run(dir.path(), &control, &["other"]).unwrap_or_else(|codes| panic!("{codes:?}"));
+        assert!(!body.contains("::map") && !body.contains("::filter") && body.contains("- 2"), "{body}");
+    }
+}
+
+/// Every place a collection evaluates an expression (positional transform
+/// or predicate, `filter=`, `while=`, `until=`, `sort=`, and `when=`, on
+/// both directives) defers the whole collection when the expression reads
+/// a written member, and composes when it reads the static one.
+#[test]
+fn every_collection_option_defers_an_unavailable_read_and_composes_a_static_one() {
+    let dir = TempDir::new().unwrap();
+    let sites = |read: &str, key: &str| -> Vec<String> {
+        let mut sites = vec![
+            format!("::map items \"i => {read} ? i : 0\"\n- {{{{ i }}}}\n::end-map\n"),
+            format!("::filter items \"i => {read}\"\n- {{{{ i }}}}\n::end-filter\n"),
+        ];
+        for (directive, callback) in [("map", " \"i => i\""), ("filter", " \"i => true\"")] {
+            for option in [
+                format!("filter=\"i => {read}\""),
+                format!("while=\"i => {read}\""),
+                format!("until=\"i => !({read})\""),
+                format!("sort=\"i => {key}\""),
+                format!("when=\"{read}\""),
+            ] {
+                sites.push(format!("::{directive} items{callback} {option}\n- {{{{ i }}}}\n::end-{directive}\n"));
+            }
+        }
+        sites
+    };
+    let written = DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() };
+    let deferred = sites("length(seq.outputs) == 0", "length(seq.outputs) + i");
+    assert_eq!(deferred.len(), 12);
+    for region in &deferred {
+        assert_collection_deferred(collection_dry_run(dir.path(), region, &["seq.outputs"]), region, &written);
+    }
+    for region in sites("seq.index == 2", "seq.index + i") {
+        let (body, deferrals) =
+            collection_dry_run(dir.path(), &region, &["seq.outputs"]).unwrap_or_else(|codes| panic!("`{region}`: {codes:?}"));
+        assert!(body.contains("- 1") && body.contains("- 2") && !body.contains("::end-"), "`{region}`: {body}");
+        assert!(deferrals.is_empty(), "`{region}`: {deferrals:?}");
+    }
+}
+
+/// A dry run defers only what it cannot evaluate: a genuine failure on
+/// known data still fails, beside a written member it never reaches.
+#[test]
+fn a_genuine_collection_failure_on_known_data_still_fails() {
+    let dir = TempDir::new().unwrap();
+    let cases = [
+        ("::map items \"i => i\" sort=\"i => i > 1\"\n- {{ i }}\n::end-map\n", "dm.collection.invalid_sort_key"),
+        ("::filter items \"i => true\" sort=\"i => i > 1\"\n- {{ i }}\n::end-filter\n", "dm.collection.invalid_sort_key"),
+        ("::filter items \"i => i / 0 > 1\"\n- {{ i }}\n::end-filter\n", "dm.collection.callback_failed"),
+    ];
+    for (region, code) in cases {
+        let codes = collection_dry_run(dir.path(), region, &["seq.outputs"]).map(|(body, _)| body).expect_err(region);
+        assert!(codes.iter().any(|found| found == code), "`{region}`: {codes:?}");
+    }
+}
+
+/// A predicate that meets the unavailable value only at a later item
+/// discards the copies earlier items produced: the collection is left
+/// whole, never half expanded.
+#[test]
+fn a_collection_deferred_at_a_later_item_keeps_no_partial_expansion() {
+    let dir = TempDir::new().unwrap();
+    let region = "::filter items \"i => i == 1 || length(seq.outputs) > 0\"\n- item {{ i }}\n::end-filter\n";
+    let written = DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() };
+    let outcome = collection_dry_run(dir.path(), region, &["seq.outputs"]);
+    if let Ok((body, _)) = &outcome {
+        assert!(!body.contains("- item 1"), "{body}");
+    }
+    assert_collection_deferred(outcome, region, &written);
+}
+
+/// A page block inside a collection whose condition reads a written
+/// member stays with its directive lines in each copy, as a page block
+/// outside a collection does, and the collection around it expands.
+#[test]
+fn a_page_block_inside_a_collection_defers_like_one_outside() {
+    let dir = TempDir::new().unwrap();
+    let region = "::map items \"i => i\"\n- item {{ i }}\n::block when=\"length(seq.outputs) > 0\"\nguarded {{ i }}\n::end-block\n::end-map\n";
+    let (body, deferrals) = collection_dry_run(dir.path(), region, &["seq.outputs"]).unwrap_or_else(|codes| panic!("{codes:?}"));
+    assert!(!body.contains("::map"), "{body}");
+    for item in ["1", "2"] {
+        assert!(body.contains(&format!("- item {item}\n::block when=\"length(seq.outputs) > 0\"\nguarded {item}\n::end-block")), "{body}");
+    }
+    let written = DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() };
+    assert!(
+        deferrals.iter().all(|deferral| deferral.construct == DeferredConstruct::BlockCondition && deferral.reason == written),
+        "{deferrals:#?}"
+    );
+    assert!(!deferrals.is_empty());
+
+    let (body, _) = collection_dry_run(dir.path(), region, &[]).unwrap_or_else(|codes| panic!("{codes:?}"));
+    assert!(!body.contains("::block") && !body.contains("guarded"), "{body}");
+}
+
+/// An effectful function in a callback is not called; the collection is
+/// deferred for the effect, and a pure callback composes.
+#[test]
+fn an_effectful_callback_defers_its_collection() {
+    let dir = TempDir::new().unwrap();
+    let region = "::filter items \"i => has_alias('ll')\"\n- {{ i }}\n::end-filter\n";
+    let reason = DeferralReason::ShellProbe { function: "has_alias".into() };
+    assert_collection_deferred(collection_dry_run(dir.path(), region, &[]), region, &reason);
+
+    let (body, _) = collection_dry_run(dir.path(), &region.replace("has_alias('ll')", "upper('ll') == 'LL'"), &[])
+        .unwrap_or_else(|codes| panic!("{codes:?}"));
+    assert!(body.contains("- 1") && body.contains("- 2"), "{body}");
+}
+
+/// A `::file`/`::code` whose `when=` reads a written member names no
+/// decision: the directive stays as written and is a deferred transclusion,
+/// never a condition failure, and its static control includes the file.
+#[test]
+fn a_transclusion_condition_that_reads_a_written_member_is_left_as_written() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "a.md", "Included.\n");
+    let region = "::file ./a.md when=\"length(seq.outputs) > 0\"\n";
+    let (body, deferrals) = collection_dry_run(dir.path(), region, &["seq.outputs"]).unwrap_or_else(|codes| panic!("{codes:?}"));
+    assert!(body.contains(region.trim_end()) && !body.contains("Included."), "{body}");
+    let written = DeferralReason::WrittenAtLaunch { name: "seq.outputs".into() };
+    assert!(
+        deferrals.iter().any(|deferral| deferral.construct == DeferredConstruct::Transclusion && deferral.reason == written),
+        "{deferrals:#?}"
+    );
+
+    let control = region.replace("length(seq.outputs) > 0", "seq.index == 2");
+    let (body, _) = collection_dry_run(dir.path(), &control, &["seq.outputs"]).unwrap_or_else(|codes| panic!("{codes:?}"));
+    assert!(body.contains("Included.") && !body.contains("::file"), "{body}");
 }

@@ -34,6 +34,11 @@ pub(crate) struct FileStore {
 }
 
 impl FileStore {
+    /// The root directory this store writes under.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Records `root` without touching the filesystem.
     pub fn at(root: PathBuf) -> Self {
         Self { root }

@@ -339,12 +339,17 @@ fn rewrite_value<L: EvaluationLookup>(
             let mut scoped = reborrow(&mut scope.before_eval).map(|check| {
                 move |new: &[ComposeWarning]| check(&new.iter().cloned().map(present).collect::<Vec<_>>())
             });
+            let item_scopes = collection_item_scopes(s);
+            let outside_item_scope = |span: Range<usize>, expression: Option<&str>| {
+                !reads_item_binding(&item_scopes, &span, expression)
+            };
             let (value, count, warnings, trace) = interpolate_value_traced(
                 s,
                 evaluator,
                 policy,
                 "frontmatter-interpolation",
                 scoped.as_mut().map(|check| check as &mut dyn FnMut(&[ComposeWarning]) -> Result<(), MarkdownError>),
+                (!item_scopes.is_empty()).then_some(&outside_item_scope as &dyn Fn(Range<usize>, Option<&str>) -> bool),
             )
             .map_err(|failure| {
                 let mut failure = LocatedFrontmatterError::in_string(s, failure);
@@ -404,6 +409,55 @@ fn rewrite_value<L: EvaluationLookup>(
         // Number, Bool, Null — pass through
         other => Ok((other.clone(), 0, vec![])),
     }
+}
+
+/// The body of each `::map`/`::filter` region in `text`, with every name the
+/// region (or one enclosing it) binds for its items: the positional
+/// callback's pattern, or the default `i`.
+///
+/// A frontmatter value holding such a region (an inline `prompt:`) is a
+/// template whose regions only body composition expands, item by item. Its
+/// frontmatter interpolation has no item to bind, so an expression there
+/// that reads an item name is the collection's, left as written, never an
+/// undeclared document property read as `null`.
+fn collection_item_scopes(text: &str) -> Vec<(Range<usize>, Vec<String>)> {
+    use super::collection_blocks::{CollectionRegion, scan_collection_regions_lenient};
+    use super::expression::parse_callback_spanned;
+
+    fn walk(regions: &[CollectionRegion], enclosing: &[String], scopes: &mut Vec<(Range<usize>, Vec<String>)>) {
+        for region in regions {
+            let mut names = enclosing.to_vec();
+            match region.header.callback.as_ref().map(|callback| parse_callback_spanned(callback.text.trim())) {
+                Some(Ok(callback)) => names.extend(callback.pattern.erase().names().map(str::to_string)),
+                Some(Err(_)) => {}
+                None => names.push("i".to_string()),
+            }
+            walk(&region.children, &names, scopes);
+            scopes.push((region.body_span.clone(), names));
+        }
+    }
+
+    if !text.contains("::map") && !text.contains("::filter") {
+        return Vec::new();
+    }
+    let mut scopes = Vec::new();
+    walk(&scan_collection_regions_lenient(text).regions, &[], &mut scopes);
+    scopes
+}
+
+/// Whether the `{{ … }}` at `span`, whose source is `expression`, sits in a
+/// body of `scopes` and reads one of the names bound there.
+fn reads_item_binding(scopes: &[(Range<usize>, Vec<String>)], span: &Range<usize>, expression: Option<&str>) -> bool {
+    use super::expression::static_access_reads;
+    let Some(expression) = expression else { return false };
+    let names: Vec<&String> = scopes
+        .iter()
+        .filter(|(body, _)| body.start <= span.start && span.end <= body.end)
+        .flat_map(|(_, names)| names)
+        .collect();
+    !names.is_empty()
+        && parse(expression.trim())
+            .is_ok_and(|parsed| static_access_reads(&parsed).iter().any(|read| names.iter().any(|name| *name == read.root())))
 }
 
 /// Replaces each authored whole-leaf literal token below `segments` with the

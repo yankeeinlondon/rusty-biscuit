@@ -958,9 +958,25 @@ fn collect_document(
         scan_sites?.site_at(scan_content, span, line_offset)
     };
     let mut scoped_walked: HashMap<(String, u64), std::sync::Arc<super::PreflightGraphNode>> = HashMap::new();
-    for directive in transclusion::parse_directives_in(scan_content, Some(scan_data), scan_ctx.clone(), line_offset)
-        .map_err(|error| error.at_authored_directive(scan_document, scan_origin, line_offset))?
-    {
+    // A dry run leaves a directive whose line holds a value it could not
+    // produce as written, as composition does: its target is no path.
+    let session = options.passive_session();
+    let deferred = |line: &str| session.and_then(|session| session.deferred_span_in(line));
+    let (directives, set_aside) =
+        transclusion::parse_directives_deferring(scan_content, Some(scan_data), scan_ctx.clone(), line_offset, &deferred)
+            .map_err(|error| error.at_authored_directive(scan_document, scan_origin, line_offset))?;
+    if let Some(session) = session {
+        for directive in set_aside {
+            session.record(crate::markdown::compose::passive::Deferral {
+                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                reason: directive.reason,
+                authored: directive.text,
+                key: None,
+                line: None,
+            });
+        }
+    }
+    for directive in directives {
         let site = scoped_site(&directive.span);
         // A target failure names the directive's opener in its file.
         let inclusion = || {
@@ -987,12 +1003,18 @@ fn collect_document(
                 directive.line,
                 scan_ctx.clone(),
             ) {
+                // A file the run's initializer appends to is not walked;
+                // composition leaves it unchecked.
+                Ok(transclusion::ResolvedTarget::File { path, .. }) if transclusion::changed_before_read(options, &path) => continue,
                 Ok(transclusion::ResolvedTarget::File { path, resolved, .. }) => {
                     super::PreflightResolvedTarget::File { path, resolved }
                 }
                 Ok(transclusion::ResolvedTarget::Url { url, .. }) => super::PreflightResolvedTarget::Url(url),
                 Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
                 // Composition removes it, so nothing of it can run.
+                // A target the run creates first is not walked; composition
+                // leaves it unchecked.
+                Err(e) if transclusion::created_before_read(options, &e).is_some() => continue,
                 Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
                 Err(e) => return Err(at_directive(e).into()),
             };
@@ -1016,12 +1038,18 @@ fn collect_document(
             directive.line,
             scan_ctx.clone(),
         ) {
+            // A file the run's initializer appends to is not walked;
+            // composition leaves it unchecked.
+            Ok(transclusion::ResolvedTarget::File { path, .. }) if transclusion::changed_before_read(options, &path) => continue,
             Ok(r) => r,
             // Remote transclusion disabled: the child cannot appear in the
             // composed output, so its commands can never execute.
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
             // A target composition removes (absent under the recovery, or
             // any failure under `ignore_invalid`) contributes no command.
+            // A target the run creates first is not walked; composition
+            // leaves it unchecked.
+            Err(e) if transclusion::created_before_read(options, &e).is_some() => continue,
             Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
             Err(e) => return Err(at_directive(e).into()),
         };
@@ -1037,7 +1065,7 @@ fn collect_document(
                 let child = match reused {
                     Some(child) => child,
                     None => {
-                        let mut child = Markdown::try_from(path.as_path())
+                        let mut child = Markdown::load_observed(path.as_path(), options.passive_session().map(|session| session.observations().local_reads()))
                             .map_err(|error| transclusion::target_failure_at(error, &path, inclusion()))?;
                         transclusion::apply_directive_set_overlay(&mut child, &directive.options);
                         let child_options = transclusion::markdown_child_options(
@@ -1174,6 +1202,20 @@ fn collect_document(
         // A target failure names the key, or the list entry, that wrote it.
         let inclusion = || transclusion::InclusionSite::of_frontmatter_value(markdown, key, index, reference);
         let at_value = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
+        // A dry run's value it could not produce names no target, as in
+        // composition.
+        if let Some((session, reason)) =
+            options.passive_session().and_then(|session| Some((session, session.deferred_reference(reference)?)))
+        {
+            session.record(crate::markdown::compose::passive::Deferral {
+                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                reason,
+                authored: reference.to_string(),
+                key: Some(key.to_string()),
+                line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+            });
+            continue;
+        }
         let file_ref = match transclusion::classify_frontmatter_reference(reference) {
             transclusion::FrontmatterReference::Inline => continue,
             transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
@@ -1190,17 +1232,21 @@ fn collect_document(
             0,
             prepared_ctx.clone(),
         ) {
+            Ok(transclusion::ResolvedTarget::File { path, .. }) if transclusion::changed_before_read(options, &path) => continue,
             Ok(r) => r,
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
             // An entry composition removes contributes nothing; its siblings
             // are still walked.
+            // A target the run creates first is not walked; composition
+            // leaves it unchecked.
+            Err(e) if transclusion::created_before_read(options, &e).is_some() => continue,
             Err(e) if transclusion::skips_unresolved(options, &prepared, &e) => continue,
             Err(e) => return Err(at_value(e).into()),
         };
 
         let child = match resolved {
             transclusion::ResolvedTarget::File { path, resolved, .. } => {
-                let child = Markdown::try_from(path.as_path())
+                let child = Markdown::load_observed(path.as_path(), options.passive_session().map(|session| session.observations().local_reads()))
                     .map_err(|error| transclusion::target_failure_at(error, &path, inclusion()))?;
                 let child_options = transclusion::markdown_child_options(
                     options,

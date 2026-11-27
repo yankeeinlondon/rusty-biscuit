@@ -1922,8 +1922,22 @@ impl ComposeOptions {
     /// [`Self::with_dry_run`] recording into an existing `session`, so a
     /// host composing several documents of one invocation shares one
     /// record.
+    ///
+    /// Reads go through the session's
+    /// [`PassiveObservations`](crate::markdown::compose::passive::PassiveObservations):
+    /// its `load_data` memo unless a data runtime is already attached, and
+    /// its remote-fetch runtime for this composition's fetch policy unless a
+    /// remote runtime is already attached, whose fetches it then shares
+    /// without persisting any of its own. Every composition attached to a
+    /// session sharing them observes a source once.
     #[must_use]
     pub fn with_passive_session(mut self, session: crate::markdown::compose::passive::PassiveSession) -> Self {
+        if self.data_runtime.is_none() {
+            self.data_runtime = Some(session.observations().data());
+        }
+        // An attached runtime keeps its fetches; what the dry run fetches
+        // through it is not persisted.
+        self.remote_fetch = self.remote_fetch.as_ref().map(RemoteFetchRuntime::without_store);
         self.passive = Some(session);
         self.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
         // Alias lookup starts the login shell, an effect a dry run never has.
@@ -2627,6 +2641,20 @@ impl ComposeOptions {
         self
     }
 
+    /// [`Self::with_shared_remote_fetch`] with `config`'s hosts, concurrency,
+    /// and freshness in place of the attached remote-read configuration,
+    /// which is left as it is. A command attaches the runtime its
+    /// composition fetches with before an earlier pass that must not take
+    /// the configuration's other grants (`md compose`'s reference check
+    /// takes no ICMP grant), so both passes fetch each URL once.
+    #[must_use]
+    pub fn with_shared_remote_fetch_under(mut self, config: &crate::markdown::compose::remote::RemoteReadConfig) -> Self {
+        let attached = std::mem::replace(&mut self.remote_read_config, config.clone());
+        self.remote_fetch = Some(self.build_remote_fetch_runtime());
+        self.remote_read_config = attached;
+        self
+    }
+
     /// Attaches a fresh `load_data` runtime that every pass cloned from these
     /// options shares: one memo and one read set for the whole command.
     ///
@@ -2842,7 +2870,14 @@ impl ComposeOptions {
                 self.cache_namespace.as_deref(),
             )))
         });
-        RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission())
+        let runtime =
+            RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission());
+        // A dry run's passes share one runtime per fetch policy, so a URL
+        // they all read is fetched once.
+        match &self.passive {
+            Some(session) => session.observations().remote(runtime),
+            None => runtime,
+        }
     }
 
     // ── Getters ────────────────────────────────────────────────────

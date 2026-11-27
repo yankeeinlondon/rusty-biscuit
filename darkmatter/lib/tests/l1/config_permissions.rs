@@ -328,6 +328,9 @@ fn an_unusable_reference_target_is_an_error_naming_both_files() {
             (fixture.home().join(CONFIG_FILE_NAME).as_path(), "/permissions", Some(2)),
             "{target:?}: located at the reference"
         );
+        // The reference's problem names its target as data, so a host that
+        // reports that file itself can tell this problem follows from it.
+        assert_eq!(source.reference_target.as_deref(), Some(target_path.as_path()), "{target:?}");
         if target.is_none() || needle == "no `permissions` mapping" {
             assert!(text.contains("md init --inline"), "{text}");
         }

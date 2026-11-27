@@ -350,6 +350,11 @@ pub(crate) fn validate(
     // graph's provenance and root context are the ones validated.
     let admitted = options.graph.compose.admitted_document(md);
     let md = admitted.as_ref();
+    // A dry run's validation reads its fragment targets and headings through
+    // the observation its graph and composition share.
+    let _shared_reads = options.graph.compose.options().passive_session().map(|session| {
+        simplified_schema::resolve::buffers::enter_shared_reads(session.observations().local_reads().clone())
+    });
     let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
         match error {
             crate::markdown::MarkdownError::Reference(source) => *source,
@@ -800,7 +805,7 @@ fn verify_graph_compatibility(
 ///
 /// The dependency manifest already holds one entry per unique visited local
 /// child, so each child is read and hashed at most once. Each read goes
-/// straight to disk via [`Markdown::try_from`], bypassing the graph-building
+/// straight to disk (one fresh open), bypassing the graph-building
 /// runtime and its run-local cache, so stale cached
 /// content cannot mask an on-disk edit. Content identity (not mtime/size/inode)
 /// is authoritative.
@@ -817,7 +822,11 @@ fn verify_descendants(graph: &ReferenceGraph) -> Result<(), ReferenceError> {
             continue;
         };
 
-        match Markdown::try_from(path.as_path()) {
+        // Opened afresh, never through a shared observation of local files.
+        let current = simplified_schema::resolve::buffers::open_source(path)
+            .map_err(crate::markdown::MarkdownError::from)
+            .and_then(|source| Markdown::from_read_source(path, &source));
+        match current {
             Ok(current_md) => {
                 let current = ReferenceDocumentIdentity::capture(&current_md);
                 if current != entry.document {
@@ -888,6 +897,16 @@ fn validate_local_path(
                 super::TargetLookup::Found(resolved) => {
                     report.references_valid += 1;
                     Ok(Some(resolved))
+                }
+                // A dry run's file the run creates before this point is not
+                // read now; composition leaves what reads it unchecked.
+                super::TargetLookup::Missing(Some(resolution))
+                    if graph_options
+                        .compose
+                        .passive_session()
+                        .is_some_and(|session| session.created_among(resolution.probed_paths()).is_some()) =>
+                {
+                    Ok(None)
                 }
                 super::TargetLookup::Missing(resolution) => {
                     report.issues.push(missing_local_target(raw, record, trail, resolution));
@@ -1177,6 +1196,11 @@ fn validate_cross_doc_fragment(
         return;
     }
 
+    // A dry run's file the run's initializer appends to has other headings
+    // by then: the fragment is not judged now.
+    if graph_options.compose.passive_session().is_some_and(|session| session.initializer_changes(target_path).is_some()) {
+        return;
+    }
     // A target that resolved but cannot be loaded has no headings to check
     // the fragment against: reported, never passed. One that vanished since
     // it resolved is already reported missing.

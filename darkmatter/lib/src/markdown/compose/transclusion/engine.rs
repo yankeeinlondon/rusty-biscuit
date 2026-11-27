@@ -577,7 +577,9 @@ impl<'a> TransclusionEngine<'a> {
             // composition removes is left to the caller's own resolution,
             // and any other fails as the same directive written out does.
             return match resolve_now() {
-                Err(err) if skips_unresolved(options, self.markdown, &err) => Ok(None),
+                Err(err) if skips_unresolved(options, self.markdown, &err) || created_before_read(options, &err).is_some() => {
+                    Ok(None)
+                }
                 Err(err) => Err(err.into()),
                 Ok(_) => Err(refuse("this repeated target was not found by pre-flight")),
             };
@@ -779,6 +781,31 @@ impl<'a> TransclusionEngine<'a> {
                         watch.check(report)?;
                     }
                 }
+                // A dry run that cannot decide the condition leaves the
+                // directive as written, its target unread.
+                if let Err(crate::markdown::compose::conditions::ConditionError::Eval { cause, .. }) = &should_include
+                    && let Some(reason) = cause.unavailable_reason()
+                    && let Some(session) = options.passive_session()
+                {
+                    let written = self.markdown.content()[directive.span.clone()].to_string();
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                        reason: reason.clone(),
+                        authored: written.trim_end().to_string(),
+                        key: None,
+                        line: Some(site.located().1),
+                    });
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
+                        span: directive.span.clone(),
+                        replacement: written,
+                        report: fixed_report,
+                    });
+                    *next_order += 1;
+                    continue;
+                }
                 let should_include =
                     should_include.map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 if !should_include {
@@ -854,6 +881,33 @@ impl<'a> TransclusionEngine<'a> {
                     self.markdown.source_context_for_errors(),
                 ) {
                     Ok(resolved) => resolved,
+                    // A target the run creates before composing is left as
+                    // written, unread, and not checked.
+                    Err(err) if let Some(reason) = created_before_read(options, &err) => {
+                        let written = self.markdown.content()[directive.span.clone()].to_string();
+                        if let Some(session) = options.passive_session() {
+                            session.record(crate::markdown::compose::passive::Deferral {
+                                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                                reason,
+                                authored: written.trim_end().to_string(),
+                                key: None,
+                                line: inclusion()
+                                    .as_ref()
+                                    .and_then(transclusion::InclusionSite::authored)
+                                    .map(crate::markdown::types::AuthoredSpan::line),
+                            });
+                        }
+                        let mut fixed_report = ComposeReport::new();
+                        fixed_report.transclusions_skipped = 1;
+                        prepared.push(PreparedTransclusion::FixedReplace {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            replacement: written,
+                            report: fixed_report,
+                        });
+                        *next_order += 1;
+                        continue;
+                    }
                     Err(err) if skips_unresolved(options, self.markdown, &err) => {
                         let mut fixed_report = ComposeReport::new();
                         fixed_report.transclusions_skipped = 1;
@@ -872,6 +926,31 @@ impl<'a> TransclusionEngine<'a> {
                     Err(err) => return Err(in_scope(at_directive(err).into())),
                 }
             };
+            // A file the run's initializer appends to holds other bytes by
+            // then: left as written, unread, and not checked.
+            if let transclusion::ResolvedTarget::File { path, .. } = &resolved
+                && let Some(session) = options.passive_session()
+                && let Some(reason) = session.initializer_changes(path)
+            {
+                let written = self.markdown.content()[directive.span.clone()].to_string();
+                session.record(crate::markdown::compose::passive::Deferral {
+                    construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                    reason,
+                    authored: written.trim_end().to_string(),
+                    key: None,
+                    line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+                });
+                let mut fixed_report = ComposeReport::new();
+                fixed_report.transclusions_skipped = 1;
+                prepared.push(PreparedTransclusion::FixedReplace {
+                    order: *next_order,
+                    span: directive.span.clone(),
+                    replacement: written,
+                    report: fixed_report,
+                });
+                *next_order += 1;
+                continue;
+            }
 
             match resolved {
                 transclusion::ResolvedTarget::File { path, resolved, .. } => {
@@ -1074,6 +1153,27 @@ impl<'a> TransclusionEngine<'a> {
             self.markdown.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
+            // A target the run creates before composing contributes nothing
+            // here and is not checked.
+            Err(err) if let Some(reason) = created_before_read(options, &err) => {
+                if let Some(session) = options.passive_session() {
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                        reason,
+                        authored: reference.to_string(),
+                        key: Some(match slot {
+                            SectionSlot::Prologue(_) => "prologue".to_string(),
+                            SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                        }),
+                        line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+                    });
+                }
+                let mut report = ComposeReport::new();
+                report.transclusions_skipped = 1;
+                prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+                *next_order += 1;
+                return Ok(());
+            }
             Err(err) if skips_unresolved(options, self.markdown, &err) => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
@@ -1089,6 +1189,28 @@ impl<'a> TransclusionEngine<'a> {
             }
             Err(err) => return Err(at_value(err).into()),
         };
+        // A file the run's initializer appends to contributes nothing here
+        // and is not checked.
+        if let transclusion::ResolvedTarget::File { path, .. } = &resolved
+            && let Some(session) = options.passive_session()
+            && let Some(reason) = session.initializer_changes(path)
+        {
+            session.record(crate::markdown::compose::passive::Deferral {
+                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                reason,
+                authored: reference.to_string(),
+                key: Some(match slot {
+                    SectionSlot::Prologue(_) => "prologue".to_string(),
+                    SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                }),
+                line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+            });
+            let mut report = ComposeReport::new();
+            report.transclusions_skipped = 1;
+            prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+            *next_order += 1;
+            return Ok(());
+        }
 
         match resolved {
             transclusion::ResolvedTarget::File { path, resolved, .. } => {
@@ -1923,7 +2045,7 @@ impl<'a> TransclusionEngine<'a> {
         let language = transclusion::infer_language(path, &options.code_fallback_language);
         let canonical_source = cache::compose_cache_key_for_path(path);
         let source_id = cache::hashing::source_id_hash(&canonical_source);
-        let source_bytes = std::fs::read(path)?;
+        let source_bytes = crate::markdown::compose::passive::read_local_source(options.passive_session(), path)?.bytes.to_vec();
 
         let op = cache::CodeOperation;
         let mut buckets = op.split_params(directive_options);
@@ -2230,6 +2352,27 @@ pub(crate) fn skips_unresolved(
     ignores_invalid(options, markdown)
         || (options.allow_missing_transclusions
             && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch))
+}
+
+/// In a dry run, why the inclusion whose target failed with `err` is not
+/// checked instead of missing: no candidate exists, and one it probed is a
+/// file the run creates before this composition
+/// ([`PassiveSession::created_among`](crate::markdown::compose::passive::PassiveSession::created_among)).
+/// `None` outside a dry run and for every other failure.
+pub(crate) fn created_before_read(
+    options: &crate::markdown::compose::ComposeRequest,
+    err: &transclusion::TransclusionError,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    let session = options.passive_session()?;
+    let resolution = err.target_not_found_details()?.resolution.as_deref()?;
+    session.created_among(resolution.probed_paths())
+}
+
+/// In a dry run, whether the resolved inclusion `path` holds other bytes
+/// when the run reads it: the run's initializer appends to it first
+/// ([`PassiveSession::initializer_changes`](crate::markdown::compose::passive::PassiveSession::initializer_changes)).
+pub(crate) fn changed_before_read(options: &crate::markdown::compose::ComposeRequest, path: &std::path::Path) -> bool {
+    options.passive_session().is_some_and(|session| session.initializer_changes(path).is_some())
 }
 
 /// The warning of an inclusion `markdown` wrote that composition removed

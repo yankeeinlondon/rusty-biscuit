@@ -57,6 +57,8 @@ pub mod slots;
 pub mod triggers;
 pub mod yaml_documents;
 mod positions;
+mod preparation_memo;
+pub use preparation_memo::observe_preparations;
 pub(crate) mod embedded;
 
 use simplified_schema::{
@@ -784,6 +786,7 @@ impl DarkmatterSchemas {
         let Some(pending) = slots.pending.as_ref() else {
             return Err(unresolved);
         };
+        preparation_memo::note_template_resolved();
         session
             .resolve(pending, template, &self.file_resolution_context, self.slot_pins_only)
             .map(|resolved| simplified_schema::resolve::ResolvedSchema::clone(&resolved))
@@ -1195,13 +1198,33 @@ impl DarkmatterSchemas {
         self.site_schema_with_override(source, None)
     }
 
+    /// The schema [`Self::site_schema_for`] returns, prepared once per key
+    /// while one shared observation of local files serves every read
+    /// ([`preparation_memo`]); prepared every time otherwise.
     fn site_schema_with_override(
+        &self,
+        source: &Markdown,
+        schema_override: Option<&Value>,
+    ) -> Result<SiteSchema, SchemaError> {
+        let Some((shared, memo)) = preparation_memo::in_force() else {
+            return self.prepare_site_schema(source, schema_override);
+        };
+        let key = self.preparation_key(source, schema_override);
+        if let Some(schema) = memo.get(&shared, &key) {
+            crate::note_work!(EffectivePreparationReuse);
+            return Ok(SiteSchema::Effective(schema));
+        }
+        preparation_memo::prepare_and_keep(&memo, key, || self.prepare_site_schema(source, schema_override))
+    }
+
+    fn prepare_site_schema(
         &self,
         source: &Markdown,
         schema_override: Option<&Value>,
     ) -> Result<SiteSchema, SchemaError> {
         let _resolve = timings::stage(ValidationStage::Resolve);
         crate::note_work!(EffectivePreparation);
+        preparation_memo::observe(document_path(source));
         let base_dir = base_dir_for(source, &self.file_resolution_context);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));

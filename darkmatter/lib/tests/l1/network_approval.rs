@@ -34,13 +34,13 @@ const TRANSCLUSION_NEEDS_APPROVAL: &str = "dm.transclusion.remote_needs_approval
 
 /// A loopback HTTP responder serving fixed routes and counting every request
 /// by path for the rest of the process.
-struct Responder {
+pub(crate) struct Responder {
     base: String,
     hits: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl Responder {
-    fn start() -> Self {
+    pub(crate) fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let base = format!("http://127.0.0.1:{}", listener.local_addr().expect("address").port());
         let hits = Arc::new(Mutex::new(HashMap::new()));
@@ -63,6 +63,7 @@ impl Responder {
                     "/child.md" => "Remote child.",
                     "/snippet.rs" => "fn remote() {}",
                     "/os.yaml" => "- macOS\n- Linux\n",
+                    "/facts.md" => "---\ntitle: Remote facts\n---\nRemote body.\n",
                     _ => "",
                 };
                 let response = format!(
@@ -75,11 +76,11 @@ impl Responder {
         Self { base, hits }
     }
 
-    fn url(&self, route: &str) -> String {
+    pub(crate) fn url(&self, route: &str) -> String {
         format!("{}{route}", self.base)
     }
 
-    fn requests(&self) -> usize {
+    pub(crate) fn requests(&self) -> usize {
         self.hits.lock().unwrap().values().sum()
     }
 }

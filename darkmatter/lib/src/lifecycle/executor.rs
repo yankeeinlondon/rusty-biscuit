@@ -188,7 +188,7 @@ const FRONTMATTER_VERBS: [&str; 7] = [
 ];
 
 /// Why a mutation target did not resolve to a local path.
-enum MutationTargetError {
+pub(super) enum MutationTargetError {
     Reference(biscuit_file::FileReferenceError),
     /// The reference has no document-scoped candidate to create.
     NoLocalTarget,
@@ -197,6 +197,30 @@ enum MutationTargetError {
     UnmatchedRecursive,
     /// The selected target lies outside the engine's mutation root.
     Outside(EffectError),
+}
+
+/// The file a side effect's `reference` names in `document_context` (the
+/// authoring document's context), before the mutation-root check: the file
+/// it resolves to, else its first candidate, so a later read of the same
+/// reference finds the file the effect creates. Shared with the static
+/// [`created_files`](super::created_files) collector.
+pub(super) fn select_mutation_target(
+    reference: &FileReference,
+    document_context: &biscuit_file::FileResolutionContext,
+) -> Result<PathBuf, MutationTargetError> {
+    let resolved = reference.resolve_in_context(document_context).map_err(MutationTargetError::Reference)?;
+    match resolved {
+        Some(path) => Ok(path),
+        // A recursive reference's candidates are search roots (directories).
+        None if reference.class().recursive => Err(MutationTargetError::UnmatchedRecursive),
+        None => reference
+            .candidate_plan(document_context)
+            .map_err(MutationTargetError::Reference)?
+            .into_iter()
+            .next()
+            .map(|candidate| candidate.path().to_path_buf())
+            .ok_or(MutationTargetError::NoLocalTarget),
+    }
 }
 
 /// Which layer an action error originated in.
@@ -1296,21 +1320,7 @@ impl<'a> StackExecutor<'a> {
     /// anything is opened, created, or written.
     fn mutation_target(&self, reference: &FileReference) -> Result<PathBuf, MutationTargetError> {
         let document_context = self.inputs.file_resolution_context.for_source(self.inputs.source_path);
-        let resolved = reference
-            .resolve_in_context(&document_context)
-            .map_err(MutationTargetError::Reference)?;
-        let target = match resolved {
-            Some(path) => path,
-            // A recursive reference's candidates are search roots (directories).
-            None if reference.class().recursive => return Err(MutationTargetError::UnmatchedRecursive),
-            None => reference
-                .candidate_plan(&document_context)
-                .map_err(MutationTargetError::Reference)?
-                .into_iter()
-                .next()
-                .map(|candidate| candidate.path().to_path_buf())
-                .ok_or(MutationTargetError::NoLocalTarget)?,
-        };
+        let target = select_mutation_target(reference, &document_context)?;
         ensure_within(self.inputs.effect_engine.mutation_root(), &target).map_err(MutationTargetError::Outside)
     }
 

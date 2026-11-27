@@ -137,6 +137,16 @@ fn a_denied_expired_or_missing_entry_leaves_the_read_pending() {
     assert!(matches!(outcome(&observations), PropertyOutcome::Pending(PendingReason::RemoteUnavailable)), "{observations:?}");
 }
 
+/// The editor does not run `try_frontmatter`, so a read it cannot observe
+/// is never answered as `{ ok: false }`: the property stays pending.
+#[test]
+fn try_frontmatter_is_never_observed_as_a_failed_read() {
+    for (grants, name) in [(vec![allow_url()], "allowed, no cache entry"), (Vec::new(), "refused")] {
+        let observations = Remote::new().observe(grants, &format!("try_frontmatter('{URL}').ok"));
+        assert!(matches!(outcome(&observations), PropertyOutcome::Pending(PendingReason::Unsupported(_))), "{name}: {observations:?}");
+    }
+}
+
 /// A cached body past the remaining byte allowance is not decoded and stops
 /// the pass.
 #[test]

@@ -1418,6 +1418,7 @@ fn problem_at(
         line: at.as_ref().map(|at| at.line),
         column: at.as_ref().map(|at| at.column),
         message,
+        reference_target: None,
     }
 }
 

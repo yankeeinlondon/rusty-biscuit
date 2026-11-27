@@ -440,6 +440,21 @@ flowchart TD
   Checked call.md: 2 errors, 0 warnings, 2 checks not run
   ```
 
+- A warning the reference check reports, such as a hyperlink with no
+  target (`[x]()`), keeps its row in the combined report, in the reference
+  report's order. This holds whether the reference check refused the
+  document or the shell-approval walk stopped at an inclusion inside an
+  excluded block:
+
+  ```text
+  doc.md
+    ⚠ no target in hyperlink
+        hyperlink [x]()
+        at doc.md:4:7
+    ✗ file not found in `::file`
+        ...
+  ```
+
 - An `--allow missing-*` recovery is applied first, as always: a document
   whose broken references are all recovered composes, and no combined report
   is printed.

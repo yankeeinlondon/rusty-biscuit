@@ -40,8 +40,9 @@ const FILE_STORE_ALLOWLIST: &[(&str, usize)] = &[
     // The fetch runtime owns the optional transport store (`with_store`,
     // `with_store_and_network`, and `cache_only` accept it;
     // `cache_only_under` opens the store under a cache root for an editor
-    // observation, read-only).
-    ("markdown/compose/remote_fetch.rs", 8),
+    // observation, read-only; `build_over` takes the store, or none for a
+    // dry run's `without_store` view of another runtime's fetches).
+    ("markdown/compose/remote_fetch.rs", 9),
     // Resolves the configured cache root into the fetch runtime's store.
     ("markdown/compose/context/options.rs", 3),
     // The `cache-test-hooks` seam writes a remote-URL transport entry, as a

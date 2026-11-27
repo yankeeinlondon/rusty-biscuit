@@ -17,11 +17,11 @@ pub use conditions::evaluate_condition;
 pub use engine::{find_preceding_heading_level, relevel_with_overflow};
 pub(crate) use engine::{
     ApplyTarget, PreparedTransclusion, ResolvedTransclusion, SectionSlot, TransclusionEngine, apply_directive_set_overlay,
-    build_resolution_cache, ignores_invalid, inherited_child_options, markdown_child_options, remote_child_options, skips_unresolved,
+    build_resolution_cache, changed_before_read, created_before_read, ignores_invalid, inherited_child_options, markdown_child_options, remote_child_options, skips_unresolved,
 };
 pub use parser::{parse_directives, parse_frontmatter_refs};
 pub use resolver::frontmatter_value_is_inline;
-pub(crate) use parser::{parse_directives_deferring, parse_directives_in};
+pub(crate) use parser::parse_directives_deferring;
 pub(crate) use resolver::{
     FrontmatterReference, admit_local_target, admit_url_target, classify_frontmatter_reference, resolve_parsed_target, resolve_path,
     resolve_target, source_opening,

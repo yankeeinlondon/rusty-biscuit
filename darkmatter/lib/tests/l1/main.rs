@@ -188,6 +188,8 @@ mod findings_portable_paths;
 mod reference_suggestions;
 mod passive_compose;
 mod network_approval;
+mod recovery_wrappers;
+mod passive_shared_observations;
 #[cfg(feature = "effects-instrumentation")]
 mod report_diagnostics;
 mod diagnostic_source_provenance;
@@ -283,6 +285,8 @@ mod effective_schema_layering;
 mod layered_validator_identities;
 #[cfg(feature = "work-counters")]
 mod raw_declaration_projection;
+#[cfg(feature = "work-counters")]
+mod shared_schema_preparation;
 mod schema_enhancements_matrix;
 mod schema_extraction_characterization;
 mod schema_language_ownership_guard;
@@ -403,6 +407,7 @@ mod collection_expression_surfaces;
 mod collection_effects;
 mod url_root_identity;
 mod yaml_block_parity;
+mod lifecycle_created_files;
 mod lifecycle_passive_compose;
 mod lifecycle_schema_generation;
 mod lifecycle_schema_parity;

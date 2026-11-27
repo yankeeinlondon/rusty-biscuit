@@ -89,6 +89,11 @@ impl ReferenceAnalysisRuntime {
         options: &ReferenceGraphOptions,
         site: Option<InclusionSite>,
     ) -> MarkdownResult<Option<Markdown>> {
+        // A dry run's file the run's initializer appends to holds other
+        // references by then; composition leaves what reads it unchecked.
+        if options.compose.passive_session().is_some_and(|session| session.initializer_changes(path).is_some()) {
+            return Ok(None);
+        }
         match self.cache.load_markdown(path) {
             Ok(markdown) => Ok(Some(markdown)),
             Err(MarkdownError::FileLoad(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -180,8 +185,16 @@ fn named_read_failure(error: MarkdownError, path: &std::path::Path) -> MarkdownE
 /// Memory-only: `cache_root` reaches only the remote transport cache, so
 /// graph construction, like the compose pipeline, persists no semantic-result
 /// artifact (R18).
+///
+/// A dry run's graph reads each local source through the run's one
+/// observation of local files, which its composition shares.
 fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
-    RunLocalCache::new(options.compose.cache_access_mode)
+    RunLocalCache::new(options.compose.cache_access_mode).with_shared_reads(shared_reads(options))
+}
+
+/// The dry run's observation of local files, when the graph is part of one.
+fn shared_reads(options: &ReferenceGraphOptions) -> Option<simplified_schema::resolve::buffers::SharedReads> {
+    options.compose.options().passive_session().map(|session| session.observations().local_reads().clone())
 }
 
 /// Shared graph construction. The build [`ReferenceGraphMode`] is the sole
@@ -206,6 +219,8 @@ fn build_graph_inner(
     };
     let options = ReferenceGraphOptions::from_compose_options(compose);
     let options = &options;
+    // Every schema file and document the build reads on this thread.
+    let _shared_reads = shared_reads(options).map(simplified_schema::resolve::buffers::enter_shared_reads);
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
@@ -1107,7 +1122,26 @@ fn build_node(
         |value: &str| options.compose.passive_session().is_some_and(|session| session.deferred_reference(value).is_some());
     let value_location = |key: &str, idx: usize, expected: &str| {
         let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
-        locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
+        let index = in_list.then_some(idx);
+        match locator {
+            Some(locator) => locator.frontmatter_location(key, index, expected),
+            // A generated body beneath a file's frontmatter has no body map,
+            // but its frontmatter values are still the file's.
+            None => md
+                .frontmatter_origin()
+                .filter(|origin| matches!(source, ComposeSource::File(file) if *file == origin.file))
+                .and_then(|origin| {
+                    let range =
+                        crate::markdown::compose::transclusion::frontmatter_value_range(&origin.text, key, index, expected)?;
+                    let span = crate::markdown::types::AuthoredSpan::locate(&origin.text, range)?;
+                    Some(AuthoredReferenceLocation {
+                        line: span.line(),
+                        column: span.column(),
+                        span: span.range(),
+                        inserted: false,
+                    })
+                }),
+        }
     };
     for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
         if deferred_reference(prologue) {

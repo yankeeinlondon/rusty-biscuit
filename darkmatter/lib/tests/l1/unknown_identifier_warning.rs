@@ -734,3 +734,29 @@ fn a_page_block_gate_logical_or_over_declared_roots_is_silent() {
         assert!(unknown_identifiers(&report).is_empty(), "{gate}: {:?}", report.warnings);
     }
 }
+
+/// A frontmatter value holding a `::map`/`::filter` region (an inline
+/// `prompt:` a host composes as a body) is a template whose regions only
+/// body composition expands: frontmatter interpolation leaves a read of the
+/// region's item binding (the callback's pattern, or the default `i`) as
+/// written, with no undeclared-property advisory, while every other read in
+/// the value, inside a region or outside it, is evaluated and warned about
+/// as before.
+#[test]
+fn a_frontmatter_collection_body_reading_its_item_is_left_for_the_collection() {
+    let dir = TempDir::new().unwrap();
+    let value = "  Intro {{ nope }}.\n  ::map items \"x => x * 10\"\n  - {{ x }} {{ inner }}\n  ::filter items\n  - {{ i }} of {{ x }}\n  ::end-filter\n  ::end-map\n  ::map items \"{ name } => name\"\n  - {{ name }}\n  ::end-map\n  After {{ i }}.\n";
+    let path = write(dir.path(), "doc.md", &format!("---\nitems: [1, 2]\nnote: |\n{value}---\nBody.\n"));
+
+    let request = crate::request_support::request(options(dir.path(), &path));
+    let (composed, report) = Markdown::try_from(path.as_path()).unwrap().compose_with(&request).unwrap();
+
+    let note = composed.frontmatter().as_map()["note"].as_str().unwrap().to_string();
+    assert!(note.contains("- {{ x }} \n"), "{note}");
+    assert!(note.contains("- {{ i }} of {{ x }}\n"), "{note}");
+    assert!(note.contains("- {{ name }}\n"), "{note}");
+    assert!(note.starts_with("Intro .\n") && note.ends_with("After ."), "{note:?}");
+    let mut warned = warned_roots(&report);
+    warned.sort();
+    assert_eq!(warned, ["i", "inner", "nope"], "{:?}", report.warnings);
+}

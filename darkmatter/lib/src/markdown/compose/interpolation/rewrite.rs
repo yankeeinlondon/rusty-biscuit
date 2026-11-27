@@ -538,7 +538,7 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
     warning_stage: &'static str,
     before_eval: BeforeEval<'_>,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedInterpolationError> {
-    interpolate_value_traced(input, evaluator, policy, warning_stage, before_eval)
+    interpolate_value_traced(input, evaluator, policy, warning_stage, before_eval, None)
         .map(|(value, count, warnings, _)| (value, count, warnings))
 }
 
@@ -552,13 +552,16 @@ pub(crate) struct WholeValueTrace {
 }
 
 /// [`interpolate_value_guarded`], also returning the trace of a whole-value
-/// expression (`None` for mixed text and a whole-value literal).
+/// expression (`None` for mixed text and a whole-value literal). Mixed text
+/// rewrites only the spans `select` accepts (see [`SpanSelection`]); a
+/// whole-value expression is always evaluated.
 pub(crate) fn interpolate_value_traced<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
     mut before_eval: BeforeEval<'_>,
+    select: SpanSelection<'_>,
 ) -> Result<(Value, usize, Vec<ComposeWarning>, Option<WholeValueTrace>), LocatedInterpolationError> {
     if is_whole_value_literal(input) {
         let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
@@ -602,7 +605,8 @@ pub(crate) fn interpolate_value_traced<L: EvaluationLookup>(
         show_new_warnings(&mut before_eval, &warnings, &mut shown).map_err(|failure| failure.after(warnings.clone()))?;
         return Ok((value, 1, warnings, Some(WholeValueTrace { span: loc.start..loc.end, load })));
     }
-    let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
+    let result =
+        interpolate_text_selected(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None, select)?;
     Ok((Value::String(result.output), result.replacements, result.warnings, None))
 }
 

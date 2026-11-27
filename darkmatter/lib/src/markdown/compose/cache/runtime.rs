@@ -89,6 +89,11 @@ pub(crate) struct RunLocalCache {
     operation_results: Arc<DashMap<String, Arc<SingleFlightSlot<OperationResult>>>>,
     stats: Arc<Mutex<CacheStats>>,
     access_mode: CacheAccessMode,
+    /// A dry run's observation of local source files
+    /// ([`PassiveObservations::local_reads`](crate::markdown::compose::passive::PassiveObservations::local_reads)):
+    /// every document and heading load reads its bytes there, whatever the
+    /// access mode, so the dry run's passes open each file once.
+    shared_reads: Option<simplified_schema::resolve::buffers::SharedReads>,
 }
 
 impl std::fmt::Debug for RunLocalCache {
@@ -117,7 +122,14 @@ impl RunLocalCache {
             operation_results: Arc::new(DashMap::new()),
             stats: Arc::new(Mutex::new(CacheStats::default())),
             access_mode,
+            shared_reads: None,
         }
+    }
+
+    /// Reads every local source through `reads` (a dry run's observation).
+    pub fn with_shared_reads(mut self, reads: Option<simplified_schema::resolve::buffers::SharedReads>) -> Self {
+        self.shared_reads = reads;
+        self
     }
 
     /// Loads a markdown document, returning a cached copy if available.
@@ -130,7 +142,7 @@ impl RunLocalCache {
             return Ok(markdown.clone());
         }
 
-        let markdown = Markdown::try_from(path)?;
+        let markdown = Markdown::load_observed(path, self.shared_reads.as_ref())?;
 
         if self.access_mode != CacheAccessMode::Off && self.access_mode != CacheAccessMode::ReadOnly
         {
@@ -154,8 +166,12 @@ impl RunLocalCache {
             return Ok(headings.clone());
         }
 
-        let content = std::fs::read_to_string(path)?;
-        let markdown: Markdown = content.into();
+        let markdown: Markdown = match self.shared_reads.clone().or_else(simplified_schema::resolve::buffers::shared_reads) {
+            Some(shared) => String::from_utf8(shared.read(path)?.bytes.to_vec())
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8"))?
+                .into(),
+            None => std::fs::read_to_string(path)?.into(),
+        };
         let headings = markdown
             .toc()
             .all_headings()
@@ -708,6 +724,7 @@ mod tests {
             compose_failures: Arc::clone(&cache.compose_failures),
             operation_results: Arc::clone(&cache.operation_results),
             stats: Arc::clone(&cache.stats),
+            shared_reads: None,
         };
 
         let result = refresh_cache

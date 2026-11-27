@@ -538,7 +538,7 @@ impl<'a> ComposeHost<'a> {
                     // The condition-blind walk can stop at an inclusion the
                     // reference check left out with its block.
                     match self.check_references.and_then(|policy| {
-                        combined::after_inclusion_stop(self.md, &self.request, policy, &error, &self.launch_dir)
+                        combined::after_inclusion_stop(self.md, &self.request, policy, &error, &self.launch_dir, self.document.sink.is_some())
                     }) {
                         Some(combined) => {
                             combined.deliver(self.document.sink, &self.launch_dir);

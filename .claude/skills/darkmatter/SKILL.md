@@ -485,18 +485,68 @@ runs one passive dry-run composition for the call, schema, and empty-body
 checks, and uses the combined report only when one of them contributes a
 finding or a not-checked row (a passive composition failing for another
 reason, such as `{{ 3 / 0 }}`, leaves the empty body not checked); otherwise
-the reference report prints unchanged. Every row goes through
+the reference report prints unchanged. Every stop lists the reference
+report's reported warnings (`is_reported_warning`) beside its refusals, in
+report order; `after_inclusion_stop` takes `warnings_delivered` because a
+data output already holds the passed check's own (`sink.references`).
+Every row goes through
 `Collector::push_all`/`not_checked`, which mark the report as contributed;
 never push into its sink directly.
 A body that composes empty adds `dm.compose.empty_body` (`empty_body_warning`).
 In a passive dry run the schema never judges a value the session deferred
-(`schema_validation.rs`, `PassiveSession::deferred_value`).
+(`schema_validation.rs`, `PassiveSession::deferred_value`), and sets aside a
+problem with a top-level value a host declared written at launch
+(`PassiveSession::defer_written`, `written_value`; a top-level name or member
+path such as `seq.outputs`), recording a `DeferredConstruct::SchemaCheck`
+deferral. A read is deferred by what it selects, never by its spelling:
+the evaluator's `select_node` (`expression/mod.rs`) builds the selected
+path of every `Variable`/`MemberAccess`/`Index`/`Paren` chain, computed keys
+resolved (`seq['out' + 'puts']` selects `seq.outputs`), and checks it with
+`passive::check_selected`, the same `check_value` rule `check_read` applies
+to a dotted variable; `caller_file_selection` does the same for a caller
+file argument. An explicit `fm.<name>` read whose bare `<name>` resolves to
+a host global (`reads_shadowed_property`) is the document's property, not
+the written global member. Never add a deferral check keyed on a node's
+syntactic shape. A file a host declares written
+(`PassiveSession::declare_initializer_write(path, InitializerChange, reason)`,
+`defer_created` for `CreatesIfAbsent`; `declare_unresolved_write(WritePattern)`
+for a destination the host cannot resolve; from `lifecycle::created_files` +
+`CreatedFile::target`/`target_as`/`pattern`, which drop a target outside the
+mutation root) is matched by identity (`passive.rs::created`:
+nearest existing ancestor's `FileIdentity` plus the remaining names, folded
+to lowercase only where the volume opens a case-swapped ancestor name), a
+pattern by text. Readers ask one rule: `initializer_changes(path)` for
+content (absent and may be created, or existing and appended →
+`ChangedAtLaunch`; `ensure_file` leaves an existing file alone),
+`created_among(probed_paths)` for a miss (`transclusion::created_before_read`
+in the engine and pre-flight collect, `reference/validate.rs`,
+`expression/functions/fs.rs::created_before_read` for `file_exists`/
+frontmatter readers and `load_data`; an existing file always exists), and
+`changes_listing` for `find_files`; a hit is checked in the engine,
+`transclusion::changed_before_read` (pre-flight collect), the graph's
+`load_inclusion`, `load_markdown`, `load_data`, and `validate_schema`'s
+`observed.read`/`searched` schema files. Deferrals record
+`CreatedAtLaunch`/`ChangedAtLaunch`. Tests: `lib/tests/l1/lifecycle_created_files.rs`. Tests: `lib/tests/l1/passive_compose.rs::a_written_member_*`,
+`a_collection_callback_reads_*`.
+The collection traversal (`collection_blocks/engine.rs`) turns an
+unavailable gate, source, callback, or option into `Halt::Unavailable`,
+never `dm.collection.callback_failed`: `collection()` rewinds the
+`ExpansionWriter` to its mark, records one `DeferredConstruct::Collection`
+(`authored` = region text) and copies the region with `copy_inert`, whose
+runs `inline/collection_blocks.rs` adds to `body.data` so later stages read
+it as data; a page block's unavailable gate there is a `BlockCondition`
+whose body is still expanded. A transclusion `when=` that is unavailable
+is a `Transclusion` deferral (`transclusion/engine.rs`). `md`'s
+`combined::without_deferred` drops a `Collection` region before the
+empty-body verdict. Tests: `passive_compose.rs::every_collection_option_*`,
+`a_collection_*`, `a_transclusion_condition_*`.
 A `::file`/`::code` line holding a `{{ … }}` span the session left as written,
 and a `prologue`/`epilogue` value that is deferred or holds one
 (`PassiveSession::deferred_span_in`, `deferred_reference`), names no target:
 the transclusion phase (`parse_directives_deferring`, `prepare_frontmatter_reference`)
 records a `DeferredConstruct::Transclusion` deferral and leaves it unread,
-and the reference graph skips it, never a parse or missing-file failure.
+and the reference graph and the pre-flight walk (`preflight/collect.rs`)
+skip it, never a parse or missing-file failure.
 
 The reference report is `reference/validate.rs::ValidationReportView`
 (`reference/report.rs`), a `CommandOutput` adapter that keeps the data form

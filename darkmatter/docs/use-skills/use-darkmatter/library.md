@@ -211,7 +211,8 @@ let session = options.passive_session().expect("a dry run has a session").clone(
 // … compose with `options` …
 for deferral in session.deferrals() {
     // construct: FrontmatterValue, Interpolation, ShellDirective,
-    // ShellBlock, BlockCondition, SchemaTemplate, or Transclusion
+    // ShellBlock, BlockCondition, Collection, SchemaTemplate,
+    // SchemaCheck, or Transclusion
     println!("{:?} `{}`: {}", deferral.construct, deferral.authored, deferral.reason.describe());
 }
 ```
@@ -222,7 +223,9 @@ for deferral in session.deferrals() {
   deferred.
 - A read of a deferred value is unavailable, through any expression:
   the `{{{ … }}}` span stays as written, a `::block` whose condition reads it
-  stays whole, and a frontmatter value that reads it is deferred too.
+  stays whole, a `::map`/`::filter` whose gate, source, callback, or option
+  reads it stays whole and inert (a `Collection` deferral), and a
+  frontmatter value that reads it is deferred too.
   `try(…)` and `||` never recover it.
 - An inclusion whose target reads such a value names no file yet: a
   `::file`/`::code` line holding a span left as written stays as written,
@@ -230,7 +233,13 @@ for deferral in session.deferrals() {
   nothing. Each is a `Transclusion` deferral, never a parse failure or a
   missing file. A caller can declare a value it has not got with
   `session.defer_absent("topic", reason)` before composing, and the same
-  holds for what reads it.
+  holds for what reads it. A value the run will replace before this
+  composition is declared with `session.defer_written("topic", reason)`
+  (or a member path such as `seq.outputs`): it is unavailable whatever it
+  holds now and however a read spells it (`seq['outputs']`,
+  `(seq).outputs`), an explicit `fm.seq.outputs` of the document's own
+  property aside, and a schema problem with it is a `SchemaCheck` deferral
+  rather than a failure.
 - No approval is asked for and no cache is read or written. A `$schema` slot
   whose read needs approval is deferred (`SchemaTemplate`) and its checks are
   not run. An allowed remote read is fetched without being stored.

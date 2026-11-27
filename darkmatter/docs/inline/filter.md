@@ -351,6 +351,22 @@ retain their existing failure policies and explicit recoveries. Missing/null
 sources and empty selections render nothing. Already performed effects are
 not rolled back if a later iteration fails.
 
+A dry run (`ComposeOptions::with_dry_run`, `claudine … --dry-run`) is the
+exception for a value it does not have. When the `when=` gate, the source,
+the predicate, `filter=`, `while=`, `until=`, or `sort=` reads a command's
+output, a missing input, or a value the run writes first, or calls an
+effectful function such as `has_alias`, the whole region stays as written,
+nothing inside it runs, and the dry run reports one `not checked` row for
+it. An error on values it does know still fails:
+
+```md
+::filter items "i => true" sort="i => i > 1"
+- {{i}}
+::end-filter
+```
+
+is `dm.collection.invalid_sort_key` in a dry run too.
+
 Maps and filters share two budgets across expression calls, nested directives,
 and transcluded documents:
 

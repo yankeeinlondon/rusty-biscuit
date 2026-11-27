@@ -45,6 +45,7 @@ use crate::markdown::compose::expression::{
 };
 use crate::markdown::compose::expression::iterable::{IterableSource, SourceEntry};
 use crate::markdown::compose::page_blocks::PageBlockRegion;
+use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
 use crate::markdown::compose::value_origin::OverrideOrigin;
 use crate::markdown::compose::{ComposeReport, conditions};
 use crate::markdown::types::MarkdownError;
@@ -125,6 +126,11 @@ pub(crate) enum Halt {
     Blocked,
     /// A failure; no partial result is produced.
     Failed(Box<MarkdownError>),
+    /// A dry run could not evaluate a gate, source, or callback without an
+    /// effect or a value it does not have. The page block or collection it
+    /// belongs to keeps its authored text and records the deferral, so this
+    /// never leaves the traversal.
+    Unavailable(Box<DeferralReason>),
 }
 
 impl<E: Into<MarkdownError>> From<E> for Halt {
@@ -237,6 +243,9 @@ pub(crate) struct Expansion {
     pub output: String,
     pub splices: Vec<Splice>,
     pub scopes: ScopeRanges,
+    /// Output runs a dry run left as written and inert: a collection it
+    /// could not expand. Later stages read them as data.
+    pub inert: Vec<Range<usize>>,
 }
 
 impl<'a, L: EvaluationLookup> Execution<'a, L> {
@@ -300,8 +309,8 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         // Kept with a later failure, like every warning reported before it.
         self.flush_members();
         rendered?;
-        let (output, splices, scopes) = writer.finish();
-        Ok(Expansion { output, splices, scopes })
+        let (output, splices, scopes, inert) = writer.finish();
+        Ok(Expansion { output, splices, scopes, inert })
     }
 
     fn render(
@@ -345,8 +354,22 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
                         region.span.start + at..region.span.start + at + expression.len()
                     });
                 let start = condition_start(self.content, region.span.start, expression);
-                self.condition(expression, &region.span, region.start_line, scope, start)
-                    .map_err(|halt| self.in_iteration(halt, span, path))?
+                match self.condition(expression, &region.span, region.start_line, scope, start) {
+                    Ok(enabled) => enabled,
+                    // As outside a collection, the block stays with its
+                    // directive lines. Its body is expanded as if enabled,
+                    // since a collection in it binds names only an
+                    // expansion can.
+                    Err(Halt::Unavailable(reason)) => {
+                        self.defer(DeferredConstruct::BlockCondition, *reason, expression, &region.span, region.start_line);
+                        let opener = region.span.start..region.body_span.start;
+                        writer.copy(self.content, opener.clone(), path).map_err(|error| self.exhausted(opener, error))?;
+                        self.render(writer, region.body_span.clone(), &node.children, scope, path)?;
+                        let closer = region.body_span.end..region.span.end;
+                        return writer.copy(self.content, closer.clone(), path).map_err(|error| self.exhausted(closer, error));
+                    }
+                    Err(halt) => return Err(self.in_iteration(halt, span, path)),
+                }
             }
             None => true,
         };
@@ -403,7 +426,24 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         if let Some(members) = &self.members {
             self.report.add_warnings(members.warnings(start, expression, &mut observation));
         }
-        verdict.map_err(|error| Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)))
+        verdict.map_err(|error| match &error {
+            conditions::ConditionError::Eval { cause, .. } if let Some(reason) = cause.unavailable_reason() => {
+                Halt::Unavailable(Box::new(reason.clone()))
+            }
+            _ => Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)),
+        })
+    }
+
+    /// Records that a dry run left the `construct` at `span` (on body
+    /// `line`) as written for `reason`; `authored` is its recorded text.
+    fn defer(&self, construct: DeferredConstruct, reason: DeferralReason, authored: &str, span: &Range<usize>, line: usize) {
+        let Some(session) = self.lookup.resolution_context_ref().and_then(|context| context.passive.as_ref()) else {
+            return;
+        };
+        let context = self.context.clone();
+        let current = || context.clone();
+        let site = ConditionSite { span, body_line: line, opener: self.opener, current: &current };
+        session.record(Deferral { construct, reason, authored: authored.to_string(), key: None, line: Some(site.located().1) });
     }
 
     fn plan(&mut self, region: &CollectionRegion) -> Result<Rc<Plan>, Halt> {
@@ -484,10 +524,34 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         scope: Option<&Arc<LexicalScope>>,
         path: &IterationPath,
     ) -> Result<(), Halt> {
-        let header = &region.header;
         let plan = self.plan(region)?;
         self.check_names(&plan, path)?;
+        let mark = writer.mark();
+        match self.expand_collection(writer, region, node, &plan, scope, path) {
+            // The region's names are bound only by the expansion, so its
+            // text stays inert: nothing in it runs, and the empty-body
+            // judgment cannot count on what it would have produced.
+            Err(Halt::Unavailable(reason)) => {
+                writer.rewind(mark);
+                let span = region.span.clone();
+                self.defer(DeferredConstruct::Collection, *reason, &self.content[span.clone()], &span, region.start_line);
+                writer.copy_inert(self.content, span.clone(), path).map_err(|error| self.exhausted(span, error))
+            }
+            outcome => outcome,
+        }
+    }
 
+    /// Runs `region`'s gate, reads its source, and expands its body.
+    fn expand_collection(
+        &mut self,
+        writer: &mut ExpansionWriter<'_>,
+        region: &CollectionRegion,
+        node: &Node<'_>,
+        plan: &Plan,
+        scope: Option<&Arc<LexicalScope>>,
+        path: &IterationPath,
+    ) -> Result<(), Halt> {
+        let header = &region.header;
         if !self.discover
             && let Some(when) = &header.when
             && !self
@@ -517,7 +581,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         };
 
         writer.open_expansion();
-        let outcome = self.iterate(writer, region, node, &plan, &source, scope, path);
+        let outcome = self.iterate(writer, region, node, plan, &source, scope, path);
         writer.close_expansion();
         outcome
     }
@@ -551,6 +615,9 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
     }
 
     fn callback_failure(&self, span: Range<usize>, path: &IterationPath, cause: ExpressionError) -> Halt {
+        if let Some(reason) = cause.unavailable_reason() {
+            return Halt::Unavailable(Box::new(reason.clone()));
+        }
         match cause {
             ExpressionError::IterationLimit(error) => self.exhausted(span, *error),
             cause => failed(CollectionError::CallbackFailed {

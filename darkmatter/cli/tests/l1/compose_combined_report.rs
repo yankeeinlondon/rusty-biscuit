@@ -338,6 +338,38 @@ fn a_schema_problem_beside_a_broken_reference_reports_both() {
     );
 }
 
+/// The combined report grades a schema problem as `md compose` itself does:
+/// it never drops a value, so an optional property's invalid value is an
+/// error there, as a required one's is, and the same document with its
+/// reference repaired is refused by the real run. One test per row.
+macro_rules! schema_severity_parity {
+    ($($name:ident: $schema:literal, $code:literal;)*) => {$(
+        #[test]
+        fn $name() {
+            let frontmatter = concat!("---\n$schema:\n  topic: ", $schema, "\ntopic: missing\n---\nhello {{ topic }}\n");
+            let broken = format!("{frontmatter}::file ./missing.md\n");
+            let run = compose(concat!("combined-", stringify!($name)), "schema.md", &broken, &["--output", "json"]);
+            assert_eq!(run.status, Some(1), "{}", run.stdout);
+            let report: serde_json::Value = serde_json::from_str(&run.stdout).unwrap();
+            let rows: Vec<(&str, &str)> = report["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|record| (record["code"].as_str().unwrap(), record["severity"].as_str().unwrap()))
+                .collect();
+            assert!(rows.contains(&($code, "error")), "{report:#}");
+            let real = compose(concat!("real-", stringify!($name)), "schema.md", frontmatter, &[]);
+            assert_eq!(real.status, Some(1), "{}", real.stderr);
+            assert!(real.stderr.contains("schema validation failed"), "{}", real.stderr);
+        }
+    )*};
+}
+
+schema_severity_parity! {
+    an_invalid_optional_value_is_an_error_as_md_compose_refuses_it: "enum(a)", "dm.schema.constraint";
+    an_invalid_required_value_is_an_error_as_md_compose_refuses_it: "enum(a; required)", "dm.schema.constraint";
+}
+
 /// Standard input has no reference check, so nothing changes for it.
 #[test]
 fn standard_input_is_unchanged() {
@@ -381,4 +413,62 @@ fn initialize_can_create_an_included_file() {
     let run = compose("combined-lifecycle-creates", "doc.md", document, &[]);
     assert_eq!(run.status, Some(0), "{}", run.stderr);
     assert!(run.stdout.contains("from initialize"), "{}", run.stdout);
+}
+
+/// A hyperlink warning, a missing inclusion in a block a false condition
+/// leaves out, and a failing expression: the condition-blind walk stops at
+/// the inclusion the reference check left out with its block.
+const EXCLUDED_AND_WARNED: &str =
+    "---\ntitle: x\n---\nIntro [x]().\n\n::block when=\"false\"\n::file ./missing.md\n::end-block\n\n{{ 3 / 0 }}\n";
+
+/// The rows of the report a reference stop prints with the hyperlink
+/// warning, the missing inclusion, and the unchecked body.
+const WARNED_ROWS: [&str; 3] =
+    ["  ⚠ no target in hyperlink", "  ✗ file not found in `::file`", "  ℹ not checked: empty body (the document did not compose: interpolation of `3 / 0` failed: division(): Division by zero)"];
+
+/// The walk's inclusion stop keeps the reference check's warnings, as a
+/// refused check's report keeps them; a data output holds each once.
+#[test]
+fn an_inclusion_stop_keeps_the_reference_warnings() {
+    let plain = compose("combined-excluded-warned-plain", "doc.md", EXCLUDED_AND_WARNED, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(rows(&plain.stderr), WARNED_ROWS, "{}", plain.stderr);
+    assert!(plain.stderr.ends_with("Checked doc.md: 1 error, 1 warning, 1 check not run\n"), "{}", plain.stderr);
+
+    let json = compose("combined-excluded-warned-json", "doc.md", EXCLUDED_AND_WARNED, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(
+        codes(&json.stdout),
+        ["dm.reference.missing_hyperlink", "dm.reference.missing_transclusion", "dm.check.not_checked"],
+        "{}",
+        json.stdout
+    );
+}
+
+/// The lifecycle route's inclusion stop keeps them too.
+#[test]
+fn the_lifecycle_routes_inclusion_stop_keeps_the_reference_warnings() {
+    let document = EXCLUDED_AND_WARNED.replace("title: x\n", "title: x\ninitialize:\n  - info: \"event:initialize\"\n");
+    let plain = compose("combined-excluded-warned-lifecycle-plain", "doc.md", &document, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(rows(&plain.stderr), WARNED_ROWS, "{}", plain.stderr);
+
+    let json = compose("combined-excluded-warned-lifecycle-json", "doc.md", &document, &["--output", "json"]);
+    assert_eq!(json.status, Some(1), "{}", json.stdout);
+    assert_eq!(
+        codes(&json.stdout),
+        ["dm.reference.missing_hyperlink", "dm.reference.missing_transclusion", "dm.check.not_checked"],
+        "{}",
+        json.stdout
+    );
+}
+
+/// The control: the same inclusion outside the block is a refused reference
+/// check, whose report already kept the warning.
+#[test]
+fn a_refused_check_keeps_the_reference_warnings() {
+    let document = EXCLUDED_AND_WARNED.replace("::block when=\"false\"\n", "").replace("::end-block\n", "");
+    let plain = compose("combined-refused-warned-plain", "doc.md", &document, &[]);
+    assert_eq!(plain.status, Some(1), "{}", plain.stderr);
+    assert_eq!(rows(&plain.stderr), WARNED_ROWS, "{}", plain.stderr);
 }

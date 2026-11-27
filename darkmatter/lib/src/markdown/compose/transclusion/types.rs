@@ -402,18 +402,25 @@ impl InclusionSite {
 
     /// The site of `markdown`'s `key` value reading `value`, entry `index` of
     /// a list; the file alone when the value's position is not proven, and
-    /// `None` for a document with no file.
+    /// `None` for a document with no file. A generated document's
+    /// frontmatter is located in the file that wrote it
+    /// ([`Markdown::with_frontmatter_authored_in`](crate::markdown::Markdown::with_frontmatter_authored_in)).
     pub(crate) fn of_frontmatter_value(
         markdown: &crate::markdown::Markdown,
         key: &str,
         index: usize,
         value: &str,
     ) -> Option<Self> {
-        let file = file_of(markdown)?;
+        let origin = markdown.frontmatter_origin();
+        let file = file_of(markdown).or_else(|| origin.map(|origin| origin.file.clone()))?;
+        let text = markdown
+            .loaded_source()
+            .map(|loaded| &*loaded.text)
+            .or_else(|| origin.filter(|origin| origin.file == file).map(|origin| &*origin.text));
         let in_list = markdown.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
-        let authored = markdown.loaded_source().and_then(|loaded| {
-            let range = frontmatter_value_range(&loaded.text, key, in_list.then_some(index), value)?;
-            crate::markdown::types::AuthoredSpan::locate(&loaded.text, range)
+        let authored = text.and_then(|text| {
+            let range = frontmatter_value_range(text, key, in_list.then_some(index), value)?;
+            crate::markdown::types::AuthoredSpan::locate(text, range)
         });
         let construct = match key {
             "prologue" => Some("prologue:"),

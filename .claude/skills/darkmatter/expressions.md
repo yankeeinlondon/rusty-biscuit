@@ -249,6 +249,13 @@ through the shared `AbsenceScope`, not a new walk. DMLS reports the same
 and an unknown function as the `ERROR` `dm.expression.unknown_function` through
 `expression::validate_expression` (see
 [dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
+Frontmatter interpolation leaves a `{{ … }}` inside a `::map`/`::filter`
+region body of a string value as written when it reads that region's (or
+an enclosing one's) item binding (`frontmatter_interpolation.rs::
+collection_item_scopes`/`reads_item_binding`, passed to
+`interpolate_value_traced` as its `SpanSelection`): an inline `prompt:` is
+expanded only as a body, so the read is the collection's, never an
+undeclared property (`unknown_identifier_warning.rs::a_frontmatter_collection_body_reading_its_item_is_left_for_the_collection`).
 
 **Static read inventory for hosts.** `expression::static_access_reads(&Expr)`
 lists every variable read (all branches, operands, call arguments, index
@@ -550,7 +557,12 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   variant must be classified on purpose, and it defaults to `false` unless it
   is a typed missing-file or transport failure of the data source; it is
   independent of `is_authoring_fatal`. `Callback { source }` delegates to its
-  cause. Never recover by function name or message, and never by matching the
+  cause. Every other wrapper that turns a failure into data (`try_frontmatter`'s
+  `{ ok: false }`) first propagates `ExpressionError::withholds_result()`
+  (`Unavailable`, `ObservationPending`, `SlotReadRefused`: no result yet), so a
+  dry run's approval or created-file deferral is never settled as a failed
+  read; a new recovery site uses that one rule
+  (`lib/tests/l1/recovery_wrappers.rs`). Never recover by function name or message, and never by matching the
   generic `Other` variant (always `false`): give a recoverable failure its own
   typed variant. Callers: `expression/mod.rs::evaluate_recovery` (every
   composition surface) and `lifecycle/executor.rs::call_recovery` (lifecycle

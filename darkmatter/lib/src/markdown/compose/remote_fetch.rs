@@ -126,7 +126,8 @@ pub struct RemoteFetchRuntime {
 }
 
 struct RemoteFetchInner {
-    slots: DashMap<String, Arc<SlotGuard>>,
+    /// Shared with every [`RemoteFetchRuntime::without_store`] view.
+    slots: Arc<DashMap<String, Arc<SlotGuard>>>,
     provider_queries: ProviderQueryCache,
     provider_in_flight: Mutex<usize>,
     provider_notify: Condvar,
@@ -456,6 +457,49 @@ impl RemoteFetchRuntime {
         &self.inner.network
     }
 
+    /// This runtime's fetches (every URL registered so far or later, and
+    /// their bodies) under the same policy and settings, but with no
+    /// transport store: what it fetches itself is never persisted. A dry run
+    /// joining a command's runtime reads through one of these.
+    pub(crate) fn without_store(&self) -> Self {
+        let inner = &self.inner;
+        if inner.store.is_none() {
+            return self.clone();
+        }
+        let mut view = Self::build_over(
+            Arc::clone(&inner.slots),
+            inner.policy.clone(),
+            inner.network.clone(),
+            inner.concurrency,
+            None,
+            inner.cache_config,
+        );
+        if let Some(view_inner) = Arc::get_mut(&mut view.inner) {
+            view_inner.cache_only = inner.cache_only;
+        }
+        view
+    }
+
+    /// Whether `other` decides and fetches every URL as this runtime does:
+    /// the same host policy, `network` permission, concurrency, freshness
+    /// settings, cache-only mode, and transport store. Only then may one
+    /// stand in for the other ([`PassiveObservations::remote`](super::passive::PassiveObservations)).
+    pub(crate) fn authorizes_like(&self, other: &Self) -> bool {
+        let (left, right) = (&self.inner, &other.inner);
+        left.policy == right.policy
+            && left.network == right.network
+            && left.concurrency == right.concurrency
+            && left.cache_only == right.cache_only
+            && left.cache_config.ttl_override == right.cache_config.ttl_override
+            && left.cache_config.refresh == right.cache_config.refresh
+            && left.cache_config.mode == right.cache_config.mode
+            && match (&left.store, &right.store) {
+                (None, None) => true,
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left.root() == right.root(),
+                _ => false,
+            }
+    }
+
     /// Creates a runtime from the remote-read config with an optional
     /// persistent cache store for cross-run remote artifact caching. Only the
     /// config's exact hosts are allowed (`network: deny`).
@@ -584,9 +628,21 @@ impl RemoteFetchRuntime {
         store: Option<Arc<FileStore>>,
         cache_config: RemoteCacheConfig,
     ) -> Self {
+        Self::build_over(Arc::new(DashMap::new()), policy, network, concurrency, store, cache_config)
+    }
+
+    /// [`Self::build`] filling `slots`, which another runtime may share.
+    fn build_over(
+        slots: Arc<DashMap<String, Arc<SlotGuard>>>,
+        policy: FetchPolicy,
+        network: NetworkPermission,
+        concurrency: usize,
+        store: Option<Arc<FileStore>>,
+        cache_config: RemoteCacheConfig,
+    ) -> Self {
         Self {
             inner: Arc::new(RemoteFetchInner {
-                slots: DashMap::new(),
+                slots,
                 provider_queries: Mutex::new(HashMap::new()),
                 provider_in_flight: Mutex::new(0),
                 provider_notify: Condvar::new(),

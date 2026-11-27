@@ -129,10 +129,17 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
                 check_absent_request(&file_ref, &options, contract, ctx).map_err(fail)?;
                 // Creating any probed candidate would change the answer.
                 if ctx.editor.is_none() {
+                    if let Some(unavailable) = crate::markdown::compose::expression::functions::created_before_read(&file_ref, ctx) {
+                        return Err(unavailable);
+                    }
                     record_probed_candidates(&file_ref, ctx);
                 }
                 return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None));
             };
+            // A file the run's initializer appends to holds other rows by then.
+            if let Some(reason) = ctx.passive.as_ref().and_then(|session| session.initializer_changes(&path)) {
+                return Err(ExpressionError::Unavailable(Box::new(reason)));
+            }
             DataSourceIdentity::local(&path)
         }
     };
