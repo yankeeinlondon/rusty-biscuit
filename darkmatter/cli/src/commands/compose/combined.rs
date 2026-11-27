@@ -259,10 +259,7 @@ impl Collector {
     fn new(md: &Markdown, launch_dir: &Path) -> Self {
         let document = md.source().as_ref().and_then(darkmatter::markdown::compose::ComposeSource::document_path);
         let label = match &document {
-            Some(path) => match path.strip_prefix(launch_dir) {
-                Ok(relative) if !relative.as_os_str().is_empty() => biscuit_file::to_forward_slash_string(relative),
-                _ => biscuit_file::to_forward_slash_string(path),
-            },
+            Some(path) => darkmatter::findings::launch_relative(path, Some(launch_dir)),
             None => "<stdin>".to_string(),
         };
         let mut sink = FindingSink::new();

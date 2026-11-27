@@ -65,6 +65,11 @@ fn given(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// `path` as a diagnostic's `source.file` publishes it: `/` on every OS.
+fn published(path: &Path) -> String {
+    biscuit_file::to_forward_slash_string(path)
+}
+
 /// `name` under the fixture `cwd`, joined with the platform separator; a
 /// literal `"cwd/{name}"` keeps its `/` on Windows, where `md` reports `\`.
 fn cwd_file(name: &str) -> PathBuf {
@@ -116,7 +121,7 @@ fn a_category_3_warning_is_reported_once_with_every_field() {
             "code": "dm.expression.uncertain_call",
             "severity": "warning",
             "message": report["diagnostics"][0]["message"],
-            "source": { "file": given(&document), "line": 6, "column": 13, "inserted": false },
+            "source": { "file": published(&document), "line": 6, "column": 13, "inserted": false },
             "expected_type": "number",
             "actual_type": "string | null",
             "span": null,
@@ -160,7 +165,7 @@ fn a_rejected_call_reports_the_shared_record() {
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
     assert_eq!(report["diagnostics"][0]["expected_type"], "number");
     assert_eq!(report["diagnostics"][0]["actual_type"], "boolean");
-    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 6, "column": 13, "inserted": false }));
+    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": published(&document), "line": 6, "column": 13, "inserted": false }));
 }
 
 /// The lifecycle leg of criterion 19: a lifecycle rejection reports the
@@ -212,7 +217,7 @@ fn a_rejected_lifecycle_call_reports_the_shared_record() {
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
     assert_eq!(report["diagnostics"][0]["expected_type"], "number");
     assert_eq!(report["diagnostics"][0]["actual_type"], "literal true");
-    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 3, "column": 37, "inserted": false }));
+    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": published(&document), "line": 3, "column": 37, "inserted": false }));
     assert!(!document.with_file_name("marker").exists(), "no lifecycle effect ran");
 }
 
@@ -249,7 +254,7 @@ fn schema_and_parse_failures_are_located_in_the_frontmatter() {
         let report = report_of(&output);
         assert_eq!(report["document"], Value::Null, "{name}");
         assert_eq!(codes(&report), [code], "{name}: {report:#}");
-        assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": line, "column": column, "inserted": false }), "{name}");
+        assert_eq!(report["diagnostics"][0]["source"], json!({ "file": published(&document), "line": line, "column": column, "inserted": false }), "{name}");
     }
 }
 
@@ -265,7 +270,7 @@ fn an_earlier_warning_survives_a_runtime_failure() {
     let report = report_of(&output);
     assert_eq!(report["document"], Value::Null);
     assert_eq!(codes(&report), ["dm.expression.uncertain_call", "dm.expression.evaluation_failure"], "{report:#}");
-    assert_eq!(report["diagnostics"][1]["source"], json!({ "file": given(&document), "line": 8, "column": 1, "inserted": false }));
+    assert_eq!(report["diagnostics"][1]["source"], json!({ "file": published(&document), "line": 8, "column": 1, "inserted": false }));
     assert_eq!(report["diagnostics"][1]["expected_type"], Value::Null);
 }
 

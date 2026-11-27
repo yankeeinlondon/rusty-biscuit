@@ -65,13 +65,21 @@ fn normalize(text: &str, workspace: &Path) -> String {
             normalized = normalized.replace(uri.as_str(), "file://<WS>");
         }
         normalized = normalized.replace(&spelling.display().to_string(), "<WS>").replace(&forward, "<WS>");
-        // JSON escapes a Windows path's separators.
-        normalized = normalized.replace(&spelling.display().to_string().replace('\\', "\\\\"), "<WS>");
+        // JSON escapes a Windows path's separators, twice for a path a
+        // message quotes with `{:?}`.
+        let display = spelling.display().to_string();
+        normalized = normalized.replace(&display.replace('\\', "\\\\\\\\"), "<WS>");
+        normalized = normalized.replace(&display.replace('\\', "\\\\"), "<WS>");
     }
     // No fixture output holds a backslash of its own, so any left is a
-    // Windows separator (JSON-escaped or not) inside a workspace path.
-    // A JSON quote escape (`\"`) is kept.
-    let normalized = normalized.replace("\\\\", "/").replace("\\\"", "\u{0}").replace('\\', "/").replace('\u{0}', "\\\"");
+    // Windows separator (JSON-escaped, once or twice, or not) inside a
+    // workspace path. A JSON quote escape (`\"`) is kept.
+    let normalized = normalized
+        .replace("\\\\\\\\", "/")
+        .replace("\\\\", "/")
+        .replace("\\\"", "\u{0}")
+        .replace('\\', "/")
+        .replace('\u{0}', "\\\"");
     // A reference id starts with a hash of its document's path.
     const ID: &str = "\"id\": \"";
     let mut out = String::with_capacity(normalized.len());
@@ -94,7 +102,7 @@ fn normalize(text: &str, workspace: &Path) -> String {
 
 fn assert_baseline(actual: &str, expected: &str, file: &str) {
     if std::env::var_os("BLESS_REFERENCE_BASELINES").is_some() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reference_baselines").join(file);
+        let path = biscuit_test_harness::manifest_dir!().join("tests/fixtures/reference_baselines").join(file);
         std::fs::write(path, actual).unwrap();
         return;
     }
@@ -109,7 +117,7 @@ macro_rules! baselines {
             let actual = observe(stringify!($name), &[$($arg),+]);
             assert_baseline(
                 &actual,
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/reference_baselines/", $file)),
+                include_str!(concat!("../fixtures/reference_baselines/", $file)),
                 $file,
             );
         }

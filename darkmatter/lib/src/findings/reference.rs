@@ -293,10 +293,7 @@ fn missing_finding(
 }
 
 fn shown(path: &Path, launch_dir: Option<&Path>) -> String {
-    match launch_dir.and_then(|base| path.strip_prefix(base).ok()) {
-        Some(relative) if !relative.as_os_str().is_empty() => to_forward_slash_string(relative),
-        _ => to_forward_slash_string(path),
-    }
+    super::launch_relative(path, launch_dir)
 }
 
 /// A location the resolver searched, in its order.

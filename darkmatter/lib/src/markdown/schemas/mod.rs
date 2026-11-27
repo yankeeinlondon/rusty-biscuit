@@ -3920,12 +3920,24 @@ fn document_path(source: &Markdown) -> Option<&Path> {
 }
 
 fn base_dir_for(source: &Markdown, context: &biscuit_file::FileResolutionContext) -> PathBuf {
+    let cwd = context.cwd();
     match source.source() {
-        Some(ComposeSource::File(path)) => path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf),
-        _ => context.cwd().to_path_buf(),
+        Some(ComposeSource::File(path)) => match path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            // A source loaded at its canonical path (macOS `/private/var`)
+            // beside a context spelled `/var` would sit outside that
+            // context's tree; the context's spelling of the same folder wins.
+            Some(parent) if parent != cwd && same_folder(parent, cwd) => cwd.to_path_buf(),
+            Some(parent) => parent.to_path_buf(),
+            None => cwd.to_path_buf(),
+        },
+        _ => cwd.to_path_buf(),
+    }
+}
+
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (biscuit_file::canonicalize_simplified(a), biscuit_file::canonicalize_simplified(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 

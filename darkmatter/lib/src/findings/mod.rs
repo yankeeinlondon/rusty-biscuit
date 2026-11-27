@@ -32,7 +32,7 @@ pub use crate::markdown::compose::expression::diagnostics::{
     Diagnostic, DiagnosticRelated, DiagnosticSource, ReferenceDetails, Severity,
 };
 pub use presentation::{FindingPresentation, ReferencePresentation, ReferenceReportVisibility};
-pub use report::{FindingCounts, FindingReport, HumanLayout, ReportEntry};
+pub use report::{FindingCounts, FindingReport, HumanLayout, ReportEntry, launch_relative};
 pub use sink::{FindingId, FindingSink, Subject, SubjectId};
 pub use trail::{Trail, TrailFrame};
 

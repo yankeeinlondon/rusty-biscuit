@@ -534,6 +534,13 @@ impl SourceRepositories {
             .inspect_err(|error| tracing::debug!(%error, "source repository context not built"))
             .ok()?;
         let resolved = opening.map_or(path, |(_, resolved)| resolved);
+        // `own` is built at `path`'s spelling. An opening spelled through an
+        // alias of it (macOS `/var` for `/private/var`) lies outside `own`'s
+        // root lexically, which would drop the root; derive at `path` then.
+        let resolved = match own.repository_root() {
+            Some(root) if !resolved.starts_with(root) && path.starts_with(root) => path,
+            _ => resolved,
+        };
         let derived = derive_in_own_repository(&own, context, resolved, opening.map(|(reference, _)| reference));
         derived
             .validate()

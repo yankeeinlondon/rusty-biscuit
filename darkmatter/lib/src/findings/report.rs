@@ -187,11 +187,10 @@ pub(super) fn finding_details(launch_dir: Option<&Path>, diagnostic: &Diagnostic
         if let Some(resolved) = &reference.resolved {
             // A path shown relative to the launch directory needs no base
             // when the base is that directory.
-            let base = reference.base.as_ref().filter(|base| {
-                launch_dir.is_none_or(|launch| {
-                    biscuit_file::PathIdentity::new(Path::new(base.as_str())) != biscuit_file::PathIdentity::new(launch)
-                })
-            });
+            let base = reference
+                .base
+                .as_ref()
+                .filter(|base| launch_dir.is_none_or(|launch| !same_folder(Path::new(base.as_str()), launch)));
             match base {
                 Some(base) => details.push(format!(
                     "resolved to {} (relative to {})",
@@ -252,14 +251,48 @@ fn location_text(launch_dir: Option<&Path>, source: &DiagnosticSource) -> Option
     })
 }
 
-/// `path` relative to the launch directory, with `/`, when it lies under it;
-/// otherwise as given.
 fn display_path(launch_dir: Option<&Path>, path: &str) -> String {
-    let Some(base) = launch_dir else {
-        return path.to_string();
+    launch_relative(Path::new(path), launch_dir)
+}
+
+/// `path` relative to `launch_dir`, with `/`, when it lies under it;
+/// otherwise `path` as given, with `/`.
+///
+/// Two spellings of one folder (macOS `/var` for `/private/var`) are
+/// compared canonically, so a canonical document path still shows relative
+/// to a launch directory spelled through the alias.
+pub fn launch_relative(path: &Path, launch_dir: Option<&Path>) -> String {
+    let under = |path: &Path, base: &Path| {
+        path.strip_prefix(base)
+            .ok()
+            .filter(|relative| !relative.as_os_str().is_empty())
+            .map(biscuit_file::to_forward_slash_string)
     };
-    match Path::new(path).strip_prefix(base) {
-        Ok(relative) if !relative.as_os_str().is_empty() => biscuit_file::to_forward_slash_string(relative),
-        _ => path.to_string(),
-    }
+    let Some(base) = launch_dir else {
+        return biscuit_file::to_forward_slash_string(path);
+    };
+    under(path, base)
+        .or_else(|| {
+            let canonical_base = biscuit_file::canonicalize_simplified(base).ok()?;
+            // A path that does not exist yet (a missing target) cannot be
+            // canonicalized itself: it may already be spelled canonically,
+            // else its folder is.
+            under(path, &canonical_base).or_else(|| {
+                let canonical_path = biscuit_file::canonicalize_simplified(path).ok().or_else(|| {
+                    let folder = biscuit_file::canonicalize_simplified(path.parent()?).ok()?;
+                    Some(folder.join(path.file_name()?))
+                })?;
+                under(&canonical_path, &canonical_base)
+            })
+        })
+        .unwrap_or_else(|| biscuit_file::to_forward_slash_string(path))
+}
+
+/// Whether `a` and `b` name one folder, through either spelling of an alias.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    biscuit_file::PathIdentity::new(a) == biscuit_file::PathIdentity::new(b)
+        || matches!(
+            (biscuit_file::canonicalize_simplified(a), biscuit_file::canonicalize_simplified(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
 }

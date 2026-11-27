@@ -348,6 +348,7 @@ fn located_file_reference_leads_with_its_file() {
 /// that wrote it and the directive's authored line, each on its own row.
 #[test]
 fn located_composition_failure_names_the_file_and_line() {
+    use biscuit_terminal::errors::BlockError;
     use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
     use darkmatter::markdown::{Markdown, MarkdownError};
     let dir = tempfile::TempDir::new().unwrap();
@@ -365,7 +366,10 @@ fn located_composition_failure_names_the_file_and_line() {
     assert!(located.inclusion_site().is_some(), "{located:?}");
     let out = render(located.as_ref());
     assert_rows_on_own_lines(&out, &["File:", "Line: 6", "file reference syntax is invalid"]);
-    assert!(out.contains(&file.display().to_string()), "{out}");
+    // Wide enough that a long temp path (macOS `/private/var/folders/…`)
+    // is not wrapped inside the file row.
+    let wide = super::helpers::strip_ansi(&located.report_block_error_optimistic(Some(400)));
+    assert!(wide.contains(&file.display().to_string()), "{wide}");
 }
 
 #[test]

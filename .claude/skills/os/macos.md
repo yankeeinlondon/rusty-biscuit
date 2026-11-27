@@ -28,6 +28,17 @@ repository defects.
   L1 subprocess launched from the fixture `$HOME` can. Compare with
   `fs::canonicalize` where two such spellings meet, as Claudine's
   `with_prompt_magic_roots` does.
+- **Composition meets both spellings inside one request.** A transcluded
+  child's path arrives canonical (`/private/var/…`) while its opening record,
+  `$HOME`, and the request's repository root keep `/var/…`. Every lexical
+  `starts_with`/`strip_prefix` between them then fails: a child loses its
+  checkout's root (bare `$schema` names stop resolving), a schema's base dir
+  falls outside its tree (`CwdOutsideBaseDir`), and a report shows an absolute
+  path where `notes.md` was expected. Show a path relative to the launch
+  directory through `darkmatter::findings::launch_relative`, and keep a
+  context and the path judged against it in one spelling
+  (`SourceRepositories::own_repository_derivation`, `schemas::base_dir_for`).
+  Linux CI never sees this; reproduce on `BUILD_MACOS`.
 - **macOS sweeps old files under `/tmp` but leaves populated directories.** A
   git worktree there loses its small `.git` pointer file first, and
   `git worktree list` then shows it as `prunable`. That is not corruption: run

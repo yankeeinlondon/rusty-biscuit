@@ -68,8 +68,5 @@ pub(super) fn plural(count: usize, noun: &str) -> String {
 }
 
 pub(super) fn shown(path: &Path, launch_dir: Option<&Path>) -> String {
-    match launch_dir.and_then(|base| path.strip_prefix(base).ok()) {
-        Some(relative) if !relative.as_os_str().is_empty() => to_forward_slash_string(relative),
-        _ => to_forward_slash_string(path),
-    }
+    darkmatter::findings::launch_relative(path, launch_dir)
 }

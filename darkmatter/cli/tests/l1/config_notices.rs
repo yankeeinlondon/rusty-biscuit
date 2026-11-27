@@ -227,7 +227,10 @@ fn a_broken_repository_reference_names_a_direct_correction_not_md_init() {
     let output = run(&fixture, &["compose", "doc.md", "--allow", "host=127.0.0.1", "--output", "json"]);
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stdout));
     let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
-    let declared_in = fixture.cwd().join(".darkmatter.yaml").display().to_string();
+    // The repository's configuration is named at its canonical path (macOS
+    // `/private/var` for the fixture's `/var`).
+    let declared_in =
+        biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join(".darkmatter.yaml").display().to_string();
     let message = value["diagnostics"]
         .as_array()
         .expect("diagnostics")
