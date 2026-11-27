@@ -480,6 +480,8 @@ fn every_file_writing_effect_in_the_catalog_is_listed_with_its_change() {
         let found = initialize(json!([{ verb: args }]));
         assert_eq!(found.len(), 1, "{verb}");
         assert_eq!(found[0].change(), InitializerChange::ChangesExisting, "{verb}");
+        let expected = (verb != "merge_frontmatter").then(|| "k".to_string());
+        assert_eq!(found[0].property, expected, "{verb}");
         assert_eq!(darkmatter::lifecycle::file_change(verb), Some(InitializerChange::ChangesExisting));
     }
     // Every catalogued verb is classified; only these write no file.

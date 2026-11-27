@@ -46,6 +46,12 @@ pub struct CreatedFile {
     /// Whether the operand is a template, resolved only when the event
     /// runs: [`Self::target`] is `None` for one.
     pub template: bool,
+    /// The frontmatter key a single-key frontmatter verb writes
+    /// (`set_frontmatter: [doc.md, ready, true]` → `ready`), when written
+    /// as literal text. `None` for every other effect, for a templated
+    /// key, and for `merge_frontmatter`, whose keys are known only when it
+    /// runs.
+    pub property: Option<String>,
     /// Whether the action sits under a `when:` branch, so the run may skip it.
     pub conditional: bool,
     /// The action's authored path (`initialize[0].ensure_file`).
@@ -169,9 +175,18 @@ fn collect(nodes: &[LifecycleNode], conditional: bool, found: &mut Vec<CreatedFi
                 if reference.trim().is_empty() {
                     continue;
                 }
+                let property = match args.get(1) {
+                    Some(Expr::StringLiteral(key))
+                        if change == InitializerChange::ChangesExisting && verb != "merge_frontmatter" && !is_template_operand(&args[1]) =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                };
                 found.push(CreatedFile {
                     verb: verb.to_string(),
                     change,
+                    property,
                     reference,
                     template,
                     conditional,
