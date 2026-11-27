@@ -5,8 +5,13 @@
 //! graph [`Loader`] — but where a real run stops at its first failure, the
 //! check records the failure at the task or group leg it belongs to and goes
 //! on with that task's siblings. A bad item keeps its authored position; a
-//! malformed or command-backed root list leaves its tasks unread; a bad file
-//! blocks only the subtree that references it.
+//! malformed, command-backed, or effect-dependent root list leaves its tasks
+//! unread; a bad file blocks only the subtree that references it.
+//!
+//! The walk holds a passive session for its thread
+//! ([`passive_scope`](crate::composition::passive_scope)): an expression it
+//! evaluates (a source, an operator, a `template:` default, a `with:` value)
+//! that calls an effectful function fails as unavailable instead of running.
 //!
 //! Every task the walk reaches is a [`CheckedTask`], in authored order (a
 //! container before its children), identified by the same [`TaskIdentity`]
@@ -50,12 +55,14 @@ pub struct SequenceCheckRequest<'a> {
 /// How the root's `sequence` reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootList {
-    /// No `sequence` key: the default plan composes the document's body.
-    Body,
     /// A list that was read (inline, referenced, or a `{{ … }}` value).
     Read,
     /// A `$( … )` list, known only once its command runs.
     Command,
+    /// A list whose source expression needs an effect a dry run does not
+    /// have (`has_alias`, a deferred value); its root failure carries the
+    /// reason ([`CompositionError::deferral_reason`]).
+    Deferred,
     /// A list that could not be read; its failure is a root failure.
     Unread,
 }
@@ -100,6 +107,37 @@ pub struct TaskSite {
     pub property: String,
     /// The enclosing tasks, outermost first.
     pub frames: Vec<SiteFrame>,
+    /// Where a selected data row was written, when that is not
+    /// [`Self::file`]: the data file and the row's property in it (`[1]`,
+    /// `rows[1]`). A data selection resolves from [`Self::file`], the file
+    /// that selected it, and reads there; what is wrong with the row itself
+    /// is located here. `None` for a task its own file wrote.
+    pub row: Option<(PathBuf, String)>,
+}
+
+impl TaskSite {
+    /// The file that wrote the task and its property there: the data row
+    /// ([`Self::row`]) when it was selected from one.
+    #[must_use]
+    pub fn authored(&self) -> (&Path, &str) {
+        match &self.row {
+            Some((file, property)) => (file, property),
+            None => (&self.file, &self.property),
+        }
+    }
+}
+
+/// A sequence document's own preparation failure, and the task it belongs
+/// to.
+#[derive(Debug)]
+pub struct OwnerFailure {
+    /// The sequence document.
+    pub document: PathBuf,
+    /// The `sequence:` task that references it; `None` for the root (and a
+    /// root `sequence:` reference), whose tasks all read its values.
+    pub task: Option<TaskIdentity>,
+    /// The failure, as a real run raises it.
+    pub failure: CheckFailure,
 }
 
 /// One task the check reached.
@@ -135,6 +173,20 @@ pub struct CheckedTask {
     pub seq: Option<Value>,
     /// Why the task could not be read; empty when it was.
     pub failures: Vec<CheckFailure>,
+    /// The task, group, catalog, and sequence files this task's own
+    /// reference read, in read order: what a verdict on such a file that no
+    /// task inside it owns belongs to.
+    pub loaded: Vec<LoadedDocument>,
+}
+
+/// A data file a task's reference read, and the part of it the task uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedDocument {
+    /// The file as resolved.
+    pub path: PathBuf,
+    /// The authored property of the part the task uses (`groups[1]` for a
+    /// selected catalog entry); empty for the whole file.
+    pub property: String,
 }
 
 /// Everything [`check_sequence_tree`] found.
@@ -151,6 +203,10 @@ pub struct SequenceCheck {
     /// Every task, group, catalog, and sequence file the walk read, in
     /// first-read order: what a check judges against its kind's schema.
     pub files: Vec<PathBuf>,
+    /// Each sequence document whose own preparation failed for a reason
+    /// other than a missing input (a value its `$schema` refuses): a real run
+    /// stops there, after the graph and provider checks and before any task.
+    pub owner_failures: Vec<OwnerFailure>,
 }
 
 /// The walk's record while a [`Loader`] reads in check mode.
@@ -191,6 +247,8 @@ pub(super) struct SiteSeed<'s> {
     pub(super) item: &'s Value,
     pub(super) executable: Option<ExecutableField>,
     pub(super) seq: Option<Value>,
+    /// Where a selected data row was written ([`TaskSite::row`]).
+    pub(super) row: Option<(PathBuf, String)>,
 }
 
 impl CheckState {
@@ -228,6 +286,7 @@ impl CheckState {
             file: seed.file.to_path_buf(),
             property: seed.property,
             frames: self.frames.clone(),
+            row: seed.row,
         };
         self.tasks.push(CheckedTask {
             site,
@@ -241,6 +300,7 @@ impl CheckState {
             sequence_document: None,
             seq: seed.seq,
             failures: Vec::new(),
+            loaded: Vec::new(),
         });
         self.tasks.len() - 1
     }
@@ -312,10 +372,25 @@ impl Loader<'_> {
         }
     }
 
-    /// In check mode, note that the walk read the data file `path`.
+    /// In check mode, note that the walk read the data file `path`, for the
+    /// open task when there is one.
     pub(super) fn note_loaded_file(&mut self, path: &Path) {
-        if let Some(check) = self.check.as_mut() && !check.files.iter().any(|known| known == path) {
+        let Some(check) = self.check.as_mut() else { return };
+        if !check.files.iter().any(|known| known == path) {
             check.files.push(path.to_path_buf());
+        }
+        if let Some(&slot) = check.open.last() {
+            check.tasks[slot].loaded.push(LoadedDocument { path: path.to_path_buf(), property: String::new() });
+        }
+    }
+
+    /// In check mode, narrow the open task's last read of `path` to the
+    /// part at `property` it uses.
+    pub(super) fn note_loaded_part(&mut self, path: &Path, property: &str) {
+        let Some(check) = self.check.as_mut() else { return };
+        let Some(&slot) = check.open.last() else { return };
+        if let Some(loaded) = check.tasks[slot].loaded.iter_mut().rev().find(|loaded| loaded.path == path) {
+            loaded.property = property.to_string();
         }
     }
 
@@ -325,14 +400,14 @@ impl Loader<'_> {
     }
 
     /// In check mode, record the root items the plan set aside, located in
-    /// `origin`.
-    pub(super) fn record_root_item_failures(&mut self, origin: &Path) {
+    /// `origin` (and, for a data selection, at their rows of `source`).
+    pub(super) fn record_root_item_failures(&mut self, origin: &Path, source: &super::super::model::SequenceSource) {
         let Some(check) = self.check.as_mut() else { return };
         for (index, item, error) in std::mem::take(&mut check.root_item_failures) {
             let seed = SiteSeed {
                 slot: Slot::Root(index), name: item_name(&item, index), file: origin,
                 property: format!("sequence[{index}]"), item: &item, executable: item_executable(&item),
-                seq: None,
+                seq: None, row: source.data_row(index),
             };
             self.record_item_failure(seed, error);
         }
@@ -370,7 +445,12 @@ impl Loader<'_> {
         };
         check.frames.push(frame);
         check.open.push(slot);
+        let depth = self.ancestry.len();
         let result = run(self);
+        // A failure that returned between entering a file and leaving it
+        // would otherwise leave the file on the chain, and the next task
+        // referencing it would read as a cycle.
+        self.ancestry.truncate(depth);
         let check = self.check.as_mut().expect("check mode does not change during a walk");
         check.frames.pop();
         check.open.pop();
@@ -422,11 +502,17 @@ pub(super) fn item_executable(item: &Value) -> Option<ExecutableField> {
 /// Read the sequence `request.source` as its real run's preflight does,
 /// recording every failure at the task it belongs to instead of stopping.
 ///
-/// Nothing runs: no lifecycle event, command, provider, or approval. A
-/// `$( … )` list is not expanded ([`RootList::Command`]).
+/// Nothing runs: no lifecycle event, command, provider, approval, or
+/// effectful expression function. A `$( … )` list is not expanded
+/// ([`RootList::Command`]), and a `{{ … }}` list that calls such a function
+/// is not decided ([`RootList::Deferred`]).
 #[must_use]
 pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     let SequenceCheckRequest { source, compose_context, invocation, source_context, caller_layers, launch_dir } = request;
+    // Every evaluator the walk reaches builds its expression context under
+    // this session, so an effectful function is refused, not called.
+    let session = darkmatter::markdown::compose::passive::PassiveSession::new();
+    let _passive = crate::composition::passive_scope::enter(session.clone());
     let mut state = CheckState::new(launch_dir);
     let fail = |state: &mut CheckState, error: CompositionError| {
         let failure = state.failure(error);
@@ -457,10 +543,34 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     if let Some(layers) = caller_layers {
         discovery = discovery.with_caller_layers(layers);
     }
-    let inventory = match list {
-        RootList::Body | RootList::Read => super::discover_sequence_inputs(source, discovery),
-        RootList::Command | RootList::Unread => Err(no_discovery(&source.resolved_path)),
+    // A file with no `sequence` is still discovered first by a real run, so
+    // an input it misses is reported before the refusal.
+    let undefined = !source.markdown.frontmatter().as_map().contains_key("sequence");
+    let mut inventory = match list {
+        RootList::Read => super::discover_sequence_inputs(source, discovery),
+        RootList::Unread if undefined => super::discover_sequence_inputs(source, discovery),
+        RootList::Command | RootList::Deferred | RootList::Unread => Err(no_discovery(&source.resolved_path)),
     };
+    // A missing input has no value until the real run asks for it, and then
+    // every owner and task reads the answer. Discovery runs again with each
+    // one unavailable, so a value derived from it (an owner's
+    // `plan: "{{ spec }}-plan"`, a `with:` reading that) is left as written
+    // rather than computed from nothing; the missing entries are the same.
+    let missing: Vec<String> = match &inventory {
+        Ok(found) => found
+            .owners
+            .iter()
+            .filter_map(|owner| owner.missing.as_ref())
+            .flat_map(|entry| entry.missing.iter().map(|property| property.name.clone()))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    if !missing.is_empty() {
+        for name in missing {
+            session.defer_absent(&name, darkmatter::markdown::compose::passive::DeferralReason::MissingInput { name: name.clone() });
+        }
+        inventory = super::discover_sequence_inputs(source, discovery);
+    }
 
     let Some((plan, ordinals, item_failures)) = recovered else {
         return finish(state, list, inventory);
@@ -482,6 +592,12 @@ pub fn check_sequence_tree(request: SequenceCheckRequest<'_>) -> SequenceCheck {
     let mut state = *loader.check.take().expect("the walk stays in check mode");
     if let Err(error) = walked {
         fail(&mut state, error);
+    }
+    // The real graph's `finish`: a prediction reading a key some lifecycle
+    // may write before the task launches is decided at launch, not now.
+    let written = loader.runtime_written_keys();
+    for prediction in state.tasks.iter_mut().filter_map(|task| task.provider.as_mut()) {
+        prediction.defer_runtime_written(&written);
     }
     // A real run judges every referenced prompt's lifecycle literals once
     // the graph is built (`validate_prompt_lifecycle_literals`); a check
@@ -544,7 +660,51 @@ fn finish(
     // Root steps were recorded as the walk reached them and failed items as
     // the plan was read; authored order is the identities' order.
     state.tasks.sort_by_key(|task| identity_order(&task.site.identity));
-    SequenceCheck { list, root_failures: state.root_failures, tasks: state.tasks, inventory, files: state.files }
+    let mut check = SequenceCheck {
+        list, root_failures: state.root_failures, tasks: state.tasks, inventory, files: state.files,
+        owner_failures: Vec::new(),
+    };
+    // A file with no list (or one not read) stops the real run before any
+    // owner's own verdict.
+    if list == RootList::Read {
+        check.owner_failures = owner_failures(&mut check);
+    }
+    check
+}
+
+/// The owner failures discovery recorded, each at the task whose
+/// `sequence:` reference reached the owner: the n-th owner reached from one
+/// file and property belongs to the n-th task there.
+fn owner_failures(check: &mut SequenceCheck) -> Vec<OwnerFailure> {
+    let Ok(inventory) = &mut check.inventory else { return Vec::new() };
+    let mut seen: std::collections::HashMap<(PathBuf, String), usize> = std::collections::HashMap::new();
+    let occurrence: Vec<usize> = inventory.owners.iter().map(|owner| {
+        let count = seen.entry((owner.referenced_from.clone().unwrap_or_default(), owner.property.clone())).or_default();
+        *count += 1;
+        *count - 1
+    }).collect();
+    // A verdict on the owner's own list alone is the walk's to report, at
+    // each task, when it found the list's problems: the real run's graph
+    // refuses those before any owner is judged.
+    let walk_failed = !check.root_failures.is_empty() || check.tasks.iter().any(|task| !task.failures.is_empty());
+    let judges_only_the_list = |error: &CompositionError| matches!(
+        error,
+        CompositionError::SchemaValidation { problems, .. }
+            if !problems.is_empty() && problems.iter().all(|problem| problem == "/sequence" || problem.starts_with("/sequence/"))
+    );
+    std::mem::take(&mut inventory.failed_owners).into_iter()
+        .filter(|failed| !(walk_failed && judges_only_the_list(&failed.error)))
+        .map(|failed| {
+        let owner = &inventory.owners[failed.owner];
+        let task = match (owner.role, owner.referenced_from.as_deref()) {
+            (super::InputOwnerRole::Nested, Some(from)) => check.tasks.iter()
+                .filter(|task| task.site.file == from && format!("{}.sequence", task.site.property) == owner.property)
+                .nth(occurrence[failed.owner])
+                .map(|task| task.site.identity.clone()),
+            _ => None,
+        };
+        OwnerFailure { document: owner.path.clone(), task, failure: CheckFailure { error: failed.error, finding: None } }
+    }).collect()
 }
 
 /// The root ordinal of `identity` (`tasks[3]…` → 3): every task under one root
@@ -569,11 +729,17 @@ fn root_plan(
         let failure = state.failure(error);
         state.root_failures.push(failure);
     };
+    // As `resolve_sequence_plan_with`: a failure the source layers raised
+    // without knowing the file is the root's `sequence` value's.
+    let located = |error: CompositionError| error.locate_sequence(&source.resolved_path, "sequence", None);
     let frontmatter: Map<String, Value> = source.markdown.frontmatter().as_map().iter()
         .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
         .collect();
+    // A real run refuses a file with no `sequence` once it reads the plan
+    // (`phase1c.rs`), so nothing beneath the root is read.
     let Some(sequence) = frontmatter.get("sequence").cloned() else {
-        return (RootList::Body, None);
+        fail(state, CompositionError::sequence_undefined(&source.resolved_path));
+        return (RootList::Unread, None);
     };
     if let Some(value) = frontmatter.get("fail_fast") {
         fail(state, removed::removed_key(removed::RemovedOwner::Root, "fail_fast", value, &source.resolved_path));
@@ -615,8 +781,9 @@ fn root_plan(
             let mut recovered = match recovered {
                 Ok(recovered) => recovered,
                 Err(error) => {
+                    let list = if error.deferral_reason().is_some() { RootList::Deferred } else { RootList::Unread };
                     fail(state, error);
-                    return (RootList::Unread, None);
+                    return (list, None);
                 }
             };
             if let Err(error) = super::super::validate_formal_sequence_file(source, options.file_resolution_context()) {
@@ -631,28 +798,76 @@ fn root_plan(
             (RootList::Read, Some((recovered.plan, recovered.ordinals, failures)))
         }
         SequenceSourceSpec::Shell(_) => (RootList::Command, None),
-        SequenceSourceSpec::Expression(_) | SequenceSourceSpec::Reference(_) => {
-            match super::super::resolve_sequence_plan_with(source, *options) {
-                Ok(Some(plan)) => {
-                    let ordinals = (0..plan.steps.len()).collect();
-                    (RootList::Read, Some((plan, ordinals, Vec::new())))
-                }
-                Ok(None) => (RootList::Body, None),
+        // A real run reads these lists through `resolve_sequence_plan_with`,
+        // which fails the whole list at its first bad item; the check reads
+        // the same selected items one by one.
+        SequenceSourceSpec::Expression(expression) => {
+            let items = super::super::expression_source_items(
+                &expression, &frontmatter, &source.resolved_path, options.file_resolution_context(),
+            );
+            let items = match items {
+                Ok(items) => items,
+                Err(error) => return unread_list(state, located(error)),
+            };
+            let recovered = super::super::normalize::normalize_plan_recovering_at(
+                &items, SequenceSource::Expression, &source.resolved_path, true, "sequence",
+            );
+            read_list(recovered, &items)
+        }
+        SequenceSourceSpec::Reference(reference) => {
+            let path = match super::super::source::resolve_sequence_reference(
+                &reference.reference, ExecutableField::Sequence, &source.resolved_path, options.file_resolution_context(),
+            ) {
+                Ok(path) => path,
                 Err(error) => {
-                    if let SequenceSourceSpec::Reference(reference) = &grammar::classify_source(&sequence).expect("classified above") {
-                        let mut memo = std::mem::take(&mut state.memo);
-                        let launch_dir = state.launch_dir.clone();
-                        state.pending_finding = super::super::source::reference_finding(
-                            &reference.reference, &source.resolved_path, options.file_resolution_context(),
-                            DocumentConstruct { construct: "sequence:", noun: "sequence file", launch_dir: launch_dir.as_deref() },
-                            &mut memo,
-                        );
-                        state.memo = memo;
-                    }
-                    fail(state, error);
-                    (RootList::Unread, None)
+                    let mut memo = std::mem::take(&mut state.memo);
+                    let launch_dir = state.launch_dir.clone();
+                    state.pending_finding = super::super::source::reference_finding(
+                        &reference.reference, &source.resolved_path, options.file_resolution_context(),
+                        DocumentConstruct { construct: "sequence:", noun: "sequence file", launch_dir: launch_dir.as_deref() },
+                        &mut memo,
+                    );
+                    state.memo = memo;
+                    return unread_list(state, located(error));
                 }
+            };
+            // A file that does not parse has no row boundaries to recover;
+            // offsets and operators apply before any row is read.
+            let planned = super::super::data::load_document(&path).and_then(|loaded| {
+                super::super::source::plan_referenced_sequence_recovering(
+                    &reference, &path, &loaded.value, Arc::new(loaded.orders), &source.resolved_path,
+                    &frontmatter, true, options,
+                )
+            });
+            match planned {
+                Ok((recovered, items)) => read_list(recovered, &items),
+                Err(error) => unread_list(state, located(error)),
             }
         }
     }
+}
+
+/// A recovered root list read from `items`, the selected items as authored,
+/// which the failures index.
+#[allow(clippy::type_complexity)]
+fn read_list(
+    recovered: super::super::normalize::RecoveredPlan,
+    items: &[Value],
+) -> (RootList, Option<(SequencePlan, Vec<usize>, Vec<(usize, Value, CompositionError)>)>) {
+    let failures = recovered.failures.into_iter()
+        .map(|ItemFailure { index, error }| (index, items.get(index).cloned().unwrap_or(Value::Null), error))
+        .collect();
+    (RootList::Read, Some((recovered.plan, recovered.ordinals, failures)))
+}
+
+/// A root list that could not be read: `error` is its root failure.
+#[allow(clippy::type_complexity)]
+fn unread_list(
+    state: &mut CheckState,
+    error: CompositionError,
+) -> (RootList, Option<(SequencePlan, Vec<usize>, Vec<(usize, Value, CompositionError)>)>) {
+    let list = if error.deferral_reason().is_some() { RootList::Deferred } else { RootList::Unread };
+    let failure = state.failure(error);
+    state.root_failures.push(failure);
+    (list, None)
 }

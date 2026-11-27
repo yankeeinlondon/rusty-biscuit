@@ -253,7 +253,7 @@ levels, and the distinction is load-bearing:
 
 | Level | Value | Meaning |
 |---|---|---|
-| **Document** (frontmatter root) | prose string | Flips the whole sequence to **inline-compose**: the composed `prompt` is the agent prompt, and the provider's reply replaces the document body on disk. |
+| **Document** (frontmatter root) | prose string | Flips the whole sequence to **inline-compose**: the composed `prompt` is the agent prompt, and the provider's reply replaces the document body on disk. In a YAML sequence file, which has no body, the agent edits the file's properties and the file stays YAML ([inline steps of a YAML sequence file](../composition.md#inline-steps-of-a-yaml-sequence-file)). |
 | **Step / task** | file reference | Names a **prompt document** to compose and execute for that step. |
 
 ```yaml

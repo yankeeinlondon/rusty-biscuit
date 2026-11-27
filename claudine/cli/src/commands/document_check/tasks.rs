@@ -10,25 +10,18 @@
 use std::collections::HashSet;
 
 use claudine::composition::{
-    CallerInputLayers, CheckFailure, CheckedTask, MissingProperty, RootList, SequenceCheck, SequenceCheckRequest,
+    CallerInputLayers, CheckFailure, CheckedTask, OwnerFailure, RootList, SequenceCheck, SequenceCheckRequest,
     SiteFrame, TaskSite, check_sequence_tree,
 };
 use darkmatter::findings::TrailFrame;
-use darkmatter::markdown::compose::passive::PassiveSession;
+use darkmatter::markdown::compose::passive::DeferralReason;
 
 use super::*;
+use super::inputs::MissingRow;
+use super::keys::{KeyVerdict, key_owners, pointer_segments};
 
 /// A missing required input.
 pub(crate) const MISSING_INPUT: &str = "composition.missing_properties";
-
-/// One missing input, graded once the whole cohort is known.
-struct MissingRow {
-    subject: SubjectId,
-    trail: Trail,
-    property: MissingProperty,
-    declared_in: PathBuf,
-    hint: String,
-}
 
 /// The severity of every missing input of a run: a warning when the real
 /// run asks for them (it may collect, and every one has a shape it can ask
@@ -70,7 +63,7 @@ fn frame_noun(executable: Option<ExecutableField>) -> &'static str {
 }
 
 /// The trail of a task at `site`: its enclosing tasks, then the task.
-fn site_trail(site: &TaskSite) -> Trail {
+pub(super) fn site_trail(site: &TaskSite) -> Trail {
     let frames = site
         .frames
         .iter()
@@ -125,8 +118,17 @@ impl Check {
 
     pub(super) fn check_sequence(&mut self) {
         let root = self.root_ref().clone();
-        let mut removed = HashSet::new();
-        self.check_schema_keys(&root.resolved_path, &mut removed);
+        // The root's own keys are the root's; a verdict inside its list
+        // waits for the task it belongs to.
+        let (mut pending, own): (Vec<_>, Vec<_>) = self
+            .judge_keys(&root.resolved_path)
+            .into_iter()
+            .partition(|verdict| verdict.owner.len() > 1 && verdict.owner[0] == "sequence");
+        let root_subject = self.root_subject();
+        self.push_key_rows(root_subject, &Trail::default(), &own.iter().collect::<Vec<_>>(), false);
+        if self.purpose != Purpose::Advisory {
+            self.sequence_supplied_files();
+        }
         let frontmatter = root.markdown.frontmatter().as_map().clone();
         if let Some(Some(true)) =
             frontmatter.get("interactive").map(composition::parse_interactive_hint).and_then(Result::ok)
@@ -162,16 +164,19 @@ impl Check {
                 )
                 .with_source(source),
             );
-            self.sink.not_checked(subject, "tasks", "`sequence` is not a list", None);
+            self.not_checked(subject, "tasks", "`sequence` is not a list", None);
             return;
         }
 
-        let Some(invocation) = self.invocation.clone() else { return };
+        let Some(invocation) = self.invocation.clone() else {
+            self.push_key_rows(root_subject, &Trail::default(), &pending.iter().collect::<Vec<_>>(), false);
+            return;
+        };
         let source_context = match invocation.derive_composition_source(&root) {
             Ok(context) => context,
             Err(error) => {
-                let subject = self.root_subject();
-                self.push_error(subject, &error, Trail::default());
+                self.push_key_rows(root_subject, &Trail::default(), &pending.iter().collect::<Vec<_>>(), false);
+                self.push_error(root_subject, &error, Trail::default());
                 return;
             }
         };
@@ -190,17 +195,53 @@ impl Check {
             caller_layers: layers.as_ref(),
             launch_dir: self.launch_dir.as_deref(),
         });
+        // Each loaded document is judged once, however many tasks use it,
+        // and each verdict goes to every occurrence it belongs to.
         for file in &check.files {
             if *file != root.resolved_path {
-                self.check_schema_keys(file, &mut removed);
+                pending.extend(self.judge_keys(file));
             }
         }
+        let mut task_keys: Vec<Vec<&KeyVerdict>> = check.tasks.iter().map(|_| Vec::new()).collect();
+        let mut root_keys = Vec::new();
+        for verdict in &pending {
+            let owners = key_owners(&check.tasks, verdict);
+            if owners.is_empty() && verdict.file != root.resolved_path {
+                continue;
+            }
+            // Known before any failure is pushed, so a root failure for the
+            // same key is held back too.
+            if verdict.refusal {
+                self.key_problem_paths.entry(verdict.file.clone()).or_default().insert(verdict.instance_path.clone());
+                if let Some(key) = &verdict.key {
+                    self.keyed.entry((verdict.file.clone(), key.clone())).or_default();
+                }
+            }
+            if owners.is_empty() {
+                root_keys.push(verdict);
+            }
+            for index in owners {
+                task_keys[index].push(verdict);
+            }
+        }
+        self.push_key_rows(root_subject, &Trail::default(), &root_keys, false);
 
-        let root_subject = self.root_subject();
         let mut blocker = None;
         for failure in &check.root_failures {
-            if let Some(id) = self.push_failure(root_subject, failure, Trail::default(), None, &removed) {
+            if let Some(id) = self.push_failure(root_subject, failure, Trail::default(), None) {
                 blocker.get_or_insert(id);
+            }
+        }
+        // The root's supplied files are judged on their own, before the walk
+        // (`sequence_supplied_files`); the same verdict is not a second row.
+        let supplied_only = |owner: &&OwnerFailure| matches!(
+            &owner.failure.error,
+            CompositionError::ComposeFailed(darkmatter::markdown::MarkdownError::SchemaValidationFailed { problems, .. })
+                if !problems.is_empty() && problems.iter().all(|problem| problem.caller_file.is_some())
+        ) && owner.document == root.resolved_path;
+        for owner in check.owner_failures.iter().filter(|owner| owner.task.is_none()).filter(|owner| !supplied_only(owner)) {
+            if let Some(id) = self.push_owner_failure(root_subject, owner, Trail::default()) {
+                self.owner_blocks.push((None, id, owner.document.clone()));
             }
         }
         // A prompt task whose owner is missing an input waits for it, as the
@@ -209,75 +250,74 @@ impl Check {
             Ok(inventory) => inventory
                 .prompts
                 .iter()
-                .filter(|prompt| inventory.owners.get(prompt.owner).is_some_and(|owner| owner.missing.is_some()))
-                .map(|prompt| (prompt.source_path.clone(), prompt.property.clone()))
+                .filter_map(|prompt| {
+                    let entry = inventory.owners.get(prompt.owner)?.missing.as_ref()?;
+                    let names = entry.missing.iter().map(|property| property.name.clone()).collect();
+                    Some(((prompt.source_path.clone(), prompt.property.clone()), names))
+                })
                 .collect(),
-            Err(_) => HashSet::new(),
+            Err(_) => std::collections::HashMap::new(),
         };
-        self.root_waits = match &check.inventory {
+        // A referenced sequence document's missing inputs, which a body task
+        // composing it reads; its owner reports them.
+        self.owner_missing = match &check.inventory {
+            Ok(inventory) => inventory
+                .owners
+                .iter()
+                .filter(|owner| owner.role != claudine::composition::InputOwnerRole::Root)
+                .filter_map(|owner| owner.missing.as_ref())
+                .map(|entry| (entry.source_path.clone(), entry.missing.iter().map(|property| property.name.clone()).collect()))
+                .collect(),
+            Err(_) => std::collections::HashMap::new(),
+        };
+        // The root's own missing inputs, which its body reads: a value its
+        // `initialize` writes is known only when the run starts.
+        self.root_absent = match &check.inventory {
             Ok(inventory) => {
                 let mut initialized = HashSet::new();
                 if let Some(initialize) = frontmatter.get("initialize") {
                     claudine::composition::collect_written_keys(initialize, &mut initialized);
                 }
-                inventory.owners.iter().any(|owner| {
-                    owner.role == claudine::composition::InputOwnerRole::Root
-                        && owner.missing.as_ref().is_some_and(|entry| {
-                            entry.missing.iter().any(|property| !initialized.contains(&property.name))
-                        })
-                })
+                inventory
+                    .owners
+                    .iter()
+                    .filter(|owner| owner.role == claudine::composition::InputOwnerRole::Root)
+                    .filter_map(|owner| owner.missing.as_ref())
+                    .flat_map(|entry| entry.missing.iter())
+                    .map(|property| {
+                        let name = property.name.clone();
+                        let reason = if initialized.contains(&name) {
+                            DeferralReason::DependsOn { name: name.clone() }
+                        } else {
+                            DeferralReason::MissingInput { name: name.clone() }
+                        };
+                        (name, reason)
+                    })
+                    .collect()
             }
-            Err(_) => false,
+            Err(_) => Vec::new(),
         };
         self.sequence_documents = check.tasks.iter()
             .filter_map(|task| Some((task.site.identity.as_str().to_string(), task.sequence_document.clone()?)))
             .collect();
         let mut rows = Vec::new();
         match check.list {
-            RootList::Body => {
-                self.tasks = 1;
-                if self.root_is_bodyless() {
-                    let message = format!("{} has no `sequence` and no body to compose", self.root_label());
-                    self.sink.push(
-                        root_subject,
-                        Diagnostic::actionable(
-                            NO_EXECUTABLE,
-                            Severity::Error,
-                            message,
-                            "add a `sequence:` list of tasks, or a body for the document to compose",
-                        )
-                        .with_source(DiagnosticSource::file_only(Some(root.resolved_path.clone()))),
-                    );
-                } else {
-                    let task = PromptTask {
-                        subject: root_subject,
-                        trail: Trail::default(),
-                        prompt: &root,
-                        with_evaluated: Map::new(),
-                        with_late: Vec::new(),
-                        step_agent: None,
-                        selection: selection::TaskHints::Body { document: self.root_hints() },
-                        label: self.root_label(),
-                        task_path: root.resolved_path.clone(),
-                        seq: None,
-                    };
-                    if self.root_waits {
-                        self.check_selection(&task);
-                        self.sink.not_checked(root_subject, "preview", "the sequence has no value for one of its inputs", None);
-                    } else {
-                        self.check_prompt_task(&task);
-                    }
-                }
-            }
             RootList::Command => {
-                self.sink.not_checked(root_subject, "tasks", "the list comes from a shell command a dry run skips", None);
+                self.not_checked(root_subject, "tasks", "the list comes from a shell command a dry run skips", None);
             }
+            // The root failure already said why the list was not decided.
+            RootList::Deferred => {}
             RootList::Unread => {
-                self.sink.not_checked(root_subject, "tasks", "`sequence` could not be read", blocker);
+                let reason = if frontmatter.contains_key("sequence") {
+                    "`sequence` could not be read"
+                } else {
+                    "the file has no `sequence`"
+                };
+                self.not_checked(root_subject, "tasks", reason, blocker);
             }
             RootList::Read => {
-                for task in &check.tasks {
-                    self.check_task(task, &removed, &mut rows);
+                for (task, keys) in check.tasks.iter().zip(&task_keys) {
+                    self.check_owned_task(task, keys, &check, &mut rows);
                 }
             }
         }
@@ -297,111 +337,43 @@ impl Check {
             let subject = task
                 .and_then(|task| self.task_subjects.get(task.site.identity.as_str()).copied())
                 .unwrap_or_else(|| self.root_subject());
-            self.sink.not_checked(subject, "`$schema`", "an inline container's schema judges the values at its turn", None);
-        }
-    }
-
-    /// The key findings of Claudine's shipped schemas on `file` as
-    /// authored: a removed or undeclared key (an error, which the parser
-    /// would refuse at its own boundary, often before the rest is read) and
-    /// near-miss advice on an open step (a warning). Each is reported once
-    /// per owner and key. A task, group, catalog, or sequence YAML file is
-    /// judged by its `kind`; the root by its triggers. Typed values are left
-    /// to the parser and each prompt's own composition, since a templated
-    /// value is not final here.
-    ///
-    /// `removed` collects each `(file, key)` reported as removed, so the
-    /// parser's refusal of the same key is not reported a second time.
-    pub(super) fn check_schema_keys(&mut self, file: &Path, removed: &mut HashSet<(PathBuf, String)>) {
-        use simplified_schema::ValidationProblemCode;
-        let is_root = self.root.as_ref().is_some_and(|root| root.resolved_path == file);
-        let text = if is_root {
-            self.root_ref().original_text.clone()
-        } else {
-            match std::fs::read_to_string(file) {
-                Ok(text) => text,
-                Err(_) => return,
-            }
-        };
-        let Some(context) = self
-            .invocation
-            .as_ref()
-            .and_then(|invocation| invocation.derive_source(file).ok())
-            .map(|source| source.file_resolution_context().clone())
-        else {
-            return;
-        };
-        let schemas = claudine::composition::schema::bundle::with_claudine_registration(
-            darkmatter::markdown::schemas::DarkmatterSchemas::new(context),
-        );
-        let report = if composition::is_yaml_source(file) {
-            match schemas.validate_yaml_document(&text, file) {
-                Ok(darkmatter::markdown::schemas::YamlOutcome::Validated(validation)) => validation.report,
-                _ => return,
-            }
-        } else if is_root {
-            match schemas.validate(&self.root_ref().markdown) {
-                Ok(report) => report,
-                Err(_) => return,
-            }
-        } else {
-            return;
-        };
-        let keyed = report
-            .problems
-            .iter()
-            .filter(|problem| matches!(problem.code, ValidationProblemCode::RemovedKey | ValidationProblemCode::UnknownKey))
-            .map(|problem| (problem, Severity::Error))
-            .chain(report.key_advice.iter().map(|advice| (advice, Severity::Warning)));
-        let mut seen = HashSet::new();
-        let mut subject = None;
-        for (problem, severity) in keyed {
-            if !seen.insert((problem.code.diagnostic_code(), problem.path.clone(), problem.offending_property.clone())) {
-                continue;
-            }
-            if problem.code == ValidationProblemCode::RemovedKey
-                && let Some(key) = &problem.offending_property
-            {
-                removed.insert((file.to_path_buf(), key.clone()));
-            }
-            let subject = *subject.get_or_insert_with(|| {
-                if is_root {
-                    self.root_subject()
-                } else {
-                    self.sink.register_subject(Subject::document(
-                        shown(file, self.launch_dir.as_deref()),
-                        Some(file.to_path_buf()),
-                    ))
-                }
-            });
-            let source = match (problem.line, problem.column) {
-                (Some(line), column) => {
-                    DiagnosticSource::at(Some(file.to_path_buf()), line as usize, column.unwrap_or(1) as usize)
-                }
-                (None, _) => DiagnosticSource::file_only(Some(file.to_path_buf())),
-            };
-            self.sink.push(
-                subject,
-                Diagnostic::projected(problem.code.diagnostic_code(), severity, problem.message.clone(), problem.hint.clone())
-                    .with_source(source),
-            );
+            self.not_checked(subject, "`$schema`", "an inline container's schema judges the values at its turn", None);
         }
     }
 
     /// Records `failure` for `subject`: its reference finding (located at
-    /// `source`) when it has one, else its projected error. A removed key the
-    /// schema check already reported is not reported again (`None`).
+    /// `source`) when it has one, else its projected error. A key refusal a
+    /// schema-key row already reported is not reported again; the row
+    /// stands for it (its id when `subject` holds it, else `None`).
     fn push_failure(
         &mut self,
         subject: SubjectId,
         failure: &CheckFailure,
         trail: Trail,
         source: Option<DiagnosticSource>,
-        removed: &HashSet<(PathBuf, String)>,
     ) -> Option<FindingId> {
-        if let CompositionError::RemovedGrammar { source_path, removed: key, .. } = &failure.error
-            && removed.contains(&(source_path.clone(), key.clone()))
+        // The same refusal is the same file and key: the parser and the
+        // schema spell the enclosing property differently (`tasks[i]` in a
+        // real run's root, `sequence[i]` here).
+        let key = match &failure.error {
+            CompositionError::RemovedGrammar { source_path, removed, .. } => Some((source_path.clone(), removed.clone())),
+            CompositionError::SequenceUnknownTaskField { key, site, .. } => site.file.clone().map(|file| (file, key.clone())),
+            _ => None,
+        };
+        if let Some(rows) = key.and_then(|key| self.keyed.get(&key)) {
+            return rows.iter().find(|(held, _)| *held == subject).map(|(_, id)| *id);
+        }
+        if let CompositionError::SchemaValidation { source_path, problems, .. } = &failure.error
+            && !problems.is_empty()
+            && self.key_problem_paths.get(source_path).is_some_and(|paths| problems.iter().all(|path| paths.contains(path)))
         {
+            return None;
+        }
+        // An expression a dry run could not evaluate without an effect is
+        // not a defect: what depends on it is not checked.
+        if let Some(reason) = failure.error.deferral_reason() {
+            let check = if subject == self.root_subject() { "tasks" } else { "task" };
+            self.not_checked(subject, check, &reason.describe(), None);
             return None;
         }
         match &failure.finding {
@@ -419,7 +391,7 @@ impl Check {
 
     /// The authored position of `property` in `file` (its key, a child
     /// `key`'s key, or with `value` that value); file-only when not proven.
-    fn locate_in(&self, file: &Path, property: &str, key: Option<&str>, value: bool) -> DiagnosticSource {
+    pub(super) fn locate_in(&self, file: &Path, property: &str, key: Option<&str>, value: bool) -> DiagnosticSource {
         let mut path = property_segments(property);
         if let Some(key) = key {
             path.push(YamlPathSegment::Key(key.to_string()));
@@ -428,24 +400,59 @@ impl Check {
         if is_root {
             return self.locate(&path, value);
         }
-        let Ok(text) = std::fs::read_to_string(file) else {
-            return DiagnosticSource::file_only(Some(file.to_path_buf()));
-        };
-        let (text, first_line) = frontmatter_of(file, &text);
-        let offset = if value {
-            locate_yaml_value(&text, &path).map(|location| location.span.start)
-        } else {
-            locate_yaml_key(&text, &path).map(|span| span.start)
-        };
-        match offset.and_then(|offset| darkmatter::markdown::compose::expression::one_based_position(&text, offset)) {
-            Some((line, column)) => DiagnosticSource::at(Some(file.to_path_buf()), line + first_line - 1, column),
+        let located = std::fs::read_to_string(file).ok().and_then(|text| locate_authored(file, &text, &path, value));
+        match located {
+            Some((line, column)) => DiagnosticSource::at(Some(file.to_path_buf()), line, column),
             None => DiagnosticSource::file_only(Some(file.to_path_buf())),
         }
     }
 
     /// The findings of one task the walk reached.
-    fn check_task(&mut self, task: &CheckedTask, removed: &HashSet<(PathBuf, String)>, rows: &mut Vec<MissingRow>) {
+    /// [`Self::check_task`], knowing which failed sequence document, if any,
+    /// owns the task: the real run stops at that document's own verdict, so
+    /// what reads its values (inputs, preview) is not checked.
+    fn check_owned_task(&mut self, task: &CheckedTask, keys: &[&KeyVerdict], check: &SequenceCheck, rows: &mut Vec<MissingRow>) {
+        let identity = task.site.identity.as_str();
+        self.owner_blocked = self.owner_blocks.iter()
+            .find(|(owner, _, _)| owner.as_deref().is_none_or(|owner| identity.starts_with(&format!("{owner}.sequence["))))
+            .map(|(_, id, document)| (*id, document.clone()));
+        self.check_task(task, keys, rows);
+        self.owner_blocked = None;
+        // The task's own document failed: its subject exists now.
+        for owner in check.owner_failures.iter().filter(|owner| owner.task.as_ref().is_some_and(|own| own.as_str() == identity)) {
+            let Some(&subject) = self.task_subjects.get(identity) else { continue };
+            let trail = site_trail(&task.site);
+            if let Some(id) = self.push_owner_failure(subject, owner, trail) {
+                self.owner_blocks.push((Some(identity.to_string()), id, owner.document.clone()));
+            }
+        }
+    }
+
+    /// A sequence document's own preparation failure, located at the first
+    /// value its `$schema` refused when it names one.
+    fn push_owner_failure(&mut self, subject: SubjectId, owner: &OwnerFailure, trail: Trail) -> Option<FindingId> {
+        let CompositionError::SchemaValidation { source_path, problems, .. } = &owner.failure.error else {
+            return self.push_failure(subject, &owner.failure, trail, None);
+        };
+        let Some(first) = problems.first().filter(|pointer| pointer.starts_with('/')) else {
+            return self.push_failure(subject, &owner.failure, trail, None);
+        };
+        let path: Vec<YamlPathSegment> = pointer_segments(first).into_iter().map(YamlPathSegment::Key).collect();
+        let source = match std::fs::read_to_string(source_path).ok().and_then(|text| locate_authored(source_path, &text, &path, true)) {
+            Some((line, column)) => DiagnosticSource::at(Some(source_path.clone()), line, column),
+            None => DiagnosticSource::file_only(Some(source_path.clone())),
+        };
+        let code = claudine::diagnostics::as_diagnostic(&owner.failure.error).map_or(INTERNAL_BUG, |known| known.code());
+        let hint = owner.failure.error.sequence_hint();
+        let diagnostic = Diagnostic::projected(code, Severity::Error, owner.failure.error.to_string(), hint).with_source(source);
+        Some(self.sink.push(subject, if trail.is_empty() { diagnostic } else { diagnostic.with_trail(trail) }))
+    }
+
+    fn check_task(&mut self, task: &CheckedTask, keys: &[&KeyVerdict], rows: &mut Vec<MissingRow>) {
         let site = &task.site;
+        // A data row selected by another file is located where it was
+        // written; it resolves from the file that selected it.
+        let (authored_file, authored_property) = site.authored();
         let container = matches!(task.executable, Some(ExecutableField::Group | ExecutableField::Sequence));
         if !container {
             self.tasks += 1;
@@ -462,6 +469,13 @@ impl Check {
         ));
         self.task_subjects.insert(site.identity.as_str().to_string(), subject);
         let trail = site_trail(site);
+        self.subject_trails.insert(subject, trail.clone());
+        // A verdict on an object this task's file authors names its key in
+        // the trail; one on a file the task's reference read names the task.
+        let (inside, read): (Vec<&KeyVerdict>, Vec<&KeyVerdict>) =
+            keys.iter().partition(|verdict| verdict.file == site.file);
+        self.push_key_rows(subject, &trail, &inside, true);
+        self.push_key_rows(subject, &trail, &read, false);
         let step = task.item.as_object().cloned().unwrap_or_default();
 
         if is_sequence_item(&site.property) {
@@ -478,7 +492,7 @@ impl Check {
                         format!("`{key}: {written}` is step data (read as `seq.{key}`), not the task's {noun}"),
                         format!("to choose the {noun}, move it into the task's inputs: `with: {{ {key}: {written} }}`"),
                     )
-                    .with_source(self.locate_in(&site.file, &site.property, Some(key), false))
+                    .with_source(self.locate_in(authored_file, authored_property, Some(key), false))
                     .with_trail(Trail::new(key_trail));
                     self.sink.push(subject, finding);
                 }
@@ -496,11 +510,11 @@ impl Check {
                     format!("this task names more than one executable: {}", keys.join(", ")),
                     "keep exactly one executable per task, and move the others into their own tasks",
                 )
-                .with_source(self.locate_in(&site.file, &site.property, None, true))
+                .with_source(self.locate_in(authored_file, authored_property, None, true))
                 .with_trail(trail.clone()),
             );
-            self.sink.not_checked(subject, "provider", "more than one executable", None);
-            self.sink.not_checked(subject, "inputs", "more than one executable", None);
+            self.not_checked(subject, "provider", "more than one executable", None);
+            self.not_checked(subject, "inputs", "more than one executable", None);
             return;
         }
 
@@ -514,7 +528,7 @@ impl Check {
                     .and_then(|details| details.base.as_deref())
                     == Some(to_forward_slash_string(&site.file).as_str());
                 let source = written_here.then(|| {
-                    task.executable.map(|field| self.locate_in(&site.file, &site.property, Some(field.key()), true))
+                    task.executable.map(|field| self.locate_in(authored_file, authored_property, Some(field.key()), true))
                 }).flatten();
                 // …and its trail ends at the executable's property.
                 let failure_trail = match (&failure.finding, task.executable) {
@@ -527,7 +541,7 @@ impl Check {
                     }
                     _ => trail.clone(),
                 };
-                if let Some(id) = self.push_failure(subject, failure, failure_trail, source, removed) {
+                if let Some(id) = self.push_failure(subject, failure, failure_trail, source) {
                     blocker.get_or_insert(id);
                 }
             }
@@ -540,8 +554,8 @@ impl Check {
                     } else {
                         "the task could not be read"
                     };
-                    self.sink.not_checked(subject, "provider", reason, blocker);
-                    self.sink.not_checked(subject, "inputs", reason, blocker);
+                    self.not_checked(subject, "provider", reason, blocker);
+                    self.not_checked(subject, "inputs", reason, blocker);
                 }
                 return;
             }
@@ -552,25 +566,16 @@ impl Check {
             (None, _) => self.check_body_task(task, subject, trail, step, step_agent, rows),
             (_, Some(prompt)) => {
                 let Some(document) = self.load_document(subject, prompt, &trail) else { return };
-                if self.waiting_prompts.contains(&(site.file.clone(), site.property.clone())) {
-                    let prompt_task = PromptTask {
-                        subject,
-                        trail,
-                        prompt: &document,
-                        with_evaluated: Map::new(),
-                        with_late: Vec::new(),
-                        step_agent,
-                        selection: self.task_hints(task),
-                        label: site.name.clone(),
-                        task_path: site.file.clone(),
-                        seq: task.seq.clone(),
-                    };
-                    self.check_selection(&prompt_task);
-                    let reason = "it waits for an input its sequence has no value for";
-                    self.sink.not_checked(subject, "inputs", reason, None);
-                    self.sink.not_checked(subject, "preview", reason, None);
-                    return;
-                }
+                // An input its sequence is missing reaches the task as that
+                // run's answer: what reads it, or a `with:` value derived
+                // from it, stays as written; the rest is checked.
+                let absent: Vec<_> = self
+                    .waiting_prompts
+                    .get(&(site.file.clone(), site.property.clone()))
+                    .into_iter()
+                    .flatten()
+                    .map(|name| (name.clone(), DeferralReason::MissingInput { name: name.clone() }))
+                    .collect();
                 let prompt_task = PromptTask {
                     subject,
                     trail,
@@ -582,14 +587,15 @@ impl Check {
                     label: site.name.clone(),
                     task_path: site.file.clone(),
                     seq: task.seq.clone(),
+                    absent,
                 };
                 self.check_task_prompt(&prompt_task, rows);
             }
             (Some(ExecutableField::Shell), None) => {
-                self.sink.not_checked(subject, "command", "a dry run runs no commands", None);
+                self.not_checked(subject, "command", "a dry run runs no commands", None);
             }
             (Some(ExecutableField::SideEffect), None) => {
-                self.sink.not_checked(subject, "side effect", "a dry run dispatches no side effects", None);
+                self.not_checked(subject, "side effect", "a dry run dispatches no side effects", None);
             }
             // A container's children are tasks of their own; a task file's
             // command or side effect is not run.
@@ -633,10 +639,11 @@ impl Check {
             } else {
                 "and its body is empty"
             };
+            let (authored_file, authored_property) = site.authored();
             let source = if step.contains_key("name") {
-                self.locate_in(&site.file, &site.property, Some("name"), false)
+                self.locate_in(authored_file, authored_property, Some("name"), false)
             } else {
-                self.locate_in(&site.file, &site.property, None, true)
+                self.locate_in(authored_file, authored_property, None, true)
             };
             let blocker = self.sink.push(
                 subject,
@@ -649,8 +656,8 @@ impl Check {
                 .with_source(source)
                 .with_trail(trail),
             );
-            self.sink.not_checked(subject, "provider", "no executable", Some(blocker));
-            self.sink.not_checked(subject, "inputs", "no executable", Some(blocker));
+            self.not_checked(subject, "provider", "no executable", Some(blocker));
+            self.not_checked(subject, "inputs", "no executable", Some(blocker));
             return;
         }
         self.sink.push(
@@ -696,13 +703,19 @@ impl Check {
             label: site.name.clone(),
             task_path: site.file.clone(),
             seq: task.seq.clone(),
+            // The document's own inputs are its owner's, reported once.
+            absent: if is_root {
+                self.root_absent.clone()
+            } else {
+                self.owner_missing
+                    .get(&document.resolved_path)
+                    .into_iter()
+                    .flatten()
+                    .map(|name| (name.clone(), DeferralReason::MissingInput { name: name.clone() }))
+                    .collect()
+            },
         };
-        // The root's own inputs are the root owner's, reported once; a
-        // preview without one would show the prompt without its value.
-        if is_root && self.root_waits {
-            self.check_selection(&prompt_task);
-            self.sink.not_checked(subject, "preview", "the sequence has no value for one of its inputs", None);
-        } else if is_root {
+        if is_root {
             self.check_prompt_task(&prompt_task);
         } else {
             self.check_task_prompt(&prompt_task, rows);
@@ -710,17 +723,22 @@ impl Check {
     }
 
     /// The provider, model, inputs, and preview checks of a task's prompt.
-    /// A missing input leaves the preview unchecked: it would show the
-    /// prompt without that value.
-    fn check_task_prompt(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
+    /// A missing input is its own finding; the preview keeps what reads it
+    /// as written and composes the rest.
+    pub(super) fn check_task_prompt(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
         self.check_selection(task);
+        if let Some((blocker, document)) = self.owner_blocked.clone() {
+            let reason = format!("{} failed its own checks", shown(&document, self.launch_dir.as_deref()));
+            self.not_checked(task.subject, "inputs and preview", &reason, Some(blocker));
+            return;
+        }
         let before = rows.len();
         self.prompt_inputs(task, rows);
-        if rows.len() > before {
-            self.sink.not_checked(task.subject, "preview", "an input has no value", None);
-        } else {
-            self.preview(task);
-        }
+        let missing: Vec<_> = rows[before..]
+            .iter()
+            .map(|row| (row.property.name.clone(), DeferralReason::MissingInput { name: row.property.name.clone() }))
+            .collect();
+        self.preview(task, &missing);
     }
 
     /// Reads the document at `path`, recording why it could not be read.
@@ -733,127 +751,6 @@ impl Check {
                 self.push_error(subject, &error, trail.clone());
                 None
             }
-        }
-    }
-
-    /// The missing inputs of a prompt task's document, prepared passively
-    /// under the caller's setters and the task's `with:`.
-    fn prompt_inputs(&mut self, task: &PromptTask<'_>, rows: &mut Vec<MissingRow>) {
-        if self.purpose == Purpose::Advisory {
-            return;
-        }
-        if !task.with_late.is_empty() {
-            self.sink.not_checked(task.subject, "inputs", "a `with:` value is known only when the task runs", None);
-            return;
-        }
-        // A value that comes from a command stays as written; an input it
-        // would supply still counts as given.
-        let Some(options) = self.passive_prepare_options(task, PassiveSession::new()) else { return };
-        match composition::sequence::document::prepare_sequence_document_values(
-            task.prompt,
-            options,
-            composition::CompositionMode::ChainedDocument,
-        ) {
-            Ok(_) => {}
-            Err(CompositionError::MissingProperties { source_path, missing, .. }) => {
-                for property in missing {
-                    rows.push(MissingRow {
-                        subject: task.subject,
-                        trail: task.trail.clone(),
-                        hint: format!("add `{}` to the task's `with:`, or pass `{}=<value>` after the file", property.name, property.name),
-                        property,
-                        declared_in: source_path.clone(),
-                    });
-                }
-            }
-            Err(error) => {
-                self.push_error(task.subject, &error, task.trail.clone());
-            }
-        }
-    }
-
-    /// The missing inputs of every owning sequence document: the root's
-    /// under the root, a referenced document's under the task that
-    /// references it.
-    ///
-    /// A real run discovers inputs after the root's `initialize` fires and
-    /// reads its writes as setters for every owner, so an input that stack
-    /// may write is `not checked` rather than missing.
-    fn owner_inputs(&mut self, check: &SequenceCheck, rows: &mut Vec<MissingRow>) {
-        if self.purpose == Purpose::Advisory {
-            return;
-        }
-        let Ok(inventory) = &check.inventory else { return };
-        let mut initialized = std::collections::HashSet::new();
-        if let Some(initialize) = self.root_ref().markdown.frontmatter().as_map().get("initialize") {
-            claudine::composition::collect_written_keys(initialize, &mut initialized);
-        }
-        for owner in &inventory.owners {
-            let Some(entry) = &owner.missing else { continue };
-            let (subject, trail) = match owner.role {
-                claudine::composition::InputOwnerRole::Root | claudine::composition::InputOwnerRole::RootReference => {
-                    (self.root_subject(), Trail::default())
-                }
-                claudine::composition::InputOwnerRole::Nested => {
-                    let referenced_from = owner.referenced_from.as_deref();
-                    let task = check.tasks.iter().find(|task| {
-                        Some(task.site.file.as_path()) == referenced_from
-                            && format!("{}.sequence", task.site.property) == owner.property
-                    });
-                    match task.and_then(|task| Some((self.task_subjects.get(task.site.identity.as_str()).copied()?, task))) {
-                        Some((subject, task)) => (subject, site_trail(&task.site)),
-                        None => (self.root_subject(), Trail::default()),
-                    }
-                }
-            };
-            for property in &entry.missing {
-                if initialized.contains(&property.name) {
-                    self.sink.not_checked(subject, &format!("input `{}`", property.name), "the root's `initialize` writes it when it runs", None);
-                    continue;
-                }
-                rows.push(MissingRow {
-                    subject,
-                    trail: trail.clone(),
-                    hint: format!("pass `{}=<value>` after the file, or give it a default", property.name),
-                    property: property.clone(),
-                    declared_in: entry.source_path.clone(),
-                });
-            }
-        }
-    }
-
-    /// One `composition.missing_properties` row per missing input, graded
-    /// by whether the real run would collect the whole cohort.
-    fn push_missing_rows(&mut self, rows: Vec<MissingRow>) {
-        if rows.is_empty() {
-            return;
-        }
-        // As `resolve_interactive_options` does, an unreadable configuration
-        // leaves the default (ask).
-        let interactive = claudine::composition::schema::InteractiveSchemaOptions {
-            prompt_for_missing: self.config.as_ref().is_none_or(|config| config.prompt_for_missing),
-            stdin_is_tty: std::io::stdin().is_terminal(),
-            stderr_is_tty: self.stderr_is_tty,
-            silent: false,
-        };
-        let every_shape = rows.iter().all(|row| row.property.interactive_shape.is_some());
-        let severity = missing_input_severity(interactive.allowed(), every_shape);
-        for row in rows {
-            let note = match (row.property.type_label.as_deref(), row.property.description.as_deref()) {
-                (Some(label), Some(description)) => format!(" ({label} — {description})"),
-                (Some(note), None) | (None, Some(note)) => format!(" ({note})"),
-                (None, None) => String::new(),
-            };
-            let message = match severity {
-                Severity::Warning => format!("`{}`{note} has no value; an interactive run asks for it", row.property.name),
-                _ => format!("`{}`{note} is required and has no value; a non-interactive run fails here", row.property.name),
-            };
-            self.sink.push(
-                row.subject,
-                Diagnostic::actionable(MISSING_INPUT, severity, message, row.hint)
-                    .with_source(DiagnosticSource::file_only(Some(row.declared_in)))
-                    .with_trail(row.trail),
-            );
         }
     }
 }

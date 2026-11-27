@@ -17,11 +17,11 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
 }
 
 fn pre_validate(source: &ResolvedCompositionSource, mode: CompositionMode) -> Result<PreValidatedSchema, CompositionError> {
-    pre_validate_schema_for_mode(source, None, None, &crate::test_support::context(), mode, &TriggerFindings::default())
+    pre_validate_schema_for_mode(source, None, None, &crate::test_support::context(), mode, &TriggerFindings::default(), None)
 }
 
 fn status(source: &ResolvedCompositionSource, mode: CompositionMode) -> SchemaStatusReport {
-    build_schema_status_report_for_mode(source, None, None, &crate::test_support::context(), mode, &TriggerFindings::default())
+    build_schema_status_report_for_mode(source, None, None, &crate::test_support::context(), mode, &TriggerFindings::default(), None)
         .unwrap()
         .expect("the document declares a schema")
 }

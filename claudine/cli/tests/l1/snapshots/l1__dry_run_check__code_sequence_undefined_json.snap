@@ -1,0 +1,52 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/prompt.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.sequence_undefined",
+      "severity": "error",
+      "message": "the file does not define a `sequence` property, so it is not a sequence document",
+      "source": {
+        "file": "/work/prompt.md",
+        "line": null,
+        "column": null,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "Add a `sequence:` list of tasks, or run the document with `claudine compose`."
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: tasks (the file has no `sequence`)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "the file does not define a `sequence` property, so it is not a sequence document",
+          "source": {
+            "file": "/work/prompt.md",
+            "line": null,
+            "column": null,
+            "inserted": false
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 1
+  }
+}

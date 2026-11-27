@@ -520,12 +520,57 @@ read with `guardrails::load_guardrails_passively` (never created).
 `not checked` row and marks the construct in the human preview
 (`[not evaluated in a dry run]`); `ComposedBodyEmpty { cause }` becomes
 `dm.compose.empty_body` with `EmptyBodyCause::phrase`/`hint`. The input
-check (`tasks.rs::prompt_inputs`) prepares passively too. A prompt task's
+check (`tasks.rs::prompt_inputs`) prepares passively too. The walk itself
+holds a `PassiveSession` for its thread (`composition/passive_scope.rs`,
+entered by `check_sequence_tree`), which `document_expression_resolution_context`
+and `canonical_compose_options` attach, so source expressions, `::template(…)`,
+formal `template:` defaults, `with:` values, and owner preparation refuse an
+effectful function (`has_alias`, `ping`, …); `CompositionError::deferral_reason`
+turns that failure into a `not checked` row (`RootList::Deferred` for the root
+list). Tests: `cli/tests/l1/dry_run_source_effects.rs`. A prompt task's
 `with:` reaches the preview as `CheckedTask::with_evaluated` (data, beneath
 the setters), recorded by `Loader::note_prepared_with` from the walk's own
-`record_prompt_reference`; `with_late` keys skip the input check and
-preview. A prompt whose owner misses an input (`inventory.prompts` whose
-owner has `missing`) is held: inputs and preview are not checked.
+`record_prompt_reference`; `with_late` keys (including a `with:` value whose
+evaluation recorded a deferral in the walk's session) are not input-checked
+and are declared absent in the preview. A missing input never gates the rest:
+the preview session declares each missing name with Darkmatter's
+`PassiveSession::defer_absent` (`DeferralReason::MissingInput`), so a read of
+it stays as written (marked `[missing input]`, no `not checked` row) and the
+schema stage does not report it again; the input check
+(`tasks.rs::prompt_inputs`, judged in the mode the task composes in, so an
+inline completion-only `required` may stay absent) is the one finding. A
+prompt or body whose owner misses an input (`waiting_prompts`,
+`owner_missing`, `root_absent`) previews with the owner's names absent and
+does not report them again. `check_sequence_tree` reruns discovery with every
+owner's missing names absent in its scope session, so an owner's derived
+value is deferred instead of computed from nothing. A preview that fails is
+retried once with `PrepareOptions::allow_missing_transclusions` (dry run
+only), so the text beside a missing inclusion is still previewed, and the
+retry's own other failure is a finding too. Tests:
+`cli/tests/l1/dry_run_missing_inputs.rs`. Inclusion references never
+depend on the preview: `preview.rs::reference_rows` runs
+`composition::unresolved_inclusions` (the canonical request with
+`for_reference_check`, no call check, deferred schema verdict, and
+`PageBlocks` disabled, so condition-blind like the real pre-flight walk;
+transclusion-kind errors only; an issue is dropped when the copy that writes
+it tolerates invalid references, read from Darkmatter's
+`ReferenceReportDocument::tolerates_invalid_references`, which the graph sets
+with composition's own `transclusion::ignores_invalid` on the prepared copy,
+so a child's `ignore_invalid` (own or passed down) decides for its
+inclusions; an inline prompt's generated body is given the source path)
+before preparing, and `reported_by_walk` keeps the preview's own failure on
+the same reference (code, reference, resolved target, line when both have
+one) from being a second row, as `refused_by_walk` does for a tolerated-child
+warning at a reference the walk refused. A preview error naming no file is
+given the prompt's (`push_error_in`), so Darkmatter's `FindingSink` holds it
+once beside the input check's located copy (a file-only finding equal to one
+located in that file is that finding). A directive or `prologue`/`epilogue`
+whose target reads a deferred value (Darkmatter: `PassiveSession::deferred_span_in`/
+`deferred_reference`, set aside by `transclusion::parse_directives_deferring`
+in the transclusion phase and the reference graph) is a
+`DeferredConstruct::Transclusion` deferral: left as written, one mark, and a
+`not checked` row even for a missing input. Tests:
+`cli/tests/l1/dry_run_independent_references.rs`.
 The walk is the real preflight `Loader` with `check: Some(CheckState)`:
 `check_task` records a task before its children and turns its failure into a
 record instead of an early return; lists normalize through
@@ -542,7 +587,10 @@ and `recover_operation_file`'s same-name suggestions are Darkmatter's
 `basename_matches` with `walker::name_passes_filters`); discovery runs
 `InputDiscoveryOptions::recovering()`, which skips what it cannot read. A
 check-mode root property is `sequence[i]` (the authored key), a real run's
-stays `tasks[i]`. `check.rs::check_root` makes the refusals
+stays `tasks[i]`. A root with no `sequence` key is
+`CompositionError::SequenceUndefined` (`composition.sequence_undefined`) in
+both: the real run raises it from `phase1c.rs`'s plan, the check records it as
+a root failure and reads no task (`RootList::Unread`). `check.rs::check_root` makes the refusals
 `commands/sequence.rs` makes before any list is read (declaration setters,
 root grammar, lifecycle, removed `seq.*` reads), so a `$( … )` root list
 still reports them, and the walk skips them in check mode; after the walk
@@ -551,7 +599,16 @@ per-document half of `PreflightGraph::validate_prompt_lifecycle_literals`. A rea
 errors are unchanged (`cli/tests/l1/sequence_preflight_baselines.rs` pins
 them). Missing inputs are one `composition.missing_properties` row per value,
 graded by `tasks.rs::missing_input_severity` (Rule 10's cohort) with the
-configuration's `prompt_for_missing`. Tests: `cli/tests/l1/dry_run_check.rs`,
+configuration's `prompt_for_missing`. A file the real command would ask the
+caller to choose (`document_check/choice.rs`: the root picker, through
+`operation_file::{attempts_autocomplete, picker_can_ask,
+candidate_references}`, and the `compose`/`inline-compose` supplied
+eager-file chooser, through `schema_interactive::supplied_file_candidates`)
+is a `composition.file_choice_pending` warning where it would ask and find
+files, else the route's refusal; a sequence root's supplied file is always
+its refusal. The `test-fixtures` seam `CLAUDINE_TEST_DRY_RUN_TERMINAL`
+(`stdin,stderr`) injects the terminal the check grades against
+(`cli/tests/l1/dry_run_file_choices.rs`, a code fixture's `terminal.txt`). Tests: `cli/tests/l1/dry_run_check.rs`,
 `lib/src/composition/sequence/preflight/tests/check_tree.rs`, fixtures
 `cli/tests/fixtures/check/`.
 
@@ -579,7 +636,16 @@ The scope guards (`error_guards/sequence_scope.rs`, allowlist
 `outside-scope` entries, never a `Sequence…` variant) and the code snapshot guard
 (`dry_run_check::codes`) are listed in [Error Architecture](topics/error-architecture.md#the-lossy-boundary-audit).
 Every `Sequence…` variant carries `site: Box<SequenceSite>` (`error/site.rs`:
-optional file, property, task) or `source_path` + `property`; a deep layer
+optional file, property, task, and a parser-proven `position`, 1-based line
+and column in the file's frame, set by `sequence/data.rs::at_offset` for YAML,
+JSON/JSON5, and JSONL load failures; `None` stays file-only) or
+`source_path` + `property`; display wrappers (`WithFrontmatter`,
+`LifecycleEvaluationAlreadyEmitted`, `CheckFailed`) are peeled by
+`CompositionError::presented()`, which `sequence_site`, `resolution_failure`,
+the hint, and `document_check::push_error` all read. A preflight
+`TaskSite::row` names the data file and row that wrote a selected data-file
+row (`SequenceSource::data_row`), and `TaskSite::authored()` is the location
+every `locate_in` call uses; a deep layer
 raises an unlocated site and the first caller that knows it calls
 `CompositionError::locate_sequence` (innermost wins; `referenced_as` fills the
 construct noun). A referenced file's failure is `SequenceReferenceResolution`,
@@ -656,7 +722,19 @@ it switches on Darkmatter's remote transclusion, as `md compose` does, so
 the captured `network` permission alone decides whether a `::file`/`::code`/
 `prologue`/`epilogue` URL is fetched. A bare `ComposeOptions::new_with_context`
 leaves those targets failing even under `network: allow`. Tests:
-`lib/tests/l1/network_transclusion.rs` (loopback responder).
+`lib/tests/l1/network_transclusion.rs` (loopback responder). A dry run's
+remote reads under each `network` setting (`allow` fetches, `ask` is one
+`NetworkNeedsApproval` not-checked row with no request, `deny` the real
+refusal) are pinned per reader in `cli/tests/l1/dry_run_network_approval.rs`;
+`prepare.rs::dry_run_deferred_schema` keeps a slot template the dry run
+deferred from being judged again as `composition.schema_load`.
+A real run's pre-launch schema check resolves a `$schema` template through
+`composition::launch_slot_session` (the invocation's config snapshot plus the
+CLI's terminal approval handler, `wrap::launch_slot_session`), and hands that
+session to the first run's preparation through `PrepareOptions::slot_session`
+(compose, inline-compose, and a sequence step's JIT compose; a later loop pass
+resolves afresh). A slot refusal is `composition.schema_slot_failed` with the
+slot's code in `detail.slot_code`. Tests: `cli/tests/l1/launch_network_slots.rs`.
 
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
@@ -805,10 +883,21 @@ key (a guard allowlists `removed.rs::removed_key` as the ParserTwin). A
 step `task` is open with `$advise-unknown-keys: [agent, model]`; a group leg
 is the closed `leg`. `task-file.yaml`, `group-file.yaml`, and
 `group-catalog-file.yaml` are the `kind: task`/`group`/`group-catalog`
-definitions. The passive dry run (`document_check::check_schema_keys`)
-reports removed/unknown keys of the root and of every file the walk read, and near-miss advice, from the same
-schemas; `tests/fixtures/schema_keys/` is shared with DMLS's
-`claudine_schema_key_parity.rs`. Sequence declarations live in `composition/sequence/declarations.rs`:
+definitions. The passive dry run (`document_check::tasks.rs::judge_keys`)
+judges the root and every file the walk read (`SequenceCheck::files`, YAML
+or Markdown) once for removed/unknown keys and near-miss advice, from the same
+schemas, and `key_owners` attaches each verdict to every occurrence of the
+innermost task its file authors above the key, else to each task whose
+reference read that part (`CheckedTask::loaded`, a `LoadedDocument` with the
+selected catalog entry's `groups[i]` or the offset as its property); a verdict
+no occurrence uses (an unselected catalog entry) is dropped. The parser's
+`RemovedGrammar`/`SequenceUnknownTaskField` for the same `(file, key)`, and a
+formal file's aggregate `SchemaValidation` made only of reported key paths,
+are not second rows (`push_failure`). Task rows, `not checked` included
+(`Check::not_checked`, Darkmatter's `FindingSink::not_checked_within`), carry
+the occurrence's trail. `tests/fixtures/schema_keys/` is shared with DMLS's
+`claudine_schema_key_parity.rs` and the CLI's
+`dry_run_schema_key_occurrences.rs`. Sequence declarations live in `composition/sequence/declarations.rs`:
 a root's `$state`/`template` and an inline container task's
 `$schema`/`$state`/`template` are judged by key presence (null included) for
 placement (only beside that owner's inline `sequence: [ … ]`; never on a
@@ -866,8 +955,11 @@ and hands `RootSequence` to `execute_sequence`; the first attempt's
 collects with a shared `asked` set (progress-bounded, Phase 1c too), fills
 the plan (`with_sequence_id`), and `RootRun::{plan, collected_overrides}`
 keep it for retries. Discovery runs `leaving_verdicts()`: an owner's own
-non-missing preparation failure is recorded (`failed_owners`), not raised, so
-graph, provider, and Phase 1c errors keep their order; the root's is left to
+non-missing preparation failure is recorded (`failed_owners`, each a
+`FailedOwner` with its error), not raised, so
+graph, provider, and Phase 1c errors keep their order (the dry run reports each
+as `SequenceCheck::owner_failures`, at the root or at the `sequence:` task that
+reached it, and leaves that owner's tasks' inputs and preview `not checked`); the root's is left to
 Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
 after provider selection. The root's own missing inputs are left to Phase 1c
 (step headings) unless another owner is missing, a reference is pending, or
@@ -1102,7 +1194,10 @@ over the document under the setters, where an un-set `with:` key has no
 value), plus a `feeds` closure in step scope for each `with:` key a document
 closure reads. Names never cross owners, so a prompt's literal `choice` is
 not a sequence's derived `choice`. `defer_runtime_written` moves both
-`agent` and `model` to launch when either reaches a runtime-written key;
+`agent` and `model` to launch when either reaches a runtime-written key
+(`Loader::runtime_written_keys`, applied by the graph's `finish` and by
+`check_sequence_tree` to every `CheckedTask.provider`, so the dry run's
+provider and model rows read the same launch-time decision);
 `preflight/tests/provider_dependencies.rs` covers the placements) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an

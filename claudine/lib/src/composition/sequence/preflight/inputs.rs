@@ -115,9 +115,19 @@ pub struct PendingReference {
     pub reference: String,
 }
 
+/// An owner whose own preparation failed for a reason other than a missing
+/// input, under [`InputDiscoveryOptions::leaving_verdicts`].
+#[derive(Debug)]
+pub struct FailedOwner {
+    /// Index in [`SequenceInputInventory::owners`].
+    pub owner: usize,
+    /// The failure, as a discovery without `leaving_verdicts` raises it.
+    pub error: CompositionError,
+}
+
 /// Everything input collection needs to know before the graph is frozen, in
 /// first-encounter order.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SequenceInputInventory {
     /// Every owning document; the root is first.
     pub owners: Vec<InputOwner>,
@@ -127,11 +137,10 @@ pub struct SequenceInputInventory {
     pub inline_containers: Vec<InlineContainer>,
     /// References left pending by an owner's missing inputs.
     pub pending: Vec<PendingReference>,
-    /// Indices in [`Self::owners`] of the owners whose own preparation failed
-    /// for a reason other than a missing input, under
-    /// [`InputDiscoveryOptions::leaving_verdicts`]; their values were then
-    /// read as authored.
-    pub failed_owners: Vec<usize>,
+    /// The owners whose own preparation failed for a reason other than a
+    /// missing input, under [`InputDiscoveryOptions::leaving_verdicts`];
+    /// their values were then read as authored.
+    pub failed_owners: Vec<FailedOwner>,
     /// The parses discovery made, which the graph walk that follows reuses
     /// ([`super::build_preflight_graph_after_discovery`]).
     pub(crate) sources: super::NestedSources,
@@ -353,8 +362,8 @@ impl Discovery<'_> {
                 };
                 (values, Some(entry))
             }
-            Err(_) if self.options.leave_verdicts => {
-                self.inventory.failed_owners.push(self.inventory.owners.len());
+            Err(error) if self.options.leave_verdicts => {
+                self.inventory.failed_owners.push(FailedOwner { owner: self.inventory.owners.len(), error });
                 let authored = source.markdown.frontmatter().as_map().iter()
                     .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
                     .collect();
@@ -635,17 +644,27 @@ impl Discovery<'_> {
         // directory; a nested container's from the selected file's.
         let rows_origin = if role == InputOwnerRole::RootReference { origin.to_path_buf() } else { path.to_path_buf() };
         let values = Arc::clone(&self.inventory.owners[owner].values);
-        let plan = source_resolution::plan_referenced_sequence(
-            reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true,
-            &super::super::SequenceSourceOptions::new(self.options.file_resolution_context),
-        )?;
+        let options = super::super::SequenceSourceOptions::new(self.options.file_resolution_context);
+        // A recovering discovery skips a selected row that does not read, or
+        // whose executable fails, as it skips an authored one; the graph walk
+        // reports it.
+        let recovered = if self.options.recover {
+            source_resolution::plan_referenced_sequence_recovering(
+                reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true, &options,
+            )?.0
+        } else {
+            super::super::normalize::RecoveredPlan::whole(source_resolution::plan_referenced_sequence(
+                reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true, &options,
+            )?)
+        };
         let scope = Scope { owner, template: None, values };
-        for (index, step) in plan.steps.iter().enumerate() {
+        for (step, ordinal) in recovered.plan.steps.iter().zip(&recovered.ordinals) {
             if let Some(executable) = &step.executable {
-                self.walk_executable(
+                let walked = self.walk_executable(
                     executable.field, &executable.value, &executable.options, &rows_origin,
-                    &format!("sequence[{index}]"), &scope,
-                )?;
+                    &format!("sequence[{ordinal}]"), &scope,
+                );
+                self.recovered(walked)?;
             }
         }
         Ok(())

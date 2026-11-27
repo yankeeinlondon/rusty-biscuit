@@ -128,6 +128,12 @@ fn composition_representatives() -> Vec<CompositionError> {
             source_path: PathBuf::from("p.md"),
             message: "load failed".to_string(),
         },
+        // composition.schema_slot_failed
+        CompositionError::SchemaSlotFailed {
+            source_path: PathBuf::from("p.md"),
+            slot_code: "dm.schema.slot_network_denied".to_string(),
+            message: "slot failed".to_string(),
+        },
         // composition.schema_parse
         CompositionError::SchemaParse {
             source_path: PathBuf::from("p.md"),

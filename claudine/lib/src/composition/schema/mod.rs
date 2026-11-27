@@ -520,8 +520,9 @@ pub fn launch_phase_for_mode(mode: CompositionMode) -> Option<SchemaPhase> {
 /// Darkmatter baseline or trigger layers, no templates, shell, or network), so
 /// a schema file resolves relative to the source document. A SimplifiedSchema
 /// contributes the names in every union arm; a raw JSON Schema its statically
-/// declared top-level names. A `$schema` reference written as a template is
-/// [`SchemaParameters::Unestablished`]: ownership never evaluates it.
+/// declared top-level names. A `$schema` reference written as a template, or
+/// a schema template whose `{{ … }}` slots are unresolved, is
+/// [`SchemaParameters::Unestablished`]: ownership never evaluates either.
 ///
 /// ## Errors
 ///
@@ -549,17 +550,18 @@ pub fn authored_schema_parameters(
     if reference_is_templated {
         return Ok(SchemaParameters::Unestablished);
     }
+    let callers = darkmatter::markdown::compose::CallerInputRecords::new();
     Ok(
-        match load_authored_schema(
-            source,
-            file_ref_fallback_dir,
-            file_resolution_context,
-            &darkmatter::markdown::compose::CallerInputRecords::new(),
-        )? {
-            None => SchemaParameters::NoSchema,
-            Some(schema) => SchemaParameters::Declared(std::sync::Arc::new(move |key| {
+        match authored_schemas(file_ref_fallback_dir, file_resolution_context, &callers).effective_for(&source.markdown) {
+            Ok(None) => SchemaParameters::NoSchema,
+            Ok(Some(schema)) => SchemaParameters::Declared(std::sync::Arc::new(move |key| {
                 schema.declares_top_level_property(key)
             })),
+            // Only the launch check's slot session resolves a template.
+            Err(SchemaError::UnresolvedSlots(_)) => SchemaParameters::Unestablished,
+            Err(err) => {
+                return Err(schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err)));
+            }
         },
     )
 }
@@ -666,14 +668,44 @@ pub(super) fn load_authored_schema(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     callers: &darkmatter::markdown::compose::CallerInputRecords,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let mut schemas =
-        DarkmatterSchemas::new(file_resolution_context.clone()).with_caller_input_records(callers);
-    if let Some(fallback) = file_ref_fallback_dir {
-        schemas = schemas.with_file_ref_fallback_dir(fallback);
+    authored_schemas(file_ref_fallback_dir, file_resolution_context, callers)
+        .effective_for(&source.markdown)
+        .map_err(|err| schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err)))
+}
+
+fn authored_schemas(
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    callers: &darkmatter::markdown::compose::CallerInputRecords,
+) -> DarkmatterSchemas {
+    let schemas = DarkmatterSchemas::new(file_resolution_context.clone()).with_caller_input_records(callers);
+    match file_ref_fallback_dir {
+        Some(fallback) => schemas.with_file_ref_fallback_dir(fallback),
+        None => schemas,
     }
-    schemas.effective_for(&source.markdown).map_err(|err| {
-        schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err))
-    })
+}
+
+/// [`load_authored_schema`] for a passive reader that only types what the
+/// schema declares (a pre-flight walk typing shell placeholders): a `$schema`
+/// template, which only a slot session can resolve, declares no types here
+/// (`Ok(None)`), and its document's own composition reports whatever its
+/// slots do.
+///
+/// ## Errors
+///
+/// As [`load_authored_schema`], for every other failure.
+pub(in crate::composition) fn load_authored_schema_types(
+    source: &ResolvedCompositionSource,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    callers: &darkmatter::markdown::compose::CallerInputRecords,
+) -> Result<Option<EffectiveSchema>, CompositionError> {
+    match authored_schemas(file_ref_fallback_dir, file_resolution_context, callers).effective_for(&source.markdown) {
+        Err(SchemaError::UnresolvedSlots(_)) => Ok(None),
+        other => other.map_err(|err| {
+            schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err))
+        }),
+    }
 }
 
 /// The source document carrying `values` as its frontmatter, for trigger
@@ -789,6 +821,7 @@ pub fn pre_validate_schema(
         file_resolution_context,
         CompositionMode::ChainedDocument,
         trigger_findings,
+        None,
     )
 }
 
@@ -801,6 +834,11 @@ pub fn pre_validate_schema(
 /// values are type-checked at launch. Direct compose keeps the unphased
 /// authoring verdict.
 ///
+/// A `$schema` template's `{{ … }}` slots resolve through `slot_session`,
+/// the session the launch then composes with ([`super::launch_slot_session`]),
+/// so this check reads what the real run reads, under the same
+/// `permissions`; with none a template stays unresolved, which is an error.
+///
 /// ## Errors
 ///
 /// See [`pre_validate_schema`].
@@ -811,6 +849,7 @@ pub fn pre_validate_schema_for_mode(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -820,6 +859,7 @@ pub fn pre_validate_schema_for_mode(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     )
 }
 
@@ -827,6 +867,8 @@ pub fn pre_validate_schema_for_mode(
 ///
 /// A data override (a runtime value, never typed by a person) is final, so a
 /// value holding `{{` or `$(` is judged rather than deferred to composition.
+///
+/// `slot_session` as for [`pre_validate_schema_for_mode`].
 ///
 /// ## Errors
 ///
@@ -838,6 +880,7 @@ pub fn pre_validate_layered_for_mode(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -847,9 +890,11 @@ pub fn pre_validate_layered_for_mode(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pre_validate_with_origin(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
@@ -858,6 +903,7 @@ fn pre_validate_with_origin(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_verdict(
         source,
@@ -867,6 +913,7 @@ fn pre_validate_with_origin(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     )
     .map_err(|err| prefer_removed_grammar(source, &build_effective_instance(source, set_overrides), err))
 }
@@ -889,6 +936,7 @@ fn prefer_removed_grammar(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pre_validate_verdict(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
@@ -897,6 +945,7 @@ fn pre_validate_verdict(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let phase = launch_phase_for_mode(mode);
 
@@ -904,12 +953,15 @@ fn pre_validate_verdict(
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
     // One discovery serves both passes; each pass still matches and prepares
     // against its own values and caller records.
-    let schemas = discover_schema_owner(
+    let mut schemas = discover_schema_owner(
         source,
         file_ref_fallback_dir,
         file_resolution_context,
         trigger_findings,
     )?;
+    if let Some(session) = slot_session {
+        schemas = schemas.with_slot_session(std::sync::Arc::clone(session));
+    }
     let original_callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
     let schemas = schemas.with_caller_input_records(&original_callers);
     let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_schemas(

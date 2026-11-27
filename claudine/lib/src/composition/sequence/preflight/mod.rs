@@ -61,11 +61,11 @@ mod containers;
 pub mod providers;
 
 pub use inputs::{
-    InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
+    FailedOwner, InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
     SequenceInputInventory, discover_sequence_inputs,
 };
 pub use check::{
-    CheckFailure, CheckedTask, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
+    CheckFailure, CheckedTask, LoadedDocument, OwnerFailure, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use reapproval::PreflightApproval;
 pub use shape::{
@@ -1368,7 +1368,7 @@ impl<'a> Loader<'a> {
             self.owner = rows_origin.clone();
         }
         self.seed_steps(entered)?;
-        self.record_root_item_failures(&rows_origin);
+        self.record_root_item_failures(&rows_origin, &plan.source);
         for (index, step) in plan.steps.iter().enumerate() {
             // A check that set unreadable items aside names each step by its
             // authored position, and its tasks by their authored paths.
@@ -1387,6 +1387,7 @@ impl<'a> Loader<'a> {
                 property: format!("sequence[{ordinal}]"), item: &step.raw_state,
                 executable: step.executable.as_ref().map(|executable| executable.field),
                 seq: self.step_frontmatter.get("seq").cloned(),
+                row: plan.source.data_row(ordinal),
             };
             let task = self.check_task(seed, |loader| {
                 let state = reapproval::early_binding_state(&loader.step_frontmatter, loader.context.clone())?;
@@ -1764,6 +1765,9 @@ impl<'a> Loader<'a> {
                 let path = self.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
                 self.enter(&path)?;
                 let (document, order) = self.load_data_document(&path, ExecutableField::Sequence)?;
+                if let Some(offset) = &reference.offset {
+                    self.note_loaded_part(&path, offset);
+                }
                 let whole = reference.offset.is_none() && reference.operator.is_none();
                 let formal_root = document.value.as_object().filter(|root| whole && root.contains_key("sequence"));
                 let plan = match (refresh, formal_root) {
@@ -1913,6 +1917,7 @@ impl<'a> Loader<'a> {
                 executable: step.executable.as_ref().map(|executable| executable.field),
                 seq: self.checking().then(|| super::build_step_overlay(plan, index).as_set_overrides(None)
                     .get("seq").cloned()).flatten(),
+                row: plan.source.data_row(ordinal),
             };
             let task = self.check_task(seed, |loader| step.executable.as_ref().map(|executable| loader.load_step_task(
                 executable, child_origin, &child_label, &child_property,
@@ -1935,7 +1940,7 @@ impl<'a> Loader<'a> {
         let seed = check::SiteSeed {
             slot: check::Slot::SequenceChild(index), name: check::item_name(item, index), file: origin,
             property: property(index), item, executable: check::item_executable(item),
-            seq: None,
+            seq: None, row: None,
         };
         self.record_item_failure(seed, error);
     }
@@ -2041,6 +2046,7 @@ impl<'a> Loader<'a> {
                 let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
                         let (index, map) = select_catalog_group(&document, root, &name, &path)?;
+                        self.note_loaded_part(&path, &format!("groups[{index}]"));
                         (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
@@ -2203,7 +2209,7 @@ impl<'a> Loader<'a> {
             let seed = check::SiteSeed {
                 slot: check::Slot::Leg(index), name: check::item_name(raw, index), file: origin,
                 property: task_property.clone(), item: raw, executable: check::item_executable(raw),
-                seq: None,
+                seq: None, row: None,
             };
             // A check records a bad leg at the leg and reads its siblings.
             let leg = self.check_task(seed, |loader| {
@@ -3026,6 +3032,13 @@ impl<'a> Loader<'a> {
                 .map(SourceContext::file_resolution_context)
                 .unwrap_or(&self.file_resolution_context)
                 .clone();
+            // A check's value that left something as written (a read of a
+            // missing input, a skipped command) is known only at the task's
+            // turn.
+            let session = crate::composition::passive_scope::current().map(|session| {
+                let mark = session.mark();
+                (session, mark)
+            });
             match reapproval::compose_approval_value(
                 value,
                 origin,
@@ -3037,6 +3050,9 @@ impl<'a> Loader<'a> {
                 // now, binds at the task's turn: the document treats it as late
                 // rather than as a `null` it would refuse.
                 Ok(Ok(Value::Null)) if guard_proves_whole_value(value, &types) => deferred.push(key.clone()),
+                Ok(Ok(_)) if session.as_ref().is_some_and(|(session, mark)| session.mark() > *mark) => {
+                    deferred.push(key.clone());
+                }
                 Ok(Ok(resolved)) => {
                     evaluated.insert(key.clone(), resolved);
                 }
@@ -3127,64 +3143,73 @@ impl<'a> Loader<'a> {
     /// prediction that reads a key the graph's lifecycle may write to the
     /// launch.
     fn finish(mut self) -> PreflightGraph {
-        let mut written = std::mem::take(&mut self.written_keys);
-        providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()), &mut written);
-        for document in &self.graph.prompt_documents {
-            providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(document.markdown.frontmatter()), &mut written);
-        }
-        fn visit(
-            task: &mut PreflightTask,
-            identity: TaskIdentity,
-            written: &mut HashSet<String>,
-            pass: u8,
-        ) {
-            match pass {
-                0 => {
-                    for stack in [&task.setup, &task.teardown].into_iter().flatten() {
-                        providers::collect_written_keys(stack, written);
-                    }
-                    match &task.action {
-                        PreflightAction::SideEffect { action, .. } => providers::collect_written_keys(action, written),
-                        PreflightAction::Sequence(sequence) => {
-                            if let Some(frontmatter) = &sequence.frontmatter {
-                                providers::collect_written_keys(&Value::Object(frontmatter.clone()), written);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {
-                    task.identity = identity.clone();
-                    if let Some(prediction) = &mut task.provider {
-                        prediction.defer_runtime_written(written);
-                    }
-                }
+        let written = self.runtime_written_keys();
+        fn visit(task: &mut PreflightTask, identity: TaskIdentity, written: &HashSet<String>) {
+            task.identity = identity.clone();
+            if let Some(prediction) = &mut task.provider {
+                prediction.defer_runtime_written(written);
             }
             match &mut task.action {
                 PreflightAction::Sequence(sequence) => {
                     for (index, step) in sequence.steps.iter_mut().enumerate() {
                         if let Some(child) = &mut step.task {
-                            visit(child, identity.sequence_child(index), written, pass);
+                            visit(child, identity.sequence_child(index), written);
                         }
                     }
                 }
                 PreflightAction::Group(group) => {
                     for (index, leg) in group.tasks.iter_mut().enumerate() {
-                        visit(leg, identity.group_leg(index), written, pass);
+                        visit(leg, identity.group_leg(index), written);
                     }
                 }
                 _ => {}
             }
         }
-        for pass in 0..2 {
-            for (index, step) in self.graph.steps.iter_mut().enumerate() {
-                if let Some(task) = &mut step.task {
-                    visit(task, TaskIdentity::root(index), &mut written, pass);
-                }
+        for (index, step) in self.graph.steps.iter_mut().enumerate() {
+            if let Some(task) = &mut step.task {
+                visit(task, TaskIdentity::root(index), &written);
             }
         }
         self.graph.caller_layers = self.caller_layers.take().map(Arc::new);
         self.graph
+    }
+
+    /// Every key the walked graph's lifecycle may write before a task
+    /// launches: the root's and every prompt document's events, the
+    /// container events and group objects the walk met, and each task's
+    /// stacks, side effects, and sequence document. A prediction that reads
+    /// one is decided at launch ([`ProviderPrediction::defer_runtime_written`]),
+    /// in a real run's graph and a check's records alike.
+    ///
+    /// [`ProviderPrediction::defer_runtime_written`]: providers::ProviderPrediction::defer_runtime_written
+    pub(super) fn runtime_written_keys(&self) -> HashSet<String> {
+        let mut written = self.written_keys.clone();
+        providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()), &mut written);
+        for document in &self.graph.prompt_documents {
+            providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(document.markdown.frontmatter()), &mut written);
+        }
+        fn visit(task: &PreflightTask, written: &mut HashSet<String>) {
+            for stack in [&task.setup, &task.teardown].into_iter().flatten() {
+                providers::collect_written_keys(stack, written);
+            }
+            match &task.action {
+                PreflightAction::SideEffect { action, .. } => providers::collect_written_keys(action, written),
+                PreflightAction::Sequence(sequence) => {
+                    if let Some(frontmatter) = &sequence.frontmatter {
+                        providers::collect_written_keys(&Value::Object(frontmatter.clone()), written);
+                    }
+                    for child in sequence.steps.iter().filter_map(|step| step.task.as_ref()) {
+                        visit(child, written);
+                    }
+                }
+                PreflightAction::Group(group) => group.tasks.iter().for_each(|leg| visit(leg, written)),
+                _ => {}
+            }
+        }
+        for task in self.graph.steps.iter().filter_map(|step| step.task.as_ref()) {
+            visit(task, &mut written);
+        }
+        written
     }
 
     /// Resolve a reference authored inside `origin` to an absolute path.

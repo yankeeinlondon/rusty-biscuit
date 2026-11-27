@@ -1,0 +1,34 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/doc.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.file_choice_pending",
+      "severity": "warning",
+      "message": "`spec=spec` names no file, so an interactive run asks which file to use; 1 file matches",
+      "source": {
+        "file": "/work/doc.md",
+        "line": null,
+        "column": null,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "pass the file's path, such as `spec=deep/spec.md`, to run without the choice",
+      "notes": [
+        "deep/spec.md"
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 1,
+    "info": 0
+  }
+}

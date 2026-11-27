@@ -25,6 +25,11 @@ pub struct SequenceSite {
     /// The display name of the task the construct belongs to: its authored
     /// `name`, else its generated label.
     pub task: Option<String>,
+    /// The one-based line and column in [`Self::file`]'s frame where the
+    /// failure was written, when the layer that raised it proved one (a
+    /// parser's coordinate); `None` otherwise. Kept only beside the file it
+    /// was proven in.
+    pub position: Option<(usize, usize)>,
 }
 
 impl SequenceSite {
@@ -47,6 +52,7 @@ impl SequenceSite {
             file: Some(path.to_path_buf()),
             property: (!property.is_empty()).then(|| property.to_string()),
             task: None,
+            position: None,
         }
     }
 
@@ -54,6 +60,14 @@ impl SequenceSite {
     #[must_use]
     pub fn in_task(mut self, task: impl Into<String>) -> Self {
         self.task = Some(task.into());
+        self
+    }
+
+    /// This site, proven written at the one-based `line` and `column` of its
+    /// file.
+    #[must_use]
+    pub fn at_position(mut self, line: usize, column: usize) -> Self {
+        self.position = Some((line, column));
         self
     }
 

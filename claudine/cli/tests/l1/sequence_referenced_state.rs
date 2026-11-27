@@ -297,7 +297,8 @@ fn assert_combined_report(root: &str, owner: &str) {
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("Sequence preflight found 3 errors and 0 warnings; no task ran"), "{flat}");
+    // One row per missing input (the spec's one finding per input), no aggregate copy.
+    assert!(flat.contains("Sequence preflight found 2 errors and 0 warnings; no task ran"), "{flat}");
     assert!(flat.contains("root.md ✗ `topic` (string — what is reviewed) is required and has no value"), "{flat}");
     let child = flat.find(owner).map(|at| &flat[at..]).unwrap_or_else(|| panic!("no `{owner}` subject: {flat}"));
     assert!(child.contains("`reviewer` (string — who signs off) is required and has no value"), "{flat}");

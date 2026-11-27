@@ -13,7 +13,8 @@ use darkmatter::markdown::hash::{
     Change, FrontmatterDelta, FrontmatterDeltaEntry, MdHashKind, MdHashOptions,
     restore_properties_text,
 };
-use darkmatter::markdown::{Markdown, MarkdownError, extract_frontmatter_block};
+use darkmatter::markdown::{FrontmatterMap, Markdown, MarkdownError, extract_frontmatter_block};
+use std::path::Path;
 
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
@@ -86,7 +87,9 @@ pub enum InlineReconciliation {
 ///
 /// The document is written exactly once, and only when the candidate body is
 /// non-empty and semantically different from the guard's baseline. A rejection
-/// leaves the file untouched so the caller owns the rollback decision.
+/// leaves the file untouched so the caller owns the rollback decision. A YAML
+/// source stays YAML: its deliverable is a changed mapping, and only the
+/// mapping is written back.
 ///
 /// ## Errors
 ///
@@ -130,22 +133,41 @@ pub fn reconcile_inline_artifact_with_evidence(
             source,
         }
     })?;
+    let format = SourceFormat::of(path);
 
-    let raw_body = raw_body_of(&current)?.to_string();
-    let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(&raw_body);
-    if cleaned_body.trim().is_empty() {
-        return Ok(InlineReconciliation::Rejected(BodyRejection::Empty));
-    }
-    let body_cleaned = cleaned_body != raw_body;
-
-    let candidate = replace_body(&current, &cleaned_body)?;
-    // Both sides run through the same cleanup pass before hashing so a baseline
-    // that was never cleanup-stable cannot masquerade as an agent edit.
-    let baseline_cleaned = cleaned_body_of(&plan.original_document_text)?;
-    let baseline = replace_body(&plan.original_document_text, &baseline_cleaned)?;
-    if !prior_body_change && non_strict_body_hash(&candidate) == non_strict_body_hash(&baseline) {
-        return Ok(InlineReconciliation::Rejected(BodyRejection::Unchanged));
-    }
+    let (candidate, original, body_cleaned) = match format {
+        SourceFormat::Markdown => {
+            let raw_body = raw_body_of(&current)?.to_string();
+            let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(&raw_body);
+            if cleaned_body.trim().is_empty() {
+                return Ok(InlineReconciliation::Rejected(BodyRejection::Empty));
+            }
+            let candidate = replace_body(&current, &cleaned_body)?;
+            // Both sides run through the same cleanup pass before hashing so a
+            // baseline that was never cleanup-stable cannot masquerade as an
+            // agent edit.
+            let baseline_cleaned = cleaned_body_of(&plan.original_document_text)?;
+            let baseline = replace_body(&plan.original_document_text, &baseline_cleaned)?;
+            if !prior_body_change
+                && non_strict_body_hash(&candidate) == non_strict_body_hash(&baseline)
+            {
+                return Ok(InlineReconciliation::Rejected(BodyRejection::Unchanged));
+            }
+            (candidate, plan.original_document_text.clone(), cleaned_body != raw_body)
+        }
+        // The whole file is the mapping; Markdown cleanup would rewrite YAML
+        // lines (it spaces out lists), so the agent's bytes are taken as written.
+        SourceFormat::Yaml => {
+            if current.trim().is_empty() {
+                return Ok(InlineReconciliation::Rejected(BodyRejection::Empty));
+            }
+            let candidate =
+                yaml_envelope(&current).map_err(CompositionError::InlineArtifactEditFailed)?;
+            let original = yaml_envelope(&plan.original_document_text)
+                .map_err(CompositionError::InlineArtifactEditFailed)?;
+            (candidate, original, false)
+        }
+    };
 
     // Order (ruling N7): repair before restoring, since restoring needs
     // parseable YAML; encode after, so the hash and the write see the tokens.
@@ -153,14 +175,14 @@ pub fn reconcile_inline_artifact_with_evidence(
         path: path.to_path_buf(),
         rejection: Box::new(rejection),
     };
-    let candidate = repair_agent_frontmatter(&candidate, &plan.original_document_text)
-        .map_err(rejected)?;
-    let restored = restore_properties_text(
-        &candidate,
-        &plan.original_document_text,
-        CLOSURE_OWNED_PROPERTIES,
-    )
-    .map_err(CompositionError::InlineArtifactEditFailed)?;
+    let candidate = repair_agent_frontmatter(&candidate, &original).map_err(rejected)?;
+    let restored = restore_properties_text(&candidate, &original, CLOSURE_OWNED_PROPERTIES)
+        .map_err(CompositionError::InlineArtifactEditFailed)?;
+    // A YAML source has no body, so its deliverable is a change to the
+    // mapping outside the owned properties, judged after they are restored.
+    if format == SourceFormat::Yaml && !prior_body_change && restored.frontmatter_delta.is_empty() {
+        return Ok(InlineReconciliation::Rejected(BodyRejection::Unchanged));
+    }
     let encoded = encode_agent_values(&restored.text, &restored.frontmatter_delta).map_err(
         |error| match error {
             EncodeError::Rejected(rejection) => rejected(rejection),
@@ -178,6 +200,12 @@ pub fn reconcile_inline_artifact_with_evidence(
         .map_err(CompositionError::InlineHashMalformed)?
         .text
         .unwrap_or(encoded);
+    let text = match format {
+        SourceFormat::Markdown => text,
+        SourceFormat::Yaml => {
+            yaml_of_envelope(&text).map_err(CompositionError::InlineArtifactEditFailed)?
+        }
+    };
 
     crate::config::atomic::atomic_write(path, text.as_bytes()).map_err(|source| {
         CompositionError::AtomicWriteFailed {
@@ -211,9 +239,15 @@ pub fn reconcile_inline_artifact_with_evidence(
 /// [`MarkdownError::FrontmatterTextEdit`] (for example an indented root
 /// mapping) or [`MarkdownError::MalformedStoredHash`].
 pub(crate) fn rehearse_inline_baseline(
+    path: &Path,
     original: &str,
     now: DateTime<Utc>,
 ) -> Result<(), MarkdownError> {
+    let original = match SourceFormat::of(path) {
+        SourceFormat::Markdown => original.to_string(),
+        SourceFormat::Yaml => yaml_envelope(original)?,
+    };
+    let original = original.as_str();
     let restored = restore_properties_text(original, original, CLOSURE_OWNED_PROPERTIES)?;
     let md: Markdown = restored.text.as_str().into();
     md.stamp_baseline(&restored.text, &inline_hash_options(), now, Change::Known)?;
@@ -254,9 +288,82 @@ pub fn inline_hash_options() -> MdHashOptions {
     }
 }
 
+/// The frontmatter of `text`, a document the closure wrote to
+/// `plan.document_path`, read in that file's own format.
+pub(crate) fn written_frontmatter(plan: &InlineClosurePlan, text: &str) -> FrontmatterMap {
+    let markdown: Markdown = match SourceFormat::of(&plan.document_path) {
+        SourceFormat::Markdown => text.to_string().into(),
+        SourceFormat::Yaml => match yaml_envelope(text) {
+            Ok(envelope) => envelope.into(),
+            Err(_) => return FrontmatterMap::default(),
+        },
+    };
+    markdown.frontmatter().as_map().clone()
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// The on-disk format of an inline document, which decides how the closure
+/// reads the agent's edit and writes the result back.
+///
+/// A YAML source (a `kind: sequence` file with a document-level `prompt`) is
+/// loaded by composition as frontmatter with an empty body
+/// ([`crate::composition::load_yaml_document`]). The closure edits it through
+/// a transient frontmatter envelope and writes back only the mapping, so the
+/// file stays one YAML document that the next read can load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceFormat {
+    Markdown,
+    Yaml,
+}
+
+impl SourceFormat {
+    fn of(path: &Path) -> Self {
+        if crate::composition::is_yaml_source(path) { Self::Yaml } else { Self::Markdown }
+    }
+}
+
+/// `yaml` as a body-less Markdown document whose frontmatter is exactly
+/// `yaml`'s bytes.
+///
+/// ## Errors
+///
+/// Returns [`MarkdownError::FrontmatterTextEdit`] when the bytes do not
+/// survive the round trip, for example a YAML file holding its own `---`
+/// document marker.
+fn yaml_envelope(yaml: &str) -> Result<String, MarkdownError> {
+    let mut envelope = String::with_capacity(yaml.len() + 8);
+    envelope.push_str("---\n");
+    envelope.push_str(yaml);
+    if !yaml.is_empty() && !yaml.ends_with('\n') {
+        envelope.push('\n');
+    }
+    envelope.push_str("---\n");
+    match yaml_of_envelope(&envelope) {
+        Ok(inner) if inner.trim_end_matches(['\r', '\n']) == yaml.trim_end_matches(['\r', '\n']) => {
+            Ok(envelope)
+        }
+        _ => Err(MarkdownError::FrontmatterTextEdit {
+            reason: "the YAML document cannot be edited as a mapping because it holds a \
+                     `---` or `...` document marker line"
+                .to_string(),
+        }),
+    }
+}
+
+/// The frontmatter bytes of an envelope built by [`yaml_envelope`].
+fn yaml_of_envelope(envelope: &str) -> Result<String, MarkdownError> {
+    match extract_frontmatter_block(envelope)? {
+        Some(extraction) if extraction.body_span.is_empty() => {
+            Ok(extraction.yaml.to_string())
+        }
+        _ => Err(MarkdownError::FrontmatterTextEdit {
+            reason: "the edited YAML document no longer reads as one mapping".to_string(),
+        }),
+    }
+}
 
 /// `delta` with each added or replaced value as composition reads it from
 /// `document`: literal tokens decoded, every other byte as written. A malformed

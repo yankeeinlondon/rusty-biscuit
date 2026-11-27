@@ -2,6 +2,7 @@ use super::*;
 use crate::composition::schema::PropertyState;
 use crate::diagnostics::Diagnostic;
 use darkmatter::markdown::schemas::DarkmatterSchemas;
+use darkmatter::markdown::Markdown;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 

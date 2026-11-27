@@ -29,11 +29,15 @@ use darkmatter::findings::{
     NOT_CHECKED_CODE, Severity, Subject, SubjectId, Trail,
 };
 use darkmatter::markdown::compose::ContextRequirements;
+use darkmatter::markdown::compose::passive::DeferralReason;
 use serde_json::{Map, Value};
 
 use super::compose::SharedComposeArgs;
 use crate::args::Commands;
 
+mod choice;
+mod inputs;
+mod keys;
 mod outcome;
 mod preview;
 mod selection;
@@ -60,6 +64,9 @@ pub(crate) const PROVIDER_NOT_INSTALLED: &str = "composition.provider_not_instal
 pub(crate) const MODEL_REQUIRED: &str = "composition.model_required";
 /// The command-line positionals do not parse.
 pub(crate) const INVALID_ARGUMENTS: &str = "composition.invalid_arguments";
+/// A file reference that names no file but matches files a real run on
+/// this terminal would ask the caller to choose from.
+pub(crate) const FILE_CHOICE_PENDING: &str = "composition.file_choice_pending";
 /// An error no projector classifies: a defect in Claudine.
 pub(crate) const INTERNAL_BUG: &str = "internal.bug";
 
@@ -114,6 +121,8 @@ pub(crate) fn run(mode: Mode, shared: &SharedComposeArgs, args: &[String]) -> i3
     let format = if shared.json { Format::Json } else { Format::Human };
     let stderr_is_tty = std::io::stderr().is_terminal();
     let mut check = Check::new(mode, shared.clone(), stderr_is_tty);
+    #[cfg(feature = "test-fixtures")]
+    check.observe_scripted_terminal();
     check.run(args);
     let launch_dir = check.launch_dir.clone();
     let outcome = check.finish();
@@ -157,6 +166,10 @@ struct PromptTask<'a> {
     task_path: PathBuf,
     /// The `seq` binding a sequence step's document reads at its turn.
     seq: Option<Value>,
+    /// Top-level values the document reads that have no value in this dry
+    /// run (an input its sequence is missing, a value only the run writes),
+    /// with why; the preview keeps what reads them as written.
+    absent: Vec<(String, DeferralReason)>,
 }
 
 /// What a [`Check`] is run for.
@@ -179,6 +192,9 @@ struct Check {
     /// read.
     shared: SharedComposeArgs,
     stderr_is_tty: bool,
+    /// Whether stdin is a terminal, which the real run's input collection
+    /// also needs.
+    stdin_is_tty: bool,
     launch_dir: Option<PathBuf>,
     sink: FindingSink,
     memo: ListingMemo,
@@ -198,15 +214,33 @@ struct Check {
     /// identity.
     sequence_documents: std::collections::HashMap<String, (PathBuf, Map<String, Value>)>,
     /// The `(file, property)` of each prompt task whose owner is missing an
-    /// input.
-    waiting_prompts: std::collections::HashSet<(PathBuf, String)>,
-    /// Whether the root misses an input its `initialize` does not write, so
-    /// a body task of the root waits for it as a prompt task would.
-    root_waits: bool,
+    /// input, with the names of the inputs it misses.
+    waiting_prompts: std::collections::HashMap<(PathBuf, String), Vec<String>>,
+    /// The root's missing inputs, which a body task of the root reads.
+    root_absent: Vec<(String, DeferralReason)>,
+    /// The missing inputs of each referenced sequence document, by its
+    /// path, which a body task composing that document reads.
+    owner_missing: std::collections::HashMap<PathBuf, Vec<String>>,
     /// The tasks whose `agent` value provider selection already reported
     /// as unusable; their document's schema verdict on that same `agent`
     /// is not reported again.
     agent_reported: std::collections::HashSet<SubjectId>,
+    /// Each task occurrence's trail, which its `not checked` rows carry so
+    /// occurrences sharing a file stay apart in data output.
+    subject_trails: std::collections::HashMap<SubjectId, Trail>,
+    /// The rows reported for each removed or unknown key, by `(file, key)`,
+    /// with the subject each went to, so the parser's refusal of the same
+    /// key is not reported again.
+    keyed: std::collections::HashMap<(PathBuf, String), Vec<(SubjectId, FindingId)>>,
+    /// The instance paths of the key problems reported for each file, which
+    /// a formal file's aggregate schema refusal is judged against.
+    key_problem_paths: std::collections::HashMap<PathBuf, std::collections::HashSet<String>>,
+    /// Each sequence document whose own preparation failed, by the identity
+    /// of the `sequence:` task that reached it (`None` for the root), with
+    /// its finding: the tasks it owns are not input-checked or previewed.
+    owner_blocks: Vec<(Option<String>, FindingId, PathBuf)>,
+    /// The owner failure the task being checked waits on.
+    owner_blocked: Option<(FindingId, PathBuf)>,
 }
 
 impl Check {
@@ -216,6 +250,7 @@ impl Check {
             purpose: Purpose::DryRun,
             shared,
             stderr_is_tty,
+            stdin_is_tty: std::io::stdin().is_terminal(),
             launch_dir: None,
             sink: FindingSink::new(),
             memo: ListingMemo::new(),
@@ -229,10 +264,38 @@ impl Check {
             tasks: 0,
             task_subjects: std::collections::HashMap::new(),
             sequence_documents: std::collections::HashMap::new(),
-            waiting_prompts: std::collections::HashSet::new(),
-            root_waits: false,
+            waiting_prompts: std::collections::HashMap::new(),
+            root_absent: Vec::new(),
+            owner_missing: std::collections::HashMap::new(),
             agent_reported: std::collections::HashSet::new(),
+            subject_trails: std::collections::HashMap::new(),
+            keyed: std::collections::HashMap::new(),
+            key_problem_paths: std::collections::HashMap::new(),
+            owner_blocks: Vec::new(),
+            owner_blocked: None,
         }
+    }
+
+    /// Test seam, compiled only with the `test-fixtures` feature (never into
+    /// a default or installed build): `CLAUDINE_TEST_DRY_RUN_TERMINAL` lists
+    /// the streams (`stdin`, `stderr`, comma-separated; empty for neither)
+    /// the check grades as terminals, so a spawned test proves the
+    /// interactive grading without a terminal. The report's rendering still
+    /// follows the real stderr.
+    #[cfg(feature = "test-fixtures")]
+    fn observe_scripted_terminal(&mut self) {
+        let Some(streams) = crate::request::snapshot().env().get("CLAUDINE_TEST_DRY_RUN_TERMINAL").cloned() else {
+            return;
+        };
+        let streams: Vec<&str> = streams.split(',').map(str::trim).collect();
+        self.stdin_is_tty = streams.contains(&"stdin");
+        self.stderr_is_tty = streams.contains(&"stderr");
+    }
+
+    /// [`FindingSink::not_checked`] carrying `subject`'s occurrence trail.
+    fn not_checked(&mut self, subject: SubjectId, check: &str, reason: &str, blocked_by: Option<FindingId>) -> FindingId {
+        let trail = self.subject_trails.get(&subject).cloned().unwrap_or_default();
+        self.sink.not_checked_within(subject, check, reason, blocked_by, trail)
     }
 
     fn finish(self) -> Outcome {
@@ -368,8 +431,12 @@ impl Check {
             let admit_all = |_: &std::path::Path| Ok::<(), std::convert::Infallible>(());
             match check_document(&reference, context, construct, &mut self.memo, admit_all) {
                 DocumentCheck::Missing(finding) => {
-                    let subject = self.root_subject();
-                    self.sink.push(subject, *finding);
+                    // A bare name the real command's picker takes is a
+                    // choice it asks for, not a miss.
+                    if !self.root_choice(file, context, &finding) {
+                        let subject = self.root_subject();
+                        self.sink.push(subject, *finding);
+                    }
                     return None;
                 }
                 DocumentCheck::Refused(never) => match never {},
@@ -405,7 +472,29 @@ impl Check {
         error: &(dyn std::error::Error + 'static),
         trail: Trail,
     ) -> Option<FindingId> {
-        use darkmatter::markdown::compose::report_diagnostics::{COMPOSE_FAILURE_CODE, error_diagnostics};
+        self.push_error_in(subject, error, trail, None)
+    }
+
+    /// [`Self::push_error`] for an error raised composing `document`: a
+    /// record that names no file names it, so the sink can tell it from (or
+    /// match it with) another producer's located copy.
+    fn push_error_in(
+        &mut self,
+        subject: SubjectId,
+        error: &(dyn std::error::Error + 'static),
+        trail: Trail,
+        document: Option<&std::path::Path>,
+    ) -> Option<FindingId> {
+        use darkmatter::markdown::compose::report_diagnostics::{
+            COMPOSE_FAILURE_CODE, error_diagnostics, with_document_fallback,
+        };
+        // A display wrapper changes how an error is shown, not what it is:
+        // its class, code, and site are the error's it presents.
+        if let Some(composition) = error.downcast_ref::<CompositionError>()
+            && !std::ptr::eq(composition.presented(), composition)
+        {
+            return self.push_error_in(subject, composition.presented(), trail, document);
+        }
         if self.agent_reported.contains(&subject)
             && let Some(CompositionError::SchemaValidation { problems, .. }) = error.downcast_ref::<CompositionError>()
             && !problems.is_empty()
@@ -415,7 +504,8 @@ impl Check {
             // schema's verdict on the same value says less.
             return None;
         }
-        let projected = error_diagnostics(error);
+        let mut projected = error_diagnostics(error);
+        with_document_fallback(&mut projected, document);
         let unclassified = matches!(projected.as_slice(), [only] if only.code == COMPOSE_FAILURE_CODE);
         // Darkmatter's catch-all is never the answer: Claudine's own code
         // speaks for an error it types, and an error neither crate types is
@@ -436,8 +526,8 @@ impl Check {
             Some(known) => {
                 let hint = composition.and_then(CompositionError::sequence_hint);
                 let diagnostic = Diagnostic::projected(known.code(), Severity::Error, error.to_string(), hint);
-                match composition.and_then(CompositionError::sequence_site).and_then(|site| site.file.clone()) {
-                    Some(file) => diagnostic.with_source(DiagnosticSource::file_only(Some(file))),
+                match composition.and_then(|composition| self.error_source(composition)) {
+                    Some(source) => diagnostic.with_source(source),
                     None => diagnostic,
                 }
             }
@@ -457,36 +547,51 @@ impl Check {
         self.root.as_ref().expect("the root is loaded before it is checked")
     }
 
-    /// Frontmatter text of the root and the one-based line it starts on, for
-    /// locating authored keys.
-    fn root_frontmatter(&self) -> (String, usize) {
-        let root = self.root_ref();
-        frontmatter_of(&root.resolved_path, &root.original_text)
-    }
-
     /// The authored position of the key (or, with `value`, the value) at
     /// `path` in the root's frontmatter; file-only when not proven.
     fn locate(&self, path: &[YamlPathSegment], value: bool) -> DiagnosticSource {
-        let file = Some(self.root_ref().resolved_path.clone());
-        let (text, first_line) = self.root_frontmatter();
-        let offset = if value {
-            locate_yaml_value(&text, path).map(|location| location.span.start)
-        } else {
-            locate_yaml_key(&text, path).map(|span| span.start)
-        };
-        match offset.and_then(|offset| darkmatter::markdown::compose::expression::one_based_position(&text, offset)) {
-            Some((line, column)) => DiagnosticSource::at(file, line + first_line - 1, column),
+        let root = self.root_ref();
+        let file = Some(root.resolved_path.clone());
+        match locate_authored(&root.resolved_path, &root.original_text, path, value) {
+            Some((line, column)) => DiagnosticSource::at(file, line, column),
             None => DiagnosticSource::file_only(file),
         }
     }
 
-    /// Whether the root has no visible body to compose.
-    fn root_is_bodyless(&self) -> bool {
-        let root = self.root_ref();
-        composition::is_yaml_source(&root.resolved_path)
-            || darkmatter::markdown::render_tree::embedded::without_embedded_metadata(root.markdown.content())
-                .trim()
-                .is_empty()
+    /// Where `error` was written, as far as it is proven: its site's file at
+    /// the position the parser reported, else at its authored property's
+    /// value, else the file alone; a Markdown document that failed to load
+    /// at its own reported position, else that file. `None` when the error
+    /// names no file.
+    fn error_source(&self, error: &CompositionError) -> Option<DiagnosticSource> {
+        if let Some(site) = error.sequence_site() {
+            let file = site.file.clone()?;
+            if let Some((line, column)) = site.position {
+                return Some(DiagnosticSource::at(Some(file), line, column));
+            }
+            return Some(match &site.property {
+                Some(property) => self.locate_in(&file, property, None, true),
+                None => DiagnosticSource::file_only(Some(file)),
+            });
+        }
+        let CompositionError::MarkdownLoad { path, source } = error else { return None };
+        let located = match source {
+            // Darkmatter places a frontmatter failure in its file's frame.
+            claudine::composition::MarkdownLoadCause::Parse(markdown) => {
+                darkmatter::markdown::compose::report_diagnostics::error_diagnostics(markdown.as_ref())
+                    .into_iter()
+                    .find_map(|diagnostic| diagnostic.source.filter(|source| source.line.is_some()))
+            }
+            // A YAML file is its own frame; libyaml counts characters, as a
+            // diagnostic column does.
+            claudine::composition::MarkdownLoadCause::Yaml(biscuit_file::YamlError::Parse(yaml))
+                if composition::is_yaml_source(path) =>
+            {
+                yaml.location().map(|at| DiagnosticSource::at(Some(path.clone()), at.line(), at.column()))
+            }
+            _ => None,
+        };
+        Some(located.unwrap_or_else(|| DiagnosticSource::file_only(Some(path.clone()))))
     }
 
     fn root_label(&self) -> String {
@@ -496,6 +601,7 @@ impl Check {
     fn check_single(&mut self) {
         self.tasks = 1;
         let subject = self.root_subject();
+        let chosen = self.supplied_file_choices();
         let root = self.root_ref().clone();
         let task = PromptTask {
             subject,
@@ -508,14 +614,18 @@ impl Check {
             label: self.root_label(),
             task_path: root.resolved_path.clone(),
             seq: None,
+            // A value the caller is still to choose reads as absent.
+            absent: chosen.into_iter().map(|name| (name.clone(), DeferralReason::MissingInput { name })).collect(),
         };
-        self.check_prompt_task(&task);
+        let mut rows = Vec::new();
+        self.check_task_prompt(&task, &mut rows);
+        self.push_missing_rows(rows);
     }
 
     /// The provider, model, and preview checks of one prompt task.
     fn check_prompt_task(&mut self, task: &PromptTask<'_>) {
         self.check_selection(task);
-        self.preview(task);
+        self.preview(task, &[]);
     }
 
     /// The provider and model checks of one prompt task.
@@ -523,12 +633,7 @@ impl Check {
         if self.purpose == Purpose::Advisory {
             return;
         }
-        match self.select_provider(task) {
-            Some(target) => self.check_model(task, &target),
-            None => {
-                self.sink.not_checked(task.subject, "model requirement", "no provider", None);
-            }
-        }
+        self.check_provider_and_model(task);
     }
 
     /// Reads the user configuration passively (nothing is created,
@@ -653,6 +758,64 @@ pub(crate) fn render_preflight_report(
         }
     }
     out
+}
+
+/// The one-based line and column, in `file`'s frame, where the value at
+/// `path` (with `!value`, its key) was written in `text`, the content of
+/// `file`: a YAML file, a Markdown file's frontmatter, or a JSON, JSON5,
+/// JSONL, or NDJSON file. `None` when not proven.
+///
+/// A YAML mapping written over several lines has no single-line value, so
+/// it is located at its first authored key. A JSON-family key is located at
+/// its value, the only position its locators prove.
+fn locate_authored(file: &Path, text: &str, path: &[YamlPathSegment], value: bool) -> Option<(usize, usize)> {
+    let extension = file.extension().and_then(|extension| extension.to_str()).unwrap_or("").to_ascii_lowercase();
+    let pointer = || {
+        path.iter().fold(String::new(), |pointer, segment| match segment {
+            YamlPathSegment::Key(key) => format!("{pointer}/{}", key.replace('~', "~0").replace('/', "~1")),
+            YamlPathSegment::Index(index) => format!("{pointer}/{index}"),
+        })
+    };
+    let offset = match extension.as_str() {
+        "json" | "json5" => biscuit_file::locate_json5(text, &pointer()),
+        "jsonl" | "ndjson" => biscuit_file::locate_jsonl(text, &pointer()),
+        _ => {
+            let (frontmatter, first_line) = frontmatter_of(file, text);
+            let offset = if value {
+                locate_yaml_value(&frontmatter, path)
+                    .map(|location| location.span.start)
+                    .or_else(|| first_key_offset(&frontmatter, path))
+            } else {
+                locate_yaml_key(&frontmatter, path).map(|span| span.start)
+            }?;
+            let (line, column) = darkmatter::markdown::compose::expression::one_based_position(&frontmatter, offset)?;
+            return Some((line + first_line - 1, column));
+        }
+    };
+    biscuit_file::source_position(text, offset?)
+}
+
+/// The offset of the first key written in the YAML mapping at `path` of
+/// `yaml`; `None` when the value there is not a mapping or no key is found.
+fn first_key_offset(yaml: &str, path: &[YamlPathSegment]) -> Option<usize> {
+    use biscuit_file::serde_yaml_ng::Value as Yaml;
+    let mut node = biscuit_file::serde_yaml_ng::from_str::<Yaml>(yaml).ok()?;
+    for segment in path {
+        node = match (segment, node) {
+            (YamlPathSegment::Key(key), Yaml::Mapping(mut map)) => map.remove(key.as_str())?,
+            (YamlPathSegment::Index(index), Yaml::Sequence(mut items)) if *index < items.len() => items.swap_remove(*index),
+            _ => return None,
+        };
+    }
+    let Yaml::Mapping(map) = node else { return None };
+    map.keys()
+        .filter_map(Yaml::as_str)
+        .filter_map(|key| {
+            let mut at = path.to_vec();
+            at.push(YamlPathSegment::Key(key.to_string()));
+            locate_yaml_key(yaml, &at).map(|span| span.start)
+        })
+        .min()
 }
 
 /// The YAML text of `path`'s authored data (`text`): a YAML file whole, a

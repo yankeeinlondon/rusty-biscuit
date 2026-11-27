@@ -335,7 +335,8 @@ fn leaving_verdicts_records_a_failed_owner_instead_of_failing() {
     let options = InputDiscoveryOptions::new(&resolution, &context).with_caller_layers(&layers);
 
     let inventory = discover_sequence_inputs(&load(&root), options.leaving_verdicts()).unwrap();
-    assert_eq!(inventory.failed_owners, vec![1]);
+    assert_eq!(inventory.failed_owners.iter().map(|failed| failed.owner).collect::<Vec<_>>(), vec![1]);
+    assert!(matches!(inventory.failed_owners[0].error, CompositionError::SchemaValidation { .. }));
     assert_eq!(inventory.owners[1].role, InputOwnerRole::Nested);
     assert!(inventory.owners[1].missing.is_none());
     assert!(inventory.missing_error().is_none());

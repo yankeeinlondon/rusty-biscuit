@@ -7,7 +7,9 @@
 //! followed in the sequence's scope, where it is evaluated.
 //!
 //! Each case runs on every placement of the owner that declares the reading
-//! rows, built as the CLI builds it (input discovery, then the graph).
+//! rows, built as the CLI builds it (input discovery, then the graph), and
+//! the dry run's recovering walk ([`check_sequence_tree`]) must predict every
+//! reader alike: it consumes the same runtime-written keys.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -195,11 +197,56 @@ fn predict_capturing(
     let dir = TempDir::new().unwrap();
     let path = site.write(dir.path(), keys, readers);
     let found = predictions(&graph(&path, dir.path(), setters, content));
+    let checked = checked_predictions(&path, dir.path(), setters, content);
     for reader in readers {
         let name = reader["name"].as_str().unwrap();
         assert!(found.contains_key(name), "{site:?}: no prediction for `{name}` in {found:#?}");
+        let walked = checked.get(name).unwrap_or_else(|| panic!("{site:?}: the check walk has no prediction for `{name}`"));
+        for field in ["agent", "model"] {
+            assert_eq!(
+                shape(hint(&checked, name, field)),
+                shape(hint(&found, name, field)),
+                "{site:?}: the dry run predicts `{name}`'s {field} unlike the real graph: {walked:#?}"
+            );
+        }
     }
     found
+}
+
+/// Every prompt task's prediction as the dry run's recovering walk records
+/// it, by row name.
+fn checked_predictions(path: &Path, dir: &Path, setters: Option<&Value>, content: &str) -> HashMap<String, ProviderPrediction> {
+    let source = load(path);
+    let invocation =
+        crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir).unwrap();
+    let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+    let layers = setters.map(|setters| {
+        let mut layers = crate::composition::CallerInputLayers::new(source_context.file_resolution_context().clone());
+        layers.set_overrides = Some(setters.clone());
+        layers
+    });
+    let check = check_sequence_tree(SequenceCheckRequest {
+        source: &source,
+        compose_context: ComposeContext::capture_for_content(dir, content),
+        invocation: &invocation,
+        source_context: &source_context,
+        caller_layers: layers.as_ref(),
+        launch_dir: Some(dir),
+    });
+    check.tasks.into_iter().filter_map(|task| Some((task.site.name, task.provider?))).collect()
+}
+
+/// A hint's class, value, and layer: what selection reads, without the
+/// property path, which a check spells by its authored key.
+fn shape(state: &HintState) -> String {
+    match state {
+        HintState::Absent => "absent".into(),
+        HintState::Static { value, source } => format!("static {value} {:?}", source.layer),
+        HintState::DecidedAtLaunch { source, reason } => format!("launch {reason:?} {:?}", source.layer),
+        HintState::Failed { source, .. } => format!("failed {:?}", source.layer),
+        HintState::Circular { source, variable } => format!("circular {variable} {:?}", source.layer),
+        HintState::EmptyAgentList { source } => format!("empty {:?}", source.layer),
+    }
 }
 
 fn reader(name: &str, prompt: &str, with: Value) -> Value {

@@ -302,10 +302,16 @@ pub(crate) fn run_composition_inner(
         interactive_opts,
     )
     .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    // The pre-launch check resolves a `$schema` template through the session
+    // the document's first composition then takes, so both read the same
+    // snapshot under the same `permissions`.
+    let mut launch_slot_session = None;
     let (source, mut set_overrides) = if staged_boot::authors_initialize(&source) {
         (source, set_overrides)
     } else {
         let term = crate::log::terminal();
+        let session = crate::commands::wrap::launch_slot_session(&invocation, &file_resolution_context)
+            .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         let pre = pre_validate_with_interactive_collection(
             &source,
             set_overrides.as_ref(),
@@ -316,8 +322,10 @@ pub(crate) fn run_composition_inner(
             !caller_input_records.is_empty(),
             kind.mode(),
             invocation.trigger_findings(),
+            Some(&session),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+        launch_slot_session = Some(session);
         emit_dropped_optional_warnings(&pre.dropped_optionals);
         // Pre-validation may have supplied a missing value or dropped an
         // invalid optional; the caller records must carry the same values,
@@ -425,6 +433,7 @@ pub(crate) fn run_composition_inner(
             invocation.clone(),
             source_context,
             None,
+            launch_slot_session.take(),
         )?;
 
         match outcome {
@@ -533,6 +542,7 @@ pub(crate) fn prepare_and_run_active_document(
     invocation: InvocationContext,
     source_context: SourceContext,
     step_scope: Option<&StepScope>,
+    launch_slot_session: Option<Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<(ActiveDocumentOutcome, Option<std::path::PathBuf>)> {
     let perf_enabled = shared.perf;
     // Captured for frontmatter-excerpt enrichment of any error rendered below;
@@ -766,6 +776,7 @@ pub(crate) fn prepare_and_run_active_document(
             &approval_options,
             kind.mode(),
             &mut prep_substages,
+            launch_slot_session.as_ref(),
         )?
     };
 
@@ -807,6 +818,7 @@ pub(crate) fn prepare_and_run_active_document(
         prepared_context,
         document_epoch,
         step_scope,
+        launch_slot_session,
     )?;
 
     Ok((outcome, commit_repo_root))
@@ -842,6 +854,7 @@ fn eager_shell_preflight(
     approval_options: &claudine::harness::ShellApprovalOptions,
     mode: claudine::composition::CompositionMode,
     prep_substages: &mut Vec<crate::perf::SubstageTiming>,
+    slot_session: Option<&Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<DocumentBoot> {
     // The audit composes through the same canonical options, with the same
     // overlay and caller layers, as the preparation that executes the
@@ -863,6 +876,7 @@ fn eager_shell_preflight(
         // of the typed one the direct route renders (AC28).
         defer_schema_verdict: true,
         proxy_overlay: proxy_overlay.clone(),
+        slot_session: slot_session.cloned(),
         ..PrepareOptions::new(file_resolution_context.clone())
     }
     .with_layered_overrides(caller_overrides.clone());
@@ -1212,6 +1226,11 @@ fn build_and_run_loop(
                 // frontmatter, shell audit, and — carried on the prepared
                 // input layers — every lifecycle event it fires.
                 iteration_options.loop_values = Some(ctx.ambient.clone());
+                // A later pass reads what the agent left behind: its `$schema`
+                // template resolves afresh, not from pass 1's snapshot.
+                if ctx.iteration > 1 {
+                    iteration_options.slot_session = None;
+                }
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
                         // The reread extends the snapshot `initialize` ran with.
@@ -1634,6 +1653,9 @@ fn execute_loop_or_single(
     prepared_context: darkmatter::markdown::compose::ComposeContext,
     document_epoch: claudine::invocation_context::DocumentEpoch,
     step_scope: Option<&StepScope>,
+    // The session the document's pre-launch check resolved its `$schema`
+    // template with, for its first run.
+    launch_slot_session: Option<Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared, document_epoch.environment());
 
@@ -1697,6 +1719,10 @@ fn execute_loop_or_single(
         // Each iteration supplies its own (`run_loop_with_overrides` below).
         loop_values: None,
         passive: None,
+        allow_missing_transclusions: false,
+        // The pre-launch check's session serves this document's first run;
+        // a later pass resolves through its own.
+        slot_session: launch_slot_session,
     };
 
     let is_proxy_target = adopted_handoff.is_some();

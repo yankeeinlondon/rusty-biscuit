@@ -195,50 +195,59 @@ fn a_dry_run_creates_no_configuration() {
 /// `compose` checks one document: an installed provider and a composable
 /// body exit 0 with the preview on stdout; a provider not on `PATH` and
 /// OpenCode without a model are errors.
-#[test]
-fn compose_checks_the_provider_and_its_model_requirement() {
-    let fixture = CliProcessFixture::named("dry-run-compose");
-    fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\n---\nHello {{ who }}\n").unwrap();
-    let missing = run(&fixture, &["compose", "doc.md", "who=world", "--dry-run"]);
-    assert_eq!(missing.status.code(), Some(2), "stderr:\n{}", missing.stderr);
-    assert!(prose(&missing.stderr).contains("is not installed: `claude` is not on PATH"), "stderr:\n{}", missing.stderr);
+mod compose_checks_the_provider_and_its_model_requirement {
+    use super::*;
 
-    install_provider_binary(&fixture, "claude");
-    let clean = run(&fixture, &["compose", "doc.md", "who=world", "--dry-run"]);
-    assert_eq!(clean.status.code(), Some(0), "stderr:\n{}", clean.stderr);
-    assert_eq!(clean.stdout.trim(), "Hello world");
-    assert!(clean.stderr.contains("Dry run found 0 errors and 0 warnings; 0 checks not run. Previewed 1 of 1 task."));
+    fn fixture(name: &str) -> CliProcessFixture {
+        let fixture = CliProcessFixture::named(name);
+        fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\n---\nHello {{ who }}\n").unwrap();
+        fixture
+    }
 
-    install_provider_binary(&fixture, "opencode");
-    let model = fixture
-        .command()
-        .env("NO_COLOR", "1")
-        .env_remove("OPENCODE_MODEL")
-        .env_remove("MODEL")
-        .args(["compose", "doc.md", "who=world", "--dry-run", "--provider", "opencode"])
-        .output()
-        .unwrap();
-    let stderr = strip_ansi(&String::from_utf8_lossy(&model.stderr));
-    assert_eq!(model.status.code(), Some(2), "stderr:\n{stderr}");
-    assert!(stderr.contains("OpenCode needs a model in a non-interactive run"), "stderr:\n{stderr}");
+    #[test]
+    fn a_provider_not_on_path_is_an_error() {
+        let fixture = fixture("dry-run-compose-missing");
+        let missing = run(&fixture, &["compose", "doc.md", "who=world", "--dry-run"]);
+        assert_eq!(missing.status.code(), Some(2), "stderr:\n{}", missing.stderr);
+        assert!(prose(&missing.stderr).contains("is not installed: `claude` is not on PATH"), "stderr:\n{}", missing.stderr);
+    }
+
+    #[test]
+    fn an_installed_provider_previews_the_body() {
+        let fixture = fixture("dry-run-compose-clean");
+        install_provider_binary(&fixture, "claude");
+        let clean = run(&fixture, &["compose", "doc.md", "who=world", "--dry-run"]);
+        assert_eq!(clean.status.code(), Some(0), "stderr:\n{}", clean.stderr);
+        assert_eq!(clean.stdout.trim(), "Hello world");
+        assert!(clean.stderr.contains("Dry run found 0 errors and 0 warnings; 0 checks not run. Previewed 1 of 1 task."));
+    }
+
+    #[test]
+    fn opencode_without_a_model_is_an_error() {
+        let fixture = fixture("dry-run-compose-model");
+        install_provider_binary(&fixture, "claude");
+        install_provider_binary(&fixture, "opencode");
+        let model = fixture
+            .command()
+            .env("NO_COLOR", "1")
+            .env_remove("OPENCODE_MODEL")
+            .env_remove("MODEL")
+            .args(["compose", "doc.md", "who=world", "--dry-run", "--provider", "opencode"])
+            .output()
+            .unwrap();
+        let stderr = strip_ansi(&String::from_utf8_lossy(&model.stderr));
+        assert_eq!(model.status.code(), Some(2), "stderr:\n{stderr}");
+        assert!(stderr.contains("OpenCode needs a model in a non-interactive run"), "stderr:\n{stderr}");
+    }
 }
 
 /// A transcluded file the real run would replace with a notice and warn
 /// about (it does not parse) is a warning row of the dry run in the
 /// including document, not a clean report; the same document with a valid
-/// part is the control.
+/// part is the control ([`a_valid_transcluded_part_is_a_clean_report`]).
 #[test]
 fn a_tolerated_transclusion_failure_is_a_warning_row() {
-    let fixture = CliProcessFixture::named("dry-run-tolerated-transclusion");
-    install_provider_binary(&fixture, "claude");
-    fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\n---\n# Doc\n\n::file part.md\n\nbody\n").unwrap();
-
-    fs::write(fixture.cwd().join("part.md"), "part text\n").unwrap();
-    let control = run(&fixture, &["compose", "doc.md", "--dry-run"]);
-    assert_eq!(control.status.code(), Some(0), "stderr:\n{}", control.stderr);
-    assert!(control.stdout.contains("part text"), "stdout:\n{}", control.stdout);
-    assert!(control.stderr.contains("Dry run found 0 errors and 0 warnings"), "stderr:\n{}", control.stderr);
-
+    let fixture = transclusion_fixture("dry-run-tolerated-transclusion");
     fs::write(fixture.cwd().join("part.md"), "---\ntitle: [unclosed\n---\npart text\n").unwrap();
     let human = run(&fixture, &["compose", "doc.md", "--dry-run"]);
     assert_eq!(human.status.code(), Some(2), "stderr:\n{}", human.stderr);
@@ -252,8 +261,32 @@ fn a_tolerated_transclusion_failure_is_a_warning_row() {
     let diagnostics = envelope["diagnostics"].as_array().unwrap();
     assert_eq!(diagnostics.len(), 1, "{}", json.stdout);
     assert_eq!(diagnostics[0]["severity"], "warning", "{}", json.stdout);
+    // R1-F10.7: the tolerated child failure keeps its class, at the
+    // inclusion that was left out.
+    assert_eq!(diagnostics[0]["code"], "dm.transclusion.failure", "{}", json.stdout);
     assert!(diagnostics[0]["source"]["file"].as_str().unwrap().ends_with("doc.md"), "{}", json.stdout);
+    assert_eq!((&diagnostics[0]["source"]["line"], &diagnostics[0]["source"]["column"]), (&Value::from(6), &Value::from(1)), "{}", json.stdout);
     assert_eq!(envelope["summary"]["warnings"], 1, "{}", json.stdout);
+}
+
+/// The control of [`a_tolerated_transclusion_failure_is_a_warning_row`]: a
+/// part that parses is transcluded and the report is clean.
+#[test]
+fn a_valid_transcluded_part_is_a_clean_report() {
+    let fixture = transclusion_fixture("dry-run-tolerated-transclusion-control");
+    fs::write(fixture.cwd().join("part.md"), "part text\n").unwrap();
+    let control = run(&fixture, &["compose", "doc.md", "--dry-run"]);
+    assert_eq!(control.status.code(), Some(0), "stderr:\n{}", control.stderr);
+    assert!(control.stdout.contains("part text"), "stdout:\n{}", control.stdout);
+    assert!(control.stderr.contains("Dry run found 0 errors and 0 warnings"), "stderr:\n{}", control.stderr);
+}
+
+/// A fixture whose `doc.md` transcludes `part.md`, which the caller writes.
+fn transclusion_fixture(name: &str) -> CliProcessFixture {
+    let fixture = CliProcessFixture::named(name);
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("doc.md"), "---\nagent: claude\n---\n# Doc\n\n::file part.md\n\nbody\n").unwrap();
+    fixture
 }
 
 /// `inline-compose --dry-run` leaves the input file byte-for-byte intact.
@@ -370,21 +403,127 @@ fn a_document_that_fails_to_parse_fails_only_its_task() {
         "---\nagent: claude\nsequence:\n  - name: yaml\n    sequence: ./child.yaml\n  - name: json5\n    sequence: ./rows.json5\n  - name: jsonl\n    sequence: ./rows.jsonl\n  - name: markdown\n    sequence: ./child.md\n  - name: mark\n    shell: touch marker\n  - name: tail\n    prompt: ./ok.md\n---\n",
     )
     .unwrap();
-    let run = run(&fixture, &["sequence", "seq.md", "--dry-run"]);
-    let stderr = prose(&run.stderr);
-    assert_eq!(run.status.code(), Some(2), "stderr:\n{}", run.stderr);
+    let human = run(&fixture, &["sequence", "seq.md", "--dry-run"]);
+    let stderr = prose(&human.stderr);
+    assert_eq!(human.status.code(), Some(2), "stderr:\n{}", human.stderr);
+    // Each parser's coordinate is the row's location, in the file's frame
+    // (`child.md`'s frontmatter starts on line 2).
     for expected in [
-        "is not valid YAML: YAML parse error: sequence[0]: duplicate entry with key \"name\" at line 3 column 5 in child.yaml",
+        "is not valid YAML: YAML parse error: sequence[0]: duplicate entry with key \"name\" at line 3 column 5 at child.yaml:3:5",
         "is not valid JSON: JSON5 parse error",
-        "line 1 column 15",
+        "line 1 column 15 (char 14) at rows.json5:1:15",
         "repeats a key: line 3: duplicate key `name`",
+        "at rows.jsonl:3:23",
         "child.md: Failed to parse frontmatter",
+        "at child.md:4:5",
         "Previewed 1 of 2 tasks.",
     ] {
-        assert!(stderr.contains(expected), "{expected:?} in stderr:\n{}", run.stderr);
+        assert!(stderr.contains(expected), "{expected:?} in stderr:\n{}", human.stderr);
     }
-    assert!(run.stdout.contains("the control prompt"), "stdout:\n{}", run.stdout);
+    assert!(human.stdout.contains("the control prompt"), "stdout:\n{}", human.stdout);
+
+    let json = run(&fixture, &["sequence", "seq.md", "--dry-run", "--json"]);
+    let envelope: Value = serde_json::from_str(&json.stdout).unwrap();
+    let located: Vec<(String, Value, Value)> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .map(|diagnostic| {
+            let source = &diagnostic["source"];
+            let file = source["file"].as_str().unwrap().rsplit(['/', '\\']).next().unwrap().to_string();
+            (file, source["line"].clone(), source["column"].clone())
+        })
+        .collect();
+    let expected: Vec<(String, Value, Value)> =
+        [("child.yaml", 3, 5), ("rows.json5", 1, 15), ("rows.jsonl", 3, 23), ("child.md", 4, 5)]
+            .into_iter()
+            .map(|(file, line, column)| (file.to_string(), Value::from(line), Value::from(column)))
+            .collect();
+    assert_eq!(located, expected, "{}", json.stdout);
     assert!(!fixture.cwd().join("marker").exists(), "a dry run runs no command");
+}
+
+/// R1-F10.3: an executable reference that is not a non-empty file reference
+/// (a number, an empty string) is located at the value the task wrote, for
+/// each executable; the valid control is still previewed.
+#[test]
+fn a_malformed_executable_reference_is_located_at_its_value() {
+    let fixture = CliProcessFixture::named("dry-run-reference-values");
+    install_provider_binary(&fixture, "claude");
+    fs::write(fixture.cwd().join("ok.md"), "the control prompt\n").unwrap();
+    fs::write(
+        fixture.cwd().join("seq.md"),
+        "---\nagent: claude\nsequence:\n  - name: number\n    prompt: 42\n  - name: empty\n    prompt: \"\"\n  - name: task\n    task: \"\"\n  - name: group\n    group: 3\n  - name: sequence\n    sequence: \"\"\n  - name: tail\n    prompt: ./ok.md\n---\n",
+    )
+    .unwrap();
+    let json = run(&fixture, &["sequence", "seq.md", "--dry-run", "--json"]);
+    assert_eq!(json.status.code(), Some(2), "{}", json.stdout);
+    let envelope: Value = serde_json::from_str(&json.stdout).unwrap();
+    let located: Vec<(Value, Value)> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .map(|diagnostic| (diagnostic["source"]["line"].clone(), diagnostic["source"]["column"].clone()))
+        .collect();
+    let expected: Vec<(Value, Value)> =
+        [(5, 13), (7, 13), (9, 11), (11, 12), (13, 15)].into_iter().map(|(line, column)| (line.into(), column.into())).collect();
+    assert_eq!(located, expected, "{}", json.stdout);
+}
+
+/// A root list read from a referenced formal document, a referenced data
+/// file, or a `{{ … }}` value: its middle row declares two executables and
+/// is reported at its own place, and both siblings are still previewed.
+mod a_bad_row_in_a_root_source_leaves_its_siblings_previewed {
+    use super::*;
+
+    const ROWS: &str = "- name: one\n  prompt: ./one.md\n- name: two\n  shell: touch marker\n  prompt: ./one.md\n- name: three\n  prompt: ./three.md\n";
+
+    /// `ROWS` as the list under `key`.
+    fn under(key: &str) -> String {
+        format!("{key}:\n{}", ROWS.lines().map(|line| format!("  {line}\n")).collect::<String>())
+    }
+
+    #[test]
+    fn formal() {
+        assert_route("formal", "sequence: ./child.yaml\n", Some("at child.yaml:5:5"));
+    }
+
+    // A selected data row resolves from the root, and is located in the
+    // data file that wrote it.
+    #[test]
+    fn data() {
+        assert_route("data", "sequence: ./rows.yaml\n", Some("at rows.yaml:3:3"));
+    }
+
+    // Rows an expression computed have no proven place of their own.
+    #[test]
+    fn expression() {
+        assert_route("expression", &format!("sequence: \"{{{{ rows }}}}\"\n{}", under("rows")), Some("in seq.md"));
+    }
+
+    fn assert_route(route: &str, root: &str, at: Option<&str>) {
+        let fixture = CliProcessFixture::named(&format!("dry-run-root-sources-{route}"));
+        install_provider_binary(&fixture, "claude");
+        fs::write(fixture.cwd().join("one.md"), "first prompt\n").unwrap();
+        fs::write(fixture.cwd().join("three.md"), "third prompt\n").unwrap();
+        fs::write(fixture.cwd().join("child.yaml"), format!("kind: sequence\n{}", under("sequence"))).unwrap();
+        fs::write(fixture.cwd().join("rows.yaml"), ROWS).unwrap();
+        fs::write(fixture.cwd().join("seq.md"), format!("---\nagent: claude\n{root}---\n")).unwrap();
+        let run = run(&fixture, &["sequence", "seq.md", "--dry-run"]);
+        let stderr = prose(&run.stderr);
+        assert_eq!(run.status.code(), Some(2), "{route} stderr:\n{}", run.stderr);
+        for expected in [
+            "task two (sequence[1])".to_string(),
+            "this task names more than one executable: `shell`, `prompt`".to_string(),
+            "Previewed 2 of 3 tasks.".to_string(),
+        ].into_iter().chain(at.map(str::to_string)) {
+            assert!(stderr.contains(&expected), "{route}: {expected:?} in stderr:\n{}", run.stderr);
+        }
+        assert!(run.stdout.contains("first prompt") && run.stdout.contains("third prompt"), "{route} stdout:\n{}", run.stdout);
+        assert!(!fixture.cwd().join("marker").exists(), "a dry run runs no command");
+    }
 }
 
 /// Each occurrence of a referenced sequence is its own subject, labeled by
@@ -518,10 +657,12 @@ fn a_preview_leaves_what_needs_an_effect_as_written_and_marks_it() {
 }
 
 /// A nested task's `with:` value known at launch reaches its preview as the
-/// task's turn would pass it; with the sequence's input missing, the task
-/// waits for it instead of reporting the same input again.
+/// task's turn would pass it. With the sequence's input missing, the input
+/// is reported once, by its owner, and the task is still previewed: what
+/// reads the input, or a `with:` value derived from it, stays as written and
+/// marked, and the rest composes.
 #[test]
-fn a_nested_task_previews_with_values_known_at_launch_and_waits_for_a_missing_input() {
+fn a_nested_task_previews_with_values_known_at_launch_and_marks_a_missing_input() {
     let fixture = CliProcessFixture::named("dry-run-passive-with");
     install_provider_binary(&fixture, "claude");
     fs::write(
@@ -543,8 +684,13 @@ fn a_nested_task_previews_with_values_known_at_launch_and_waits_for_a_missing_in
     assert_eq!(missing.status.code(), Some(2), "stdout:\n{}", missing.stdout);
     let report = prose(&missing.stderr);
     assert_eq!(report.matches("`spec` (string) is required and has no value").count(), 1, "{report}");
-    assert!(report.contains("not checked: inputs, preview (it waits for an input its sequence has no value for)"), "{report}");
-    assert!(missing.stdout.trim().is_empty(), "stdout:\n{}", missing.stdout);
+    assert!(report.contains("not checked: input `plan` (a `with:` value is known only when the task runs)"), "{report}");
+    assert_eq!(
+        missing.stdout.trim(),
+        "Plan [{{ plan }} [not evaluated in a dry run]] from [{{ spec }} [missing input]]",
+        "stderr:\n{}",
+        missing.stderr
+    );
 }
 
 /// A body whose every block was left out is an empty-prompt error that names
@@ -588,14 +734,14 @@ fn an_inline_preview_refuses_a_baseline_the_run_could_not_edit() {
 /// `args` run with the model variables a host might export removed, so a
 /// provider's model requirement reads only what the fixture wrote.
 fn run_without_model_env(fixture: &CliProcessFixture, args: &[&str]) -> Run {
-    let output = fixture
-        .command()
-        .env("NO_COLOR", "1")
-        .env_remove("OPENCODE_MODEL")
-        .env_remove("MODEL")
-        .args(args)
-        .output()
-        .unwrap();
+    let mut command = fixture.command();
+    command.env("NO_COLOR", "1").env_remove("OPENCODE_MODEL").env_remove("MODEL");
+    // A fixture that is graded on a terminal names the streams the check
+    // treats as terminals; no terminal is opened.
+    if let Ok(streams) = fs::read_to_string(fixture.cwd().join("terminal.txt")) {
+        command.env("CLAUDINE_TEST_DRY_RUN_TERMINAL", streams.trim());
+    }
+    let output = command.args(args).output().unwrap();
     Run {
         status: output.status,
         stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
@@ -609,42 +755,49 @@ const STATUS_BLOCK_GUTTER: char = '┃';
 /// The check's own code `composition.<code>` is in the report of
 /// `tests/fixtures/check/codes/<code>/finding/` and absent from the clean
 /// report of the `control/` beside it, so a check cannot pass by firing on
-/// everything. Each directory's `args.txt` holds the command line. The
+/// everything. Each directory's `args.txt` holds the command line, and an
+/// optional `terminal.txt` the streams the check grades as terminals. The
 /// finding's report is pinned in both forms, plain text and JSON, as
 /// `code_<code>_human` and `code_<code>_json`.
-fn assert_code_fixture(code: &str) {
+/// The `kind` (`finding` or `control`) fixture of `code`: the finding's
+/// report carries the code and matches its JSON and human snapshots; the
+/// control's carries no such row and exits 0.
+fn assert_code_fixture(code: &str, kind: &str) {
     let root = biscuit_test_harness::manifest_dir!().join("tests/fixtures/check/codes").join(code);
     let full = format!("composition.{code}");
-    for (kind, expected) in [("finding", true), ("control", false)] {
-        let fixture = CliProcessFixture::named("dry-run-code");
-        copy_tree(&root.join(kind), fixture.cwd());
-        install_provider_binary(&fixture, "claude");
-        install_provider_binary(&fixture, "opencode");
-        let line = fs::read_to_string(fixture.cwd().join("args.txt")).unwrap();
-        let mut args: Vec<&str> = line.split_whitespace().collect();
-        args.extend(["--dry-run", "--json"]);
-        let run = run_without_model_env(&fixture, &args);
-        let envelope: Value = serde_json::from_str(&run.stdout).unwrap_or_else(|_| panic!("{full} {kind}: {}", run.stdout));
-        let found = envelope["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["code"] == full.as_str());
-        assert_eq!(found, expected, "{full} {kind}:\n{}", run.stdout);
-        if !expected {
-            assert_eq!(run.status.code(), Some(0), "{full} control is clean:\n{}", run.stdout);
-            continue;
-        }
-        let mut envelope = envelope;
-        portable(&mut envelope, &launch_spellings(&fixture));
-        insta::assert_json_snapshot!(format!("code_{code}_json"), envelope);
-        let human = run_without_model_env(&fixture, &line.split_whitespace().chain(["--dry-run"]).collect::<Vec<_>>());
-        insta::assert_snapshot!(format!("code_{code}_human"), human.stderr);
+    let expected = kind == "finding";
+    let fixture = CliProcessFixture::named("dry-run-code");
+    copy_tree(&root.join(kind), fixture.cwd());
+    install_provider_binary(&fixture, "claude");
+    install_provider_binary(&fixture, "opencode");
+    let line = fs::read_to_string(fixture.cwd().join("args.txt")).unwrap();
+    let mut args: Vec<&str> = line.split_whitespace().collect();
+    args.extend(["--dry-run", "--json"]);
+    let run = run_without_model_env(&fixture, &args);
+    let envelope: Value = serde_json::from_str(&run.stdout).unwrap_or_else(|_| panic!("{full} {kind}: {}", run.stdout));
+    let found = envelope["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["code"] == full.as_str());
+    assert_eq!(found, expected, "{full} {kind}:\n{}", run.stdout);
+    if !expected {
+        assert_eq!(run.status.code(), Some(0), "{full} control is clean:\n{}", run.stdout);
+        return;
     }
+    let mut envelope = envelope;
+    portable(&mut envelope, &launch_spellings(&fixture));
+    insta::assert_json_snapshot!(format!("code_{code}_json"), envelope);
+    let human = run_without_model_env(&fixture, &line.split_whitespace().chain(["--dry-run"]).collect::<Vec<_>>());
+    insta::assert_snapshot!(format!("code_{code}_human"), human.stderr);
 }
 
-/// One test per code of the check's own (`internal.bug` has no fixture: no
-/// input reaches it), plus a guard that every fixture directory has its test.
+/// Two tests per code the registry marks `dry_run_report`, its finding and
+/// its control, plus guards that the list equals the registry's scope and
+/// that every fixture directory and snapshot has its code.
 mod codes {
     macro_rules! code_fixtures {
         ($($code:ident),* $(,)?) => {
-            $(#[test] fn $code() { super::assert_code_fixture(stringify!($code)); })*
+            $(#[test] fn $code() { super::assert_code_fixture(stringify!($code), "finding"); })*
+            mod control {
+                $(#[test] fn $code() { super::super::assert_code_fixture(stringify!($code), "control"); })*
+            }
             const CODES: &[&str] = &[$(stringify!($code)),*];
         };
     }
@@ -653,12 +806,31 @@ mod codes {
         no_executable,
         multiple_executables,
         sequence_shape,
+        sequence_undefined,
         provider_unresolved,
         provider_unknown,
         provider_not_installed,
         model_required,
         invalid_arguments,
+        missing_properties,
+        file_choice_pending,
     );
+
+    /// The scope comes from the registry: every code it marks
+    /// `dry_run_report` has its two tests here, so a new scoped declaration
+    /// without its fixture fails.
+    #[test]
+    fn every_scoped_registry_code_has_its_tests() {
+        let mut scoped: Vec<String> = claudine::diagnostics::CODES
+            .iter()
+            .filter(|spec| spec.dry_run_report)
+            .map(|spec| spec.code.strip_prefix("composition.").unwrap_or(spec.code).to_string())
+            .collect();
+        scoped.sort();
+        let mut declared: Vec<String> = CODES.iter().map(|code| code.to_string()).collect();
+        declared.sort();
+        assert_eq!(declared, scoped);
+    }
 
     #[test]
     fn every_fixture_directory_has_its_test() {
@@ -900,32 +1072,45 @@ fn tree(dir: &Path) -> std::collections::BTreeMap<String, Option<Vec<u8>>> {
 /// Darkmatter, publish the host registration, run commands, lifecycle
 /// events, and side effects, and fill caches writes nothing: the fixture's
 /// home (configuration, registration, caches), launch directory, and `PATH`
-/// directory are byte-for-byte the same afterwards.
-#[test]
-fn a_dry_run_writes_nothing_anywhere() {
-    let fixture = CliProcessFixture::named("dry-run-no-write").without_darkmatter_config();
-    install_provider_binary(&fixture, "claude");
-    fs::create_dir_all(fixture.home().join(".claudine")).unwrap();
-    fs::write(fixture.home().join(".claudine/config.json"), "{ \"preferred_agent\": \"claude\" }").unwrap();
-    fs::write(
-        fixture.cwd().join("prompt.md"),
-        "---\nagent: claude\nstamp: $(touch frontmatter-marker)\ninitialize:\n  - append_line: [initialize-marker, a]\n  - say: hello\n---\nstamp {{ stamp }}\n::shell touch body-marker\n",
-    )
-    .unwrap();
-    fs::write(
-        fixture.cwd().join("seq.md"),
-        "---\nagent: claude\ninitialize:\n  - append_line: [sequence-marker, a]\nsequence:\n  - name: run\n    shell: \"touch task-marker\"\n  - name: write\n    side_effect: { append_line: [effect-marker, a] }\n  - name: ask\n    prompt: ./prompt.md\n---\n",
-    )
-    .unwrap();
-    let workspace = fixture.cwd().parent().unwrap().to_path_buf();
-    let before = tree(&workspace);
-    for args in [
-        vec!["sequence", "seq.md", "--dry-run"],
-        vec!["sequence", "seq.md", "--dry-run", "--json", "--yolo"],
-        vec!["compose", "prompt.md", "--dry-run", "--yolo"],
-        vec!["inline-compose", "prompt.md", "--dry-run"],
-    ] {
-        let run = run(&fixture, &args);
+/// directory are byte-for-byte the same afterwards. One test per command
+/// route, each on its own fixture.
+mod a_dry_run_writes_nothing_anywhere {
+    use super::*;
+
+    macro_rules! no_write_routes {
+        ($($name:ident => [$($arg:literal),+ $(,)?]),+ $(,)?) => {
+            $(#[test]
+            fn $name() {
+                assert_writes_nothing(stringify!($name), &[$($arg),+]);
+            })+
+        };
+    }
+
+    no_write_routes! {
+        sequence => ["sequence", "seq.md", "--dry-run"],
+        sequence_json_yolo => ["sequence", "seq.md", "--dry-run", "--json", "--yolo"],
+        compose_yolo => ["compose", "prompt.md", "--dry-run", "--yolo"],
+        inline_compose => ["inline-compose", "prompt.md", "--dry-run"],
+    }
+
+    fn assert_writes_nothing(route: &str, args: &[&str]) {
+        let fixture = CliProcessFixture::named(&format!("dry-run-no-write-{route}")).without_darkmatter_config();
+        install_provider_binary(&fixture, "claude");
+        fs::create_dir_all(fixture.home().join(".claudine")).unwrap();
+        fs::write(fixture.home().join(".claudine/config.json"), "{ \"preferred_agent\": \"claude\" }").unwrap();
+        fs::write(
+            fixture.cwd().join("prompt.md"),
+            "---\nagent: claude\nstamp: $(touch frontmatter-marker)\ninitialize:\n  - append_line: [initialize-marker, a]\n  - say: hello\n---\nstamp {{ stamp }}\n::shell touch body-marker\n",
+        )
+        .unwrap();
+        fs::write(
+            fixture.cwd().join("seq.md"),
+            "---\nagent: claude\ninitialize:\n  - append_line: [sequence-marker, a]\nsequence:\n  - name: run\n    shell: \"touch task-marker\"\n  - name: write\n    side_effect: { append_line: [effect-marker, a] }\n  - name: ask\n    prompt: ./prompt.md\n---\n",
+        )
+        .unwrap();
+        let workspace = fixture.cwd().parent().unwrap().to_path_buf();
+        let before = tree(&workspace);
+        let run = run(&fixture, args);
         assert!(matches!(run.status.code(), Some(0 | 2)), "{args:?}: {}", run.stderr);
         assert_eq!(tree(&workspace), before, "{args:?} wrote to the fixture");
     }
@@ -1073,7 +1258,7 @@ fn a_task_file_yaml_error_names_the_file_and_the_parse_stage() {
     // JSON snapshot pins the text, and the human report its shape.
     let stderr = prose(&human.stderr);
     assert!(stderr.contains("task t (sequence[0]) ✗ task file `"), "{}", human.stderr);
-    assert!(stderr.contains("in bad.yaml hint: Fix the YAML syntax of `"), "{}", human.stderr);
+    assert!(stderr.contains("at bad.yaml:3:1 hint: Fix the YAML syntax of `"), "{}", human.stderr);
     insta::assert_json_snapshot!("seq_site_yaml_json", envelope);
     let rows = error_rows(&envelope);
     assert_eq!(rows.len(), 1, "{rows:?}");
@@ -1112,10 +1297,18 @@ fn an_exclusive_executable_names_the_one_based_step_and_the_choices() {
     let seq = "---\nagent: goose\nsequence:\n  - name: both\n    prompt: ./x.md\n    sequence: ./y.md\n---\n";
     let fixture = sequence_fixture("seq-site-exclusive", &[("seq.md", seq), ("x.md", "x\n")]);
     let (human, envelope) = sequence_reports(&fixture);
-    let real = run(&fixture, &["sequence", "seq.md"]);
     assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
     insta::assert_snapshot!("seq_site_exclusive_human", portable_text(&fixture, &human.stderr));
     insta::assert_json_snapshot!("seq_site_exclusive_json", envelope);
+}
+
+/// The real run of [`an_exclusive_executable_names_the_one_based_step_and_the_choices`]:
+/// its stop line names the one-based step and the choices.
+#[test]
+fn a_real_run_stops_at_the_exclusive_executable_step() {
+    let seq = "---\nagent: goose\nsequence:\n  - name: both\n    prompt: ./x.md\n    sequence: ./y.md\n---\n";
+    let fixture = sequence_fixture("seq-site-exclusive-real", &[("seq.md", seq), ("x.md", "x\n")]);
+    let real = run(&fixture, &["sequence", "seq.md"]);
     assert!(
         prose(&real.stderr).contains(
             "The run stopped at: step 1 declares more than one executable field (prompt, sequence); \
@@ -1139,8 +1332,10 @@ fn a_single_executable_is_not_reported() {
     assert!(error_rows(&envelope).is_empty(), "{envelope:#}");
 }
 
-/// An unknown field on a task file: the parser's row offers the near miss
-/// as its hint. Control: a key near nothing gets the list instead.
+/// An unknown field on a task file: one row, the shipped schema's, located
+/// at the key and attached to the task occurrence, with the near miss as its
+/// hint; the parser's refusal of the same key is not a second row. Control:
+/// a key near nothing gets the schema's row with no did-you-mean.
 #[test]
 fn an_unknown_task_field_offers_its_near_miss() {
     let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./t.yaml\n---\n";
@@ -1152,23 +1347,32 @@ fn an_unknown_task_field_offers_its_near_miss() {
     assert_eq!(human.status.code(), Some(2), "{}", human.stderr);
     insta::assert_snapshot!("seq_site_unknown_field_human", portable_text(&fixture, &human.stderr));
     insta::assert_json_snapshot!("seq_site_unknown_field_json", envelope);
-    let parser_row = error_rows(&envelope).into_iter().find(|row| row.0 == "composition.failed").expect("the parser's row");
-    assert!(parser_row.1.starts_with("`whem` is not a field of a `prompt` task; expected one of"), "{parser_row:?}");
-    assert_eq!(parser_row.2.as_deref(), Some("Did you mean `when`? Rename `whem`."));
+    let rows = error_rows(&envelope);
+    assert_eq!(rows.len(), 1, "{envelope:#}");
+    assert_eq!(rows[0].0, "dm.schema.unknown_key");
+    assert_eq!(rows[0].2.as_deref(), Some("did you mean `when`?"));
 }
 
 /// The control of [`an_unknown_task_field_offers_its_near_miss`]: a key near
-/// nothing gets the list of fields instead.
+/// nothing is still one row, whose hint is to remove the key or use one of
+/// the task's declared keys.
 #[test]
-fn an_unknown_task_field_near_nothing_lists_the_fields() {
+fn an_unknown_task_field_near_nothing_is_one_row() {
     let seq = "---\nagent: goose\nsequence:\n  - name: t\n    task: ./t.yaml\n---\n";
     let control = sequence_fixture(
         "seq-site-unknown-field-control",
         &[("seq.md", seq), ("t.yaml", "kind: task\nprompt: ./x.md\nzzzzzz: \"true\"\n"), ("x.md", "x\n")],
     );
     let (_, envelope) = sequence_json(&control);
-    let parser_row = error_rows(&envelope).into_iter().find(|row| row.0 == "composition.failed").expect("the parser's row");
-    assert!(parser_row.2.as_deref().is_some_and(|hint| hint.starts_with("Remove `zzzzzz`, or use one of")), "{parser_row:?}");
+    let rows = error_rows(&envelope);
+    assert_eq!(rows.len(), 1, "{envelope:#}");
+    assert_eq!(rows[0].0, "dm.schema.unknown_key", "{envelope:#}");
+    assert!(rows[0].1.contains("'zzzzzz' was unexpected"), "{envelope:#}");
+    assert_eq!(
+        rows[0].2.as_deref(),
+        Some("remove `zzzzzz`, or use one of `name`, `when`, `with`, `prompt`, `shell`, `side_effect`, `task`, `sequence`, …"),
+        "{envelope:#}"
+    );
 }
 
 /// `agent: []` in a prompt document: one row, the provider selection's.
@@ -1216,5 +1420,6 @@ fn another_schema_problem_beside_an_empty_agent_list_keeps_its_row() {
     let control_run = run(&control, &["sequence", "seq.md", "--dry-run"]);
     let stderr = prose(&control_run.stderr);
     assert!(stderr.contains("an `agent` list needs at least one entry"), "{}", control_run.stderr);
-    assert!(stderr.contains("schema validation failed") && stderr.contains("/yolo"), "{}", control_run.stderr);
+    assert!(stderr.contains("`yolo` must be a boolean"), "{}", control_run.stderr);
+    assert!(stderr.contains("found 2 errors"), "{}", control_run.stderr);
 }

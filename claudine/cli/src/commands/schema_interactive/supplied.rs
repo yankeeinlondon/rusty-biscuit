@@ -4,7 +4,7 @@ use darkmatter::markdown::compose::{CallerInputRecord, CallerInputRecords};
 
 use super::{
     CompositionError, InteractiveSchemaOptions, ResolvedCompositionSource, ScopeContext,
-    choose_provided_file_reference, downgrade_to_schema_validation,
+    choose_provided_file_reference, downgrade_to_schema_validation, provided_partial_candidates,
 };
 
 /// Resolve supplied eager file partials without collecting gaps or judging the schema.
@@ -25,12 +25,7 @@ pub(crate) fn resolve_supplied_file_inputs(
         document_context,
         interactive,
         |property, provided, alternatives, origin| {
-            let scope = ScopeContext {
-                cwd: origin.cwd().to_path_buf(),
-                home: origin.home_dir().map(std::path::Path::to_path_buf),
-                repo_info: None,
-                git_root: origin.repository_root().map(std::path::Path::to_path_buf),
-            };
+            let scope = origin_scope(origin);
             // A decline or cancellation is `Ok(None)` and is a normal outcome;
             // only a broken chooser is worth a diagnostic, since both reach the
             // caller as the same "no existing file matched" surface.
@@ -65,6 +60,28 @@ pub(crate) fn resolve_supplied_file_inputs(
             Some(serde_json::Value::String(resolved.display().to_string()))
         },
     )
+}
+
+/// The candidate search scope of a supplied value: its caller's frozen
+/// launch origin.
+fn origin_scope(origin: &FileResolutionContext) -> ScopeContext {
+    ScopeContext {
+        cwd: origin.cwd().to_path_buf(),
+        home: origin.home_dir().map(std::path::Path::to_path_buf),
+        repo_info: None,
+        git_root: origin.repository_root().map(std::path::Path::to_path_buf),
+    }
+}
+
+/// The files the chooser would offer for a supplied partial, found by its
+/// own read-only search and shown nothing. Empty when the chooser would not
+/// open, so the run keeps its schema refusal.
+pub(crate) fn supplied_file_candidates(
+    provided: &str,
+    alternatives: &[Vec<Vec<String>>],
+    origin: &FileResolutionContext,
+) -> Vec<std::path::PathBuf> {
+    provided_partial_candidates(alternatives, provided, &origin_scope(origin))
 }
 
 fn resolve_supplied_file_inputs_with(

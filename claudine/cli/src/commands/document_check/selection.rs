@@ -7,7 +7,7 @@
 //! read-only `PATH` snapshot, and the configuration from the passive load.
 
 use claudine::composition::sequence::preflight::TaskIdentity;
-use claudine::composition::sequence::preflight::providers::ProviderPrediction;
+use claudine::composition::sequence::preflight::providers::{HintState, LaunchDecision, ProviderPrediction};
 use claudine::composition::{
     AgentResolutionState, EffectiveSelectionHints, InstalledProviderSnapshot, ResolvedExecutionTarget,
     SequenceTaskProviderProblem,
@@ -63,28 +63,30 @@ impl SelectionEnv {
 enum Selected {
     /// The provider it launches.
     Provider(ResolvedExecutionTarget),
-    /// Decided when the task runs.
-    AtLaunch,
+    /// Decided when the task runs, for this reason.
+    AtLaunch(String),
     /// No provider: the finding is recorded.
     None,
 }
 
 impl Check {
-    /// Decides the task's provider as its real run would, recording a
-    /// finding when that run would ask or refuse; returns the provider when
-    /// it is known.
-    pub(super) fn select_provider(&mut self, task: &PromptTask<'_>) -> Option<ResolvedExecutionTarget> {
+    /// The provider and model checks of one task, decided as its real run
+    /// would decide them. A provider known only at launch leaves the model
+    /// requirement unchecked for the same reason.
+    pub(super) fn check_provider_and_model(&mut self, task: &PromptTask<'_>) {
         let selected = match &task.selection {
             TaskHints::Document => self.select_document(task),
             TaskHints::Task { .. } | TaskHints::Body { .. } => self.select_sequence_task(task),
         };
         match selected {
-            Selected::Provider(target) => Some(target),
-            Selected::AtLaunch => {
-                self.sink.not_checked(task.subject, "provider", "the task's `agent` is decided when it runs", None);
-                None
+            Selected::Provider(target) => self.check_model(task, &target),
+            Selected::AtLaunch(reason) => {
+                self.not_checked(task.subject, "provider", &reason, None);
+                self.not_checked(task.subject, "model requirement", &reason, None);
             }
-            Selected::None => None,
+            Selected::None => {
+                self.not_checked(task.subject, "model requirement", "no provider", None);
+            }
         }
     }
 
@@ -130,7 +132,7 @@ impl Check {
         let own = match &task.selection {
             TaskHints::Task { prediction: Some(prediction), .. } => OwnHints::Task(prediction.as_ref().clone()),
             TaskHints::Task { prediction: None, .. } => {
-                self.sink.not_checked(task.subject, "provider", "the task's `agent` could not be predicted", None);
+                self.not_checked(task.subject, "provider", "the task's `agent` could not be predicted", None);
                 return Selected::None;
             }
             TaskHints::Body { document } => OwnHints::Body(document.clone()),
@@ -170,7 +172,9 @@ impl Check {
         }
         match result {
             Ok(TaskTarget::Own(target) | TaskTarget::Fallback(target)) => self.installed(task, target, &trace),
-            Ok(TaskTarget::AtLaunch(_)) => Selected::AtLaunch,
+            Ok(TaskTarget::AtLaunch(_)) => Selected::AtLaunch(
+                launch_reason(task, "agent").unwrap_or_else(|| "the task's `agent` is decided when it runs".to_string()),
+            ),
             Ok(TaskTarget::Unresolved { state, .. }) => {
                 // A sequence reviews every unresolved task on a terminal
                 // (`review::needs_review`) and fails without one.
@@ -302,7 +306,6 @@ impl Check {
             finding = finding.with_note(line);
         }
         self.sink.push(task.subject, finding);
-        self.sink.not_checked(task.subject, "model requirement", "no provider", None);
     }
 
     /// Whether the chosen provider needs a model this launch cannot find,
@@ -327,6 +330,11 @@ impl Check {
             })
             || self.shared.provider_tail.launch_args().iter().any(|arg| arg == "--model" || arg == "-m" || arg.starts_with("--model="));
         if found {
+            return;
+        }
+        // The task's own `model` may still name one when it launches.
+        if let Some(reason) = launch_reason(task, "model") {
+            self.not_checked(task.subject, "model requirement", &reason, None);
             return;
         }
         let variables = info.model_env_vars.iter().map(|var| format!("`{var}`")).collect::<Vec<_>>();
@@ -374,7 +382,6 @@ impl Check {
             Ok(hints) => Some(hints),
             Err(error) => {
                 self.push_error(task.subject, &error, task.trail.clone());
-                self.sink.not_checked(task.subject, "model requirement", "no provider", None);
                 None
             }
         }
@@ -396,4 +403,21 @@ impl Check {
 /// The classified state of `hints`, for a refusal the resolver returned.
 fn classify_after_trace(hints: &EffectiveSelectionHints, snapshot: &InstalledProviderSnapshot) -> AgentResolutionState {
     composition::classify_agent_resolution(hints, snapshot)
+}
+
+/// Why a sequence task's own `key` (`agent` or `model`) is known only when
+/// the task launches; `None` when preflight predicted it.
+fn launch_reason(task: &PromptTask<'_>, key: &str) -> Option<String> {
+    let TaskHints::Task { prediction: Some(prediction), .. } = &task.selection else { return None };
+    let state = if key == "agent" { &prediction.agent } else { &prediction.model };
+    let HintState::DecidedAtLaunch { reason, .. } = state else { return None };
+    Some(match reason {
+        LaunchDecision::RuntimeWritten => {
+            format!("known only at launch: the task's `{key}` reads a value a lifecycle `set` may write before it runs")
+        }
+        LaunchDecision::LateValue => {
+            format!("known only at launch: the task's `{key}` reads `seq`, `loop`, `group`, or `current`")
+        }
+        LaunchDecision::ShellSubstitution => format!("the task's `{key}` depends on a shell expansion"),
+    })
 }

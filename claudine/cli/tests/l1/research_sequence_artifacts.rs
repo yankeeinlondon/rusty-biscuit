@@ -159,43 +159,45 @@ fn research_task_rosters_preserve_canonical_rows_and_templates() {
     }
 }
 
-#[test]
-fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
-    let root = biscuit_test_harness::manifest_dir!().join("../..");
-    let directory = root.join("claudine/docs/research");
-    let fixture = CliProcessFixture::named("research-corpus-context");
-    fixture.initialize_repository();
-    let staged = fixture.cwd().join("claudine/docs/research");
-    std::fs::create_dir_all(&staged).unwrap();
-    for name in ["_provider-tasks.yaml", "_local-runner-tasks.yaml"] {
-        std::fs::copy(directory.join(name), staged.join(name)).unwrap();
+/// One test per shipped fleet, each building that fleet's preflight graph
+/// alone, so nextest schedules the graph builds in parallel. Each case names
+/// its repository files as literals inside its own `#[test]` body, so an edit
+/// to one fleet schedules only its case in CI.
+mod shipped_fleet_graphs_resolve_per_row_prompt_lifecycles {
+    use super::*;
+
+    macro_rules! fleet_graph_tests {
+        ($(#[test] fn $name:ident() { $fleet:literal, $research:literal, $roster:literal, $style:literal $(,)? })*) => {
+            $(#[test]
+            fn $name() {
+                assert_fleet_graph($fleet, $research, $roster, $style);
+            })*
+
+            /// The fleet of every case above, checked against the shipped set.
+            const CASES: &[&str] = &[$($fleet),*];
+        };
     }
-    // A topic is a folder of the research tree or of one of its subject
-    // areas (`providers/`, `local-ai/`); each is staged at the same path.
-    let folders = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
-        std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().path()).filter(|path| path.is_dir()).collect()
-    };
-    let mut fleets = Vec::new();
-    for area in folders(&directory) {
-        for topic in std::iter::once(area.clone()).chain(folders(&area)) {
-            if !topic.join("_fleet.md").is_file() { continue; }
-            let destination = staged.join(topic.strip_prefix(&directory).unwrap());
-            std::fs::create_dir_all(&destination).unwrap();
-            for name in ["_fleet.md", "_research.md"] {
-                std::fs::copy(topic.join(name), destination.join(name)).unwrap();
-            }
-            fleets.push(destination.join("_fleet.md"));
+
+    /// Stages the fleet, its row prompt, and its roster at their repository
+    /// paths in a fresh repository, with the frozen output-style prompt the
+    /// row prompt includes, and builds the fleet's preflight graph.
+    fn assert_fleet_graph(fleet: &str, research: &str, roster: &str, style: &str) {
+        let root = biscuit_test_harness::manifest_dir!().join("../..");
+        assert_eq!(std::path::Path::new(research).parent(), std::path::Path::new(fleet).parent(), "{fleet}");
+        let fixture = CliProcessFixture::named("research-corpus-context");
+        fixture.initialize_repository();
+        for name in [fleet, research, roster] {
+            let destination = fixture.cwd().join(name);
+            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            std::fs::copy(root.join(name), destination).unwrap();
         }
-    }
-    // Graph discovery follows includes; keep its internal prompt dependency frozen.
-    let output_style = include_str!("../fixtures/frozen_prompts/prompts/make-it-markdown.md");
-    std::fs::create_dir_all(fixture.cwd().join("prompts")).unwrap();
-    std::fs::write(fixture.cwd().join("prompts/make-it-markdown.md"), output_style).unwrap();
-    let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(fixture.cwd());
-    let resolution = biscuit_file::FileResolutionContext::new(fixture.cwd());
-    let mut count = 0;
-    for path in fleets {
-        count += 1;
+        // Graph discovery follows includes; keep its internal prompt dependency frozen.
+        let output_style = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(style)).unwrap();
+        std::fs::create_dir_all(fixture.cwd().join("prompts")).unwrap();
+        std::fs::write(fixture.cwd().join("prompts/make-it-markdown.md"), output_style).unwrap();
+        let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(fixture.cwd());
+        let resolution = biscuit_file::FileResolutionContext::new(fixture.cwd());
+        let path = fixture.cwd().join(fleet);
         let markdown = darkmatter::markdown::Markdown::try_from(path.as_path()).unwrap();
         // The shared roster sees no property of the fleet, so the fleet's one
         // root hook writes the topic prompt the roster's template reads; row
@@ -215,7 +217,7 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
             &source, claudine::composition::SequenceSourceOptions::new(&resolution).with_caller_layers(&layers),
         ).unwrap().unwrap();
         let graph = claudine::composition::sequence::preflight::build_preflight_graph_with_context(
-            &plan, &source, context.clone(), &resolution,
+            &plan, &source, context, &resolution,
         ).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         assert_eq!(graph.prompt_documents.len(), 1, "{}", path.display());
         assert!(graph.prompt_documents[0].path.ends_with("_research.md"));
@@ -223,7 +225,167 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
         assert!(graph.steps.iter().all(|step| step.task.is_some()), "every roster row must be executable");
         assert!(!graph.prompt_references.is_empty());
     }
-    assert_eq!(count, 22);
+
+    fleet_graph_tests! {
+    #[test] fn hooks() {
+        "claudine/docs/research/hooks/_fleet.md",
+        "claudine/docs/research/hooks/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn local_runners() {
+        "claudine/docs/research/local-ai/local_runners/_fleet.md",
+        "claudine/docs/research/local-ai/local_runners/_research.md",
+        "claudine/docs/research/_local-runner-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn acp() {
+        "claudine/docs/research/providers/acp/_fleet.md",
+        "claudine/docs/research/providers/acp/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn agent_cli() {
+        "claudine/docs/research/providers/agent-cli/_fleet.md",
+        "claudine/docs/research/providers/agent-cli/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn agent_errors() {
+        "claudine/docs/research/providers/agent-errors/_fleet.md",
+        "claudine/docs/research/providers/agent-errors/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn agent_logging() {
+        "claudine/docs/research/providers/agent-logging/_fleet.md",
+        "claudine/docs/research/providers/agent-logging/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn agent_models() {
+        "claudine/docs/research/providers/agent-models/_fleet.md",
+        "claudine/docs/research/providers/agent-models/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn agent_permissions() {
+        "claudine/docs/research/providers/agent-permissions/_fleet.md",
+        "claudine/docs/research/providers/agent-permissions/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn mcp() {
+        "claudine/docs/research/providers/mcp/_fleet.md",
+        "claudine/docs/research/providers/mcp/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn memory() {
+        "claudine/docs/research/providers/memory/_fleet.md",
+        "claudine/docs/research/providers/memory/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn model_config() {
+        "claudine/docs/research/providers/model-config/_fleet.md",
+        "claudine/docs/research/providers/model-config/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn non_interactive_sessions() {
+        "claudine/docs/research/providers/non-interactive-sessions/_fleet.md",
+        "claudine/docs/research/providers/non-interactive-sessions/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn plugins() {
+        "claudine/docs/research/providers/plugins/_fleet.md",
+        "claudine/docs/research/providers/plugins/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn reasoning_level() {
+        "claudine/docs/research/providers/reasoning-level/_fleet.md",
+        "claudine/docs/research/providers/reasoning-level/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn resume() {
+        "claudine/docs/research/providers/resume/_fleet.md",
+        "claudine/docs/research/providers/resume/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn signals() {
+        "claudine/docs/research/providers/signals/_fleet.md",
+        "claudine/docs/research/providers/signals/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn skills() {
+        "claudine/docs/research/providers/skills/_fleet.md",
+        "claudine/docs/research/providers/skills/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn slash_commands() {
+        "claudine/docs/research/providers/slash-commands/_fleet.md",
+        "claudine/docs/research/providers/slash-commands/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn steering() {
+        "claudine/docs/research/providers/steering/_fleet.md",
+        "claudine/docs/research/providers/steering/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn subagents() {
+        "claudine/docs/research/providers/subagents/_fleet.md",
+        "claudine/docs/research/providers/subagents/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn system_prompt() {
+        "claudine/docs/research/providers/system-prompt/_fleet.md",
+        "claudine/docs/research/providers/system-prompt/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    #[test] fn usage() {
+        "claudine/docs/research/providers/usage/_fleet.md",
+        "claudine/docs/research/providers/usage/_research.md",
+        "claudine/docs/research/_provider-tasks.yaml",
+        "tests/fixtures/frozen_prompts/prompts/make-it-markdown.md",
+    }
+    }
+
+    /// Every shipped fleet has exactly one case above: a new fleet without a
+    /// case, or a case whose fleet is gone, fails here.
+    #[test]
+    fn every_shipped_fleet_has_a_case() {
+        let research = biscuit_test_harness::manifest_dir!().join("../../claudine/docs/research");
+        // A topic is a folder of the research tree or of one of its subject
+        // areas (`providers/`, `local-ai/`).
+        let folders = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+            std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().path()).filter(|path| path.is_dir()).collect()
+        };
+        let mut shipped = Vec::new();
+        for area in folders(&research) {
+            for topic in std::iter::once(area.clone()).chain(folders(&area)) {
+                if topic.join("_fleet.md").is_file() {
+                    let name = topic.strip_prefix(&research).unwrap().to_string_lossy().replace('\\', "/");
+                    shipped.push(format!("claudine/docs/research/{name}/_fleet.md"));
+                }
+            }
+        }
+        shipped.sort();
+        let mut cases: Vec<String> = CASES.iter().map(ToString::to_string).collect();
+        cases.sort();
+        assert_eq!(cases, shipped, "add or remove a `fleet_graph_tests!` case");
+        assert_eq!(cases.len(), 22);
+    }
 }
 
 /// A shipped fleet over two roster rows: the fresh first row skips, and the

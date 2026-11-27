@@ -315,7 +315,7 @@ fn a_dry_run_judges_each_tasks_predicted_provider() {
     assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
     assert!(run.launches.is_empty(), "a dry run launched: {:?}", run.launches);
     assert!(
-        run.stderr.contains("task dynamic (sequence[3]) ℹ not checked: provider (the task's `agent` is decided when it runs)"),
+        run.stderr.contains("task dynamic (sequence[3]) ℹ not checked: provider, model requirement (known only at launch: the task's `agent` reads `seq`, `loop`, `group`, or `current`)"),
         "stderr:\n{}",
         run.stderr
     );

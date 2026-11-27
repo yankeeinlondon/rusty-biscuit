@@ -21,7 +21,7 @@ pub(crate) use prompt::materialize_harness_prompt;
 pub(crate) use shell_options::test_permissions;
 pub(crate) use shell_options::{
     CachedHarnessLoopContext, apply_composition_shell_overrides, build_harness_shell_options,
-    build_harness_shell_options_with_cache,
+    build_harness_shell_options_with_cache, launch_slot_session,
 };
 pub(crate) use types::{
     AttemptLaunch, HarnessPromptMode, HarnessPromptState, LoopPassPreparation,

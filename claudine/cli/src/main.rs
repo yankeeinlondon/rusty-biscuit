@@ -426,6 +426,10 @@ fn run() -> Result<std::convert::Infallible> {
         shutdown::exit_before_runtime(0);
     }
 
+    // Claudine has no per-run `--allow host=HOST`, so a refused remote read
+    // names the `network` setting alone.
+    let _ = darkmatter::config::network::install_network_remedy(darkmatter::config::network::NetworkRemedy::Setting);
+
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
     let arg_parse_start = std::time::Instant::now();

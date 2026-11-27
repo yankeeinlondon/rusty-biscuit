@@ -193,6 +193,14 @@ pub struct PrepareOptions {
     /// [`darkmatter::markdown::compose::passive`]). `None` for a real
     /// preparation.
     pub passive: Option<darkmatter::markdown::compose::passive::PassiveSession>,
+    /// Remove a transclusion whose target does not exist, with a warning,
+    /// instead of failing (Darkmatter's
+    /// `ComposeOptions::with_allow_missing_transclusions`).
+    ///
+    /// Set only by a dry-run preview that already reported the missing
+    /// target, so the content beside it is still previewed; a real
+    /// preparation never sets it, since a real run refuses the target.
+    pub allow_missing_transclusions: bool,
     /// Compose without reaching this document's schema verdict.
     ///
     /// Set by the stages that read a document they do not judge: the
@@ -210,6 +218,12 @@ pub struct PrepareOptions {
     /// frontmatter values read it, while `fm.loop` reads the `loop:`
     /// configuration. `None` outside an iteration.
     pub loop_values: Option<super::looping::LoopAmbient>,
+    /// The schema-slot session this preparation resolves `$schema` templates
+    /// through: the one the launch's pre-validation resolved with
+    /// ([`super::launch_slot_session`]), so the composition judges by the
+    /// snapshot (and the approvals) that check pinned instead of fetching
+    /// again. `None` builds one for this preparation's request.
+    pub slot_session: Option<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 }
 
 impl PrepareOptions {
@@ -308,8 +322,10 @@ impl PrepareOptions {
             name_coercion_keys: Vec::new(),
             allow_empty_body: false,
             passive: None,
+            allow_missing_transclusions: false,
             defer_schema_verdict: false,
             loop_values: None,
+            slot_session: None,
         }
     }
 
@@ -525,8 +541,13 @@ fn canonical_compose_options(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
-    if let Some(session) = &options.passive {
-        compose_opts = compose_opts.with_passive_session(session.clone());
+    // A sequence check's owner preparations set no session of their own
+    // and run under the check's (`passive_scope`).
+    if let Some(session) = options.passive.clone().or_else(super::passive_scope::current) {
+        compose_opts = compose_opts.with_passive_session(session);
+    }
+    if options.allow_missing_transclusions {
+        compose_opts = compose_opts.with_allow_missing_transclusions(true);
     }
     compose_opts
         .with_deferred_shell_roots(options.deferred_shell_roots.clone())
@@ -557,6 +578,10 @@ fn prepared_request(
     let request = super::compose_request(compose_opts, options.file_resolution_context.clone())?;
     if request.options().slot_session().is_some() {
         return Ok(request);
+    }
+    if let Some(session) = &options.slot_session {
+        let session = std::sync::Arc::clone(session);
+        return Ok(request.map_options(|compose_opts| compose_opts.with_slot_session(session)));
     }
     // One schema-slot session for the composition and the launch schema
     // after it, so a template resolved (and approved) while composing is the
@@ -600,8 +625,21 @@ fn resolve_launch_schema(
             report: None,
         })),
         Err(_) if options.defer_schema_verdict => Ok(None),
+        // A dry run left a template it could not resolve without asking
+        // unchecked, and its session says so; judging it again here would
+        // report the same deferral as an unresolved-schema error.
+        Err(_) if dry_run_deferred_schema(request) => Ok(None),
         Err(err) => Err(err),
     }
+}
+
+/// Whether `request` is a dry run whose composition left its `$schema`
+/// template unchecked (a slot read it would have had to ask for).
+fn dry_run_deferred_schema(request: &ComposeRequest) -> bool {
+    use darkmatter::markdown::compose::passive::DeferredConstruct;
+    request.options().passive_session().is_some_and(|session| {
+        session.deferrals().iter().any(|deferral| deferral.construct == DeferredConstruct::SchemaTemplate)
+    })
 }
 
 /// The `prompt` an inline run delivers.
@@ -714,6 +752,82 @@ pub fn approve_document_shell(
         approval_options,
         PromptOrigin::for_mode(mode, &source.resolved_path, &source.original_text).as_ref(),
     )
+}
+
+/// The inclusion references of the document a preparation in `mode` composes
+/// (body `::file`/`::code`, `prologue:`/`epilogue:`, and every child they
+/// reach) that fail to resolve, found condition-blind as the pre-flight walk
+/// a real run makes finds them: a reference inside a `::block` whose
+/// condition is false is still reported.
+///
+/// The walk never runs a command and never judges what the preparation
+/// judges (calls, the schema verdict, an expression it cannot finish), so
+/// its findings stand whether or not the preparation itself succeeds. An
+/// inclusion is left out when the document that writes it tolerates invalid
+/// references (its own `ignore_invalid`, its parent's passed down, or
+/// `IGNORE_INVALID` in its environment), as composition decides for that
+/// document.
+///
+/// ## Errors
+///
+/// The walk's own failure (a graph that could not be built), which the
+/// preparation reports in its own terms.
+pub fn unresolved_inclusions(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: CompositionMode,
+) -> Result<Vec<darkmatter::markdown::reference::validate::ReferenceIssue>, CompositionError> {
+    use darkmatter::markdown::compose::ComposeOperation;
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    use darkmatter::markdown::reference::validate::{ReferenceSeverity, ReferenceValidationOptions};
+
+    let Ok(document) = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref()) else {
+        return Ok(Vec::new());
+    };
+    // An inline run's generated body has no file; its references resolve
+    // from the source's folder, as its composition resolves them, and carry
+    // no line, since no line of the file is proven to be theirs.
+    let document = match mode {
+        CompositionMode::ChainedDocument => document,
+        CompositionMode::InlineFrontmatterPrompt => std::borrow::Cow::Owned(
+            document
+                .into_owned()
+                .with_source(darkmatter::markdown::compose::ComposeSource::File(source.resolved_path.clone())),
+        ),
+    };
+    let ctx = derive_compose_context(source, options);
+    let request = prepared_request(canonical_compose_options(source, &ctx, options, schema_phase_for(mode)), options)?
+        .map_options(|compose_opts| {
+            compose_opts
+                .for_reference_check()
+                .without_call_check()
+                .with_deferred_schema_verdict(true)
+                // Page blocks stay in place, so an inclusion is found
+                // whatever its block's condition.
+                .disable(ComposeOperation::PageBlocks)
+        });
+    let report = document
+        .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&request)))
+        .map_err(CompositionError::ComposeFailed)?;
+    // Composition asks the document that writes an inclusion whether a
+    // failing target is removed, so a child's own `ignore_invalid` decides
+    // for its inclusions as the prompt's decides for the prompt's.
+    let tolerated = |issue: &darkmatter::markdown::reference::validate::ReferenceIssue| {
+        report.documents.iter().any(|written_in| {
+            written_in.tolerates_invalid_references
+                && written_in.included_via == issue.included_via
+                && written_in.source == issue.origin.source
+        })
+    };
+    Ok(report
+        .issues
+        .iter()
+        .filter(|issue| {
+            issue.kind == ReferenceKind::Transclusion && issue.severity == ReferenceSeverity::Error && !tolerated(issue)
+        })
+        .cloned()
+        .collect())
 }
 
 /// The document a preparation in `mode` composes, and so the only text its
@@ -1600,7 +1714,7 @@ fn prepare_inline_on(
     // write: a baseline the closure could never stamp must not reach a launch
     // or a preview. Passing says nothing about the document after the agent
     // edits it; the closure still validates and rolls back.
-    super::closure::rehearse_inline_baseline(baseline_text, chrono::Utc::now()).map_err(
+    super::closure::rehearse_inline_baseline(&source.resolved_path, baseline_text, chrono::Utc::now()).map_err(
         |source_error| CompositionError::InlineBaselineUnstampable {
             path: source.resolved_path.clone(),
             source: Box::new(source_error),

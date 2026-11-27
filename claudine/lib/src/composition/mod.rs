@@ -41,6 +41,7 @@ mod prepare;
 pub mod provider_tail;
 pub mod registration;
 pub mod ownership;
+pub(crate) mod passive_scope;
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -134,7 +135,7 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    approve_document_shell, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    approve_document_shell, unresolved_inclusions, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
     prepare_bootstrap, prepare_direct, prepare_document, prepare_document_selecting, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
     read_selection_hints, replace_env_overrides, ResolvedIdentitySelector,
 };
@@ -176,10 +177,10 @@ pub use sequence::preflight::{
     ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
     build_preflight_graph_with_context, build_preflight_graph_with_invocation,
     build_preflight_graph_after_discovery, reread_preflight_graph_with_invocation, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
-    InputOwner, InputOwnerRole, InputPrompt, PendingReference, SequenceInputInventory,
+    FailedOwner, InputOwner, InputOwnerRole, InputPrompt, OwnerFailure, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots, validate_lifecycle_literals,
     providers::collect_written_keys,
-    CheckFailure, CheckedTask, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
+    CheckFailure, CheckedTask, LoadedDocument, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
@@ -252,6 +253,45 @@ pub fn with_invocation_config(
         })
 }
 
+/// The schema-slot session one launch resolves a document's `$schema`
+/// templates through: the pre-launch check
+/// ([`pre_validate_schema_for_mode`]) judges with it, and the composition
+/// that follows takes it ([`PrepareOptions::slot_session`]), so a template is
+/// resolved once, and both judge by the same snapshot.
+///
+/// Its reads are decided by `invocation`'s captured configuration for
+/// `context`, as composition's are: `permissions.network: allow` fetches,
+/// `deny` refuses (`dm.schema.slot_network_denied`), and `ask` asks
+/// `handler` (the terminal prompt, when one can be shown); with no handler an
+/// `ask` read is `dm.schema.slot_approval_required`. Without an invocation
+/// the configuration `context` names is loaded passively.
+///
+/// ## Errors
+///
+/// [`CompositionError`] for the invocation's configuration that does not load.
+pub fn launch_slot_session(
+    invocation: Option<&crate::invocation_context::InvocationContext>,
+    context: &biscuit_file::FileResolutionContext,
+    handler: Option<std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>>,
+) -> Result<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>, CompositionError> {
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    let mut session =
+        SlotSession::for_context(darkmatter::markdown::compose::DataRuntime::new(), context);
+    if let Some(invocation) = invocation {
+        let snapshot = invocation.darkmatter_config_for(context).map_err(|source| {
+            CompositionError::from(darkmatter::markdown::compose::ContextBuildError::Config {
+                dir: context.request_cwd().to_path_buf(),
+                source,
+            })
+        })?;
+        session = session.with_config_snapshot(snapshot);
+    }
+    if let Some(handler) = handler {
+        session = session.with_handler(handler);
+    }
+    Ok(std::sync::Arc::new(session))
+}
+
 /// Builds Darkmatter's local expression context from the request's
 /// file-resolution context for the document that authored the expression.
 ///
@@ -259,6 +299,12 @@ pub fn with_invocation_config(
 ///
 /// Returns the [`ContextBuildError`](darkmatter::markdown::compose::ContextBuildError)
 /// when `file_resolution_context` fails validation.
+///
+/// ## Notes
+///
+/// While a sequence check reads the tree, the context carries the check's
+/// passive session (`passive_scope`), so an effectful function is refused
+/// rather than called.
 pub fn document_expression_resolution_context(
     source_path: &Path,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
@@ -285,6 +331,9 @@ pub fn document_expression_resolution_context(
         .with_source_file(source_path);
     if let Some(fallback) = file_ref_fallback_dir {
         options = options.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(session) = passive_scope::current() {
+        options = options.with_passive_session(session);
     }
     // A local-only context consults no configuration, so no request (and no
     // configuration snapshot) is built for it.

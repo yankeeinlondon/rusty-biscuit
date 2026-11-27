@@ -221,7 +221,10 @@ pub(super) fn compose_step_selecting(
     // Schema pre-validation before the shell pass. A step whose effective
     // frontmatter is missing required values must report that rather than let
     // Darkmatter's compose surface a raw `SchemaValidationFailed`, which would
-    // hide the property names the caller needs to collect or report.
+    // hide the property names the caller needs to collect or report. A
+    // `$schema` template resolves through the session the step's composition
+    // then takes.
+    let slot_session = super::super::launch_slot_session(ctx.invocation, ctx.file_resolution_context)?;
     let pre = composition::pre_validate_layered_for_mode(
         source,
         set_overrides,
@@ -233,6 +236,7 @@ pub(super) fn compose_step_selecting(
             composition::CompositionMode::ChainedDocument
         },
         ctx.invocation.trigger_findings(),
+        Some(&slot_session),
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
     crate::commands::compose::emit_trigger_warnings(ctx.invocation.trigger_findings(), ctx.shared.silent);
@@ -254,6 +258,7 @@ pub(super) fn compose_step_selecting(
     // document here would grant new bytes or shapes after the sequence starts.
     let mut prepare_options =
         step_prepare_options(&step_source, ctx, step_overrides, env_overrides, allow_empty_body);
+    prepare_options.slot_session = Some(slot_session);
     let mode = if ctx.inline_mode {
         composition::CompositionMode::InlineFrontmatterPrompt
     } else {

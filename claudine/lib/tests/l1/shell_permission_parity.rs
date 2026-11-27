@@ -229,6 +229,7 @@ mod shared_fixture {
     use super::*;
 
     const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+    const NETWORK_DENIED: &str = "dm.schema.slot_network_denied";
 
     impl Fixture {
         /// The fixture's `user_permissions` with `network`, and its home
@@ -274,6 +275,9 @@ mod shared_fixture {
             Ok(()) => Decision::Approved,
             Err(error) => {
                 let codes: Vec<String> = error_diagnostics(error.as_ref()).into_iter().map(|diagnostic| diagnostic.code).collect();
+                if codes.iter().any(|code| code == NETWORK_DENIED) {
+                    return Decision::Refused;
+                }
                 assert!(codes.iter().any(|code| code == APPROVAL_REQUIRED), "{error} ({codes:?})");
                 Decision::ApprovalRequired
             }
@@ -360,7 +364,7 @@ mod shared_fixture {
             .iter()
             .filter(|row| row["allow_hosts"].as_array().is_some_and(Vec::is_empty))
             .collect();
-        assert!(rows.len() >= 2, "the table keeps an allow and a deny row without a run host");
+        assert!(rows.len() >= 3, "the table keeps an allow, an ask, and a deny row without a run host");
 
         for row in rows {
             let fixture = Fixture::shared(&cases, row["network"].as_str().expect("network"));

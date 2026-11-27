@@ -32,20 +32,19 @@ impl CompositionError {
     /// sequence block.
     #[must_use]
     pub fn sequence_hint(&self) -> Option<String> {
-        match self {
-            Self::WithFrontmatter { inner, .. } | Self::CheckFailed { cause: inner, .. } => inner.sequence_hint(),
-            other => parts(other).map(|(_, hint)| hint),
-        }
+        parts(self.presented()).map(|(_, hint)| hint)
     }
 }
 
-/// The site's rows: `at:` the file, the authored `property:`, and the
-/// `task:` it belongs to, each only when known.
+/// The site's rows: `at:` the file (with its line and column when proven),
+/// the authored `property:`, and the `task:` it belongs to, each only when
+/// known.
 fn site_rows(site: Option<&SequenceSite>) -> Option<Prose> {
     let site = site?;
     let mut lines = Vec::new();
     if let Some(file) = &site.file {
-        lines.push(format!("<dim>at:</dim> {}", super::render_file_link(file)));
+        let position = site.position.map(|(line, column)| format!(":{line}:{column}")).unwrap_or_default();
+        lines.push(format!("<dim>at:</dim> {}{position}", super::render_file_link(file)));
     }
     if let Some(property) = &site.property {
         lines.push(format!("<dim>property:</dim> {}", code_span(property)));
@@ -255,6 +254,10 @@ fn parts(err: &CompositionError) -> Option<(String, String)> {
         E::SequenceNestedSequence { path, .. } => (
             "prompt document declares a sequence".into(),
             format!("Reference it with `sequence: {}` instead of `prompt:`.", forward(path)),
+        ),
+        E::SequenceUndefined { .. } => (
+            "not a sequence document".into(),
+            "Add a `sequence:` list of tasks, or run the document with `claudine compose`.".into(),
         ),
         E::SequenceUnsupportedConstruct { detail, .. } => ("unsupported sequence construct".into(), capitalized(detail)),
         E::SequenceTaskPromptLaunch { .. } => (

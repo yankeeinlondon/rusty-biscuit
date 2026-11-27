@@ -263,7 +263,7 @@ fn plan_referenced(
         return Ok((recovered, authored_items));
     }
 
-    let source = SequenceSource::DataFile { path: path.to_path_buf() };
+    let source = SequenceSource::DataFile { path: path.to_path_buf(), list: list_property.to_string() };
     if recover {
         let recovered = super::normalize::normalize_plan_recovering_at(
             &items, source, invocation_path, document_fail_fast, list_property,

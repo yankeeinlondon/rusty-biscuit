@@ -2701,7 +2701,7 @@ mod task_guards_and_container_loops {
         let data = std::path::PathBuf::from("/work/tasks.jsonl");
         let error = normalize::normalize_plan_at(
             &[json!({"name": "a", "shell": "x", "when": ""})],
-            SequenceSource::DataFile { path: data.clone() }, &origin(), true, "",
+            SequenceSource::DataFile { path: data.clone(), list: String::new() }, &origin(), true, "",
         ).unwrap_err();
         assert!(
             matches!(&error, CompositionError::TaskWhenInvalid { source_path, property, .. } if source_path == &data && property == "[0].when"),

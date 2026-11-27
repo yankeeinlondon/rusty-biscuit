@@ -85,6 +85,14 @@ Config-load failure is rendered with `log::error` and the function returns `Ok((
 
 [[allow]]
 shape = "format_context"
+file = "cli/src/commands/document_check/choice.rs"
+symbol = "Check::root_choice"
+tag = "retained"
+reason = """
+The passive document check attaches the root picker's refusal (`AutocompleteNotInteractive`, `AutocompleteNoMatches`, `AutocompleteOverCap`) as a note on the located missing-document finding, saying why the real run would stop there. The refusal is never returned; this is the final render into the dry-run report, and the finding's own code and reference details carry the miss."""
+
+[[allow]]
+shape = "format_context"
 file = "cli/src/commands/config_tui/mod.rs"
 symbol = "run_tui"
 tag = "retained"

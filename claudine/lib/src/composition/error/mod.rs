@@ -2261,6 +2261,18 @@ pub enum CompositionError {
         site: Box<SequenceSite>,
     },
 
+    /// The file run as a sequence has no `sequence` key: `claudine sequence`
+    /// runs only a document that declares its task list (an empty list
+    /// included), so a prompt or data file is refused before any task.
+    // The file is the site's, so the message stays the same wherever it runs.
+    #[error("the file does not define a `sequence` property, so it is not a sequence document")]
+    SequenceUndefined {
+        /// The file run as the sequence.
+        path: PathBuf,
+        /// The file, with `sequence` as the missing property.
+        site: Box<SequenceSite>,
+    },
+
     /// A construct that preflight recognizes but v1 deliberately does not run.
     ///
     /// Covers nested groups, group `loop` (commit semantics unratified — spec →
@@ -3106,6 +3118,28 @@ pub enum CompositionError {
         message: String,
     },
 
+    /// A `$schema` template's `{{ … }}` slot could not be resolved, so the
+    /// document has no schema to be judged by: a read the captured
+    /// `permissions` refuse (`permissions.network: deny`) or that needs an
+    /// approval this run did not give (`ask` with no terminal to ask on), or
+    /// a slot whose evaluation failed.
+    ///
+    /// `slot_code` is Darkmatter's code for the first failed slot
+    /// (`dm.schema.slot_network_denied`, `dm.schema.slot_approval_required`,
+    /// `dm.schema.slot_failed`, …), the code a dry run reports for it.
+    #[error(
+        "schema slot failed for {}: {message}",
+        biscuit_file::to_forward_slash_string(source_path)
+    )]
+    SchemaSlotFailed {
+        /// The prompt file whose `$schema` holds the template.
+        source_path: PathBuf,
+        /// Darkmatter's code for the first failed slot.
+        slot_code: String,
+        /// Human-readable description of the failure.
+        message: String,
+    },
+
     /// A `$schema` declaration could not be *parsed* or lowered to a JSON Schema.
     ///
     /// Distinct from [`SchemaLoad`] (reference resolution): this is a syntax
@@ -3914,12 +3948,25 @@ pub struct SequenceMissingPropertiesEntry {
 }
 
 impl CompositionError {
-    /// The site of a `Sequence…` error, looking through
-    /// [`Self::WithFrontmatter`] and [`Self::CheckFailed`]; `None` for any
-    /// other error.
+    /// The error a display wrapper presents: through
+    /// [`Self::WithFrontmatter`], [`Self::LifecycleEvaluationAlreadyEmitted`],
+    /// and [`Self::CheckFailed`], which change how an error is shown but not
+    /// what it is; any other error is itself.
+    #[must_use]
+    pub fn presented(&self) -> &Self {
+        match self {
+            Self::WithFrontmatter { inner, .. }
+            | Self::LifecycleEvaluationAlreadyEmitted { inner }
+            | Self::CheckFailed { cause: inner, .. } => inner.presented(),
+            other => other,
+        }
+    }
+
+    /// The site of a `Sequence…` error, looking through its display wrappers
+    /// ([`Self::presented`]); `None` for any other error.
     #[must_use]
     pub fn sequence_site(&self) -> Option<&SequenceSite> {
-        match self {
+        match self.presented() {
             Self::SequenceInvalid { site, .. }
             | Self::SequenceEmpty { site, .. }
             | Self::SequenceReferenceResolution { site, .. }
@@ -3948,6 +3995,7 @@ impl CompositionError {
             | Self::SequenceReferenceInvalid { site, .. }
             | Self::SequenceNestedSequence { site, .. }
             | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceUndefined { site, .. }
             | Self::SequenceTaskPromptLaunch { site, .. }
             | Self::SequenceStepNotExecutable { site, .. }
             | Self::SequenceGroupCatalogLookup { site, .. }
@@ -3974,7 +4022,6 @@ impl CompositionError {
             | Self::SequenceTaskProviderSelection { site, .. }
             | Self::SequenceInteractiveRejected { site, .. }
             | Self::SequenceUnknownTaskField { site, .. } => Some(site),
-            Self::WithFrontmatter { inner, .. } | Self::CheckFailed { cause: inner, .. } => inner.sequence_site(),
             _ => None,
         }
     }
@@ -4009,6 +4056,7 @@ impl CompositionError {
             | Self::SequenceReferenceInvalid { site, .. }
             | Self::SequenceNestedSequence { site, .. }
             | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceUndefined { site, .. }
             | Self::SequenceTaskPromptLaunch { site, .. }
             | Self::SequenceStepNotExecutable { site, .. }
             | Self::SequenceGroupCatalogLookup { site, .. }
@@ -4040,6 +4088,11 @@ impl CompositionError {
         }
     }
 
+    /// A [`Self::SequenceUndefined`] for the file run as a sequence.
+    pub fn sequence_undefined(path: &Path) -> Self {
+        Self::SequenceUndefined { path: path.to_path_buf(), site: Box::new(SequenceSite::at(path, "sequence")) }
+    }
+
     /// A [`Self::SequenceInvalid`] saying `message` at `site`.
     pub fn sequence_invalid(message: impl Into<String>, site: SequenceSite) -> Self {
         Self::SequenceInvalid { message: message.into(), site: Box::new(site) }
@@ -4069,6 +4122,20 @@ impl CompositionError {
             *field = Some(referencing);
         }
         self
+    }
+
+    /// Why a dry run left a sequence-source expression without a value, when
+    /// that is this failure: the expression called an effectful function or
+    /// read a deferred value under the check's passive session. A check
+    /// reports it as not checked, never as an error.
+    #[must_use]
+    pub fn deferral_reason(&self) -> Option<&darkmatter::markdown::compose::passive::DeferralReason> {
+        match self {
+            Self::SequenceExpressionFailed { source: SequenceExpressionCause::Evaluate(cause), .. } => {
+                cause.unavailable_reason()
+            }
+            _ => None,
+        }
     }
 }
 
@@ -4130,7 +4197,7 @@ impl CompositionError {
     /// carry no class here.
     pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
         use biscuit_file::ResolutionFailure;
-        match self {
+        match self.presented() {
             Self::InvalidReference { source, .. } => Some(source.resolution_failure()),
             Self::FileNotFound(_)
             | Self::FileReferenceNoMatch { .. }
@@ -4465,7 +4532,7 @@ impl CompositionError {
             CompositionError::InteractiveHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("interactive".to_string()))
             }
-            CompositionError::SchemaLoad { .. } => {
+            CompositionError::SchemaLoad { .. } | CompositionError::SchemaSlotFailed { .. } => {
                 Some(FrontmatterHighlight::Property("$schema".to_string()))
             }
             CompositionError::SchemaParse {

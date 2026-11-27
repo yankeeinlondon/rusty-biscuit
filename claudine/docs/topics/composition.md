@@ -728,6 +728,59 @@ plans the save, and writes `hash` and the UTC `last_updated` in one step.
 
 [`reconcile_inline_artifact`]: ../../lib/src/composition/closure.rs
 
+### Inline steps of a YAML sequence file
+
+A YAML sequence file with a top-level `prompt` runs each body step as
+inline-compose, like a Markdown inline sequence. A YAML file has no body, so
+the whole file is the document's frontmatter, and the agent's work is the
+edits it makes to that mapping. The closure keeps the file YAML:
+
+```yaml
+# seq.yaml before the run
+kind: sequence
+prompt: "Step {{ seq.name }}."
+status: draft
+sequence: [first, second]
+```
+
+When the agent changes `status` to `done` during step `first`, the closure
+writes the same file back with every authored line unchanged and the two
+stamps added as ordinary YAML keys. No `---` fence is added:
+
+```yaml
+kind: sequence
+prompt: "Step {{ seq.name }}."
+status: done
+sequence: [first, second]
+hash: 0ba3d05d212f0d8a-ef46db3751d8e999
+last_updated: 2026-10-20
+```
+
+Step `second` then rereads a valid YAML file. The other rules are the same as
+for a Markdown document, with these differences:
+
+- **The deliverable is a change to the mapping.** A step passes the body check
+  when the agent changed, added, or removed a property other than `prompt`,
+  `hash`, and `last_updated`. A file the agent left alone, or changed only in
+  layout, comments, or the owned properties, fails as `unchanged`. A file it
+  emptied fails as `empty`. In both cases nothing is written and the guard
+  restores the original bytes.
+- **Owned properties are restored in place.** An edited `prompt` gets its
+  authored text back, as in Markdown, and a restore warning is reported.
+- **No Markdown cleanup.** The agent's YAML is kept as written. Markdown
+  cleanup would change YAML lines, for example by adding blank lines around
+  lists.
+- **A file with its own document marker is refused at launch.** A YAML file
+  with a line that is only `---` or `...` cannot be edited as one mapping, so
+  the [baseline check](#launch-time-baseline-check) refuses it as
+  `InlineBaselineUnstampable` before anything runs.
+
+A dry run previews such a sequence and writes nothing. A YAML sequence whose
+steps name Markdown prompt files (`prompt: ./task.md`) is not inline at the
+root: those Markdown files are the documents written, and the YAML file is
+never stamped. JSON and JSON5 files cannot be run as a sequence root, so they
+never reach this write.
+
 ### Inline Conventions
 
 
@@ -1045,9 +1098,11 @@ A dry run is passive. Even with `--yolo` it:
 
 Expressions and the functions that only read (`file_exists`, `::block
 when=`, `::map`, `::filter`) evaluate as in a real run, and local files are
-read. A remote `::file` or `::code` is fetched when the configured `network`
-permission allows its host, and stored in no cache; a denied host is the
-same refusal a real run reports.
+read. A remote read (`::file`, `::code`, `load_data`, a `$schema` slot) is
+fetched when the configured `network` permission allows its host, and
+stored in no cache; under `network: deny` it is the same refusal a real run
+reports; under `network: ask` no request is sent and the read is a
+not-checked row ("needs network approval"), since a dry run asks nothing.
 
 Whatever needs one of those effects is left as written in the preview,
 marked `[not evaluated in a dry run]`, and reported as a not-checked row,
@@ -1135,8 +1190,9 @@ A template schema (one whose `{{ … }}` slots read files or URLs) resolves
 through the same schema-slot session the document was composed with, so the
 verdict judges the snapshot composition already approved: a read the
 captured `permissions` (or the network permission) allow resolves without
-asking, and one they do not is `dm.schema.slot_approval_required`, exactly
-as `md compose` decides it.
+asking, one they do not is `dm.schema.slot_approval_required`, and a URL
+read under `network: deny` is `dm.schema.slot_network_denied`, exactly as
+`md compose` decides it.
 
 ```yaml
 ---
@@ -1481,6 +1537,11 @@ In a root union, an **existing** file outside a simplified arm's declared `match
 A partial such as `cli` names no file yet, so it rules no arm out; a settled `kind: fix` still offers only the `fixes` tree. Paths are compared in `/` spelling relative to the launch directory, the same anchor the chooser walks, so every file the chooser offers is one its arm accepts. When the late verdict reports an unresolved value on a union whose literal discriminant is settled, the chooser searches only that arm's glob.
 
 Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, alternatives, .. }` signal and never gains a `globset`/`ignore` dependency. `alternatives` (`Vec<Vec<Vec<String>>>`) is an OR over root-union arms of an AND over one property's `match(...)` groups: a file qualifies when it satisfies every group of some alternative. A single schema gives one alternative holding every group, including groups a reused named type inherits; an undecided root union gives one alternative per contending arm, so one arm's exclusions never apply to another. `InteractiveShape::File` carries the same `alternatives` field, with one alternative, or none for a bare `file`.
+
+`--dry-run` opens no confirmation dialog or chooser. Where a real run would
+open one, it reports the pending choice as a warning that lists the
+candidates. Where a real run would refuse, it reports that refusal as an
+error (see [the dry run](../cli/sequence.md#dry-run)).
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate

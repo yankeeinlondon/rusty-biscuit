@@ -234,11 +234,36 @@ In Claudine, `network` decides only what composition may fetch: a `::file` or
 `::code` URL, a `prologue` or `epilogue` URL, and a URL given to a read-side
 function such as `load_data`. With `network: allow` in effect, this prompt
 includes the remote file; with the default `deny`, preparation fails and the
-host is never contacted:
+host is never contacted. `network: ask` fails the same way, with an error
+naming the setting, because Claudine does not ask about composition reads
+(set `allow` to fetch):
 
 ```markdown
 ::file https://example.com/guidelines.md
 ```
+
+A `$schema` slot that reads a URL is the one read Claudine can ask about. It
+is resolved before the agent launches, in a real run and a dry run alike,
+and the composition reuses that result:
+
+| `network` | Real run | Dry run |
+| --- | --- | --- |
+| `allow` | fetches, then launches | fetches |
+| `ask` | asks on a terminal; with none, fails with `dm.schema.slot_approval_required` | sends nothing; a `not checked` row |
+| `deny` | fails with `dm.schema.slot_network_denied`, sending nothing | the same refusal as an error row |
+
+```yaml
+# schema.yaml, referenced as `$schema: ./schema.yaml`
+kind: schema
+$schema:
+    os: "enum({{ load_data('https://example.com/os.yaml', 'string[]') }})"
+```
+
+A refused slot stops the run with `composition.schema_slot_failed`, whose
+`slot_code` detail is the slot's own code, so a `failure` handler can tell
+the cases apart (`when: "err.detail.slot_code == 'dm.schema.slot_network_denied'"`).
+Claudine has no per-run host allowance, so its refusals name the
+`permissions.network` setting as the remedy.
 
 It does not limit the agent's own network access once it runs.
 

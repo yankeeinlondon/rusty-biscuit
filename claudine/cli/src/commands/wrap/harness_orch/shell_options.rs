@@ -45,6 +45,22 @@ fn prompt_handler(can_prompt: bool) -> Option<SharedApprovalHandler> {
     can_prompt.then(|| Arc::new(darkmatter_cli::approval::CliShellApprovalHandler) as SharedApprovalHandler)
 }
 
+/// The schema-slot session one launch pre-validates and composes a document
+/// with ([`claudine::composition::launch_slot_session`]): a read
+/// `permissions.network: ask` leaves undecided is asked about on the terminal
+/// when one can prompt, and is `dm.schema.slot_approval_required` otherwise.
+#[allow(clippy::result_large_err)]
+pub(crate) fn launch_slot_session(
+    invocation: &claudine::invocation_context::InvocationContext,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<Arc<darkmatter::markdown::schemas::slots::SlotSession>, claudine::composition::CompositionError> {
+    claudine::composition::launch_slot_session(
+        Some(invocation),
+        context,
+        prompt_handler(darkmatter_cli::approval::can_prompt_interactively()),
+    )
+}
+
 /// Approval handler that auto-approves every command it is asked about.
 ///
 /// Installed for composition preflight when `--yolo` is active so that

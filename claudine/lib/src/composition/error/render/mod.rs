@@ -88,6 +88,7 @@ impl BlockError for CompositionError {
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }
+            | CompositionError::SchemaSlotFailed { .. }
             | CompositionError::SchemaParse { .. }
             | CompositionError::SchemaValidation { .. }
             | CompositionError::MissingProperties { .. }
@@ -149,6 +150,7 @@ impl BlockError for CompositionError {
             | CompositionError::SequenceReferenceInvalid { .. }
             | CompositionError::SequenceNestedSequence { .. }
             | CompositionError::SequenceUnsupportedConstruct { .. }
+            | CompositionError::SequenceUndefined { .. }
             | CompositionError::SequenceTaskPromptLaunch { .. }
             | CompositionError::SequenceStepNotExecutable { .. }
             | CompositionError::SequenceGroupCatalogLookup { .. }
@@ -498,6 +500,7 @@ impl Diagnostic for CompositionError {
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
             CompositionError::LifecycleEditFailed { .. } => "composition.lifecycle_edit_failed",
+            CompositionError::SequenceUndefined { .. } => "composition.sequence_undefined",
             // The agent produced the document, so its output postcondition
             // failed, not the author's document.
             CompositionError::InlineAgentFrontmatterRejected { .. } => {
@@ -510,6 +513,7 @@ impl Diagnostic for CompositionError {
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
+            CompositionError::SchemaSlotFailed { .. } => "composition.schema_slot_failed",
             CompositionError::SchemaParse { .. } => "composition.schema_parse",
             CompositionError::SchemaValidation { .. }
             | CompositionError::UnresolvedFileReference { .. } => "composition.schema_validation",
@@ -704,6 +708,15 @@ impl Diagnostic for CompositionError {
                 message,
             } => {
                 base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
+                base["message"] = json!(message);
+            }
+            CompositionError::SchemaSlotFailed {
+                source_path,
+                slot_code,
+                message,
+            } => {
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
+                base["slot_code"] = json!(slot_code);
                 base["message"] = json!(message);
             }
             // `composition.schema_validation` declares `source_path`,

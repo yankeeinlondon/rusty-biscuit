@@ -1077,9 +1077,11 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         passive: None,
+        allow_missing_transclusions: false,
         invocation_context: None,
         document_epoch: None,
         loop_values: None,
+        slot_session: None,
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -1549,6 +1551,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
         (FileRefFailure::FoundElsewhere, "found_elsewhere"),
         (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
         (FileRefFailure::RemoteDenied, "remote_denied"),
+        (FileRefFailure::RemoteNeedsApproval, "remote_needs_approval"),
     ] {
         let err = file_ref_compose_error(FileReferenceDiagnostic {
             function: "frontmatter",

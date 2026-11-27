@@ -312,9 +312,9 @@ fn count(codes: &[String], code: &str) -> usize {
 }
 
 /// A `$schema`-required property the frontmatter does not satisfy is
-/// reported once, as the document's input; every task whose body reads it
-/// waits for it (its preview is not checked) rather than repeating it, and
-/// no provider launches.
+/// reported once, as the document's input; every task whose body reads it is
+/// still previewed with the placeholder marked missing (no second finding
+/// and no `not checked` row), and no provider launches.
 #[cfg(unix)]
 #[test]
 fn sequence_dry_run_reports_a_missing_document_input_once() {
@@ -323,7 +323,7 @@ fn sequence_dry_run_reports_a_missing_document_input_once() {
     assert_eq!(code, Some(2), "{codes:?}");
     assert_eq!(count(&codes, "composition.missing_properties"), 1, "{codes:?}");
     assert_eq!(count(&codes, "dm.schema.missing_required"), 0, "no second finding per task: {codes:?}");
-    assert_eq!(count(&codes, "dm.check.not_checked"), 2, "each task's preview waits: {codes:?}");
+    assert_eq!(count(&codes, "dm.check.not_checked"), 0, "each task still previews: {codes:?}");
 }
 
 /// No frontmatter `agent` and no explicit provider: with no TTY, every step

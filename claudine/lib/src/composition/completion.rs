@@ -18,7 +18,6 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 
-use darkmatter::markdown::Markdown;
 use darkmatter::markdown::hash::{FrontmatterDelta, FrontmatterDeltaEntry};
 use simplified_schema::{SchemaPhase, ValidationProblem, ValidationProblemKind};
 
@@ -225,7 +224,7 @@ pub fn complete_active_document(
                 }),
                 InlineReconciliation::Written(artifact) => {
                     let instance =
-                        inline_completion_instance(context.live_frontmatter, artifact.as_ref());
+                        inline_completion_instance(context.live_frontmatter, guard, artifact.as_ref());
                     let verdict = evaluate_completion(
                         context.launch_schema,
                         &instance,
@@ -303,6 +302,7 @@ pub fn evaluate_completion(
 /// deletions are still observable because the delta is applied on top.
 fn inline_completion_instance(
     live_frontmatter: &serde_json::Value,
+    guard: &InlineClosurePlan,
     artifact: &InlineArtifact,
 ) -> serde_json::Value {
     let mut map = live_frontmatter
@@ -320,8 +320,7 @@ fn inline_completion_instance(
     // that is deliberately never persisted (spec §D3/AC13). Removing it here
     // would fail completion for a run whose launch gate the same value
     // satisfied, so the live effective value stands.
-    let written: Markdown = artifact.text.clone().into();
-    let written_fm = written.frontmatter().as_map();
+    let written_fm = super::closure::written_frontmatter(guard, &artifact.text);
     for property in CLOSURE_OWNED_PROPERTIES {
         if let Some(value) = written_fm.get(*property) {
             map.insert((*property).to_string(), value.clone());

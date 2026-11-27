@@ -420,7 +420,7 @@ original five fields keep their names, order, and values:
 | Field | Supplied today | Notes |
 |-------|----------------|-------|
 | `reference` | ✅ | the raw, unresolved reference |
-| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled`, `remote_denied` (a remote host the fetch policy does not allow) |
+| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled`, `remote_denied` (a remote host the fetch policy does not allow), `remote_needs_approval` (a remote host `permissions.network: ask` would have to approve) |
 | `base_dir` | ✅ | **compatibility projection** — see below |
 | `suggestions` | ✅ | the same did-you-mean list the human block shows |
 | `fallback_dir` | ✅ | **compatibility projection** — see below |
@@ -484,7 +484,7 @@ Three more guards live beside the tests of what they guard:
 | Guard | Where | Fails when |
 |-------|-------|-----------|
 | boundary mapping | `cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*`) | a preflight boundary (sequence resolution, prompt load, transclusion, graph, provider, inputs) loses the typed cause, its `err.*` facets, or its `finalize` routing once the report wraps it; each boundary is one explicit case, and a guard keeps the list of boundaries complete |
-| catalog snapshots | `cli/tests/l1/dry_run_check.rs` (`codes::*`) | a dry-run check code has no fixture, no control, or no plain and JSON report snapshot, or a code snapshot names no code |
+| catalog snapshots | `cli/tests/l1/dry_run_check.rs` (`codes::*`) | a code the registry marks `dry_run_report: true` (`lib/src/diagnostics/registry.rs`) has no fixture, no control, or no plain and JSON report snapshot, or a fixture or code snapshot names no such code |
 | wrapper identity | `lib/src/composition/error/tests.rs` (`check_failed::*`) | a `CheckFailed` differs from its cause in any `err.*` field or snapshot |
 
 ### Why a scan and not a grep

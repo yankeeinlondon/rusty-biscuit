@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of doc.md (no commands run)
+
+doc.md
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in doc.md
+      hint: pass `topic=<value>` after the file, or give it a default
+
+Dry run found 1 error and 0 warnings; 0 checks not run. Previewed 1 of 1 task.

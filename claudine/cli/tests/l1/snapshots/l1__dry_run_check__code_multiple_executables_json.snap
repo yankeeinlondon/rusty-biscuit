@@ -12,8 +12,8 @@ expression: envelope
       "message": "this task names more than one executable: `shell`, `prompt`",
       "source": {
         "file": "/work/seq.yaml",
-        "line": null,
-        "column": null,
+        "line": 2,
+        "column": 5,
         "inserted": false
       },
       "expected_type": null,
@@ -38,7 +38,15 @@ expression: envelope
       "expected_type": null,
       "actual_type": null,
       "span": null,
-      "iteration_path": []
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "both",
+          "property": "sequence[0]"
+        }
+      ]
     },
     {
       "code": "dm.check.not_checked",
@@ -48,7 +56,15 @@ expression: envelope
       "expected_type": null,
       "actual_type": null,
       "span": null,
-      "iteration_path": []
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "both",
+          "property": "sequence[0]"
+        }
+      ]
     }
   ],
   "summary": {

@@ -31,6 +31,13 @@ pub(in crate::composition) fn schema_error_to_composition_error(
             message: message.clone(),
             span: None,
         },
+        Some(error @ SchemaError::SlotResolution(_)) => CompositionError::SchemaSlotFailed {
+            source_path: source_path.to_path_buf(),
+            slot_code: darkmatter::markdown::compose::report_diagnostics::template_diagnostics(error, source_path)
+                .and_then(|records| records.into_iter().next())
+                .map_or_else(|| darkmatter::markdown::schemas::slots::codes::SLOT_FAILED_CODE.to_string(), |record| record.code),
+            message: fallback_message,
+        },
         Some(SchemaError::FrontmatterShape { message }) => CompositionError::SchemaParse {
             source_path: source_path.to_path_buf(),
             property: None,
@@ -42,6 +49,18 @@ pub(in crate::composition) fn schema_error_to_composition_error(
             message: fallback_message,
         },
     }
+}
+
+/// The session a failed composition's schema is reloaded through, to
+/// classify its problems: the launch's, else one deciding by the same
+/// configuration (the composition's own was its request's), so a `$schema`
+/// template resolves here as it did there instead of reading as unresolved.
+fn classification_slot_session(
+    options: &PrepareOptions,
+) -> Option<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>> {
+    options.slot_session.clone().or_else(|| {
+        crate::composition::launch_slot_session(options.invocation_context.as_ref(), &options.file_resolution_context, None).ok()
+    })
 }
 
 pub(super) fn handle_compose_error(
@@ -122,6 +141,7 @@ pub(super) fn translate_schema_failure(
     // be the document's directory; report the caller's instead (R4).
     rebase_caller_file_problems(&mut problems, &options.compose_caller_records());
     let snapshot = build_effective_instance(source, options.set_overrides.as_ref());
+    let slot_session = classification_slot_session(&options);
     let effective = load_effective_schema(
         source,
         Some(&snapshot),
@@ -129,7 +149,7 @@ pub(super) fn translate_schema_failure(
         &options.file_resolution_context,
         &options.schema_caller_records(),
         &options.trigger_findings(),
-        None,
+        slot_session.as_ref(),
     )?;
     let phase = mode.is_inline().then_some(SchemaPhase::Launch);
     let mut categorized = categorize_problems(&problems, effective.as_ref(), phase);
@@ -187,6 +207,7 @@ pub(super) fn translate_schema_failure(
                     &options.compose_caller_records(),
                     phase,
                     &options.trigger_findings(),
+                    slot_session.as_ref(),
                 )
             }
         };
@@ -211,6 +232,7 @@ pub(super) fn translate_schema_failure(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
@@ -219,6 +241,7 @@ pub(super) fn handle_retry_error(
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     phase: Option<SchemaPhase>,
     trigger_findings: &super::TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
         mut problems,
@@ -237,7 +260,7 @@ pub(super) fn handle_retry_error(
         file_resolution_context,
         caller_input_records,
         trigger_findings,
-        None,
+        slot_session,
     )?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 

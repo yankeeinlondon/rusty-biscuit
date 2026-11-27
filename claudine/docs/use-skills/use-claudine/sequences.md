@@ -200,7 +200,9 @@ claudine sequence workflow.md --dry-run --json   # one JSON report on stdout
 A dry run runs nothing: no provider, `shell:`/`side_effect:` task, `$(…)`
 expansion, lifecycle event, loop pass, or question. It reads the whole tree
 and reports every problem under its task (`composition.provider_unresolved`,
-`composition.no_executable`, a missing `prompt:` file, a missing input, …),
+`composition.no_executable`, a missing `prompt:` file, a missing input, a
+file with no `sequence` key (`composition.sequence_undefined`, which a real run
+refuses too), …),
 then exits `2` if any is an error or warning, else `0`. On a terminal a
 choice the run would ask about is a warning; without one it is an error.
 A dry run never exits `1`; a refused command line (`--json` without

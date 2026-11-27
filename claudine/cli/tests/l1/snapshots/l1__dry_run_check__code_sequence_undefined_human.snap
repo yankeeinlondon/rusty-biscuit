@@ -1,0 +1,15 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of prompt.md (no commands run)
+
+prompt.md
+  ✗ the file does not define a `sequence` property, so it is not a sequence
+    document
+      in prompt.md
+      hint: Add a `sequence:` list of tasks, or run the document with
+            `claudine compose`.
+  ℹ not checked: tasks (the file has no `sequence`)
+
+Dry run found 1 error and 0 warnings; 1 check not run. Previewed 0 of 0 tasks.

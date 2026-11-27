@@ -20,23 +20,7 @@ expression: envelope
       "actual_type": null,
       "span": null,
       "iteration_path": [],
-      "hint": "did you mean `when`?"
-    },
-    {
-      "code": "composition.failed",
-      "severity": "error",
-      "message": "`whem` is not a field of a `prompt` task; expected one of name, with, operation, flow, when",
-      "source": {
-        "file": "/work/t.yaml",
-        "line": null,
-        "column": null,
-        "inserted": false
-      },
-      "expected_type": null,
-      "actual_type": null,
-      "span": null,
-      "iteration_path": [],
-      "hint": "Did you mean `when`? Rename `whem`.",
+      "hint": "did you mean `when`?",
       "trail": [
         {
           "kind": "host",
@@ -48,7 +32,7 @@ expression: envelope
     }
   ],
   "summary": {
-    "errors": 2,
+    "errors": 1,
     "warnings": 0,
     "info": 0
   }

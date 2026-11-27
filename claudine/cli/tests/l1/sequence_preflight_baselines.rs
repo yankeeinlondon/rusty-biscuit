@@ -317,3 +317,24 @@ fn an_advisory_warning_is_printed_once_before_the_first_task() {
     assert!(warned < first_task, "printed before the first task; stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.launches, 2, "both tasks ran; stderr:\n{}", outcome.stderr);
 }
+
+/// A root list read from a referenced formal document or data file, whose
+/// middle row names two executables: a real run still stops at that row's
+/// typed failure before any task, and its report names the row.
+#[test]
+fn a_bad_row_in_a_root_reference_keeps_its_typed_failure() {
+    let rows = "  - name: one\n    prompt: ./ask.md\n  - name: two\n    shell: echo hi\n    prompt: ./ask.md\n  - name: three\n    prompt: ./ask.md\n";
+    for (child, text) in [
+        ("child.yaml", format!("kind: sequence\nsequence:\n{rows}")),
+        ("rows.yaml", rows.lines().map(|line| format!("{}\n", &line[2..])).collect()),
+    ] {
+        let outcome = run(&[
+            ("ask.md", "ask\n"),
+            (child, &text),
+            ("seq.md", &format!("---\nagent: goose\nsequence: ./{child}\n{FINALIZE}---\n")),
+        ]);
+        assert_baseline(&outcome, 1, "composition.failed composition correctable author",
+            "step 2 declares more than one executable field (shell, prompt)",
+            &["task two (sequence[1])", "this task names more than one executable"]);
+    }
+}

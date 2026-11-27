@@ -31,6 +31,26 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      directory. Remote `http://` / `https://` references are not supported.",
                 )
         }
+        CompositionError::SchemaSlotFailed {
+            source_path,
+            slot_code,
+            message,
+        } => {
+            let file_link = render_file_link(source_path);
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "schema slot failed"))
+                .body(vec![
+                    Prose::new(format!(
+                        "A `{{{{ … }}}}` slot of the `$schema` template referenced by {file_link} could not be resolved ({}).",
+                        code_span(slot_code)
+                    )),
+                    rows(message.as_str()),
+                ])
+                .hint(
+                    "A slot's reads are decided by the configured `permissions`: `file-read` for a \
+                     file, `network` for a URL.",
+                )
+        }
         CompositionError::SchemaParse {
             source_path,
             property,

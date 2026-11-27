@@ -6,7 +6,7 @@ Dry run of seq.md (no commands run)
 
 task both (sequence[0])
   ✗ this task names more than one executable: `prompt`, `sequence`
-      in seq.md
+      at seq.md:4:5
       hint: keep exactly one executable per task, and move the others
             into their own tasks
   ℹ not checked: provider, inputs (more than one executable)

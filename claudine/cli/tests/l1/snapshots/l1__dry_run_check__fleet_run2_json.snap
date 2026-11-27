@@ -88,7 +88,15 @@ expression: envelope
       "expected_type": null,
       "actual_type": null,
       "span": null,
-      "iteration_path": []
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0]"
+        }
+      ]
     },
     {
       "code": "dm.reference.missing_document",
@@ -140,6 +148,14 @@ expression: envelope
             "inserted": false
           }
         }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[1]"
+        }
       ]
     },
     {
@@ -160,6 +176,14 @@ expression: envelope
             "column": 15,
             "inserted": false
           }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[1]"
         }
       ]
     }

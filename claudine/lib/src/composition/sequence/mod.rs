@@ -343,17 +343,25 @@ fn resolve_expression_source(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
-    let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path);
-    let value = expr::evaluate_whole(expression, &lookup)?;
+    let items = expression_source_items(expression, frontmatter, invocation_path, file_resolution_context)?;
+    normalize::normalize_plan(&items, Source::Expression, invocation_path, fail_fast)
+}
 
-    let items = match value {
+/// The items a whole-value `{{ … }}` source yields, before any is read as a
+/// task: the list [`resolve_expression_source`] normalizes.
+fn expression_source_items(
+    expression: &str,
+    frontmatter: &Map<String, Value>,
+    invocation_path: &Path,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Vec<Value>, CompositionError> {
+    let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path);
+    Ok(match expr::evaluate_whole(expression, &lookup)? {
         Value::Array(items) => items,
         Value::Null => Vec::new(),
         Value::String(text) => classify_string_items(&text),
         other => classify_string_items(&other.to_string()),
-    };
-
-    normalize::normalize_plan(&items, Source::Expression, invocation_path, fail_fast)
+    })
 }
 
 /// Resolve a `$( … )` source through the caller's approved-command runner.

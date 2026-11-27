@@ -26,6 +26,14 @@ pub struct CodeSpec {
     pub disposition: Disposition,
     /// Who remediates.
     pub origin: Origin,
+    /// Whether a check of the passive dry-run report (`claudine … --dry-run`)
+    /// reports this code. Each such code has a fixture pair (a finding and a
+    /// control) and plain and JSON report snapshots, which the CLI's
+    /// `dry_run_check::codes` guard requires of every `true` entry. A code
+    /// the report only projects from an error that stopped a check (most of
+    /// the catalog, and the `internal.bug` fallback no authored input
+    /// reaches) is `false`.
+    pub dry_run_report: bool,
     /// Severity override; `None` derives from
     /// [`Disposition::default_severity`].
     pub severity_override: Option<Severity>,
@@ -51,6 +59,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Auth,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "reason"],
     },
@@ -59,6 +68,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Auth,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "action"],
     },
@@ -68,6 +78,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Cap,
         disposition: Disposition::Throttled,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "reset_at", "retry_after_ms", "scope"],
     },
@@ -76,6 +87,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Cap,
         disposition: Disposition::Throttled,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &[
             "provider",
@@ -90,6 +102,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Cap,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "reason"],
     },
@@ -99,6 +112,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Timeout,
         disposition: Disposition::Transient,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["elapsed_ms", "limit_ms"],
     },
@@ -107,6 +121,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Timeout,
         disposition: Disposition::Transient,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["elapsed_ms", "limit_ms"],
     },
@@ -116,6 +131,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "path"],
     },
@@ -124,6 +140,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider"],
     },
@@ -132,6 +149,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Transient,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "exit_code", "signal"],
     },
@@ -140,6 +158,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         detail: &["signal"],
     },
@@ -148,6 +167,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Transient,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "raw"],
     },
@@ -158,6 +178,7 @@ pub const CODES: &[CodeSpec] = &[
         origin: Origin::Provider,
         // Override to warning: context pressure is a heads-up, not a hard
         // failure (error-catalog §3).
+        dry_run_report: false,
         severity_override: Some(Severity::Warning),
         detail: &["provider"],
     },
@@ -173,6 +194,7 @@ pub const CODES: &[CodeSpec] = &[
         // The agent run abandoned its own work — not the author's document, not
         // the host, not a Claudine bug.
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         // The synthesized-label path knows the code but no per-instance values,
         // so both project `null` today; the complete per-task list lives in
@@ -188,6 +210,7 @@ pub const CODES: &[CodeSpec] = &[
         // is the caller's decision, not a handler's.
         disposition: Disposition::Unrecoverable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         // `selector` is a variable *name*. Its value is never projected —
         // shadow-home spec Invariant 8.
@@ -198,6 +221,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Provider,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["provider", "reason", "stage", "message"],
     },
@@ -207,6 +231,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         // One identity for the same authoring mistake across proxying,
         // expressions, schemas, and transclusion — so the payload has to carry
@@ -250,6 +275,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["name", "suggestions"],
     },
@@ -258,6 +284,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["expression", "message"],
     },
@@ -266,14 +293,25 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path", "message"],
+    },
+    CodeSpec {
+        code: "composition.schema_slot_failed",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        dry_run_report: false,
+        severity_override: None,
+        detail: &["source_path", "slot_code", "message"],
     },
     CodeSpec {
         code: "composition.schema_parse",
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path", "property", "message"],
     },
@@ -282,6 +320,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path", "problems", "pointer_paths"],
     },
@@ -290,6 +329,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &["missing", "pointer_paths"],
     },
@@ -298,6 +338,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path"],
     },
@@ -306,6 +347,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["property", "message"],
     },
@@ -314,6 +356,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["command"],
     },
@@ -322,6 +365,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         // A shell command the author wrote could not be approved. Every reason
         // — the user declined, the catalog blacklists it, no handler was
@@ -338,6 +382,7 @@ pub const CODES: &[CodeSpec] = &[
         // The agent was asked to write the document and did not, so the run's
         // producer is what has to change — not the author's document.
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path", "reason"],
     },
@@ -346,6 +391,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         // `properties` is the ordered per-property failure list — one object
         // per problem carrying `property`, `message`, and `kind` — so a
@@ -358,6 +404,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: Some(Severity::Warning),
         detail: &["group", "leg", "cause"],
     },
@@ -369,6 +416,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path", "property", "target", "reason"],
     },
@@ -380,6 +428,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -389,6 +438,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -398,6 +448,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -407,6 +458,17 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
+        severity_override: None,
+        detail: &[],
+    },
+    // The file run as a sequence declares no `sequence` list.
+    CodeSpec {
+        code: "composition.sequence_undefined",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -416,6 +478,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -425,6 +488,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -434,6 +498,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -443,6 +508,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: true,
         severity_override: None,
         detail: &[],
     },
@@ -452,7 +518,20 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Caller,
+        dry_run_report: true,
         severity_override: None,
+        detail: &[],
+    },
+    // A bare-name document or a supplied `file` input that names no file
+    // but matches files a real run on this terminal would ask the caller to
+    // choose from.
+    CodeSpec {
+        code: "composition.file_choice_pending",
+        category: Category::Composition,
+        disposition: Disposition::NeedsInput,
+        origin: Origin::Caller,
+        dry_run_report: true,
+        severity_override: Some(Severity::Warning),
         detail: &[],
     },
     CodeSpec {
@@ -460,6 +539,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Composition,
         disposition: Disposition::Correctable,
         origin: Origin::Author,
+        dry_run_report: false,
         severity_override: None,
         detail: &["source_path"],
     },
@@ -469,6 +549,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Document,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["doc", "property"],
     },
@@ -477,6 +558,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Document,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["doc", "property", "problems"],
     },
@@ -485,6 +567,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Document,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["doc"],
     },
@@ -494,6 +577,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Vcs,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["scope", "files"],
     },
@@ -502,6 +586,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Vcs,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["commits"],
     },
@@ -510,6 +595,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Vcs,
         disposition: Disposition::Correctable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["scope"],
     },
@@ -519,6 +605,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Io,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["path"],
     },
@@ -527,6 +614,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Io,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["path"],
     },
@@ -535,6 +623,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Io,
         disposition: Disposition::Correctable,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["path"],
     },
@@ -543,6 +632,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Io,
         disposition: Disposition::Transient,
         origin: Origin::Environment,
+        dry_run_report: false,
         severity_override: None,
         detail: &["url", "message"],
     },
@@ -552,6 +642,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Config,
         disposition: Disposition::Correctable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         detail: &["field", "message"],
     },
@@ -560,6 +651,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Config,
         disposition: Disposition::Correctable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         detail: &["server", "message"],
     },
@@ -569,6 +661,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Usage,
         disposition: Disposition::Correctable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         detail: &["argument", "expected"],
     },
@@ -577,6 +670,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Usage,
         disposition: Disposition::Correctable,
         origin: Origin::Caller,
+        dry_run_report: false,
         severity_override: None,
         detail: &["operation", "provider"],
     },
@@ -586,6 +680,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Runaway,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["measure", "cap"],
     },
@@ -594,6 +689,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Runaway,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["cycles"],
     },
@@ -602,6 +698,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Runaway,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Provider,
+        dry_run_report: false,
         severity_override: None,
         detail: &["expression"],
     },
@@ -611,6 +708,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Internal,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Internal,
+        dry_run_report: false,
         severity_override: None,
         detail: &["message"],
     },
@@ -619,6 +717,7 @@ pub const CODES: &[CodeSpec] = &[
         category: Category::Internal,
         disposition: Disposition::Unrecoverable,
         origin: Origin::Internal,
+        dry_run_report: false,
         severity_override: None,
         detail: &["message"],
     },
@@ -780,6 +879,17 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_report_codes_are_the_checks_own_and_the_reused_missing_input() {
+        let scoped: Vec<&str> = CODES.iter().filter(|spec| spec.dry_run_report).map(|spec| spec.code).collect();
+        assert!(scoped.iter().all(|code| code.starts_with("composition.")), "{scoped:?}");
+        assert!(scoped.contains(&"composition.missing_properties"), "{scoped:?}");
+        // A launch-only refusal: the dry run reports a slot by its own code.
+        assert!(!code_spec("composition.schema_slot_failed").unwrap().dry_run_report);
+        assert!(!code_spec("internal.bug").unwrap().dry_run_report);
+        assert_eq!(scoped.len(), 12, "{scoped:?}");
+    }
+
+    #[test]
     fn catalog_covers_the_ratified_count() {
         // 12 categories; the faithful transcription of §3 landed at 42, plus the
         // additive `composition.schema_parse` (finding #6) → 43, plus the
@@ -793,8 +903,12 @@ mod tests {
         // (shadow-home fix → Fail closed before spawn) → 49, plus structured
         // sibling cancellation (`composition.cancelled`) → 50, plus the
         // lifecycle `edit` action's `composition.lifecycle_edit_failed` → 51,
-        // plus the passive dry-run check's nine codes → 60.
+        // plus the passive dry-run check's nine codes → 60, plus the launch
+        // check's `composition.schema_slot_failed` → 61, plus the dry run's
+        // pending file choice (`composition.file_choice_pending`) → 62, plus
+        // a sequence run of a file with no `sequence`
+        // (`composition.sequence_undefined`) → 63.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 60);
+        assert_eq!(CODES.len(), 63);
     }
 }

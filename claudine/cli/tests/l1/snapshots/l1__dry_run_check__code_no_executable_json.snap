@@ -49,6 +49,14 @@ expression: envelope
             "inserted": false
           }
         }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[0]"
+        }
       ]
     },
     {
@@ -69,6 +77,14 @@ expression: envelope
             "column": 5,
             "inserted": false
           }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[0]"
         }
       ]
     }

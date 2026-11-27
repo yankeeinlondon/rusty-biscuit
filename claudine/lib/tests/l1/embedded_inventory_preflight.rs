@@ -152,6 +152,7 @@ fn a_document_schema_over_the_inline_union_keeps_the_union_at_launch() {
             &context,
             CompositionMode::InlineFrontmatterPrompt,
             &TriggerFindings::default(),
+            None,
         )
     };
     let deferred = "$schema:\n  topic: string(required)\nprompt: Write about the topic";

@@ -83,7 +83,7 @@ pub fn normalize_plan_at(
     // Task grammar names the file that holds the list, which for a
     // referenced source is not the invoking document.
     let declaring_path = match &source {
-        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.as_path(),
+        SequenceSource::External { path } | SequenceSource::DataFile { path, .. } => path.as_path(),
         _ => invocation_path,
     };
     let parsed: Vec<ParsedStep> = items
@@ -142,7 +142,7 @@ pub fn normalize_plan_recovering_at(
 ) -> RecoveredPlan {
     let strictness = source.strictness();
     let declaring_path = match &source {
-        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.clone(),
+        SequenceSource::External { path } | SequenceSource::DataFile { path, .. } => path.clone(),
         _ => invocation_path.to_path_buf(),
     };
     let mut parsed = Vec::with_capacity(items.len());

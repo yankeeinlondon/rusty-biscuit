@@ -82,7 +82,19 @@ mod diagnostic_discovery;
 mod dispatch_inventory;
 mod doctor;
 mod dry_run_check;
+// Copies the compiled fake Goose, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_launch_hints;
+mod dry_run_missing_inputs;
+// Grades the check on an injected terminal through the
+// `CLAUDINE_TEST_DRY_RUN_TERMINAL` seam, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod dry_run_file_choices;
+mod dry_run_independent_references;
 mod dry_run_portable_paths;
+mod dry_run_schema_key_occurrences;
+mod dry_run_source_effects;
+mod dry_run_network_approval;
 // Reads the `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS` seam, which only
 // `test-fixtures` builds compile into the binary.
 #[cfg(feature = "test-fixtures")]
@@ -126,6 +138,8 @@ mod inline_prompt_shell_preflight;
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
 mod invalid_trigger_warnings;
+#[cfg(feature = "test-fixtures")]
+mod launch_network_slots;
 #[cfg(feature = "test-fixtures")]
 mod launch_trigger_schemas;
 #[cfg(feature = "test-fixtures")]
@@ -255,10 +269,15 @@ mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
 mod sequence_error_blocks;
 mod sequence_dry_run;
+mod sequence_dry_run_parity;
 mod steer_cli;
 mod task_guards;
 #[cfg(unix)]
 mod sequence_groups;
+// Installs the `claudine-fake-goose` fixture binary, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod sequence_inline_source_format;
 // Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only
 // `test-fixtures` builds compile into the binary.
 #[cfg(feature = "test-fixtures")]

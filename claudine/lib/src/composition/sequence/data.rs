@@ -117,6 +117,26 @@ fn parse_failure(path: &Path, stage: SourceParseStage, source: SequenceLoadCause
     }
 }
 
+/// `error`, a failure reading `text`, proven written at byte `offset` of it;
+/// unchanged when the offset is not a position of `text`.
+fn at_offset(mut error: CompositionError, text: &str, offset: Option<usize>) -> CompositionError {
+    if let CompositionError::SequenceSourceParse { site, .. } = &mut error
+        && let Some((line, column)) = offset.and_then(|offset| biscuit_file::source_position(text, offset))
+    {
+        site.position = Some((line, column));
+    }
+    error
+}
+
+/// The byte offset in `text` where a YAML parser failure was reported, when
+/// the parser gave one (a second document has none).
+fn yaml_error_offset(error: &biscuit_file::YamlError) -> Option<usize> {
+    match error {
+        biscuit_file::YamlError::Parse(error) => error.location().map(|location| location.index()),
+        _ => None,
+    }
+}
+
 /// [`load_document`] over `text`, the content of the YAML, JSON, JSON5,
 /// JSONL, or NDJSON file at `path`, which is not read: a caller that already
 /// holds the file's bytes parses exactly those. `path` selects the format and
@@ -131,8 +151,10 @@ fn parse_failure(path: &Path, stage: SourceParseStage, source: SequenceLoadCause
 pub fn load_document_from_text(path: &Path, text: &str) -> Result<LoadedDocument, CompositionError> {
     match SourceFormat::for_path(path) {
         SourceFormat::Yaml => {
-            let yaml = biscuit_file::Yaml::from_str(text)
-                .map_err(|e| parse_failure(path, SourceParseStage::Yaml, SequenceLoadCause::Yaml(e)))?;
+            let yaml = biscuit_file::Yaml::from_str(text).map_err(|e| {
+                let offset = yaml_error_offset(&e);
+                at_offset(parse_failure(path, SourceParseStage::Yaml, SequenceLoadCause::Yaml(e)), text, offset)
+            })?;
             let orders = MappingOrders::collect(yaml.value());
             let value = yaml
                 .as_json()
@@ -140,13 +162,16 @@ pub fn load_document_from_text(path: &Path, text: &str) -> Result<LoadedDocument
             Ok(LoadedDocument { value, orders })
         }
         SourceFormat::Json | SourceFormat::Json5 => {
-            let json5 = biscuit_file::Json5::from_str(text)
-                .map_err(|e| parse_failure(path, SourceParseStage::Json5, SequenceLoadCause::Json5(e)))?;
+            let json5 = biscuit_file::Json5::from_str(text).map_err(|e| {
+                let error = parse_failure(path, SourceParseStage::Json5, SequenceLoadCause::Json5(e));
+                at_offset(error, text, biscuit_file::json5_parse_error_offset(text))
+            })?;
             // `serde_json::Value` keeps the last of two equal keys, so the
             // raw text is checked before that conversion is trusted.
             let scan_failure = |e| parse_failure(path, SourceParseStage::DuplicateKey, SequenceLoadCause::Json5(e));
             if let DuplicateScan(Some(duplicate)) = json5.deserialize_raw::<DuplicateScan>().map_err(scan_failure)? {
-                return Err(duplicate.into_error(path, None));
+                let offset = biscuit_file::locate_json5(text, &duplicate.pointer);
+                return Err(at_offset(duplicate.into_error(path, None), text, offset));
             }
             let orders = json5
                 .deserialize_raw::<MappingOrders>()
@@ -184,18 +209,39 @@ pub(crate) fn load_markdown_document(path: &Path) -> Result<(LoadedDocument, Opt
 }
 
 /// Parse JSONL/NDJSON `text` into an array, one entry per non-blank line.
+///
+/// A failure is placed in the file's frame: a record's parser column counts
+/// bytes of the trimmed record, so it is moved to the record's start in
+/// `text` before it becomes a position.
 fn parse_line_delimited(path: &Path, text: &str) -> Result<Value, CompositionError> {
     let mut items = Vec::new();
-    for (offset, line) in text.lines().enumerate() {
-        let line = line.trim();
+    let mut line_start = 0;
+    for (offset, raw) in text.split_inclusive('\n').enumerate() {
+        let record_start = line_start + (raw.len() - raw.trim_start().len());
+        line_start += raw.len();
+        let line = raw.trim();
         if line.is_empty() {
             continue;
         }
-        let line_failure = |e| {
-            parse_failure(path, SourceParseStage::JsonLine, SequenceLoadCause::JsonLine { line: offset + 1, source: e })
+        let in_record = |within: usize| {
+            let mut at = record_start + within.min(line.len());
+            while !text.is_char_boundary(at) {
+                at -= 1;
+            }
+            Some(at)
+        };
+        let line_failure = |e: serde_json::Error| {
+            let within = e.column().saturating_sub(1);
+            let error = parse_failure(
+                path,
+                SourceParseStage::JsonLine,
+                SequenceLoadCause::JsonLine { line: offset + 1, source: e },
+            );
+            at_offset(error, text, in_record(within))
         };
         if let DuplicateScan(Some(duplicate)) = serde_json::from_str::<DuplicateScan>(line).map_err(line_failure)? {
-            return Err(duplicate.into_error(path, Some(offset + 1)));
+            let within = biscuit_file::locate_json(line, &duplicate.pointer);
+            return Err(at_offset(duplicate.into_error(path, Some(offset + 1)), text, within.and_then(in_record)));
         }
         let value: Value = serde_json::from_str(line).map_err(line_failure)?;
         items.push(value);
@@ -208,10 +254,12 @@ fn parse_line_delimited(path: &Path, text: &str) -> Result<Value, CompositionErr
 /// already kept only the last value.
 struct DuplicateScan(Option<DuplicateKey>);
 
-/// A repeated key and the path of the object that holds it.
+/// A repeated key, the path of the object that holds it, and the JSON
+/// Pointer of the key's (last) value.
 struct DuplicateKey {
     path: String,
     key: String,
+    pointer: String,
 }
 
 impl DuplicateKey {
@@ -233,17 +281,24 @@ impl DuplicateKey {
 
 impl<'de> serde::Deserialize<'de> for DuplicateScan {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        serde::de::DeserializeSeed::deserialize(ScanAt(String::new()), deserializer).map(DuplicateScan)
+        serde::de::DeserializeSeed::deserialize(ScanAt(String::new(), String::new()), deserializer).map(DuplicateScan)
     }
 }
 
-/// Scans the value at one path; the path names nested objects in errors.
-struct ScanAt(String);
+/// Scans the value at one path; the path names nested objects in errors,
+/// and the JSON Pointer beside it locates them.
+struct ScanAt(String, String);
 
 impl ScanAt {
     fn child(&self, segment: &str) -> Self {
-        if self.0.is_empty() { Self(segment.to_string()) } else { Self(format!("{}.{segment}", self.0)) }
+        let path = if self.0.is_empty() { segment.to_string() } else { format!("{}.{segment}", self.0) };
+        Self(path, pointer_child(&self.1, segment))
     }
+}
+
+/// `pointer` extended by the RFC 6901 segment `segment`.
+fn pointer_child(pointer: &str, segment: &str) -> String {
+    format!("{pointer}/{}", segment.replace('~', "~0").replace('/', "~1"))
 }
 
 impl<'de> serde::de::DeserializeSeed<'de> for ScanAt {
@@ -278,7 +333,7 @@ impl<'de> serde::de::Visitor<'de> for ScanAt {
     fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut first = None;
         let mut index = 0usize;
-        while let Some(found) = seq.next_element_seed(Self(format!("{}[{index}]", self.0)))? {
+        while let Some(found) = seq.next_element_seed(Self(format!("{}[{index}]", self.0), format!("{}/{index}", self.1)))? {
             first = first.or(found);
             index += 1;
         }
@@ -291,7 +346,7 @@ impl<'de> serde::de::Visitor<'de> for ScanAt {
         while let Some(key) = map.next_key::<String>()? {
             let child = self.child(&key);
             if !seen.insert(key.clone()) && first.is_none() {
-                first = Some(DuplicateKey { path: self.0.clone(), key });
+                first = Some(DuplicateKey { path: self.0.clone(), pointer: pointer_child(&self.1, &key), key });
             }
             first = first.or(map.next_value_seed(child)?);
         }

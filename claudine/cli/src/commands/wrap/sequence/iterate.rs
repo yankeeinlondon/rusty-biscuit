@@ -901,6 +901,7 @@ pub(super) fn run_step_document(
         document,
         source_context,
         Some(scope),
+        None,
     )?;
     match outcome {
         ActiveDocumentOutcome::Done { exit_code, final_output } => Ok((exit_code, final_output)),
@@ -1005,6 +1006,7 @@ pub(super) fn run_step_proxy_loop(
             target_invocation,
             source_context,
             Some(scope),
+            None,
         )?;
 
         match outcome {

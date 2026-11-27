@@ -184,6 +184,52 @@ fn a_repeated_reference_is_checked_at_each_occurrence() {
     assert_eq!(check.files.len(), 1, "the file is read once: {:?}", check.files);
 }
 
+/// Each task records the data files its own reference read and the part it
+/// uses: a whole task or sequence file, or a selected catalog entry.
+#[test]
+fn each_task_records_the_files_its_reference_read() {
+    let check = check_files(&[
+        OK,
+        ("t.yaml", "kind: task\nprompt: ./ok.md\n"),
+        ("child.yaml", "kind: sequence\nsequence:\n  - name: c\n    prompt: ./ok.md\n"),
+        ("cat.yaml", "kind: group-catalog\ngroups:\n  - name: first\n    tasks:\n      - name: f\n        prompt: ./ok.md\n  - name: second\n    tasks:\n      - name: s\n        prompt: ./ok.md\n"),
+        ("seq.md", "---\nsequence:\n  - name: t\n    task: ./t.yaml\n  - name: q\n    sequence: ./child.yaml\n  - name: g\n    group: second@./cat.yaml\n---\n"),
+    ]);
+    let loaded: Vec<(String, Vec<(String, String)>)> = check
+        .tasks
+        .iter()
+        .map(|task| {
+            let files = task.loaded.iter()
+                .map(|loaded| (loaded.path.file_name().unwrap().to_string_lossy().into_owned(), loaded.property.clone()))
+                .collect();
+            (task.site.name.clone(), files)
+        })
+        .collect();
+    let file = |name: &str, property: &str| vec![(name.to_string(), property.to_string())];
+    assert_eq!(loaded, vec![
+        ("t".to_string(), file("t.yaml", "")),
+        ("q".to_string(), file("child.yaml", "")),
+        ("c".to_string(), Vec::new()),
+        ("g".to_string(), file("cat.yaml", "groups[1]")),
+        ("s".to_string(), Vec::new()),
+    ]);
+}
+
+/// A file whose first occurrence failed after it was entered is not left on
+/// the reference chain: the next occurrence reads it and fails the same way,
+/// not as a cycle.
+#[test]
+fn a_failed_occurrence_leaves_the_reference_chain() {
+    let check = check_files(&[
+        OK,
+        ("child.yaml", "kind: sequence\nfail_fast: true\nsequence:\n  - name: c\n    prompt: ./ok.md\n"),
+        ("seq.md", "---\nsequence:\n  - name: a\n    sequence: ./child.yaml\n  - name: b\n    sequence: ./child.yaml\n---\n"),
+    ]);
+    let messages = messages(&check);
+    assert_eq!(messages.len(), 2, "{messages:#?}");
+    assert!(messages.iter().all(|message| message.contains("removed `fail_fast` grammar")), "{messages:#?}");
+}
+
 /// A root list from a command is known only once it runs: no task is read.
 #[test]
 fn a_command_backed_root_list_is_left_unread() {
@@ -194,7 +240,7 @@ fn a_command_backed_root_list_is_left_unread() {
 
 /// A root `sequence` of the wrong whole type, or authored null, is a root
 /// failure and no task is read; an empty list is a zero-task plan; no key
-/// composes the body.
+/// is the real run's refusal.
 #[test]
 fn the_root_list_shape_decides_what_is_read() {
     for (text, kind) in [("5", "number"), ("null", "null")] {
@@ -206,8 +252,10 @@ fn the_root_list_shape_decides_what_is_read() {
     }
     let empty = check_files(&[("seq.md", "---\nsequence: []\n---\n")]);
     assert_eq!((empty.list, empty.tasks.len(), empty.root_failures.len()), (RootList::Read, 0, 0));
-    let body = check_files(&[("seq.md", "---\nagent: claude\n---\nBody\n")]);
-    assert_eq!((body.list, body.tasks.len(), body.root_failures.len()), (RootList::Body, 0, 0));
+    // A file with no `sequence` is refused as the real run refuses it.
+    let undefined = check_files(&[("seq.md", "---\nagent: claude\n---\nBody\n")]);
+    assert_eq!((undefined.list, undefined.tasks.len()), (RootList::Unread, 0));
+    assert_eq!(root_codes(&undefined), ["composition.sequence_undefined"]);
 }
 
 /// Formal root items: each invalid shape is recorded at its own position,
@@ -308,7 +356,8 @@ fn every_entry_point_reports_its_bad_child_beside_its_control() {
 
 /// Lenient foreign-data rows: a bare name, a number, and a boolean are
 /// steps named by their scalar; a nameless object takes its one-based
-/// ordinal; a null row is still invalid, alone.
+/// ordinal; a null row is still invalid, alone, in the walk and in input
+/// discovery.
 #[test]
 fn lenient_rows_keep_their_projection_and_refuse_only_null() {
     let check = check_files(&[OK, ("rows.yaml", "- just-a-name\n- 5\n- true\n- {prompt: ./ok.md}\n- null\n"), ("seq.md", &referencing("rows.yaml"))]);
@@ -322,6 +371,9 @@ fn lenient_rows_keep_their_projection_and_refuse_only_null() {
         "tasks[1] tail sequence[1] seq.md",
     ]);
     assert_message(&check, "sequence item 5 is null");
+    // Input discovery skips the null row too, so the other rows' inputs
+    // are still checked.
+    assert!(check.inventory.is_ok(), "{:?}", check.inventory.as_ref().err().map(ToString::to_string));
 }
 
 /// Every loader: a file that was read and failed to parse fails only the
@@ -392,4 +444,288 @@ fn a_prompts_nested_lifecycle_literal_is_refused_at_its_task() {
     assert_rows(&check, &["tasks[0] fine sequence[0] seq.md", "tasks[1] nested sequence[1] seq.md ! composition.lifecycle_invalid"]);
     assert_message(&check, "nests `{{area}}` inside the string literal");
     assert!(check.tasks[1].prompt.is_some(), "the prompt was read");
+}
+
+/// The three-row split every root source route is judged by: rows 1 and 3
+/// name prompts (`first`/`third`, missing unless `ok`), and the middle row
+/// is `middle`.
+fn rows_with(middle: &str, outer: &str) -> String {
+    format!("- name: one\n  prompt: ./{outer}\n- {middle}\n- name: three\n  prompt: ./{outer}\n")
+}
+
+/// The same rows under a key, indented as `key:`'s list.
+fn rows_under(key: &str, middle: &str, outer: &str) -> String {
+    let rows = rows_with(middle, outer);
+    let indented: String = rows.lines().map(|line| format!("  {line}\n")).collect();
+    format!("{key}:\n{indented}")
+}
+
+/// The middle rows: a valid shell task, two executables, an invalid
+/// `with:`, and a prompt reference that is not text.
+const CONTROL: &str = "name: two\n  shell: echo hi";
+const TWO_EXECUTABLES: &str = "name: two\n  shell: echo hi\n  prompt: ./ok.md";
+const BAD_WITH: &str = "name: two\n  shell: echo hi\n  with: 5";
+const NUMBER_PROMPT: &str = "name: two\n  prompt: 123";
+
+/// Every root source route whose rows have known boundaries: the root's
+/// `seq.md` and the files it reads.
+fn root_routes(middle: &str, outer: &str) -> Vec<(&'static str, Vec<(String, String)>)> {
+    let own = |name: &str, text: String| (name.to_string(), text);
+    vec![
+        ("inline", vec![own("seq.md", format!("---\n{}---\n", rows_under("sequence", middle, outer)))]),
+        ("formal reference", vec![
+            own("child.yaml", format!("kind: sequence\n{}", rows_under("sequence", middle, outer))),
+            own("seq.md", "---\nsequence: ./child.yaml\n---\n".into()),
+        ]),
+        ("data reference", vec![
+            own("rows.yaml", rows_with(middle, outer)),
+            own("seq.md", "---\nsequence: ./rows.yaml\n---\n".into()),
+        ]),
+        ("data offset", vec![
+            own("data.yaml", rows_under("tasks", middle, outer)),
+            own("seq.md", "---\nsequence: ./data.yaml -> tasks\n---\n".into()),
+        ]),
+        ("expression", vec![
+            own("seq.md", format!("---\nsequence: \"{{{{ rows }}}}\"\n{}---\n", rows_under("rows", middle, outer))),
+        ]),
+    ]
+}
+
+fn check_route(files: &[(String, String)]) -> SequenceCheck {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "ok.md", "ok\n");
+    for (name, text) in files {
+        write(dir.path(), name, text);
+    }
+    check(dir.path(), "seq.md")
+}
+
+/// Each row's failure codes, by authored position.
+fn failure_codes(check: &SequenceCheck) -> Vec<Vec<&'static str>> {
+    check.tasks.iter()
+        .map(|task| task.failures.iter().map(|failure| if failure.finding.is_some() { "ref" } else { failure.error.code() }).collect())
+        .collect()
+}
+
+/// R1-F2: a bad middle row is reported at its own position on every root
+/// source route, and both siblings are still checked: their missing prompts
+/// are reference findings, or, with working prompts, both are read.
+#[test]
+fn every_root_source_route_checks_the_siblings_of_a_bad_row() {
+    for (route, files) in root_routes(CONTROL, "missing.md") {
+        let check = check_route(&files);
+        assert_eq!(check.list, RootList::Read, "{route}");
+        assert_eq!(failure_codes(&check), [vec!["ref"], vec![], vec!["ref"]], "{route} control: {:#?}", rows(&check));
+        assert!(check.root_failures.is_empty(), "{route}: {:#?}", messages(&check));
+    }
+    for middle in [TWO_EXECUTABLES, BAD_WITH, NUMBER_PROMPT] {
+        for (route, files) in root_routes(middle, "missing.md") {
+            let check = check_route(&files);
+            assert_eq!(check.list, RootList::Read, "{route}: {middle}");
+            let codes = failure_codes(&check);
+            assert_eq!(codes.len(), 3, "{route} {middle}: {:#?}", rows(&check));
+            assert_eq!((&codes[0], &codes[2]), (&vec!["ref"], &vec!["ref"]), "{route} {middle}: {:#?}", rows(&check));
+            assert!(!codes[1].is_empty() && !codes[1].contains(&"ref"), "{route} {middle}: {:#?}", rows(&check));
+            assert!(check.root_failures.is_empty(), "{route} {middle}: {:#?}", messages(&check));
+            // Input discovery skips the bad row too, so the siblings'
+            // inputs are still checked.
+            assert!(check.inventory.is_ok(), "{route} {middle}: {:?}", check.inventory.as_ref().err().map(ToString::to_string));
+        }
+        for (route, files) in root_routes(middle, "ok.md") {
+            let check = check_route(&files);
+            let read: Vec<bool> = check.tasks.iter().map(|task| task.prompt.is_some()).collect();
+            assert_eq!(read, [true, false, true], "{route} {middle}: {:#?}", rows(&check));
+        }
+    }
+}
+
+/// The rows of each route keep their authored positions and files; the
+/// two-executables refusal names the middle row.
+#[test]
+fn a_root_source_routes_bad_row_keeps_its_authored_place() {
+    let routes = root_routes(TWO_EXECUTABLES, "ok.md");
+    let found: Vec<Vec<String>> = routes.iter().map(|(_, files)| rows(&check_route(files))).collect();
+    assert_eq!(found, [
+        vec!["tasks[0] one sequence[0] seq.md", "tasks[1] two sequence[1] seq.md ! composition.failed", "tasks[2] three sequence[2] seq.md"],
+        vec!["tasks[0] one sequence[0] child.yaml", "tasks[1] two sequence[1] child.yaml ! composition.failed", "tasks[2] three sequence[2] child.yaml"],
+        vec!["tasks[0] one sequence[0] seq.md", "tasks[1] two sequence[1] seq.md ! composition.failed", "tasks[2] three sequence[2] seq.md"],
+        vec!["tasks[0] one sequence[0] seq.md", "tasks[1] two sequence[1] seq.md ! composition.failed", "tasks[2] three sequence[2] seq.md"],
+        vec!["tasks[0] one sequence[0] seq.md", "tasks[1] two sequence[1] seq.md ! composition.failed", "tasks[2] three sequence[2] seq.md"],
+    ].map(|rows| rows.into_iter().map(str::to_string).collect::<Vec<_>>()));
+    let formal = check_route(&routes[1].1);
+    assert_message(&formal, "step 2 declares more than one executable field (shell, prompt)");
+}
+
+/// Strict formal rows and converted data rows survive recovery: a scalar
+/// row in a referenced formal document is refused, the same scalar in
+/// selected data is a named step, and a null or array record in selected data is still
+/// refused, each beside its readable siblings.
+#[test]
+fn recovered_root_rows_keep_their_strictness() {
+    let formal = check_route(&[
+        ("child.yaml".into(), "kind: sequence\nsequence:\n  - name: one\n    prompt: ./ok.md\n  - 17\n  - name: three\n    prompt: ./ok.md\n".into()),
+        ("seq.md".into(), "---\nsequence: ./child.yaml\n---\n".into()),
+    ]);
+    assert_eq!(failure_codes(&formal), [vec![], vec!["composition.failed"], vec![]], "{:#?}", rows(&formal));
+    let data = check_route(&[
+        ("rows.yaml".into(), "- name: one\n  prompt: ./ok.md\n- 17\n- null\n- [a]\n- name: five\n  prompt: ./ok.md\n".into()),
+        ("seq.md".into(), "---\nsequence: ./rows.yaml\n---\n".into()),
+    ]);
+    assert_eq!(
+        failure_codes(&data),
+        [vec![], vec![], vec!["composition.failed"], vec!["composition.failed"], vec![]],
+        "{:#?}", rows(&data),
+    );
+    assert_eq!(data.tasks[1].site.name, "17");
+}
+
+/// A root reference whose whole file does not parse has no rows to
+/// recover: the list is unread and the failure is the root's.
+#[test]
+fn a_root_reference_that_fails_to_parse_leaves_the_list_unread() {
+    for (name, text) in [
+        ("child.yaml", "kind: sequence\nsequence:\n  - name: a\n]]]\n"),
+        ("rows.json5", "[{name: 'a'}] xx\n"),
+        ("rows.jsonl", "{\"name\": \"a\"}\n{oops\n"),
+        ("child.md", "---\nkind: sequence\nsequence:\n  - name: a\n    name: b\n---\n"),
+    ] {
+        let check = check_route(&[(name.into(), text.into()), ("seq.md".into(), format!("---\nsequence: ./{name}\n---\n"))]);
+        assert_eq!(check.list, RootList::Unread, "{name}");
+        assert!(check.tasks.is_empty(), "{name}: {:#?}", rows(&check));
+        assert_eq!(root_codes(&check), ["composition.failed"], "{name}: {:#?}", messages(&check));
+    }
+}
+
+/// A real run keeps reading each root source route fail-fast: the plan
+/// fails at the bad middle row with the typed failure it always returned.
+#[test]
+fn a_real_runs_root_plan_still_stops_at_the_bad_row() {
+    for (route, files) in root_routes(TWO_EXECUTABLES, "ok.md") {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "ok.md", "ok\n");
+        for (name, text) in &files {
+            write(dir.path(), name, text);
+        }
+        let path = dir.path().join("seq.md");
+        let source = crate::composition::resolve_fixture_source(&path.display().to_string()).unwrap();
+        let error = crate::composition::resolve_sequence_plan(&source, &crate::test_support::context_for(&path))
+            .expect_err(route);
+        assert_eq!(error.code(), "composition.failed", "{route}");
+        assert!(error.to_string().contains("step 2 declares more than one executable field (shell, prompt)"), "{route}: {error}");
+    }
+}
+
+/// R1-F10: a referenced file that does not load carries the position its
+/// parser proved as data, in the file's frame. Each case is checked through
+/// the walk as authored, with `N` lines prepended (the reported line moves
+/// by `N`, the code stays), and fixed (the failure is gone).
+mod load_positions {
+    use super::*;
+
+    /// The first task's failures for `seq.md` referencing `child` (`text`):
+    /// each one's code and proven position.
+    fn failures(child: &str, text: &str) -> Vec<(String, Option<(usize, usize)>)> {
+        let check = check_files(&[OK, ("seq.md", &referencing(child)), (child, text)]);
+        check.tasks[0]
+            .failures
+            .iter()
+            .map(|failure| {
+                let site = failure.error.sequence_site().unwrap_or_else(|| panic!("{child}: {}", failure.error));
+                assert!(site.file.as_ref().is_some_and(|file| file.ends_with(child)), "{child}: {site:?}");
+                (failure.error.code().to_string(), site.position)
+            })
+            .collect()
+    }
+
+    /// `text` with `lines` prepended `n` times.
+    fn shifted(lines: &str, n: usize, text: &str) -> String {
+        format!("{}{text}", lines.repeat(n))
+    }
+
+    #[track_caller]
+    fn assert_located(child: &str, pad: &str, text: &str, at: (usize, usize), fixed: &str) {
+        for n in [0, 3] {
+            let found = failures(child, &shifted(pad, n, text));
+            let [(code, position)] = found.as_slice() else { panic!("{child} +{n}: {found:?}") };
+            assert_eq!(code, "composition.failed", "{child} +{n}");
+            assert_eq!(*position, Some((at.0 + n, at.1)), "{child} +{n}");
+        }
+        assert!(failures(child, fixed).is_empty(), "{child}: the fixed file loads");
+    }
+
+    const TASK: &str = "  - name: a\n    prompt: ./ok.md\n";
+
+    #[test]
+    fn yaml_duplicate_key_and_trailing_syntax() {
+        let duplicate = "kind: sequence\nsequence:\n  - name: a\n    name: b\n    prompt: ./ok.md\n";
+        assert_located("dup.yaml", "# note\n", duplicate, (3, 5), &format!("kind: sequence\nsequence:\n{TASK}"));
+        let trailing = format!("kind: sequence\nsequence:\n{TASK}  ]\n");
+        assert_located("trail.yaml", "\n", &trailing, (5, 3), &format!("kind: sequence\nsequence:\n{TASK}"));
+    }
+
+    #[test]
+    fn json_and_json5_trailing_token_and_duplicate_key() {
+        let fixed = r#"[{"name": "a", "prompt": "./ok.md"}]"#;
+        assert_located("trail.json", "\n", &format!("{fixed} xx\n"), (1, 38), fixed);
+        let duplicate = "[{name: 'a', name: 'b', prompt: './ok.md'}]\n";
+        assert_located("dup.json5", "// note\n", duplicate, (1, 20), "[{name: 'a', prompt: './ok.md',},] // trailing commas\n");
+    }
+
+    #[test]
+    fn jsonl_duplicate_after_a_blank_line_and_malformed_record() {
+        let row = "{\"name\": \"a\", \"prompt\": \"./ok.md\"}\n";
+        let duplicate = format!("{row}\n{{\"name\": \"b\", \"name\": \"c\", \"prompt\": \"./ok.md\"}}\n");
+        assert_located("dup.jsonl", "\n", &duplicate, (3, 23), &format!("{row}\n{row}"));
+        assert_located("bad.ndjson", "\n", &format!("{row}{{\"name\": \n"), (2, 8), row);
+    }
+
+    /// A second YAML document has no parser coordinate: the file alone.
+    #[test]
+    fn an_unproven_position_stays_file_only() {
+        let found = failures("two.yaml", &format!("kind: sequence\nsequence:\n{TASK}---\nfoo: 1\n"));
+        assert!(matches!(found.as_slice(), [(_, None)]), "{found:?}");
+    }
+
+    /// R1-F10.8: a row a root data selection reads is located in the data
+    /// file, at its own property; it still resolves from the selecting file.
+    #[test]
+    fn a_selected_data_row_names_the_file_and_row_that_wrote_it() {
+        let rows = "- name: one\n  prompt: ./ok.md\n- name: two\n  prompt: ./ok.md\n";
+        for (reference, data, row) in [
+            ("./rows.yaml", rows.to_string(), "[1]"),
+            ("./list.yaml -> items", format!("items:\n{}", rows.lines().map(|line| format!("  {line}\n")).collect::<String>()), "items[1]"),
+        ] {
+            let file = reference.trim_start_matches("./").split(' ').next().unwrap();
+            let check = check_files(&[OK, (file, &data), ("seq.md", &format!("---\nsequence: \"{reference}\"\n---\n"))]);
+            let site = &check.tasks[1].site;
+            assert!(site.file.ends_with("seq.md"), "{reference}: resolves from the root");
+            let (authored, property) = site.authored();
+            assert!(authored.ends_with(file), "{reference}: {authored:?}");
+            assert_eq!(property, row, "{reference}");
+        }
+        let formal = check_files(&[OK, ("child.yaml", &format!("kind: sequence\nsequence:\n{TASK}")), ("seq.md", "---\nsequence: ./child.yaml\n---\n")]);
+        assert_eq!(formal.tasks[0].site.row, None, "a formal file's rows are its own");
+    }
+}
+
+/// An owner whose own values fail its `$schema` is the real run's refusal:
+/// the root's belongs to the root, a referenced document's to the task that
+/// references it, and the walk still reads every task.
+#[test]
+fn an_owners_own_schema_failure_is_recorded_at_its_owner() {
+    let schema = "$schema: { count: 'number(required)' }\ncount: abc\n";
+    let root = check_files(&[("seq.md", &format!("---\n{schema}sequence:\n  - name: a\n    shell: echo a\n---\n"))]);
+    assert_eq!((root.list, root.tasks.len()), (RootList::Read, 1));
+    let owners: Vec<_> = root.owner_failures.iter().map(|owner| (owner.task.clone(), owner.failure.error.code())).collect();
+    assert_eq!(owners, [(None, "composition.schema_validation")]);
+
+    let nested = check_files(&[
+        ("child.md", &format!("---\n{schema}sequence:\n  - name: inner\n    shell: echo inner\n---\n")),
+        ("seq.md", "---\nsequence:\n  - name: a\n    shell: echo a\n  - name: b\n    sequence: ./child.md\n---\n"),
+    ]);
+    assert_eq!(nested.tasks.len(), 3, "the walk reads the failed owner's tasks too");
+    let owners: Vec<_> = nested.owner_failures.iter()
+        .map(|owner| (owner.task.as_ref().map(|task| task.as_str().to_string()), owner.document.file_name().unwrap().to_owned()))
+        .collect();
+    assert_eq!(owners, [(Some("tasks[1]".to_string()), std::ffi::OsString::from("child.md"))]);
 }

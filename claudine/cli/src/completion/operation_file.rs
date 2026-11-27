@@ -127,12 +127,12 @@ pub(crate) fn recover_operation_file(
     reference: &str,
     no_match: CompositionError,
 ) -> OperationFileRecovery {
+    if attempts_autocomplete(reference, &no_match) {
+        return OperationFileRecovery::AttemptAutocomplete;
+    }
     let Some((retained_reference, resolution, _)) = no_match.file_reference_no_match() else {
         return OperationFileRecovery::ExplicitNoMatch(no_match);
     };
-    if is_operation_file_autocomplete_eligible(reference) && no_match.glob_hint().is_none() {
-        return OperationFileRecovery::AttemptAutocomplete;
-    }
 
     let suggestions = repository_basename_suggestions(
         resolution.repository_root(),
@@ -141,6 +141,32 @@ pub(crate) fn recover_operation_file(
     OperationFileRecovery::ExplicitNoMatch(
         no_match.with_file_reference_suggestions(suggestions),
     )
+}
+
+/// Whether [`recover_operation_file`] hands `no_match` for `reference` to the
+/// picker, read without searching anything: a structured no-match of an
+/// eligible bare name whose text carries no literal-glob hint.
+pub(crate) fn attempts_autocomplete(reference: &str, no_match: &CompositionError) -> bool {
+    no_match.file_reference_no_match().is_some()
+        && is_operation_file_autocomplete_eligible(reference)
+        && no_match.glob_hint().is_none()
+}
+
+/// The picker's candidates for `query`, spelled as it lists them, found by
+/// the same read-only search ([`gather_candidates`]) and shown nothing.
+pub(crate) fn candidate_references(
+    query: &str,
+    mode: ComposeMode,
+    ctx: &ScopeContext,
+) -> Result<Vec<String>, CompositionError> {
+    let candidates = gather_candidates(query, mode, ctx)?;
+    Ok(candidates.iter().map(|path| format_relative_insert(path, ctx)).collect())
+}
+
+/// Whether the picker may ask: it needs stdin **and** stderr on a terminal,
+/// whatever `--silent` says.
+pub(crate) fn picker_can_ask(stdin_is_tty: bool, stderr_is_tty: bool) -> bool {
+    stdin_is_tty && stderr_is_tty
 }
 
 /// Interactively resolve an operation-file reference when the original
@@ -289,7 +315,7 @@ fn present_and_select(
 }
 
 fn is_interactive() -> bool {
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+    picker_can_ask(std::io::stdin().is_terminal(), std::io::stderr().is_terminal())
 }
 
 fn badge_for_mode(mode: ComposeMode) -> &'static str {

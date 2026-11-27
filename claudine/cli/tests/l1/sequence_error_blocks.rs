@@ -179,3 +179,40 @@ fn reshaped_sequence_variants_keep_their_identity() {
         assert!(DiagnosticSnapshot::from_diagnostic(&err).cause.is_none(), "{name}: causes stay unregistered");
     }
 }
+
+/// Each case's link to the guarded report inventory: the code the passive
+/// check (`--dry-run`) reports for the authored shape behind it, whose
+/// fixture pair and both rendered snapshots `dry_run_check::codes` (a
+/// Claudine `dry_run_report` code) or Darkmatter's `findings` guard (a
+/// `REPORTED_FINDING_CODES` entry) require; `None` where the check reports
+/// the block's own `composition.failed` row, which these snapshots pin.
+const REPORT_LINKS: &[(&str, Option<&str>)] = &[
+    ("reference_not_found", Some(darkmatter::findings::MISSING_DOCUMENT_CODE)),
+    ("reference_not_found_unlocated", Some(darkmatter::findings::MISSING_DOCUMENT_CODE)),
+    ("source_read", None),
+    ("source_parse_yaml", None),
+    ("source_parse_unknown_field_noun", None),
+    ("exclusive_executable", Some("composition.multiple_executables")),
+    ("unknown_task_field_near_miss", None),
+    ("unknown_task_field_no_near_miss", None),
+    ("invalid", None),
+    ("empty", None),
+    ("step_name_missing", None),
+    ("external_wrong_type", None),
+    ("null_item", None),
+];
+
+/// Every case is linked (a new case must say which report code, if any,
+/// covers its shape), and every linked code is in a guarded inventory.
+#[test]
+fn every_case_is_linked_to_the_guarded_report_inventory() {
+    let names: Vec<&str> = cases().into_iter().map(|(name, _)| name).collect();
+    let linked: Vec<&str> = REPORT_LINKS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(linked, names);
+    for (name, code) in REPORT_LINKS {
+        let Some(code) = code else { continue };
+        let guarded = darkmatter::findings::REPORTED_FINDING_CODES.contains(code)
+            || claudine::diagnostics::code_spec(code).is_some_and(|spec| spec.dry_run_report);
+        assert!(guarded, "{name}: `{code}` is in no guarded report inventory");
+    }
+}

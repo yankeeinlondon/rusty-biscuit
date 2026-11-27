@@ -240,12 +240,8 @@ impl RootPlanRequest<'_> {
             .with_compose_context(self.compose_context)
             .with_caller_layers(layers)
             .with_invocation(self.invocation);
-        let plan = composition::resolve_sequence_plan_with(&self.root.authored, options)?.ok_or_else(|| {
-            eyre!(
-                "file '{}' does not define a `sequence` frontmatter property",
-                self.root.authored.resolved_path.display()
-            )
-        })?;
+        let plan = composition::resolve_sequence_plan_with(&self.root.authored, options)?
+            .ok_or_else(|| CompositionError::sequence_undefined(&self.root.authored.resolved_path))?;
         Ok(plan.with_sequence_id(&self.root.sequence_id))
     }
 }
@@ -290,7 +286,7 @@ pub(super) fn prepare_root_plan(
         if let Some(plan) = plan {
             // No step probes an empty root, so its failure is rechecked too.
             let recheck_owners = inventory.failed_owners.iter()
-                .any(|&owner| inventory.owners[owner].role != composition::InputOwnerRole::Root || plan.steps.is_empty());
+                .any(|failed| inventory.owners[failed.owner].role != composition::InputOwnerRole::Root || plan.steps.is_empty());
             return Ok(RootPlan { plan, inventory, layers, overrides, recheck_owners });
         }
         let contexts = inventory.missing_entries().into_iter()
