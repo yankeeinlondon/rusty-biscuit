@@ -1279,12 +1279,11 @@ decisions-for-review:
       previews such a sequence correctly. Three `sequence_sources_cli` tests were restructured to task prompts around
       it.
     - |-
-      Phase 6: a finding's `trail` is published in JSON only when it holds a host frame (a Claudine task, group, or
-      sequence); then every frame is written in order. A trail of only transclusion and `::map`/`::filter` frames is
-      published through the legacy `included_via` and `iteration_path` alone, so every `md` output stays byte-identical
-      (the spec's sample always shows `trail`). Alternative: always publish a non-empty `trail`, which adds a field to
-      `md validate refs`/`md compose` JSON and breaks the byte-identical gate. Redo in the hand-written `Serialize` of
-      `Diagnostic` (`compose/expression/diagnostics.rs`) and the data contract.
+      Phase 6: Claudine and the `md compose` and `md render` document envelopes publish every non-empty
+      `trail` in order, including trails with only inclusion or iteration frames. The legacy projection
+      suppresses `trail` unless it holds a host frame, preserving the reference JSON baselines for
+      `md validate refs` and `md graph --validate`. Both projections retain the existing `included_via`
+      and `iteration_path` rules.
     - |-
       Phase 6: `Diagnostic::with_trail` now puts the host's frames outside the frames a record already has instead of
       replacing them, so a Claudine projection of a Darkmatter error keeps its iteration and inclusion context (and
@@ -2586,8 +2585,8 @@ has no fixture: no input reaches it on purpose.
   positions with the old omit rules; `ReferenceDetails::reports_inclusion` (not serialized) carries whether a
   record reports an inclusion path (`[]` versus omitted). Accessors `iteration_path()`, `included_via()`,
   `set_/with_iteration_path()`; `TrailFrame::Included.file` is the typed `ComposeSource`.
-- `trail` is published only when it holds a host frame (then whole); `md` output is byte-identical (baselines and
-  envelope tests pass unedited).
+- Claudine and the `md compose` and `md render` envelopes publish a non-empty `trail` in full. The legacy
+  projection preserves the reference JSON baselines for `md validate refs` and `md graph --validate`.
 - `with_trail` now puts the host's frames outside the record's existing frames instead of replacing them, so a
   projected error keeps its iteration context.
 - `notes` documented as an addition beside `related` in `darkmatter/docs/cli/data-contracts.md` (new "Trail"
@@ -3068,3 +3067,11 @@ handoff. Review 4 reran `a_prompt_two_tasks_compose_is_read_once_and_handed_to_t
 `one_or_two_prompt_tasks_open_each_source_once` through `just test` in Claudine. Both assert one
 open for one and two prompt occurrences. The library test also checks that the source-read counter
 agrees with the open count.
+
+### 2026-11-27 review 5 correction
+
+The Phase 6 entries described the legacy host-frame rule as applying to every `md` command. A Linux CLI
+probe composed a root that included a child with a broken hyperlink. `md compose root.md --output json`
+reported the hyperlink with both an inclusion-only `trail` and `included_via`.
+`md validate refs root.md --output json` reported it with `included_via` alone. The Darkmatter Level 1
+reference baseline tests passed. The entries now distinguish the document envelopes and the legacy projection.

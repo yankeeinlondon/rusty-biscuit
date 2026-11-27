@@ -28,6 +28,7 @@ feature: 2026-11-22-better-errors-and-dry-run/review-4.md
 previous: 2026-11-22-better-errors-and-dry-run/review-3.md
 implemented-by: claude/opus
 repaired-on: "2026-11-27T14:35:54+00:00"
+next: 2026-11-22-better-errors-and-dry-run/review-5.md
 ---
 
 # Review 4 — Better errors and a diagnostic dry run
