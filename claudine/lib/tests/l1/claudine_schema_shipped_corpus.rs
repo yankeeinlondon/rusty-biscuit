@@ -1,6 +1,6 @@
 //! Every shipped document Claudine runs, judged by both of its gates: the
 //! schema verdict (trigger discovery, effective schema, and validation over
-//! the shipped `claudine/schemas/` bundle, the path DMLS and
+//! the shipped `claudine/registration/` bundle, the path DMLS and
 //! `md schema validate` take) and Claudine's lifecycle parser
 //! (`2026-10-30-claudine-recursive-schemas`, Phase 5).
 //!
@@ -121,16 +121,16 @@ fn assert_shipped(shipped: &Shipped) {
     let judged = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged");
-    let sequence = discovered.selects(&path, include_str!("../../../schemas/sequence.yaml"));
+    let sequence = discovered.selects(&path, include_str!("../../../registration/sequence-document.yaml"));
 
     assert_eq!(
         (judged.claudine, judged.inline, sequence),
         (selects.claudine, selects.inline, selects.sequence),
-        "{label}: (claudine.yaml, inline-compose.yaml, sequence.yaml) selection"
+        "{label}: (composition.yaml, inline-composition.yaml, sequence-document.yaml) selection"
     );
     // The selected payloads are what judged the document, so a valid verdict
     // is not vacuous. A list `$schema` lowers to an `anyOf` root whose
@@ -198,12 +198,19 @@ fn every_shipped_document_has_one_test() {
     let mut listed = markdown_below(manifest.join("../docs/examples"));
     listed.extend(markdown_below(manifest.join("tests/fixtures/frozen_prompts")));
     listed.extend(markdown_below(manifest.join("../cli/tests/fixtures/frozen_prompts")));
+    // A research topic is a folder of `docs/research/` or of one of its
+    // subject areas (`providers/`, `local-ai/`, …).
     let research = manifest.join("../docs/research");
-    for entry in std::fs::read_dir(&research).unwrap_or_else(|error| panic!("{}: {error}", research.display())) {
-        let topic = entry.expect("directory entry").path();
-        for name in ["_fleet.md", "_research.md"] {
-            if topic.join(name).is_file() {
-                listed.push(topic.join(name));
+    let children = |dir: &Path| -> Vec<PathBuf> {
+        let entries = std::fs::read_dir(dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
+        entries.map(|entry| entry.expect("directory entry").path()).filter(|path| path.is_dir()).collect()
+    };
+    for area in children(&research) {
+        for topic in std::iter::once(area.clone()).chain(children(&area)) {
+            for name in ["_fleet.md", "_research.md"] {
+                if topic.join(name).is_file() {
+                    listed.push(topic.join(name));
+                }
             }
         }
     }
@@ -507,8 +514,8 @@ fn frozen_cli_sequence_state_schema_spec() {
 #[test]
 fn research_acp_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/acp/_fleet.md",
-        text: include_str!("../../../docs/research/acp/_fleet.md"),
+        label: "docs/research/providers/acp/_fleet.md",
+        text: include_str!("../../../docs/research/providers/acp/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -518,8 +525,8 @@ fn research_acp_fleet() {
 #[test]
 fn research_acp_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/acp/_research.md",
-        text: include_str!("../../../docs/research/acp/_research.md"),
+        label: "docs/research/providers/acp/_research.md",
+        text: include_str!("../../../docs/research/providers/acp/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -529,8 +536,8 @@ fn research_acp_research() {
 #[test]
 fn research_agent_cli_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-cli/_fleet.md",
-        text: include_str!("../../../docs/research/agent-cli/_fleet.md"),
+        label: "docs/research/providers/agent-cli/_fleet.md",
+        text: include_str!("../../../docs/research/providers/agent-cli/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -540,8 +547,8 @@ fn research_agent_cli_fleet() {
 #[test]
 fn research_agent_cli_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-cli/_research.md",
-        text: include_str!("../../../docs/research/agent-cli/_research.md"),
+        label: "docs/research/providers/agent-cli/_research.md",
+        text: include_str!("../../../docs/research/providers/agent-cli/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -551,8 +558,8 @@ fn research_agent_cli_research() {
 #[test]
 fn research_agent_errors_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-errors/_fleet.md",
-        text: include_str!("../../../docs/research/agent-errors/_fleet.md"),
+        label: "docs/research/providers/agent-errors/_fleet.md",
+        text: include_str!("../../../docs/research/providers/agent-errors/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -562,8 +569,8 @@ fn research_agent_errors_fleet() {
 #[test]
 fn research_agent_errors_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-errors/_research.md",
-        text: include_str!("../../../docs/research/agent-errors/_research.md"),
+        label: "docs/research/providers/agent-errors/_research.md",
+        text: include_str!("../../../docs/research/providers/agent-errors/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -573,8 +580,8 @@ fn research_agent_errors_research() {
 #[test]
 fn research_agent_logging_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-logging/_fleet.md",
-        text: include_str!("../../../docs/research/agent-logging/_fleet.md"),
+        label: "docs/research/providers/agent-logging/_fleet.md",
+        text: include_str!("../../../docs/research/providers/agent-logging/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -584,8 +591,8 @@ fn research_agent_logging_fleet() {
 #[test]
 fn research_agent_logging_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-logging/_research.md",
-        text: include_str!("../../../docs/research/agent-logging/_research.md"),
+        label: "docs/research/providers/agent-logging/_research.md",
+        text: include_str!("../../../docs/research/providers/agent-logging/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -595,8 +602,8 @@ fn research_agent_logging_research() {
 #[test]
 fn research_agent_models_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-models/_fleet.md",
-        text: include_str!("../../../docs/research/agent-models/_fleet.md"),
+        label: "docs/research/providers/agent-models/_fleet.md",
+        text: include_str!("../../../docs/research/providers/agent-models/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -606,8 +613,8 @@ fn research_agent_models_fleet() {
 #[test]
 fn research_agent_models_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-models/_research.md",
-        text: include_str!("../../../docs/research/agent-models/_research.md"),
+        label: "docs/research/providers/agent-models/_research.md",
+        text: include_str!("../../../docs/research/providers/agent-models/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -617,8 +624,8 @@ fn research_agent_models_research() {
 #[test]
 fn research_agent_permissions_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-permissions/_fleet.md",
-        text: include_str!("../../../docs/research/agent-permissions/_fleet.md"),
+        label: "docs/research/providers/agent-permissions/_fleet.md",
+        text: include_str!("../../../docs/research/providers/agent-permissions/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -628,8 +635,8 @@ fn research_agent_permissions_fleet() {
 #[test]
 fn research_agent_permissions_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/agent-permissions/_research.md",
-        text: include_str!("../../../docs/research/agent-permissions/_research.md"),
+        label: "docs/research/providers/agent-permissions/_research.md",
+        text: include_str!("../../../docs/research/providers/agent-permissions/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -661,8 +668,8 @@ fn research_hooks_research() {
 #[test]
 fn research_local_runners_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/local_runners/_fleet.md",
-        text: include_str!("../../../docs/research/local_runners/_fleet.md"),
+        label: "docs/research/local-ai/local_runners/_fleet.md",
+        text: include_str!("../../../docs/research/local-ai/local_runners/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -672,8 +679,8 @@ fn research_local_runners_fleet() {
 #[test]
 fn research_local_runners_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/local_runners/_research.md",
-        text: include_str!("../../../docs/research/local_runners/_research.md"),
+        label: "docs/research/local-ai/local_runners/_research.md",
+        text: include_str!("../../../docs/research/local-ai/local_runners/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -683,8 +690,8 @@ fn research_local_runners_research() {
 #[test]
 fn research_mcp_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/mcp/_fleet.md",
-        text: include_str!("../../../docs/research/mcp/_fleet.md"),
+        label: "docs/research/providers/mcp/_fleet.md",
+        text: include_str!("../../../docs/research/providers/mcp/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -694,8 +701,8 @@ fn research_mcp_fleet() {
 #[test]
 fn research_mcp_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/mcp/_research.md",
-        text: include_str!("../../../docs/research/mcp/_research.md"),
+        label: "docs/research/providers/mcp/_research.md",
+        text: include_str!("../../../docs/research/providers/mcp/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -705,8 +712,8 @@ fn research_mcp_research() {
 #[test]
 fn research_memory_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/memory/_fleet.md",
-        text: include_str!("../../../docs/research/memory/_fleet.md"),
+        label: "docs/research/providers/memory/_fleet.md",
+        text: include_str!("../../../docs/research/providers/memory/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -716,8 +723,8 @@ fn research_memory_fleet() {
 #[test]
 fn research_memory_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/memory/_research.md",
-        text: include_str!("../../../docs/research/memory/_research.md"),
+        label: "docs/research/providers/memory/_research.md",
+        text: include_str!("../../../docs/research/providers/memory/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -727,8 +734,8 @@ fn research_memory_research() {
 #[test]
 fn research_model_config_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/model-config/_fleet.md",
-        text: include_str!("../../../docs/research/model-config/_fleet.md"),
+        label: "docs/research/providers/model-config/_fleet.md",
+        text: include_str!("../../../docs/research/providers/model-config/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -738,8 +745,8 @@ fn research_model_config_fleet() {
 #[test]
 fn research_model_config_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/model-config/_research.md",
-        text: include_str!("../../../docs/research/model-config/_research.md"),
+        label: "docs/research/providers/model-config/_research.md",
+        text: include_str!("../../../docs/research/providers/model-config/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -760,8 +767,8 @@ fn research_model_serving_api_standards_research() {
 #[test]
 fn research_non_interactive_sessions_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/non-interactive-sessions/_fleet.md",
-        text: include_str!("../../../docs/research/non-interactive-sessions/_fleet.md"),
+        label: "docs/research/providers/non-interactive-sessions/_fleet.md",
+        text: include_str!("../../../docs/research/providers/non-interactive-sessions/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -771,8 +778,8 @@ fn research_non_interactive_sessions_fleet() {
 #[test]
 fn research_non_interactive_sessions_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/non-interactive-sessions/_research.md",
-        text: include_str!("../../../docs/research/non-interactive-sessions/_research.md"),
+        label: "docs/research/providers/non-interactive-sessions/_research.md",
+        text: include_str!("../../../docs/research/providers/non-interactive-sessions/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -782,8 +789,8 @@ fn research_non_interactive_sessions_research() {
 #[test]
 fn research_plugins_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/plugins/_fleet.md",
-        text: include_str!("../../../docs/research/plugins/_fleet.md"),
+        label: "docs/research/providers/plugins/_fleet.md",
+        text: include_str!("../../../docs/research/providers/plugins/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -793,8 +800,8 @@ fn research_plugins_fleet() {
 #[test]
 fn research_plugins_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/plugins/_research.md",
-        text: include_str!("../../../docs/research/plugins/_research.md"),
+        label: "docs/research/providers/plugins/_research.md",
+        text: include_str!("../../../docs/research/providers/plugins/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -804,8 +811,8 @@ fn research_plugins_research() {
 #[test]
 fn research_reasoning_level_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/reasoning-level/_fleet.md",
-        text: include_str!("../../../docs/research/reasoning-level/_fleet.md"),
+        label: "docs/research/providers/reasoning-level/_fleet.md",
+        text: include_str!("../../../docs/research/providers/reasoning-level/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -815,8 +822,8 @@ fn research_reasoning_level_fleet() {
 #[test]
 fn research_reasoning_level_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/reasoning-level/_research.md",
-        text: include_str!("../../../docs/research/reasoning-level/_research.md"),
+        label: "docs/research/providers/reasoning-level/_research.md",
+        text: include_str!("../../../docs/research/providers/reasoning-level/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -826,8 +833,8 @@ fn research_reasoning_level_research() {
 #[test]
 fn research_resume_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/resume/_fleet.md",
-        text: include_str!("../../../docs/research/resume/_fleet.md"),
+        label: "docs/research/providers/resume/_fleet.md",
+        text: include_str!("../../../docs/research/providers/resume/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -837,8 +844,8 @@ fn research_resume_fleet() {
 #[test]
 fn research_resume_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/resume/_research.md",
-        text: include_str!("../../../docs/research/resume/_research.md"),
+        label: "docs/research/providers/resume/_research.md",
+        text: include_str!("../../../docs/research/providers/resume/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -848,8 +855,8 @@ fn research_resume_research() {
 #[test]
 fn research_signals_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/signals/_fleet.md",
-        text: include_str!("../../../docs/research/signals/_fleet.md"),
+        label: "docs/research/providers/signals/_fleet.md",
+        text: include_str!("../../../docs/research/providers/signals/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -859,8 +866,8 @@ fn research_signals_fleet() {
 #[test]
 fn research_signals_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/signals/_research.md",
-        text: include_str!("../../../docs/research/signals/_research.md"),
+        label: "docs/research/providers/signals/_research.md",
+        text: include_str!("../../../docs/research/providers/signals/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -870,8 +877,8 @@ fn research_signals_research() {
 #[test]
 fn research_skills_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/skills/_fleet.md",
-        text: include_str!("../../../docs/research/skills/_fleet.md"),
+        label: "docs/research/providers/skills/_fleet.md",
+        text: include_str!("../../../docs/research/providers/skills/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -881,8 +888,8 @@ fn research_skills_fleet() {
 #[test]
 fn research_skills_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/skills/_research.md",
-        text: include_str!("../../../docs/research/skills/_research.md"),
+        label: "docs/research/providers/skills/_research.md",
+        text: include_str!("../../../docs/research/providers/skills/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -892,8 +899,8 @@ fn research_skills_research() {
 #[test]
 fn research_slash_commands_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/slash-commands/_fleet.md",
-        text: include_str!("../../../docs/research/slash-commands/_fleet.md"),
+        label: "docs/research/providers/slash-commands/_fleet.md",
+        text: include_str!("../../../docs/research/providers/slash-commands/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -903,8 +910,8 @@ fn research_slash_commands_fleet() {
 #[test]
 fn research_slash_commands_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/slash-commands/_research.md",
-        text: include_str!("../../../docs/research/slash-commands/_research.md"),
+        label: "docs/research/providers/slash-commands/_research.md",
+        text: include_str!("../../../docs/research/providers/slash-commands/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -914,8 +921,8 @@ fn research_slash_commands_research() {
 #[test]
 fn research_steering_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/steering/_fleet.md",
-        text: include_str!("../../../docs/research/steering/_fleet.md"),
+        label: "docs/research/providers/steering/_fleet.md",
+        text: include_str!("../../../docs/research/providers/steering/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -925,8 +932,8 @@ fn research_steering_fleet() {
 #[test]
 fn research_steering_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/steering/_research.md",
-        text: include_str!("../../../docs/research/steering/_research.md"),
+        label: "docs/research/providers/steering/_research.md",
+        text: include_str!("../../../docs/research/providers/steering/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -936,8 +943,8 @@ fn research_steering_research() {
 #[test]
 fn research_subagents_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/subagents/_fleet.md",
-        text: include_str!("../../../docs/research/subagents/_fleet.md"),
+        label: "docs/research/providers/subagents/_fleet.md",
+        text: include_str!("../../../docs/research/providers/subagents/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -947,8 +954,8 @@ fn research_subagents_fleet() {
 #[test]
 fn research_subagents_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/subagents/_research.md",
-        text: include_str!("../../../docs/research/subagents/_research.md"),
+        label: "docs/research/providers/subagents/_research.md",
+        text: include_str!("../../../docs/research/providers/subagents/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -958,8 +965,8 @@ fn research_subagents_research() {
 #[test]
 fn research_system_prompt_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/system-prompt/_fleet.md",
-        text: include_str!("../../../docs/research/system-prompt/_fleet.md"),
+        label: "docs/research/providers/system-prompt/_fleet.md",
+        text: include_str!("../../../docs/research/providers/system-prompt/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -969,8 +976,8 @@ fn research_system_prompt_fleet() {
 #[test]
 fn research_system_prompt_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/system-prompt/_research.md",
-        text: include_str!("../../../docs/research/system-prompt/_research.md"),
+        label: "docs/research/providers/system-prompt/_research.md",
+        text: include_str!("../../../docs/research/providers/system-prompt/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,
@@ -980,8 +987,8 @@ fn research_system_prompt_research() {
 #[test]
 fn research_usage_fleet() {
     assert_shipped(&Shipped {
-        label: "docs/research/usage/_fleet.md",
-        text: include_str!("../../../docs/research/usage/_fleet.md"),
+        label: "docs/research/providers/usage/_fleet.md",
+        text: include_str!("../../../docs/research/providers/usage/_fleet.md"),
         selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
@@ -991,8 +998,8 @@ fn research_usage_fleet() {
 #[test]
 fn research_usage_research() {
     assert_shipped(&Shipped {
-        label: "docs/research/usage/_research.md",
-        text: include_str!("../../../docs/research/usage/_research.md"),
+        label: "docs/research/providers/usage/_research.md",
+        text: include_str!("../../../docs/research/providers/usage/_research.md"),
         selects: CLAUDINE,
         schema: Valid,
         parser: ACCEPTS,

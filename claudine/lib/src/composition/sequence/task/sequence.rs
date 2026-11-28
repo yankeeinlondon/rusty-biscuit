@@ -111,16 +111,12 @@ impl TaskExecution<'_> {
                     // Each entry judges the check as it reads now (a reread
                     // may have changed it) against the values of this entry,
                     // which on the first entry include `initialize`'s writes
-                    // (admission judged the values before it); a preview
-                    // names the check once.
-                    if !self.prompt.is_dry_run() {
-                        self.check_inline_container(&fresh, Some(runtime))?;
-                    }
+                    // (admission judged the values before it).
+                    self.check_inline_container(&fresh, Some(runtime))?;
                     // A whole referenced document is judged by its own
                     // schema against the values of this entry, as a directly
-                    // run document is at each step; a preview, which makes no
-                    // writes, only prepares them.
-                    let values = self.referenced_owner_values(&fresh, runtime, !self.prompt.is_dry_run())?;
+                    // run document is at each step.
+                    let values = self.referenced_owner_values(&fresh, runtime, true)?;
                     Ok((fresh, values))
                 }) {
                     Ok((fresh, values)) => {
@@ -165,11 +161,7 @@ impl TaskExecution<'_> {
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
                 self.prewarm_container(runner.guard_mut().config(), &event_frontmatter);
             }
-            let event = if self.prompt.is_dry_run() {
-                let outcome = Default::default();
-                let decision = runner.record_outcome(signal, &outcome);
-                crate::composition::lifecycle::runtime::ContainerEventResult { outcome, decision }
-            } else { runner.execute_event(signal, &stack) };
+            let event = runner.execute_event(signal, &stack);
             if error.is_none() {
                 error = event.outcome.evaluation_error.clone().or_else(|| event.outcome.action_error.clone());
             }
@@ -335,9 +327,7 @@ impl TaskExecution<'_> {
                     return PrimaryOutcome::interrupted(interrupted_stdout).with_secondary(secondary_errors);
                 }
                 ContainerEventDecision::Finished { failed: false } => {
-                    if let Some(frame) = frame.as_deref_mut()
-                        && !self.prompt.is_dry_run()
-                    {
+                    if let Some(frame) = frame.as_deref_mut() {
                         let ambient = frame.ambient();
                         let mut gate_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
                         let (mutations, outputs) = runtime.mutations_and_outputs();
@@ -432,6 +422,7 @@ impl TaskExecution<'_> {
                     let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
                         &CompositionError::SequenceTaskUnsupported {
                             task: self.label(), construct: "nested container recovery".into(), detail: format!("{decision:?}"),
+                            site: Box::new(self.task.error_site()),
                         });
                     error = Some(diagnostic.info);
                     runner.set_error(error.as_ref().unwrap().clone());
@@ -448,8 +439,7 @@ impl TaskExecution<'_> {
     /// caller's setters, and every runtime write so far.
     ///
     /// The check is passive: the converted or defaulted copy it judges is
-    /// discarded, and nothing it reads is changed. A dry run only names the
-    /// check, because the writes it would read are not made in a preview.
+    /// discarded, and nothing it reads is changed.
     ///
     /// ## Errors
     ///
@@ -464,7 +454,7 @@ impl TaskExecution<'_> {
     /// Admit `sequence` at this task's turn: judge its inline `$schema` as
     /// the declaring file reads now, not as the approved graph froze it, so a
     /// declaration an earlier task edited refuses the container before its
-    /// `initialize` runs. A dry run names the frozen check without reading.
+    /// `initialize` runs.
     ///
     /// ## Errors
     ///
@@ -474,7 +464,6 @@ impl TaskExecution<'_> {
     pub(super) fn admit_inline_container(
         &self, sequence: &PreflightSequence, runtime: Option<&RuntimeState>,
     ) -> Result<(), CompositionError> {
-        if self.prompt.is_dry_run() { return self.check_inline_container(sequence, runtime) }
         let current = crate::composition::sequence::preflight::reread_inline_check(
             self.task, sequence, self.stack.file_resolution_context, self.graph.nested_sources(), self.document,
         )?;
@@ -487,10 +476,6 @@ impl TaskExecution<'_> {
     ) -> Result<(), CompositionError> {
         let Some(check) = check else { return Ok(()) };
         let container = check.property().strip_suffix(".$schema").unwrap_or(check.property());
-        if self.prompt.is_dry_run() {
-            self.dry_run_note(&format!("`{container}` checks its `$schema` at its turn (not evaluated in a dry run)"));
-            return Ok(());
-        }
         let mut snapshot: Map<String, Value> = self.state.data().iter()
             .map(|(key, value)| (key.clone(), value.clone())).collect();
         if let Some(Value::Object(setters)) = self.user_setters {
@@ -556,6 +541,7 @@ impl TaskExecution<'_> {
             return Err(CompositionError::SequenceShellResolution {
                 command: command.command.clone(), task: self.label(),
                 message: "nested source introduced a command after sequence approval closed".into(), source: None,
+                site: Box::new(self.task.error_site()),
             });
         }
         for candidate in &fresh.template_candidates {
@@ -564,12 +550,13 @@ impl TaskExecution<'_> {
                 return Err(CompositionError::SequenceShellResolution {
                     command: candidate.authored().unwrap_or("").into(), task: self.label(),
                     message: "nested source introduced a template after sequence approval closed".into(), source: None,
+                    site: Box::new(self.task.error_site()),
                 });
             }
         }
         for document in &fresh.prompt_documents {
             if self.graph.prompt_document(&document.path).is_none() {
-                return Err(CompositionError::SequenceInvalid("nested source introduced an unapproved prompt document".into()));
+                return Err(CompositionError::sequence_invalid("nested source introduced an unapproved prompt document", self.task.error_site()));
             }
         }
         if let Some(authorization) = self.graph.shell_authorization() {
@@ -587,9 +574,11 @@ impl TaskExecution<'_> {
                 PreflightAction::Group(group) => &group.origin_path,
                 _ => &self.task.origin_path,
             };
+            // A container proxy's target is a container document.
             let path = crate::composition::sequence::source::resolve_sequence_reference(
-                target, source, self.stack.file_resolution_context,
-            )?;
+                target, crate::composition::sequence::model::ExecutableField::Sequence, source, self.stack.file_resolution_context,
+            )
+            .map_err(|error| error.locate_sequence(source, "", Some(&self.label())))?;
             let path = biscuit_file::canonicalize_simplified(&path).unwrap_or(path);
             let owned_runtime = Arc::new(RuntimeState::new_sequence());
             let runtime = self.runtime.unwrap_or(&owned_runtime);
@@ -618,6 +607,7 @@ impl TaskExecution<'_> {
                 return Err(CompositionError::SequenceTaskUnsupported {
                     task: self.label(), construct: "container proxy".into(),
                     detail: format!("target `{target}` was not approved during sequence preflight"),
+                    site: Box::new(self.task.error_site()),
                 });
             }
             let mut task = self.task.clone();

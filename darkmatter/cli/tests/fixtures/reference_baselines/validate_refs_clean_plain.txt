@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+Checked 2 references across 1 document: all ok
+--- stderr

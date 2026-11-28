@@ -56,39 +56,22 @@ Step about {{topic}}.
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    // Strong assertion: error must be Claudine's typed CompositionError
-    // surface AND per-step aggregated (`sequence missing properties`),
-    // not Darkmatter's raw MarkdownError or a single-doc MissingProperties.
-    // Catches regressions where the per-step preflight short-circuits
-    // aggregation.
+    // The run returns the typed, per-step aggregate (its message closes the
+    // report), and the report names the root's one missing input once,
+    // not once per step that inherits it.
+    let flat = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        plain.contains("CompositionError"),
-        "expected typed CompositionError surface (not raw MarkdownError); stderr:\n{plain}"
-    );
-    assert!(
-        plain.to_lowercase().contains("sequence missing properties"),
-        "expected aggregated `sequence missing properties` (not single-doc); stderr:\n{plain}"
+        flat.contains("The run stopped at: sequence schema validation failed for 2 step(s) or document(s); missing required properties"),
+        "expected the aggregated typed failure; stderr:\n{plain}"
     );
     assert!(
         !plain.contains("MarkdownError"),
         "raw MarkdownError leaked instead of typed Claudine error; stderr:\n{plain}"
     );
-    // Both steps must appear in the aggregated report.
-    assert!(
-        plain.contains("Step 1"),
-        "expected per-step `Step 1` header; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("Step 2"),
-        "expected per-step `Step 2` header; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("alpha") && plain.contains("beta"),
-        "expected both step names in the aggregated report; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("topic"),
-        "expected the `topic` property name; stderr:\n{plain}"
+    assert_eq!(
+        flat.matches("`topic` (string) is required and has no value").count(),
+        1,
+        "expected the `topic` input once; stderr:\n{plain}"
     );
     assert!(
         !count_path.exists(),
@@ -184,29 +167,20 @@ Step about {{config}}.
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    // Strong assertions: non-TTY must produce the aggregated
-    // sequence-missing surface, NOT the unsupported-shape error.
+    // Non-TTY must report the missing input and return the aggregated
+    // sequence failure, NOT the unsupported-shape error.
+    let flat = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        plain.to_lowercase().contains("sequence missing properties"),
-        "expected aggregated `sequence missing properties` surface; stderr:\n{plain}"
+        flat.contains("The run stopped at: sequence schema validation failed for 2 step(s) or document(s); missing required properties"),
+        "expected the aggregated typed failure; stderr:\n{plain}"
     );
     assert!(
         !plain.to_lowercase().contains("unsupported interactive schema"),
         "non-TTY must NOT short-circuit to UnsupportedInteractiveSchema; stderr:\n{plain}"
     );
-    // Both step labels should appear in the aggregated report so a user
-    // can fix the full sequence in one pass.
     assert!(
-        plain.contains("Step 1") && plain.contains("Step 2"),
-        "expected per-step `Step 1` and `Step 2` headers; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("alpha") && plain.contains("beta"),
-        "expected both step names; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("config"),
-        "expected the `config` property name in error report; stderr:\n{plain}"
+        flat.contains("`config` (object) is required and has no value"),
+        "expected the `config` input in the report; stderr:\n{plain}"
     );
     assert!(
         !count_path.exists(),

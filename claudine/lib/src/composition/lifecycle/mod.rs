@@ -157,23 +157,67 @@ fn claudine_parse_options<'a>(
     }
 }
 
-/// The repository-relative path of Claudine's host lifecycle artifact, beside
-/// its host catalog ([`crate::composition::schema::globals::HOST_CATALOG_PATH`]).
-pub const LIFECYCLE_ARTIFACT_PATH: &str = "claudine/schemas/globals.lifecycle.json";
+/// The repository-relative path of Claudine's committed host lifecycle
+/// artifact.
+pub const LIFECYCLE_ARTIFACT_PATH: &str = "claudine/lib/generated/globals.lifecycle.json";
 
 /// Claudine's host lifecycle artifact: its event registry, its parse options
 /// (unknown verbs rejected, the embedded Playa effect names), versioned
-/// against its host catalog
-/// ([`darkmatter::lifecycle::host_profile::lifecycle_artifact`]). DMLS reads
-/// the committed copy at [`LIFECYCLE_ARTIFACT_PATH`] to type Claudine
-/// lifecycle stacks as composition does; a test keeps it fresh, and
-/// `just regen-lifecycle-artifact` in `claudine/` rewrites it.
-pub fn lifecycle_artifact() -> String {
-    darkmatter::lifecycle::host_profile::lifecycle_artifact(
+/// against its namespace catalog
+/// ([`darkmatter::lifecycle::host_profile::lifecycle_artifact`]).
+///
+/// The `catalog_hash` is the one Darkmatter's namespace preparation computes
+/// over the inventory's namespace members and every bundled file their
+/// resolution reads
+/// ([`prepare_namespace_catalog`](crate::composition::schema::globals::prepare_namespace_catalog)),
+/// so it is the hash a reader of the published bundle checks. Generation
+/// reads only the compiled inventory, never the committed copy at
+/// [`LIFECYCLE_ARTIFACT_PATH`]; the root `just shipped-schemas` writes that
+/// copy, and a test keeps it fresh.
+///
+/// ## Errors
+///
+/// The namespace catalog's refusals, when the inventory's namespace members
+/// do not prepare.
+pub fn lifecycle_artifact() -> Result<String, String> {
+    let catalog = crate::composition::schema::globals::prepare_namespace_catalog()?;
+    Ok(darkmatter::lifecycle::host_profile::lifecycle_artifact(
         &claudine_parse_options(None, None),
         playa::SoundEffect::all_names(),
-        crate::composition::schema::globals::HOST_CATALOG_TEXT,
-    )
+        &catalog.hash,
+    ))
+}
+
+/// Checks `text` as Claudine's lifecycle artifact the way a reader of the
+/// published bundle loads it: against the namespace catalog prepared from
+/// the compiled inventory and its `catalog_hash`, and recording Claudine's
+/// host. The generator runs it on its candidate before emitting it, so an
+/// artifact derived from other namespace bytes is refused.
+///
+/// ## Errors
+///
+/// Why `text` is not a current lifecycle artifact.
+pub fn check_lifecycle_artifact(text: &str) -> Result<(), String> {
+    use darkmatter::lifecycle::host_profile::HostLifecycleProfile;
+    use darkmatter::markdown::compose::expression::host::FactsArtifact;
+    let catalog = crate::composition::schema::globals::prepare_namespace_catalog()?;
+    let profile = HostLifecycleProfile::from_artifact_at(
+        std::sync::Arc::clone(&catalog.catalog),
+        &catalog.hash,
+        std::path::Path::new(LIFECYCLE_ARTIFACT_PATH),
+        FactsArtifact::Text(text),
+    )?;
+    if let Some((segments, root)) = darkmatter::lifecycle::host_profile::undeclared_root(text, &catalog.catalog) {
+        return Err(format!(
+            "the lifecycle artifact binds `{root}` at `/{}`, which neither Darkmatter nor any namespace of Claudine's catalog declares",
+            segments.join("/")
+        ));
+    }
+    let host = profile.registry().host();
+    if host != crate::composition::registration::HOST_ID {
+        return Err(format!("the lifecycle artifact records host `{host}`, not `{}`", crate::composition::registration::HOST_ID));
+    }
+    Ok(())
 }
 
 /// Parses lifecycle configuration from composition frontmatter.

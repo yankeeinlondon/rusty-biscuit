@@ -282,7 +282,10 @@ fn template_shape<'a>(
     };
     // A `$schema` default would land on every item as a container's check.
     if let Some(key) = template.keys().find(|key| reserved::is_reserved_state_key(key) || *key == CHECK_KEY) {
-        return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
+        return Err(CompositionError::SequenceReservedTemplateKey {
+            key: key.clone(),
+            site: Box::new(super::super::error::SequenceSite::at(source_path, &format!("{property}.{key}"))),
+        });
     }
     Ok(template)
 }
@@ -341,8 +344,11 @@ impl PreparedSequenceSchema {
         let mut frontmatter = darkmatter::markdown::Frontmatter::new();
         // `$schema` is a key every frontmatter accepts; a refusal here would be
         // a Darkmatter invariant change, kept typed as the declaring file's.
-        frontmatter.insert("$schema", declaration.clone()).map_err(|error| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_portable_string(source_path),
+        frontmatter.insert("$schema", declaration.clone()).map_err(|error| CompositionError::SequenceSourceParse {
+            field: None,
+            path: source_path.to_path_buf(),
+            stage: super::super::error::SourceParseStage::Frontmatter,
+            site: Box::new(super::super::error::SequenceSite::at(source_path, property)),
             source: SequenceLoadCause::Frontmatter(Box::new(error)),
         })?;
         let view = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
@@ -391,27 +397,39 @@ impl PreparedSequenceSchema {
     /// failing step.
     pub fn validate_states(&self, plan: &SequencePlan, container: &str) -> Result<(), CompositionError> {
         for step in &plan.steps {
-            let Some(report) = self.validate(&step.state.to_value()) else {
-                return Ok(());
+            self.validate_step(step, step.index, container)?;
+        }
+        Ok(())
+    }
+
+    /// [`Self::validate_states`] for one step, reported at `index`: the
+    /// step's position in the authored list, which a check that set
+    /// unreadable items aside knows and the plan does not.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validate_states`].
+    pub fn validate_step(&self, step: &super::model::SequenceStep, index: usize, container: &str) -> Result<(), CompositionError> {
+        let Some(report) = self.validate(&step.state.to_value()) else {
+            return Ok(());
+        };
+        if let Some(problem) = report.problems.first() {
+            // A top-level missing property has no pointer of its own, so it
+            // is named; every other problem, including a field missing
+            // inside a value, keeps its instance pointer (the message names
+            // the field).
+            let property = match &problem.property {
+                Some(name) if problem.path.is_empty() => name.clone(),
+                _ => problem.path.clone(),
             };
-            if let Some(problem) = report.problems.first() {
-                // A top-level missing property has no pointer of its own, so it
-                // is named; every other problem, including a field missing
-                // inside a value, keeps its instance pointer (the message names
-                // the field).
-                let property = match &problem.property {
-                    Some(name) if problem.path.is_empty() => name.clone(),
-                    _ => problem.path.clone(),
-                };
-                return Err(CompositionError::SequenceStateSchemaViolation {
-                    index: step.index,
-                    id: step.state.id.clone(),
-                    property,
-                    message: problem.message.clone(),
-                    source_path: self.source_path.clone(),
-                    container: container.to_string(),
-                });
-            }
+            return Err(CompositionError::SequenceStateSchemaViolation {
+                index,
+                id: step.state.id.clone(),
+                property,
+                message: problem.message.clone(),
+                source_path: self.source_path.clone(),
+                container: container.to_string(),
+            });
         }
         Ok(())
     }

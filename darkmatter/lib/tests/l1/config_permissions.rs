@@ -328,9 +328,141 @@ fn an_unusable_reference_target_is_an_error_naming_both_files() {
             (fixture.home().join(CONFIG_FILE_NAME).as_path(), "/permissions", Some(2)),
             "{target:?}: located at the reference"
         );
+        // The reference's problem names its target as data, so a host that
+        // reports that file itself can tell this problem follows from it.
+        assert_eq!(source.reference_target.as_deref(), Some(target_path.as_path()), "{target:?}");
         if target.is_none() || needle == "no `permissions` mapping" {
             assert!(text.contains("md init --inline"), "{text}");
         }
+    }
+}
+
+/// Where a broken-reference fixture declares `permissions: <reference>`.
+#[derive(Clone, Copy, Debug)]
+enum Declared {
+    User,
+    Worktree,
+    Head,
+}
+
+/// The reference error when the file of `declared` holds `permissions:
+/// <reference>` and `policy.yaml` beside it holds `target` (absent for
+/// `None`); every other layer is valid.
+fn broken_reference(declared: Declared, reference: &str, target: Option<&str>) -> (Fixture, ConfigError) {
+    let fixture = Fixture::new();
+    let declaration = format!("permissions: {reference}\n");
+    let error = match declared {
+        Declared::User => {
+            fixture.user(&declaration);
+            if let Some(text) = target {
+                fixture.write("home/policy.yaml", text);
+            }
+            reference_error(&fixture.load_outside())
+        }
+        Declared::Worktree => {
+            fixture.user("permissions: {}\n");
+            let tree = fixture.repository(&[]);
+            fixture.worktree(&declaration);
+            if let Some(text) = target {
+                fixture.write("work/policy.yaml", text);
+            }
+            reference_error(&fixture.load_repository(&tree))
+        }
+        Declared::Head => {
+            fixture.user("permissions: {}\n");
+            let mut entries = vec![(CONFIG_FILE_NAME, FILE, declaration.as_str())];
+            entries.extend(target.map(|text| ("policy.yaml", FILE, text)));
+            let tree = fixture.repository(&entries);
+            fixture.worktree("permissions: {}\n");
+            reference_error(&fixture.load_repository(&tree))
+        }
+    };
+    (fixture, error)
+}
+
+/// The remedy of a broken reference names a command only when that command
+/// writes the declaring file: `md init --inline` for the user file, a
+/// direct correction for a repository file, and the commit for `HEAD`.
+fn assert_scoped_remedy(declared: Declared, target: Option<&str>, diagnosis: &str, fix: &str) {
+    let (fixture, error) = broken_reference(declared, "./policy.yaml", target);
+    let source = error.problems().last().unwrap();
+    let message = source.message.as_str();
+    assert!(message.contains(diagnosis) && message.contains(fix), "{declared:?} {target:?}: {message}");
+    let (revision, declared_in) = match declared {
+        Declared::User => (ConfigRevision::User, fixture.home().join(CONFIG_FILE_NAME)),
+        Declared::Worktree => (ConfigRevision::RepositoryWorktree, fixture.work().join(CONFIG_FILE_NAME)),
+        Declared::Head => (ConfigRevision::RepositoryHead, fixture.work().join(CONFIG_FILE_NAME)),
+    };
+    assert_eq!((source.revision, source.file.as_path()), (revision, declared_in.as_path()), "{message}");
+    let commit = "commit the correction too, because this reference is declared in the commit at HEAD";
+    match declared {
+        Declared::User => {
+            assert!(message.contains("or run `md init --inline` to write the block back inline"), "{message}");
+            assert!(!message.contains("commit"), "{message}");
+        }
+        Declared::Worktree | Declared::Head => {
+            assert!(!message.contains("md init"), "a user-scoped command cannot repair it: {message}");
+            let inline = format!("point `permissions` in `{}` at another file or write the block there inline", declared_in.display());
+            assert!(message.contains(&inline), "{message}");
+            assert_eq!(message.contains(commit), matches!(declared, Declared::Head), "{message}");
+        }
+    }
+}
+
+macro_rules! scoped_remedy_tests {
+    ($($name:ident: $declared:ident, $target:expr, $diagnosis:expr, $fix:expr;)+) => {$(
+        #[test]
+        fn $name() {
+            assert_scoped_remedy(Declared::$declared, $target, $diagnosis, $fix);
+        }
+    )+};
+}
+
+scoped_remedy_tests! {
+    missing_target_remedy_user: User, None, "which does not exist", "create it";
+    missing_target_remedy_worktree: Worktree, None, "which does not exist", "create it";
+    missing_target_remedy_head: Head, None, "which does not exist", "create it";
+    invalid_yaml_target_remedy_user: User, Some("permissions: [\n"), "which is not valid YAML", "fix it";
+    invalid_yaml_target_remedy_worktree: Worktree, Some("permissions: [\n"), "which is not valid YAML", "fix it";
+    invalid_yaml_target_remedy_head: Head, Some("permissions: [\n"), "which is not valid YAML", "fix it";
+    chained_target_remedy_user: User, Some("permissions: ./other.yaml\n"), "references do not chain", "write the block in `";
+    chained_target_remedy_worktree: Worktree, Some("permissions: ./other.yaml\n"), "references do not chain", "write the block in `";
+    chained_target_remedy_head: Head, Some("permissions: ./other.yaml\n"), "references do not chain", "write the block in `";
+    nonmapping_target_remedy_user: User, Some("[]\n"), "which is not a YAML mapping", "write a `permissions` mapping in it";
+    nonmapping_target_remedy_worktree: Worktree, Some("[]\n"), "which is not a YAML mapping", "write a `permissions` mapping in it";
+    nonmapping_target_remedy_head: Head, Some("[]\n"), "which is not a YAML mapping", "write a `permissions` mapping in it";
+    wrong_block_type_remedy_user: User, Some("permissions: 3\n"), "whose `permissions` is not a mapping", "write a `permissions` mapping in it";
+    wrong_block_type_remedy_worktree: Worktree, Some("permissions: 3\n"), "whose `permissions` is not a mapping", "write a `permissions` mapping in it";
+    wrong_block_type_remedy_head: Head, Some("permissions: 3\n"), "whose `permissions` is not a mapping", "write a `permissions` mapping in it";
+    missing_block_remedy_user: User, Some("{}\n"), "which has no `permissions` mapping", "write a `permissions` mapping in it";
+    missing_block_remedy_worktree: Worktree, Some("{}\n"), "which has no `permissions` mapping", "write a `permissions` mapping in it";
+    missing_block_remedy_head: Head, Some("{}\n"), "which has no `permissions` mapping", "write a `permissions` mapping in it";
+}
+
+#[test]
+fn an_equivalent_reference_spelling_keeps_the_remedy() {
+    for declared in [Declared::User, Declared::Worktree, Declared::Head] {
+        let remedy = |reference: &str| {
+            let (fixture, error) = broken_reference(declared, reference, Some("permissions: 3\n"));
+            let message = error.problems().last().unwrap().message.clone();
+            message.replacen(&format!("`{reference}`"), "`<reference>`", 1).replace(&fixture.root.display().to_string(), "<root>")
+        };
+        assert_eq!(remedy("./policy.yaml"), remedy("./sub/../policy.yaml"), "{declared:?}");
+    }
+}
+
+#[test]
+fn a_valid_referenced_mapping_reports_no_initializer_in_either_scope() {
+    let fixture = Fixture::new();
+    fixture.user("permissions: ./policy.yaml\n");
+    fixture.write("home/policy.yaml", "permissions: {}\n");
+    let tree = fixture.repository(&[(CONFIG_FILE_NAME, FILE, "permissions: ./policy.yaml\n"), ("policy.yaml", FILE, "permissions: {}\n")]);
+    fixture.worktree("permissions: ./policy.yaml\n");
+    fixture.write("work/policy.yaml", "permissions: {}\n");
+    for snapshot in [fixture.load_outside(), fixture.load_repository(&tree)] {
+        let policy = policy(&snapshot);
+        assert!(policy.user().is_referenced());
+        assert!(snapshot.diagnostics().iter().all(|notice| !notice.message.contains("md init")), "{:?}", snapshot.diagnostics());
     }
 }
 

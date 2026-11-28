@@ -46,7 +46,7 @@ fn config_is_saved_under_the_child_home_and_reloaded_from_it() {
     let first = set_favorite(&mut fixture.command(), "codex");
     assert!(first.contains("Set favorite agent"), "{first}");
     assert!(
-        first.contains(&biscuit_file::to_portable_string(&config)),
+        first.contains(&biscuit_file::to_forward_slash_string(&config)),
         "the reported path is the fixture config: {first}"
     );
     assert_eq!(favorite_in(&config), "codex");

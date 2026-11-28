@@ -62,7 +62,7 @@ fn assert_not_a_schema_document<T>(
     reason: simplified_schema::NotSchemaReason,
 ) {
     match result {
-        Err(SchemaError::NotASchemaDocument { path, reason: actual }) => {
+        Err(SchemaError::NotASchemaDocument { path, reason: actual, .. }) => {
             assert_eq!(path, schema_path);
             assert_eq!(actual, reason);
         }
@@ -160,7 +160,7 @@ fn sidecar_shapes_without_a_schema_property_are_rejected_and_envelopes_load_advi
         let result = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path())).validate(&md);
         match rejection {
             Some(reason) => match result {
-                Err(SchemaError::NotASchemaDocument { path, reason: actual }) => {
+                Err(SchemaError::NotASchemaDocument { path, reason: actual, .. }) => {
                     assert_eq!(path, schema_path, "{label}");
                     assert_eq!(actual, reason, "{label}");
                 }

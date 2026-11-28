@@ -4,7 +4,7 @@ use std::io::{self, IsTerminal, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -854,9 +854,9 @@ fn display_path(path: &Path, root: Option<&Path>) -> String {
     if let Some(root) = root
         && let Ok(relative) = path.strip_prefix(root)
     {
-        return to_portable_string(relative);
+        return to_forward_slash_string(relative);
     }
-    to_portable_string(path)
+    to_forward_slash_string(path)
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -1510,7 +1510,7 @@ fn completion_candidate(prefix: &Path, name: &str) -> String {
     if prefix.as_os_str().is_empty() {
         return name.to_string();
     }
-    let base = to_portable_string(prefix);
+    let base = to_forward_slash_string(prefix);
     if base.ends_with('/') {
         format!("{base}{name}")
     } else {
@@ -2122,7 +2122,7 @@ fn render_unified_diagnostic(
     // Location line: "  --> file:line:col"
     let location = format!(
         "{}:{}:{}",
-        to_portable_string(file),
+        to_forward_slash_string(file),
         diagnostic.range.start_line,
         diagnostic.range.start_column
     );
@@ -2320,7 +2320,7 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
         RiskBand::Moderate => "yellow",
     };
 
-    let rel = render::literal(&to_portable_string(&analysis.relative_path));
+    let rel = render::literal(&to_forward_slash_string(&analysis.relative_path));
     let label = match file_url(Path::new(analysis.file.raw())).filter(|_| term.osc_link_support) {
         Some(url) => format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url)),
         None => rel,

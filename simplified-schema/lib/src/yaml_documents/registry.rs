@@ -51,6 +51,9 @@ use crate::roots::{SchemaRootState, SchemaRoots};
 use crate::triggers::discovery::SchemaRootSource;
 use crate::triggers::envelope::lexically_declared_kind;
 
+use super::declaration::claim_segments;
+use super::load::{load_yaml_document, locating_problem};
+
 /// What a host supplies to a registry: the reserved namespace its kind
 /// definitions resolve `Name@<namespace><stem>` imports through, and the
 /// prepared shipped definitions (one per [`ENVELOPE_DEFINITIONS`] entry, in
@@ -185,9 +188,9 @@ pub struct RegisteredDefinition {
 }
 
 impl RegisteredDefinition {
-    /// The definition `source` names, whose `$schema` the host already
-    /// resolved as `resolved`. Its claimed kinds are read by the same rule as
-    /// a shipped or local definition's.
+    /// The definition `source` names, whose authored text is `text` and
+    /// whose `$schema` the host already resolved as `resolved`. Its claimed
+    /// kinds are read by the same rule as a shipped or local definition's.
     ///
     /// `sameness` says which entries are copies of one definition: entries
     /// claiming a kind with equal `sameness` collapse into one claim, and
@@ -196,10 +199,11 @@ impl RegisteredDefinition {
     ///
     /// ## Errors
     ///
-    /// [`SchemaError::SchemaDocument`] naming `source.file` when the export
-    /// claims no finite set of kinds, as for a local definition.
-    pub fn new(source: RegisteredSource, resolved: ResolvedSchema, sameness: impl Into<String>) -> Result<Self, SchemaError> {
-        let kinds = claimed_kinds(&resolved, &source.file)?;
+    /// [`SchemaError::SchemaDocument`] naming `source.file`, spanning the
+    /// claim's declaration in `text`, when the export claims no finite set
+    /// of kinds, as for a local definition.
+    pub fn new(source: RegisteredSource, text: &str, resolved: ResolvedSchema, sameness: impl Into<String>) -> Result<Self, SchemaError> {
+        let kinds = claimed_kinds(&resolved, &source.file, text)?;
         let definition = KindDefinition { source: DefinitionSource::Registered(source.clone()), resolved, kinds };
         Ok(Self { source, definition: Arc::new(definition), sameness: sameness.into() })
     }
@@ -636,7 +640,8 @@ pub fn prepare_shipped(
     mode: PreparationMode<'_>,
 ) -> Result<KindDefinition, SchemaError> {
     let resolved = crate::resolve::prepare_embedded_yaml_schema_with_mode(path, documents, sources, mode)?;
-    let kinds = claimed_kinds(&resolved, Path::new(path))?;
+    let text = documents.iter().find(|document| document.path == path).map_or("", |document| document.text);
+    let kinds = claimed_kinds(&resolved, Path::new(path), text)?;
     Ok(KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds })
 }
 
@@ -679,23 +684,29 @@ fn prepare_candidate(
     sources: ShippedSources,
 ) -> Result<KindDefinition, SchemaError> {
     let resolved = crate::resolve::prepare_yaml_schema_text(file, text, schema_roots, context, sources)?;
-    let kinds = claimed_kinds(&resolved, file)?;
+    let kinds = claimed_kinds(&resolved, file, text)?;
     Ok(KindDefinition { source: DefinitionSource::File(file.to_path_buf()), resolved, kinds })
 }
 
-/// The kinds `resolved`, the export of the definition at `file`, claims:
-/// the one rule for shipped, local, and registered definitions.
-fn claimed_kinds(resolved: &ResolvedSchema, file: &Path) -> Result<Vec<String>, SchemaError> {
-    claimed_values(resolved, "kind").map_err(|problem| claim_error(file, &problem))
+/// The kinds `resolved`, the export of the definition at `file` whose
+/// authored text is `text`, claims: the one rule for shipped, local, and
+/// registered definitions.
+fn claimed_kinds(resolved: &ResolvedSchema, file: &Path, text: &str) -> Result<Vec<String>, SchemaError> {
+    claimed_values(resolved, "kind").map_err(|problem| claim_error(file, &problem, text))
 }
 
 /// The error for a definition whose export claims no finite set of kinds.
-pub(crate) fn claim_error(file: &Path, problem: &crate::ClaimProblem) -> SchemaError {
+/// Its `span` is the claim's declaration ([`claim_segments`]) in `text`, the
+/// definition's authored text, located as the whole-YAML check locates it
+/// (a claim an arm's file reference supplied has no node of its own, so
+/// the nearest node on its path stands in).
+pub(crate) fn claim_error(file: &Path, problem: &crate::ClaimProblem, text: &str) -> SchemaError {
+    let span = load_yaml_document(text, file).ok().and_then(|loaded| loaded.byte_range(&locating_problem(&claim_segments(problem))));
     SchemaError::SchemaDocument {
         path: file.to_path_buf(),
         message: format!("the exported `$schema` claims no document kind: {problem}"),
         source: None,
-        span: None,
+        span,
     }
 }
 

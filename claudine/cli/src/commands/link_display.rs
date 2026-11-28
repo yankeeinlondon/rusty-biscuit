@@ -141,7 +141,7 @@ pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResou
     let user_display = support
         .user_path
         .as_ref()
-        .map(|p| format!("~/{}", biscuit_file::to_portable_string(p)))
+        .map(|p| format!("~/{}", biscuit_file::to_forward_slash_string(p)))
         .unwrap_or_else(|| "-".to_string());
     let repo_display = support
         .repo_path
@@ -149,7 +149,7 @@ pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResou
         .map(|p| {
             format!(
                 "<magenta>{}</magenta>",
-                biscuit_file::to_portable_string(p)
+                biscuit_file::to_forward_slash_string(p)
             )
         })
         .unwrap_or_else(|| "-".to_string());

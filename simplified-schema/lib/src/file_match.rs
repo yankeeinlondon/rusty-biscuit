@@ -841,7 +841,7 @@ mod tests {
         }
         let mut names: Vec<String> = found
             .iter()
-            .map(|path| biscuit_file::to_portable_string(path.strip_prefix(root).unwrap()))
+            .map(|path| biscuit_file::to_forward_slash_string(path.strip_prefix(root).unwrap()))
             .collect();
         names.sort();
         names
@@ -1127,7 +1127,7 @@ mod tests {
         // A structural validator judges an existing absolute path by every group.
         let structural =
             crate::validate::build_structural_validator(&keyword_schema(keyword)).unwrap();
-        let absolute = |name: &str| biscuit_file::to_portable_string(&root.join(name));
+        let absolute = |name: &str| biscuit_file::to_forward_slash_string(&root.join(name));
         assert!(structural.is_valid(&serde_json::json!({ "spec": absolute("guide-intro.md") })));
         assert!(!structural.is_valid(&serde_json::json!({ "spec": absolute("notes.md") })));
         assert!(!structural.is_valid(&serde_json::json!({ "spec": absolute("guide.txt") })));

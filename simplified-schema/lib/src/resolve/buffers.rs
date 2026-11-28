@@ -19,6 +19,12 @@
 //! [`guarded`] lets a host judge each schema source before it is read (from
 //! a buffer or the disk): a refused path fails its read as
 //! [`std::io::ErrorKind::PermissionDenied`] and nothing is read.
+//!
+//! [`SharedReads`] is a host's observation of local files that outlives one
+//! resolution: with it in force ([`enter_shared_reads`]), each file the
+//! resolver reads from the disk is opened once for the whole observation,
+//! and host readers outside the resolver ([`shared_reads`]) read the same
+//! bytes.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -86,6 +92,183 @@ impl SourceBuffers {
     }
 }
 
+/// A local file's bytes as one open read them, with the modification time
+/// taken from the same handle, so the two never describe different
+/// revisions.
+#[derive(Clone, Debug)]
+pub struct ReadSource {
+    /// The file's bytes.
+    pub bytes: Arc<[u8]>,
+    /// The file's modification time, when the platform reports one.
+    pub modified: Option<std::time::SystemTime>,
+}
+
+/// Opens the local file at `path` once and reads it whole: the one open
+/// every reader that can share a [`SharedReads`] goes through, and the one
+/// the `work-counters` feature counts per path
+/// (`work_counters::source_opens`).
+///
+/// ## Errors
+///
+/// The open's or the read's I/O error.
+pub fn open_source(path: &Path) -> std::io::Result<ReadSource> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    #[cfg(feature = "work-counters")]
+    crate::work_counters::note_source_open(path);
+    if let Some(observer) = OPEN_OBSERVER.get() {
+        observer(path);
+    }
+    let modified = file.metadata().and_then(|metadata| metadata.modified()).ok();
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(ReadSource { bytes: Arc::from(bytes), modified })
+}
+
+/// The process's [`observe_opens`] observer.
+static OPEN_OBSERVER: std::sync::OnceLock<fn(&Path)> = std::sync::OnceLock::new();
+
+/// Installs `observer`, called with the path of every file
+/// [`open_source`] opens, for the rest of the process: a host's test seam
+/// that counts a binary's opens from outside it. The first installation
+/// wins; `false` when one was already installed.
+pub fn observe_opens(observer: fn(&Path)) -> bool {
+    OPEN_OBSERVER.set(observer).is_ok()
+}
+
+/// One invocation's observation of local source files: the first
+/// successful read of each file, by [`SourceBuffers::key`], served to every
+/// later reader that shares it. Cloning shares the observation.
+///
+/// A host that checks one invocation in several passes (a dry run) gives
+/// every pass the same `SharedReads`, so a prompt, an included file, or a
+/// schema the passes all read is opened once and every pass judges the same
+/// bytes. A failed read is not kept: the next reader tries the file again.
+/// Nothing a reader is refused reaches it: a host's permission check, and
+/// any [`guarded`] scope, run before [`SharedReads::read`] is asked. In
+/// memory only, for the life of the observation.
+#[derive(Clone, Debug, Default)]
+pub struct SharedReads {
+    held: Arc<std::sync::Mutex<HashMap<PathBuf, ReadSource>>>,
+    memos: Arc<Memos>,
+}
+
+/// The host memos one [`SharedReads`] carries ([`SharedReads::memo`]), one
+/// per type.
+#[derive(Default)]
+struct Memos(std::sync::Mutex<Vec<Arc<dyn std::any::Any + Send + Sync>>>);
+
+impl std::fmt::Debug for Memos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Memos").finish_non_exhaustive()
+    }
+}
+
+impl SharedReads {
+    /// The bytes of the file at `path`: those an earlier reader of this
+    /// observation read, else one [`open_source`] whose result is kept.
+    ///
+    /// ## Errors
+    ///
+    /// The open's or the read's I/O error, which is not kept.
+    pub fn read(&self, path: &Path) -> std::io::Result<ReadSource> {
+        let key = SourceBuffers::key(path);
+        if let Some(held) = self.lock().get(&key) {
+            return Ok(held.clone());
+        }
+        let read = open_source(path)?;
+        // A concurrent reader that kept its read first wins, so every
+        // reader of this observation sees one revision.
+        Ok(self.lock().entry(key).or_insert(read).clone())
+    }
+
+    /// Whether this observation already holds the file at `path`, so a
+    /// [`Self::read`] of it opens nothing.
+    #[must_use]
+    pub fn holds(&self, path: &Path) -> bool {
+        self.lock().contains_key(&SourceBuffers::key(path))
+    }
+
+    /// Whether two handles share one observation.
+    #[must_use]
+    pub fn same_reads(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.held, &other.held)
+    }
+
+    /// The observation's one `T`, made on first request: a host's memo of
+    /// work derived from the bytes this observation serves (a prepared
+    /// schema), which lives exactly as long as those bytes are the ones
+    /// every reader sees. Every handle of the observation shares it.
+    #[must_use]
+    pub fn memo<T: std::any::Any + Send + Sync + Default>(&self) -> Arc<T> {
+        let mut memos = self.memos.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(held) = memos.iter().find_map(|memo| Arc::clone(memo).downcast::<T>().ok()) {
+            return held;
+        }
+        let memo = Arc::new(T::default());
+        memos.push(Arc::clone(&memo) as Arc<dyn std::any::Any + Send + Sync>);
+        memo
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, ReadSource>> {
+        self.held.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Restores the [`SharedReads`] in force before [`enter_shared_reads`] when
+/// dropped.
+#[must_use = "the scope ends when the guard is dropped"]
+pub struct SharedReadsScope {
+    previous: Option<SharedReads>,
+}
+
+impl Drop for SharedReadsScope {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        SHARED.with_borrow_mut(|shared| *shared = previous);
+    }
+}
+
+/// Puts `reads` in force on this thread until the returned guard drops:
+/// every schema source the resolver reads from the disk, and every host
+/// reader that asks [`shared_reads`], reads through it.
+pub fn enter_shared_reads(reads: SharedReads) -> SharedReadsScope {
+    SharedReadsScope { previous: SHARED.with_borrow_mut(|shared| shared.replace(reads)) }
+}
+
+/// Runs `resolve` with `reads` in force on this thread ([`enter_shared_reads`]).
+pub fn with_shared_reads<T>(reads: &SharedReads, resolve: impl FnOnce() -> T) -> T {
+    let _scope = enter_shared_reads(reads.clone());
+    resolve()
+}
+
+/// The [`SharedReads`] in force on this thread, when one is.
+#[must_use]
+pub fn shared_reads() -> Option<SharedReads> {
+    SHARED.with_borrow(Clone::clone)
+}
+
+/// The [`SharedReads`] in force on this thread when every schema source a
+/// resolution reads here now comes from it: no [`guarded`] or
+/// [`bundle`](super::bundle) scope is running, and every open buffer in
+/// force is a copy of bytes the observation holds (a
+/// [`with_reads_retained`] scope's), never an editor's text. A host may
+/// then reuse work it derived from the observation's bytes ([`SharedReads::memo`]),
+/// since a resolution would read the same bytes again.
+#[must_use]
+pub fn shared_reads_alone() -> Option<SharedReads> {
+    let shared = shared_reads()?;
+    if GUARDS.with_borrow(|guards| !guards.is_empty()) || super::bundle::current().is_some() {
+        return None;
+    }
+    let copies = ACTIVE.with_borrow(|active| {
+        active.texts.iter().all(|(path, text)| {
+            shared.lock().get(path).is_some_and(|held| *held.bytes == *text.as_bytes())
+        })
+    });
+    copies.then_some(shared)
+}
+
 /// The schema texts one [`recording`] scope has read: path and text, in
 /// read order.
 pub type ReadSources = Vec<(PathBuf, Arc<str>)>;
@@ -98,6 +281,8 @@ thread_local! {
     static RETAINING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The guards of the running [`guarded`] scopes, outermost first.
     static GUARDS: RefCell<Vec<ReadGuard>> = const { RefCell::new(Vec::new()) };
+    /// The [`SharedReads`] [`enter_shared_reads`] put in force.
+    static SHARED: RefCell<Option<SharedReads>> = const { RefCell::new(None) };
 }
 
 /// A host's judgment of one schema source read: `true` lets it happen.
@@ -212,8 +397,9 @@ pub(super) fn is_open(path: &Path) -> bool {
 }
 
 /// `path`'s bytes, read as the resolver reads a schema source: the open
-/// buffer's text in force on this thread, else the file's. Outside a
-/// [`with`] scope this is [`std::fs::read`]. A host reading a file that a
+/// buffer's text in force on this thread, else the file's, through the
+/// [`SharedReads`] in force when there is one (after every guard). Outside
+/// both scopes this is one [`open_source`]. A host reading a file that a
 /// resolution depends on (a data file a slot loads) reads it here, so an
 /// editor's unsaved text is what it sees.
 ///
@@ -240,7 +426,10 @@ pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
         record(path, &text);
         return Ok(text.as_bytes().to_vec());
     }
-    let bytes = std::fs::read(path)?;
+    let bytes = match shared_reads() {
+        Some(shared) => shared.read(path)?.bytes.to_vec(),
+        None => open_source(path)?.bytes.to_vec(),
+    };
     super::observed::opened(path);
     // Non-UTF-8 bytes fail the read's caller, so there is nothing to keep.
     if let Ok(text) = std::str::from_utf8(&bytes)
@@ -295,6 +484,40 @@ pub(crate) fn current() -> SourceBuffers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_reads_serve_the_first_read_and_keep_no_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.yaml");
+        let shared = SharedReads::default();
+        assert!(shared.read(&path).is_err(), "a missing file fails");
+        assert!(!shared.holds(&path), "and its failure is not kept");
+
+        std::fs::write(&path, "first").unwrap();
+        assert_eq!(&*shared.read(&path).unwrap().bytes, b"first");
+        std::fs::write(&path, "second").unwrap();
+
+        // Every reader of the observation sees the first read, through the
+        // resolver's reader too; one sharing nothing reads the file now.
+        assert_eq!(&*shared.clone().read(&path).unwrap().bytes, b"first");
+        assert_eq!(with_shared_reads(&shared, || read(&path).unwrap()), b"first");
+        assert_eq!(read(&path).unwrap(), b"second");
+        assert_eq!(&*SharedReads::default().read(&path).unwrap().bytes, b"second");
+    }
+
+    #[test]
+    fn a_guard_refuses_a_path_the_shared_reads_already_hold() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.yaml");
+        std::fs::write(&path, "held").unwrap();
+        let shared = SharedReads::default();
+        shared.read(&path).unwrap();
+
+        let refused = with_shared_reads(&shared, || guarded(std::rc::Rc::new(|_: &Path| false), || read(&path)));
+
+        assert_eq!(refused.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(with_shared_reads(&shared, || read(&path).unwrap()), b"held");
+    }
 
     #[test]
     fn a_snapshot_applies_only_inside_with_and_is_restored_after() {

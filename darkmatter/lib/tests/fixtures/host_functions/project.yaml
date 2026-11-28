@@ -1,4 +1,4 @@
-kind: schema
+kind: expression-schema
 categories:
     - Project -> Ask about the files and names of the test host's project.
 types:

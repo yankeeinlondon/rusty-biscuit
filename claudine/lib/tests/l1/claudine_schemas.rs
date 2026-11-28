@@ -1,4 +1,4 @@
-//! Claudine's schema bundle under `claudine/schemas/` (`2026-10-21-claudine-schemas`,
+//! Claudine's schema bundle under `claudine/registration/` (`2026-10-21-claudine-schemas`,
 //! criteria 1–5): the bundle's files load through Darkmatter's loader, the action
 //! types agree with the lifecycle parser's verb inventory and Darkmatter's
 //! catalogs, the bundles copy the category short forms, all three lifecycle
@@ -6,14 +6,20 @@
 //! `tests/fixtures/claudine-schemas/` gets its decided verdicts through the
 //! same trigger-discovery path DMLS uses.
 //!
-//! Every bundle is copied into a temporary repository's `schemas/` folder and
-//! discovered from a context built from a `RequestSnapshot` with a fixture
-//! home, so neither the checkout nor the process environment is consulted.
-//! Each test reads the repository files it needs with `include_str!`, so a
-//! change to one of them schedules exactly the tests that read it.
+//! Every bundle is loaded as Claudine's registered host profile, from the
+//! bytes alone as the in-process launch loads its compiled registration
+//! ([`SchemaRepo::discover`]) or published into the fixture home and loaded
+//! through a `register` entry ([`SchemaRepo::discover_installed`]), and is
+//! copied into a temporary repository's `registration/` folder (no schema
+//! root) for the tests that import its types. Documents are judged from a
+//! context built from a `RequestSnapshot` with that fixture home, so neither
+//! the checkout nor the process environment is consulted. Each test reads
+//! the repository files it needs with `include_str!`, so a change to one of
+//! them schedules exactly the tests that read it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use claudine::composition::lifecycle::actions::all_lifecycle_verbs;
@@ -25,32 +31,35 @@ use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use simplified_schema::triggers::{PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::validate::build_position_map;
+use claudine::composition::registration::{FileKind, PublishedFile, RegistrationInventory};
+use darkmatter::config::registration::{RegisteredHostProfile, RegisteredHosts};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
-use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 
-/// A key that selects `claudine.yaml` without adding a lifecycle stack.
+/// A key that selects `composition.yaml` without adding a lifecycle stack.
 /// `initialize`, `cancelled`, and `finalize` are shared with Darkmatter's
 /// `md` host and select nothing on their own, so a probe of Claudine's types
 /// for them carries this line.
 pub(crate) const CLAUDINE_SELECTOR: &str = "agent: claude";
 
-/// One bundle file: its name in `schemas/` and its text.
+/// One bundle file: its name under the bundle's `schemas/` and its text.
 pub(crate) type BundleFile = (&'static str, String);
 
-/// A temporary repository whose `schemas/` folder holds a schema bundle, with
-/// a fixture home beside it.
+/// A temporary repository whose `registration/` folder holds a copy of a
+/// schema bundle (outside every schema root), with a fixture home beside it.
 pub(crate) struct SchemaRepo {
     _dir: tempfile::TempDir,
     docs: PathBuf,
     home: PathBuf,
+    files: Vec<BundleFile>,
 }
 
 impl SchemaRepo {
-    /// A repository holding `files` in `schemas/`. The `.git` skeleton makes
-    /// the folder a repository without spawning Git, so its `schemas/` is the
-    /// file-tree-root schema location of every document under it.
+    /// A repository holding `files` in `registration/`. The `.git` skeleton
+    /// makes the folder a repository without spawning Git, so its `schemas/`
+    /// (absent) is the file-tree-root schema location of every document
+    /// under it.
     pub(crate) fn new(files: &[BundleFile]) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let repo = dir.path().join("repo");
@@ -60,16 +69,16 @@ impl SchemaRepo {
         std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").expect("git HEAD");
         std::fs::write(git.join("config"), "[core]\nrepositoryformatversion = 0\nbare = false\n")
             .expect("git config");
-        let schemas = repo.join("schemas");
-        std::fs::create_dir_all(&schemas).expect("schemas dir");
+        let registration = repo.join("registration");
+        std::fs::create_dir_all(&registration).expect("registration dir");
         for (name, text) in files {
-            std::fs::write(schemas.join(name), text).expect("write schema");
+            std::fs::write(registration.join(name), text).expect("write schema");
         }
         let docs = repo.join("docs");
         std::fs::create_dir_all(&docs).expect("docs dir");
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).expect("home dir");
-        Self { _dir: dir, docs, home }
+        Self { _dir: dir, docs, home, files: files.to_vec() }
     }
 
     /// Writes a document into the repository's `docs/` folder.
@@ -86,69 +95,119 @@ impl SchemaRepo {
         build_resolution_context(&snapshot).expect("fixture context")
     }
 
-    /// Trigger discovery over this repository's schema locations.
-    pub(crate) fn discover(&self) -> Result<Discovered, SchemaError> {
-        let context = self.context();
-        let schemas = DarkmatterSchemas::new(context.clone()).with_trigger_discovery()?;
-        Ok(Discovered { schemas, context })
+    /// The bundle as Claudine's registered host, loaded from its bytes as
+    /// the in-process launch loads its compiled registration, with the
+    /// repository's schema-root triggers above it.
+    ///
+    /// ## Errors
+    ///
+    /// The registration's refusals, as text, when the bundle does not load.
+    pub(crate) fn discover(&self) -> Result<Discovered, String> {
+        self.discovered(registered_hosts_of(&self.files)?)
     }
 
-    /// Trigger discovery with `bundle` registered as the last-resort
-    /// location, in the order Claudine's launch verdict registers it.
-    pub(crate) fn discover_embedded(&self, bundle: EmbeddedSchemaBundle) -> Result<Discovered, SchemaError> {
+    /// The bundle published into the fixture home by Claudine's publisher
+    /// and loaded through a `register` entry naming its manifest, as
+    /// Darkmatter loads an installed registration.
+    ///
+    /// ## Errors
+    ///
+    /// The registration's warnings, as text, when the bundle does not load.
+    pub(crate) fn discover_installed(&self) -> Result<Discovered, String> {
+        use darkmatter::config::load::{ConfigRevision, Registration};
+        let inventory = inventory_of(&self.files);
+        claudine::composition::registration::publish(&self.home, &inventory).map_err(|error| error.to_string())?;
+        let entry = Registration {
+            reference: claudine::composition::registration::MANIFEST_REFERENCE.to_string(),
+            index: 0,
+            declared_in: self.home.join(".darkmatter.yaml"),
+            revision: ConfigRevision::User,
+            at: None,
+        };
+        let loaded = darkmatter::config::registration::load_entries(
+            &[entry],
+            &self.context(),
+            darkmatter::config::registration::md_owned_names(),
+        );
+        if !loaded.diagnostics.is_empty() {
+            let messages: Vec<&str> = loaded.diagnostics.iter().map(|diagnostic| diagnostic.message.as_str()).collect();
+            return Err(messages.join("\n"));
+        }
+        self.discovered(Arc::new(RegisteredHosts::new(Arc::new(loaded))))
+    }
+
+    fn discovered(&self, hosts: Arc<RegisteredHosts>) -> Result<Discovered, String> {
         let context = self.context();
+        let profile = match hosts.claims() {
+            [darkmatter::config::registration::HostClaim::Agreed { profile, .. }] => Arc::clone(profile),
+            other => return Err(format!("one agreed Claudine claim, not {other:?}")),
+        };
         let schemas = DarkmatterSchemas::new(context.clone())
-            .with_embedded_trigger_bundle(bundle)?
-            .with_trigger_discovery()?;
-        Ok(Discovered { schemas, context })
+            .with_registered_hosts(hosts)
+            .with_trigger_discovery()
+            .map_err(|error| error.to_string())?;
+        Ok(Discovered { schemas, profile, context })
     }
 }
 
-/// `files` as an embedded bundle named like Claudine's.
-///
-/// Interns trigger text per (trigger text, every library text) combination
-/// to avoid leaking duplicate fixture strings. Darkmatter's process memo
-/// compares the trigger's content and every imported library's content, so
-/// edited libraries invalidate a load while unrelated trigger edits do not.
-pub(crate) fn embedded_bundle(files: &[BundleFile]) -> EmbeddedSchemaBundle {
-    use claudine::composition::schema::bundle::CLAUDINE_TRIGGER_FILES;
-    static TRIGGER_TEXTS: std::sync::Mutex<BTreeMap<(String, String), &'static str>> =
-        std::sync::Mutex::new(BTreeMap::new());
-    let libraries: String = files
-        .iter()
-        .filter(|(name, _)| !CLAUDINE_TRIGGER_FILES.contains(name))
-        .map(|(name, text)| format!("{name}\0{text}\0"))
-        .collect();
-    let files: Vec<(&'static str, &'static str)> = files
+/// The registration inventory `files` describe: each file as a `schemas/`
+/// member (its kind and name taken from the compiled member of that name),
+/// the compiled namespace members it does not replace, which the host
+/// catalog and the lifecycle artifact need, and the compiled lifecycle
+/// artifact.
+pub(crate) fn inventory_of(files: &[BundleFile]) -> RegistrationInventory {
+    let compiled = RegistrationInventory::claudine();
+    let mut members: Vec<PublishedFile> = files
         .iter()
         .map(|(name, text)| {
-            let leak = || &*Box::leak(text.clone().into_boxed_str());
-            if !CLAUDINE_TRIGGER_FILES.contains(name) {
-                return (*name, leak());
-            }
-            let mut texts = TRIGGER_TEXTS.lock().expect("trigger texts");
-            (*name, *texts.entry((format!("{name}\0{text}"), libraries.clone())).or_insert_with(leak))
+            let member = claudine::composition::inventory::member(name);
+            let kind = member.map_or(FileKind::Library, |member| member.kind.into());
+            PublishedFile::new(format!("schemas/{name}"), kind, member.and_then(|member| member.name), text.clone().into_bytes())
         })
         .collect();
-    EmbeddedSchemaBundle::new(
-        claudine::composition::schema::bundle::CLAUDINE_SCHEMA_BUNDLE_NAME,
-        Box::leak(files.into_boxed_slice()),
-    )
+    for file in compiled.members() {
+        let kept = matches!(file.kind(), FileKind::Namespace | FileKind::Lifecycle);
+        if kept && !members.iter().any(|member| member.path() == file.path()) {
+            members.push(file.clone());
+        }
+    }
+    RegistrationInventory::from_members(compiled.version().to_string(), members)
 }
 
-/// A discovered bundle, reused for every document of one test.
+/// The registered hosts of `files` ([`inventory_of`]): the process's
+/// prepared compiled registration when they are exactly its files, and a
+/// profile prepared from their text otherwise.
+///
+/// ## Errors
+///
+/// The registration's refusals, as text, each naming its file.
+pub(crate) fn registered_hosts_of(files: &[BundleFile]) -> Result<Arc<RegisteredHosts>, String> {
+    let inventory = inventory_of(files);
+    if inventory == *RegistrationInventory::claudine() {
+        return Ok(Arc::clone(claudine::composition::schema::bundle::claudine_hosts()));
+    }
+    let profile = claudine::composition::schema::bundle::profile_of(&inventory).map_err(|refusals| {
+        refusals.iter().map(|refusal| format!("{}: {}", refusal.file.display(), refusal.message)).collect::<Vec<_>>().join("\n")
+    })?;
+    Ok(claudine::composition::schema::bundle::hosts_of(profile))
+}
+
+/// A loaded bundle, reused for every document of one test.
 pub(crate) struct Discovered {
     pub(crate) schemas: DarkmatterSchemas,
+    /// The bundle's registered profile.
+    pub(crate) profile: Arc<RegisteredHostProfile>,
     context: FileResolutionContext,
 }
 
 /// What Darkmatter decided for one document.
 pub(crate) struct Judged {
-    /// Whether `claudine.yaml`'s trigger matched.
+    /// Whether `composition.yaml`'s trigger matched.
     pub(crate) claudine: bool,
-    /// Whether `inline-compose.yaml`'s trigger matched.
+    /// Whether `inline-composition.yaml`'s trigger matched.
     pub(crate) inline: bool,
-    /// The effective schema's top-level properties.
+    /// The effective schema's top-level properties, in every arm of a root
+    /// union.
     pub(crate) properties: BTreeSet<String>,
     /// The validation verdict.
     pub(crate) report: ValidationReport,
@@ -158,8 +217,8 @@ pub(crate) struct Judged {
 }
 
 impl Discovered {
-    /// Whether the discovered trigger whose file text is `trigger` selects
-    /// the document at `path`, evaluated on the discovered registry.
+    /// Whether the registered trigger whose file text is `trigger` selects
+    /// the document at `path`.
     pub(crate) fn selects(&self, path: &Path, trigger: &str) -> bool {
         let markdown = Markdown::try_from(path).expect("document loads");
         let frontmatter = frontmatter_json(&markdown);
@@ -167,31 +226,27 @@ impl Discovered {
             .expect("the trigger parses")
             .expect("a trigger envelope");
         let subject = PathSubject::new(path, &self.context);
-        self.schemas
-            .trigger_registry()
-            .expect("discovery installed a registry")
-            .triggers
+        self.profile
+            .triggers()
             .iter()
-            .filter(|discovered| discovered.envelope == envelope)
-            .any(|discovered| discovered.envelope.conditions.matches(&frontmatter, &subject))
+            .filter(|registered| registered.trigger.envelope == envelope)
+            .any(|registered| registered.trigger.envelope.conditions.matches(&frontmatter, &subject))
     }
 
-    /// Judges the document at `path`: which shipped triggers its frontmatter
-    /// selects (evaluated on the discovered registry, identified by their
-    /// envelopes), the effective schema, and the validation report.
+    /// Judges the document at `path`: which registered triggers its
+    /// frontmatter selects (identified by their envelopes), the effective
+    /// schema, and the validation report.
     pub(crate) fn judge(&self, path: &Path, claudine_trigger: &str, inline_trigger: &str) -> Result<Judged, SchemaError> {
         let markdown = Markdown::try_from(path)
             .expect("document loads")
             .with_source(ComposeSource::File(path.to_path_buf()));
         let frontmatter = frontmatter_json(&markdown);
-        // A matrix cell may have edited a file out of the trigger envelope;
-        // such a file selects nothing.
         let claudine_envelope = parse_trigger_envelope_from_str(claudine_trigger).ok().flatten();
         let inline_envelope = parse_trigger_envelope_from_str(inline_trigger).ok().flatten();
         let subject = PathSubject::new(path, &self.context);
         let mut claudine = false;
         let mut inline = false;
-        for trigger in &self.schemas.trigger_registry().expect("discovery installed a registry").triggers {
+        for trigger in self.profile.triggers().iter().map(|registered| &registered.trigger) {
             let selected = trigger.envelope.conditions.matches(&frontmatter, &subject);
             if claudine_envelope.as_ref() == Some(&trigger.envelope) {
                 claudine |= selected;
@@ -200,10 +255,18 @@ impl Discovered {
             }
         }
         let effective = self.schemas.effective_for(&markdown)?;
+        // A root-union payload (`inline-composition.yaml`) keeps its
+        // properties in its arms, so the declared keys are read from the
+        // per-property origins too.
         let properties = effective
             .as_ref()
-            .and_then(|effective| effective.json_schema["properties"].as_object())
-            .map(|properties| properties.keys().cloned().collect())
+            .map(|effective| {
+                let mut keys: BTreeSet<String> = effective.origins.keys().cloned().collect();
+                if let Some(declared) = effective.json_schema["properties"].as_object() {
+                    keys.extend(declared.keys().cloned());
+                }
+                keys
+            })
             .unwrap_or_default();
         // The same judgment `DarkmatterSchemas::validate` makes, without
         // resolving the effective schema a second time.
@@ -221,6 +284,7 @@ impl Discovered {
                 advisories: Vec::new(),
                 trigger_findings: Vec::new(),
                 defaults: Vec::new(),
+                key_advice: Vec::new(),
             },
         };
         let held = match &effective {
@@ -280,7 +344,7 @@ fn resolved_exports(repo: &SchemaRepo, file: &str, exports: &[&str]) -> BTreeMap
 fn export_fragments(repo: &SchemaRepo, file: &str, exports: &[&str]) -> (BTreeMap<String, Value>, Value) {
     let mut frontmatter = String::from("---\n$schema:\n");
     for export in exports {
-        frontmatter.push_str(&format!("    t_{export}: \"{export}@../schemas/{file}\"\n"));
+        frontmatter.push_str(&format!("    t_{export}: \"{export}@../registration/{file}\"\n"));
     }
     frontmatter.push_str("---\n");
     let path = repo.write_document(&format!("exports-{file}.md"), &frontmatter);
@@ -379,6 +443,43 @@ fn strip_optional_null(fragment: &mut Value) {
         [single] => single.clone(),
         _ => json!({ "anyOf": rest }),
     };
+}
+
+/// [`strip_optional_null`], keeping the union's own annotations (its
+/// `description`) on the arm left: a required declaration carries them
+/// directly.
+fn strip_optional_null_keeping_annotations(fragment: &mut Value) {
+    let annotations: serde_json::Map<String, Value> = fragment
+        .as_object()
+        .map(|map| map.iter().filter(|(key, _)| *key != "anyOf").map(|(key, value)| (key.clone(), value.clone())).collect())
+        .unwrap_or_default();
+    strip_optional_null(fragment);
+    if let Some(map) = fragment.as_object_mut() {
+        for (key, value) in annotations {
+            map.entry(key).or_insert(value);
+        }
+    }
+}
+
+/// The declaration of the top-level `property` in the lowered `root`, and
+/// whether it came from an arm of a root union: the root's own
+/// `properties`, or the first union arm (following a local `$ref`) that
+/// declares it as more than `null`.
+pub(crate) fn declared_fragment<'a>(root: &'a Value, property: &str) -> (&'a Value, bool) {
+    if let Some(fragment) = root["properties"].get(property) {
+        return (fragment, false);
+    }
+    let found = ["anyOf", "oneOf"]
+        .iter()
+        .filter_map(|keyword| root[*keyword].as_array())
+        .flatten()
+        .map(|arm| match arm["$ref"].as_str().and_then(|reference| reference.strip_prefix('#')) {
+            Some(pointer) => root.pointer(pointer).unwrap_or(arm),
+            None => arm,
+        })
+        .filter_map(|arm| arm["properties"].get(property))
+        .find(|fragment| fragment["type"] != json!("null"));
+    (found.unwrap_or(&Value::Null), true)
 }
 
 /// The arms of a lowered property: its `anyOf` arms without the null arm, or
@@ -502,14 +603,21 @@ const CATEGORIES: &[&str] = &["communicate", "flow", "shell", "expression"];
 macro_rules! shipped_bundle {
     () => {
         [
-            ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
-            ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml").to_string()),
-            ("linking.yaml", include_str!("../../../schemas/linking.yaml").to_string()),
-            ("document.yaml", include_str!("../../../schemas/document.yaml").to_string()),
-            ("claudine.yaml", include_str!("../../../schemas/claudine.yaml").to_string()),
-            ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml").to_string()),
-            ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml").to_string()),
-            ("sequence.yaml", include_str!("../../../schemas/sequence.yaml").to_string()),
+            ("action.yaml", include_str!("../../../registration/action.yaml").to_string()),
+            ("lifecycle-events.yaml", include_str!("../../../registration/lifecycle-events.yaml").to_string()),
+            ("linking.yaml", include_str!("../../../registration/linking.yaml").to_string()),
+            ("document.yaml", include_str!("../../../registration/document.yaml").to_string()),
+            ("composition.yaml", include_str!("../../../registration/composition.yaml").to_string()),
+            ("inline-composition.yaml", include_str!("../../../registration/inline-composition.yaml").to_string()),
+            ("sequence.yaml", include_str!("../../../registration/sequence.yaml").to_string()),
+            ("sequence-document.yaml", include_str!("../../../registration/sequence-document.yaml").to_string()),
+            ("shared.yaml", include_str!("../../../registration/shared.yaml").to_string()),
+            ("content-policy.yaml", include_str!("../../../registration/content-policy.yaml").to_string()),
+            ("claudine-config.yaml", include_str!("../../../registration/claudine-config.yaml").to_string()),
+            ("formal-sequence-file.yaml", include_str!("../../../registration/formal-sequence-file.yaml").to_string()),
+            ("group.yaml", include_str!("../../../registration/group.yaml").to_string()),
+            ("loop.yaml", include_str!("../../../registration/loop.yaml").to_string()),
+            ("seq.yaml", include_str!("../../../registration/seq.yaml").to_string()),
         ]
     };
 }
@@ -519,7 +627,7 @@ pub(crate) use shipped_bundle;
 
 #[test]
 fn hand_verbs_equal_the_parser_inventory() {
-    let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
+    let bundle = [("action.yaml", include_str!("../../../registration/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", CATEGORIES);
     let generated = generated_verbs();
@@ -568,8 +676,8 @@ fn hand_verbs_equal_the_parser_inventory() {
 #[test]
 fn generated_verb_keys_equal_the_darkmatter_catalogs() {
     let bundle = [
-        ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
-        ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml").to_string()),
+        ("action.yaml", include_str!("../../../registration/action.yaml").to_string()),
+        ("lifecycle-events.yaml", include_str!("../../../registration/lifecycle-events.yaml").to_string()),
     ];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
@@ -597,13 +705,13 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
     assert_eq!(projected, catalogs, "the projection covers the catalog verbs");
     let authored = |file: &str| -> biscuit_file::serde_yaml_ng::Value {
         let text = match file {
-            "action.yaml" => include_str!("../../../schemas/action.yaml"),
-            _ => include_str!("../../../schemas/lifecycle.yaml"),
+            "action.yaml" => include_str!("../../../registration/action.yaml"),
+            _ => include_str!("../../../registration/lifecycle-events.yaml"),
         };
         biscuit_file::serde_yaml_ng::from_str(text).expect("the file parses")
     };
     let action = authored("action.yaml");
-    let lifecycle = authored("lifecycle.yaml");
+    let lifecycle = authored("lifecycle-events.yaml");
     let reference = |name: String| biscuit_file::serde_yaml_ng::Value::String(format!("{name}@darkmatter:lifecycle"));
     for (_, verb) in &projection.verbs {
         let short = reference(verb.short_type_name());
@@ -623,7 +731,7 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
 
     // The loop declares `max` once, as its iteration control, and every
     // other catalog verb as a loose key, in both arms.
-    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &["loop-bundle", "loop-single"]);
+    let lifecycle = resolved_exports(&repo, "lifecycle-events.yaml", &["loop-bundle", "loop-single"]);
     let loop_keys = property_names(&lifecycle["loop-bundle"]);
     let single_keys = property_names(&lifecycle["loop-single"]);
     for verb in &catalogs {
@@ -646,11 +754,11 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
 #[test]
 fn bare_verb_enum_equals_what_the_parser_accepts_as_a_bare_item() {
     let bundle = [
-        ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
-        ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml").to_string()),
+        ("action.yaml", include_str!("../../../registration/action.yaml").to_string()),
+        ("lifecycle-events.yaml", include_str!("../../../registration/lifecycle-events.yaml").to_string()),
     ];
     let repo = SchemaRepo::new(&bundle);
-    let types = resolved_exports(&repo, "lifecycle.yaml", &["bare-verb"]);
+    let types = resolved_exports(&repo, "lifecycle-events.yaml", &["bare-verb"]);
     let declared: BTreeSet<String> = types["bare-verb"]["enum"]
         .as_array()
         .expect("bare-verb is an enum")
@@ -669,7 +777,7 @@ fn bare_verb_enum_equals_what_the_parser_accepts_as_a_bare_item() {
 
 #[test]
 fn bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error() {
-    let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
+    let bundle = [("action.yaml", include_str!("../../../registration/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
     for (export, categories) in [
@@ -702,7 +810,7 @@ fn bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error() {
 
 #[test]
 fn bundle_values_are_the_category_short_forms() {
-    let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
+    let bundle = [("action.yaml", include_str!("../../../registration/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
     let generated = generated_verbs();
@@ -753,8 +861,8 @@ fn bundle_values_are_the_category_short_forms() {
 #[test]
 fn action_objects_are_closed_and_data_maps_stay_open() {
     let bundle = [
-        ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
-        ("linking.yaml", include_str!("../../../schemas/linking.yaml").to_string()),
+        ("action.yaml", include_str!("../../../registration/action.yaml").to_string()),
+        ("linking.yaml", include_str!("../../../registration/linking.yaml").to_string()),
     ];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
@@ -791,7 +899,7 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
     assert!(linking["metadata"].get("additionalProperties").is_none(), "linking metadata stays open");
 
     // No catch-all or pattern key is authored anywhere in the action types.
-    let text = include_str!("../../../schemas/action.yaml");
+    let text = include_str!("../../../registration/action.yaml");
     for key in ["<string>", "<pattern::", "<starting::", "<ending::"] {
         assert!(!text.contains(key), "action.yaml declares no `{key}` key");
     }
@@ -801,8 +909,8 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
 fn required_long_form_fields_survive_every_reference() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
-    let claudine = include_str!("../../../schemas/claudine.yaml");
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    let claudine = include_str!("../../../registration/composition.yaml");
+    let inline = include_str!("../../../registration/inline-composition.yaml");
     for (event, item, missing) in [
         ("start", "{ shell: { on_error: oops } }", "command"),
         ("start", "{ proxy: { with: { a: 1 } } }", "target"),
@@ -836,10 +944,11 @@ fn every_file_loads_and_every_export_resolves() {
     ];
     for (file, exports) in [
         ("action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"][..]),
-        ("lifecycle.yaml", &lifecycle_exports[..]),
+        ("lifecycle-events.yaml", &lifecycle_exports[..]),
         ("linking.yaml", &linking_exports[..]),
-        ("document.yaml", &["prompt", "hash", "last_updated"][..]),
-        ("sequence-types.yaml", &["steps", "step", "task", "group"][..]),
+        ("document.yaml", &["prompt", "sections", "hash", "last_updated"][..]),
+        ("shared.yaml", &["common-attributes"][..]),
+        ("sequence.yaml", &["steps", "step", "task", "group"][..]),
     ] {
         let (fragments, defs) = export_fragments(&repo, file, exports);
         assert_eq!(fragments.len(), exports.len(), "{file}");
@@ -848,21 +957,40 @@ fn every_file_loads_and_every_export_resolves() {
         }
     }
 
-    // The three triggers load, and each payload resolves: a document
-    // selecting claudine.yaml and inline-compose.yaml gets every payload
-    // property of both.
+    // The three triggers load, and each payload resolves: an inline
+    // composition gets every common attribute, and a sequence document gets
+    // composition.yaml's and sequence-document.yaml's properties.
     let discovered = repo.discover().expect("the shipped bundle loads");
-    assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
+    assert_eq!(discovered.profile.triggers().len(), 3);
+    assert!(discovered.schemas.trigger_registry().expect("registry").triggers.is_empty(), "no schema-root trigger");
     let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
     let judged = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("both payloads resolve");
-    assert!(judged.claudine && judged.inline);
-    for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity"] {
+    assert!(!judged.claudine && judged.inline);
+    for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity", "sections", "content_policy"] {
+        assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
+    }
+    assert!(judged.report.valid, "{:?}", problems(&judged.report));
+
+    let path = repo.write_document("sequence.md", "---
+sequence: [plan]
+prompt: hi
+---
+");
+    let judged = discovered
+        .judge(
+            &path,
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
+        )
+        .expect("both payloads resolve");
+    assert!(judged.claudine && !judged.inline);
+    for property in ["initialize", "agent", "prompt", "sequence", "template", "$state"] {
         assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
     }
     assert!(judged.report.valid, "{:?}", problems(&judged.report));
@@ -935,8 +1063,8 @@ fn assert_typed_at_every_depth(bundle: &[BundleFile], claudine: &str, inline: &s
 fn event_stacks_are_typed_at_every_depth() {
     assert_typed_at_every_depth(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         "start: ",
         "{ inf0: hi }",
     );
@@ -946,8 +1074,8 @@ fn event_stacks_are_typed_at_every_depth() {
 fn initialize_stacks_exclude_shell_at_every_depth() {
     assert_typed_at_every_depth(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         "initialize: ",
         "{ shell: ls }",
     );
@@ -957,8 +1085,8 @@ fn initialize_stacks_exclude_shell_at_every_depth() {
 fn loop_gate_is_typed_at_every_depth() {
     assert_typed_at_every_depth(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         "loop: { while: \"x < 3\", gate: ",
         "{ inf0: hi }",
     );
@@ -986,9 +1114,11 @@ enum Parser {
 use Parser::{Accepts, NotJudged, Rejects};
 use Verdict::{Invalid, Valid};
 
-/// `(claudine.yaml matches, inline-compose.yaml matches)`.
+/// `(composition.yaml matches, inline-composition.yaml matches)`.
 const CLAUDINE: (bool, bool) = (true, false);
-const BOTH: (bool, bool) = (true, true);
+/// Inline composition alone: a document with a non-null `prompt` and no
+/// sequence, which composition.yaml leaves to inline-composition.yaml.
+const INLINE: (bool, bool) = (false, true);
 const NEITHER: (bool, bool) = (false, false);
 
 /// One AC5 row: the fixture's name and text, the triggers it must select,
@@ -1086,8 +1216,8 @@ fn assert_ac5(group: usize, bundle: &[BundleFile], claudine: &str, inline: &str,
         );
         assert_eq!(
             judged.properties.contains("initialize"),
-            *claudine_selected,
-            "{name}: Claudine's payload is effective exactly when its trigger matches"
+            *claudine_selected || *inline_selected,
+            "{name}: Claudine's payload is effective exactly when one of its triggers matches"
         );
 
         let found = problems(&judged.report);
@@ -1144,8 +1274,8 @@ fn ac5_depths_and_stack_shapes() {
     assert_ac5(
         0,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             ("depth1", include_str!("../fixtures/claudine-schemas/depth1.md"), CLAUDINE, Valid, Accepts),
             ("depth3", include_str!("../fixtures/claudine-schemas/depth3.md"), CLAUDINE, Valid, Accepts),
@@ -1224,35 +1354,35 @@ fn ac5_shell_placement() {
     assert_ac5(
         1,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             (
                 "shell-in-initialize-list",
                 include_str!("../fixtures/claudine-schemas/shell-in-initialize-list.md"),
                 CLAUDINE,
-                Invalid(&[("/initialize/1", "\"shell\"")]),
+                Invalid(&[("/initialize/1", "'shell' was unexpected")]),
                 Rejects("shell"),
             ),
             (
                 "shell-in-initialize-then",
                 include_str!("../fixtures/claudine-schemas/shell-in-initialize-then.md"),
                 CLAUDINE,
-                Invalid(&[("/initialize/0/then/0", "\"shell\"")]),
+                Invalid(&[("/initialize/0/then/0", "'shell' was unexpected")]),
                 Rejects("shell"),
             ),
             (
                 "shell-in-initialize-root-dictionary",
                 include_str!("../fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md"),
                 CLAUDINE,
-                Invalid(&[("/initialize", "\"shell\"")]),
+                Invalid(&[("/initialize", "'shell' was unexpected")]),
                 Rejects("shell"),
             ),
             (
                 "shell-in-initialize-depth3-then",
                 include_str!("../fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"),
                 CLAUDINE,
-                Invalid(&[("/initialize/0/then/0/then/0/then/0", "\"shell\"")]),
+                Invalid(&[("/initialize/0/then/0/then/0/then/0", "'shell' was unexpected")]),
                 Rejects("initialize[0].then[0].then[0].then[0].shell"),
             ),
             (
@@ -1281,8 +1411,8 @@ fn ac5_malformed_actions() {
     assert_ac5(
         2,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             (
                 "when-with-then-and-sibling",
@@ -1339,8 +1469,8 @@ fn ac5_single_action_dictionaries() {
     assert_ac5(
         5,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             (
                 "single-action-root-dictionary",
@@ -1374,7 +1504,7 @@ fn ac5_single_action_dictionaries() {
                 "conditional-root-dictionary",
                 include_str!("../fixtures/claudine-schemas/conditional-root-dictionary.md"),
                 CLAUDINE,
-                Invalid(&[("/start", "anyOf")]),
+                Invalid(&[("/start", "'then' was unexpected")]),
                 Rejects("never carries `when`"),
             ),
         ],
@@ -1393,8 +1523,8 @@ fn ac5_generated_operands() {
     assert_ac5(
         4,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             (
                 "generated-verb-typed-value",
@@ -1526,14 +1656,14 @@ fn ac5_generated_operands() {
     );
 }
 
-/// Malformed identifying values select `claudine.yaml`, which rejects them.
+/// Malformed identifying values select `composition.yaml`, which rejects them.
 #[test]
 fn ac5_trigger_selection() {
     assert_ac5(
         3,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             (
                 "start-number",
@@ -1568,13 +1698,13 @@ fn ac5_trigger_selection_controls() {
     assert_ac5(
         6,
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         &[
             ("empty-frontmatter", include_str!("../fixtures/claudine-schemas/empty-frontmatter.md"), NEITHER, Valid, NotJudged),
             ("unrelated-ticket", include_str!("../fixtures/claudine-schemas/unrelated-ticket.md"), NEITHER, Valid, NotJudged),
             ("null-identifiers", include_str!("../fixtures/claudine-schemas/null-identifiers.md"), NEITHER, Valid, Accepts),
-            ("controls-beside-ticket", include_str!("../fixtures/claudine-schemas/controls-beside-ticket.md"), BOTH, Valid, Accepts),
+            ("controls-beside-ticket", include_str!("../fixtures/claudine-schemas/controls-beside-ticket.md"), INLINE, Valid, Accepts),
             (
                 "prompt-with-malformed-sequence",
                 include_str!("../fixtures/claudine-schemas/prompt-with-malformed-sequence.md"),
@@ -1582,7 +1712,7 @@ fn ac5_trigger_selection_controls() {
                 Invalid(&[("/sequence", "tasks")]),
                 NotJudged,
             ),
-            ("linked-prompt", include_str!("../fixtures/claudine-schemas/linked-prompt.md"), BOTH, Valid, NotJudged),
+            ("linked-prompt", include_str!("../fixtures/claudine-schemas/linked-prompt.md"), INLINE, Valid, NotJudged),
         ],
     );
 }
@@ -1598,8 +1728,8 @@ fn linked_prompt_declares_every_linking_key_and_keeps_the_root_open() {
     let judged = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged");
     for key in [
@@ -1616,8 +1746,22 @@ fn linked_prompt_declares_every_linking_key_and_keeps_the_root_open() {
         .expect("document loads")
         .with_source(ComposeSource::File(path.clone()));
     let effective = discovered.schemas.effective_for(&markdown).expect("effective").expect("schema");
-    assert_ne!(effective.json_schema["additionalProperties"], json!(false), "the document root stays open");
-    assert!(!effective.json_schema["properties"].as_object().expect("properties").contains_key("ticket"));
+    // The inline payload is a root union: the root and each arm stay open.
+    let root = &*effective.json_schema;
+    let arms: Vec<&Value> = ["anyOf", "oneOf"]
+        .iter()
+        .filter_map(|keyword| root[*keyword].as_array())
+        .flatten()
+        .map(|arm| match arm["$ref"].as_str().and_then(|reference| reference.strip_prefix('#')) {
+            Some(pointer) => root.pointer(pointer).expect("a local reference"),
+            None => arm,
+        })
+        .collect();
+    for schema in std::iter::once(root).chain(arms) {
+        assert_ne!(schema["additionalProperties"], json!(false), "the document root stays open: {schema}");
+        assert!(schema["properties"].get("ticket").is_none(), "`ticket` is not declared");
+    }
+    assert!(!effective.origins.contains_key("ticket"));
     assert!(effective.validate(&frontmatter_json(&markdown)).valid, "`ticket: 123` is accepted beside the controls");
 }
 
@@ -1767,16 +1911,36 @@ fn graph_parity_compares_definitions_through_a_bijective_reference_mapping() {
 }
 
 /// `prompt`, `hash`, and `last_updated` resolve to one type graph through
-/// the library itself, through each metadata trigger alone, and through the
-/// effective schema that merges them, on disk and embedded. Each comparison
+/// the library itself, through each metadata trigger alone, and through
+/// each trigger selected from the whole bundle, on disk and embedded. Each comparison
 /// follows every definition the property reaches, so this holds whether a
 /// definition is inlined or shared, and however its key is spelled.
-#[test]
-fn shared_payload_properties_have_identical_types() {
-    let shipped = shipped_bundle!();
+/// The payload paths [`shared_payload_case`] compares, as (label, bundle,
+/// frontmatter, installed): each trigger alone, then each selected from the
+/// whole bundle, compiled in and installed; the two never select one
+/// document. The first is the reference the others are compared with.
+fn shared_payload_paths(shipped: &[BundleFile]) -> Vec<(&'static str, Vec<BundleFile>, &'static str, bool)> {
     let without = |dropped: &[&str]| -> Vec<BundleFile> {
         shipped.iter().filter(|(name, _)| !dropped.contains(name)).cloned().collect()
     };
+    vec![
+        ("composition.yaml alone", without(&["inline-composition.yaml"]), "---\nagent: claude\n---\n", false),
+        ("inline-composition.yaml alone", without(&["composition.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("the shipped bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
+        ("the shipped bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
+        ("the installed bundle, composition.yaml", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
+        ("the installed bundle, inline-composition.yaml", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
+    ]
+}
+
+/// `prompt`, `hash`, and `last_updated` resolve through payload path
+/// `index` to the same type graph as through the reference path and the
+/// library itself (`library_yaml`, `registration/document.yaml`), and the
+/// path accepts and rejects the same values. Each comparison follows every
+/// definition the property reaches, so this holds whether a definition is
+/// inlined or shared, and however its key is spelled.
+fn shared_payload_case(library_yaml: &str, index: usize) {
+    let shipped = shipped_bundle!();
     let effective_of = |discovered: &Discovered, repo: &SchemaRepo, name: &str, frontmatter: &str| {
         let path = repo.write_document(name, frontmatter);
         let markdown = Markdown::try_from(path.as_path())
@@ -1784,58 +1948,45 @@ fn shared_payload_properties_have_identical_types() {
             .with_source(ComposeSource::File(path.clone()));
         discovered.schemas.effective_for(&markdown).expect("effective").expect("schema")
     };
+    let payload_of = |(label, bundle, frontmatter, installed): &(&'static str, Vec<BundleFile>, &'static str, bool)| {
+        let repo = SchemaRepo::new(bundle);
+        let discovered =
+            if *installed { repo.discover_installed() } else { repo.discover() }.expect("the bundle loads");
+        (*label, effective_of(&discovered, &repo, "metadata.md", frontmatter))
+    };
 
     // The library's own types, imported by a document's `$schema`.
-    let library_repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let library_repo = SchemaRepo::new(&[("document.yaml", library_yaml.to_string())]);
     let mut imports = String::from("---\n$schema:\n");
     for property in DOCUMENT_METADATA {
-        imports.push_str(&format!("    {property}: {property}@../schemas/document.yaml\n"));
+        imports.push_str(&format!("    {property}: {property}@../registration/document.yaml\n"));
     }
     imports.push_str("---\n");
     let library = effective_of(&library_repo.discover().expect("discovery"), &library_repo, "library.md", &imports);
     let library: &Value = &library.json_schema;
 
-    // (label, bundle, frontmatter, embedded): each trigger alone, then the
-    // normal merge, where `inline-compose.yaml` is applied after
-    // `claudine.yaml` and its declarations win.
-    let paths: [(&str, Vec<BundleFile>, &str, bool); 6] = [
-        ("claudine.yaml alone", without(&["inline-compose.yaml"]), "---\nprompt: hi\n---\n", false),
-        ("inline-compose.yaml alone", without(&["claudine.yaml"]), "---\nprompt: hi\n---\n", false),
-        ("the shipped bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
-        ("the shipped bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
-        ("the embedded bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
-        ("the embedded bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
-    ];
-    let mut payloads = Vec::new();
-    for (label, bundle, frontmatter, embedded) in paths {
-        let (repo, discovered) = if embedded {
-            let repo = SchemaRepo::new(&[]);
-            let discovered = repo.discover_embedded(embedded_bundle(&bundle)).expect("the embedded bundle loads");
-            (repo, discovered)
-        } else {
-            let repo = SchemaRepo::new(&bundle);
-            let discovered = repo.discover().expect("the bundle loads");
-            (repo, discovered)
-        };
-        payloads.push((label, effective_of(&discovered, &repo, "metadata.md", frontmatter)));
-    }
-
-    let (first_label, first) = &payloads[0];
+    let paths = shared_payload_paths(&shipped);
+    let (first_label, first) = payload_of(&paths[0]);
+    let (label, payload) = if index == 0 { (first_label, first.clone()) } else { payload_of(&paths[index]) };
     let first: &Value = &first.json_schema;
     for property in DOCUMENT_METADATA {
         let first_fragment = &first["properties"][property];
         assert!(!first_fragment.is_null(), "{first_label} declares `{property}`");
 
-        // Every payload declaration, optional presence included, is one graph.
-        for (label, payload) in &payloads[1..] {
-            let payload: &Value = &payload.json_schema;
-            let fragment = &payload["properties"][property];
+        // Every payload declaration, optional presence included, is one
+        // graph. Inside a root union's arm (`inline-composition.yaml`) the
+        // arm that requires the property declares it without the optional
+        // null arm, so there the declarations are compared without it.
+        if index != 0 {
+            let schema: &Value = &payload.json_schema;
+            let (fragment, in_arm) = declared_fragment(schema, property);
             assert!(!fragment.is_null(), "{label} declares `{property}`");
-            GraphParity::new(first, payload).assert_same(
-                first_fragment,
-                fragment,
-                &format!("`{property}`: {first_label} vs {label}"),
-            );
+            let (mut expected, mut found) = (first_fragment.clone(), fragment.clone());
+            if in_arm {
+                strip_optional_null_keeping_annotations(&mut expected);
+                strip_optional_null_keeping_annotations(&mut found);
+            }
+            GraphParity::new(first, schema).assert_same(&expected, &found, &format!("`{property}`: {first_label} vs {label}"));
         }
 
         // And it is the library's type, apart from the optional null arm.
@@ -1858,10 +2009,63 @@ fn shared_payload_properties_have_identical_types() {
         (json!({ "prompt": "hi", "hash": { "kind": "bogus" } }), false),
         (json!({ "prompt": ["hi"] }), false),
     ] {
-        for (label, payload) in &payloads {
-            let report = payload.validate(&value);
-            assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
-        }
+        let report = payload.validate(&value);
+        assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
+    }
+}
+
+/// One `#[test]` per payload path, so nextest spreads the six bundle
+/// discoveries across cores. Each names the library schema itself, so a
+/// change to it schedules every case.
+mod shared_payload_properties_have_identical_types {
+    use super::*;
+
+    /// The case names, in path order, for the roster guard.
+    const SHARED_PAYLOAD_CASES: &[&str] = &[
+        "composition_alone",
+        "inline_composition_alone",
+        "shipped_bundle_composition",
+        "shipped_bundle_inline_composition",
+        "installed_bundle_composition",
+        "installed_bundle_inline_composition",
+    ];
+
+    #[test]
+    fn composition_alone() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 0);
+    }
+
+    #[test]
+    fn inline_composition_alone() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 1);
+    }
+
+    #[test]
+    fn shipped_bundle_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 2);
+    }
+
+    #[test]
+    fn shipped_bundle_inline_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 3);
+    }
+
+    #[test]
+    fn installed_bundle_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 4);
+    }
+
+    #[test]
+    fn installed_bundle_inline_composition() {
+        shared_payload_case(include_str!("../../../registration/document.yaml"), 5);
+    }
+
+    /// Every payload path has its case, so a path added to the table is
+    /// never left untested.
+    #[test]
+    fn every_payload_path_has_a_case() {
+        let shipped = shipped_bundle!();
+        assert_eq!(shared_payload_paths(&shipped).len(), SHARED_PAYLOAD_CASES.len(), "{SHARED_PAYLOAD_CASES:?}");
     }
 }
 
@@ -1870,11 +2074,11 @@ fn shared_payload_properties_have_identical_types() {
 /// use is reported at that property's instance path.
 #[test]
 fn hash_imported_twice_accepts_both_stored_forms_at_each_use() {
-    let repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../registration/document.yaml").to_string())]);
     let discovered = repo.discover().expect("discovery");
     let path = repo.write_document(
         "two-hashes.md",
-        "---\n$schema:\n    first: hash@../schemas/document.yaml\n    second: hash@../schemas/document.yaml\n---\n",
+        "---\n$schema:\n    first: hash@../registration/document.yaml\n    second: hash@../registration/document.yaml\n---\n",
     );
     let markdown = Markdown::try_from(path.as_path())
         .expect("document loads")
@@ -1919,8 +2123,8 @@ fn hash_imported_twice_accepts_both_stored_forms_at_each_use() {
 fn linking_types_accept_every_reader_form() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
-    let claudine = include_str!("../../../schemas/claudine.yaml");
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    let claudine = include_str!("../../../registration/composition.yaml");
+    let inline = include_str!("../../../registration/inline-composition.yaml");
     for (frontmatter, valid) in [
         ("allowed-tools: Read, Grep", true),
         ("allowed-tools: [Read, Grep]", true),
@@ -1947,8 +2151,8 @@ fn sequence_container_schema_contract() {
     let files = shipped_bundle!();
     let repo = SchemaRepo::new(&files);
     let discovered = repo.discover().expect("shipped schema corpus loads");
-    let trigger = include_str!("../../../schemas/claudine.yaml");
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    let trigger = include_str!("../../../registration/composition.yaml");
+    let inline = include_str!("../../../registration/inline-composition.yaml");
     for (name, yaml, valid) in [
         ("empty", "cancelled: []", true),
         ("communication", "cancelled: [{stderr: cancelled}]", true),
@@ -1969,7 +2173,7 @@ fn sequence_container_schema_contract() {
         for retired in ["state", "previous", "next", "outputs", "sequence_id"] {
             assert!(!judged.properties.contains(retired), "retired catalog property {retired}");
         }
-        // Root `fail_fast` is declared only by sequence.yaml, as `null`, so
+        // Root `fail_fast` is declared only by sequence-document.yaml, as `null`, so
         // a value is rejected by name (see `sequence_schema.rs`).
         assert_eq!(judged.properties.contains("fail_fast"), yaml.contains("sequence:"), "{name}: fail_fast");
     }
@@ -1983,8 +2187,8 @@ fn task_when_and_container_loop_schema_shapes() {
     let files = shipped_bundle!();
     let repo = SchemaRepo::new(&files);
     let discovered = repo.discover().expect("shipped schema corpus loads");
-    let trigger = include_str!("../../../schemas/claudine.yaml");
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    let trigger = include_str!("../../../registration/composition.yaml");
+    let inline = include_str!("../../../registration/inline-composition.yaml");
     for (name, yaml, valid) in [
         ("task-when", "cancelled: []\nsequence: [{name: a, shell: x, when: 'ready && n > 1'}]", true),
         // A scalar such as `when: 5` passes as text here; the task parser
@@ -2074,8 +2278,8 @@ fn forbidden_cancelled_items_are_well_formed_start_actions() {
         let report = discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged")
             .report;
@@ -2125,8 +2329,8 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
         let judged = discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged");
         let report = &judged.report;
@@ -2140,8 +2344,8 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
 fn document_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "document",
             frontmatter: "agent: claude\ncancelled: ITEMS",
@@ -2155,8 +2359,8 @@ fn document_cancelled_rejects_forbidden_actions() {
 fn task_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "task",
             frontmatter: "agent: claude\nsequence:\n  - name: child\n    sequence: []\n    cancelled: ITEMS",
@@ -2170,8 +2374,8 @@ fn task_cancelled_rejects_forbidden_actions() {
 fn group_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "group",
             frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks: [{ name: leg, shell: 'echo done' }]\n      cancelled: ITEMS",
@@ -2185,8 +2389,8 @@ fn group_cancelled_rejects_forbidden_actions() {
 fn nested_sequence_child_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "nested sequence child",
             frontmatter: "agent: claude\nsequence:\n  - name: outer\n    sequence:\n      - name: inner\n        sequence: []\n        cancelled: ITEMS",
@@ -2200,8 +2404,8 @@ fn nested_sequence_child_cancelled_rejects_forbidden_actions() {
 fn group_leg_sequence_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "group leg",
             frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks:\n        - name: leg\n          sequence: []\n          cancelled: ITEMS",
@@ -2219,11 +2423,11 @@ fn group_leg_sequence_cancelled_rejects_forbidden_actions() {
 fn imported_task_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "imported task",
-            frontmatter: "$schema:\n  nested: task@../schemas/sequence-types.yaml\nnested:\n  name: child\n  sequence: []\n  cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: task@../registration/sequence.yaml\nnested:\n  name: child\n  sequence: []\n  cancelled: ITEMS",
             pointer: "/nested/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -2234,11 +2438,11 @@ fn imported_task_cancelled_rejects_forbidden_actions() {
 fn imported_group_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "imported group",
-            frontmatter: "$schema:\n  nested: group@../schemas/sequence-types.yaml\nnested:\n  tasks: [{ name: leg, shell: 'echo done' }]\n  cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: group@../registration/sequence.yaml\nnested:\n  tasks: [{ name: leg, shell: 'echo done' }]\n  cancelled: ITEMS",
             pointer: "/nested/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -2249,11 +2453,11 @@ fn imported_group_cancelled_rejects_forbidden_actions() {
 fn imported_group_leg_cancelled_rejects_forbidden_actions() {
     assert_cancelled_restricted_at(
         &shipped_bundle!(),
-        include_str!("../../../schemas/claudine.yaml"),
-        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../registration/composition.yaml"),
+        include_str!("../../../registration/inline-composition.yaml"),
         CancelledSite {
             name: "imported group leg",
-            frontmatter: "$schema:\n  nested: group@../schemas/sequence-types.yaml\nnested:\n  tasks:\n    - name: leg\n      sequence: []\n      cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: group@../registration/sequence.yaml\nnested:\n  tasks:\n    - name: leg\n      sequence: []\n      cancelled: ITEMS",
             pointer: "/nested/tasks/0/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -2327,8 +2531,8 @@ fn assert_cancelled_restricted_in_conditionals(site: &StackSite, level: usize, f
         discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged")
             .report
@@ -2402,8 +2606,8 @@ fn cancelled_conditional_depth_is_the_parsers_alone_to_limit() {
         discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged")
             .report
@@ -2438,8 +2642,8 @@ fn cancelled_dictionaries_reject_forbidden_actions() {
         discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged")
             .report
@@ -2477,8 +2681,8 @@ fn grandchild_cancelled_is_typed() {
     let report = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged")
         .report;
@@ -2509,7 +2713,7 @@ impl SingleActionJudge {
         let path = self.repo.write_document("single.md", &format!("---\n{CLAUDINE_SELECTOR}\n{frontmatter}\n---\n"));
         let judged = self
             .discovered
-            .judge(&path, include_str!("../../../schemas/claudine.yaml"), include_str!("../../../schemas/inline-compose.yaml"))
+            .judge(&path, include_str!("../../../registration/composition.yaml"), include_str!("../../../registration/inline-composition.yaml"))
             .expect("judged");
         let markdown = Markdown::try_from(path.as_path()).expect("document loads");
         let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path).map(|_| ()).map_err(|error| format!("{error} {error:?}"));

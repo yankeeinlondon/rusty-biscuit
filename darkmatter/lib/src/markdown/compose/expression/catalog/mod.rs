@@ -1,18 +1,24 @@
-//! The expression-function catalog: one descriptor per function overload,
-//! projected once from the embedded `darkmatter/schemas/partials/functions.yaml`.
+//! The callable catalogs: one descriptor per overload, projected once from
+//! the embedded `darkmatter/schemas/partials/functions.yaml`
+//! (`kind: expression-schema`) and `mutations.yaml` (`kind: mutation-schema`),
+//! and the one reader every consumer of such a catalog uses (shipped
+//! preparation, host registration, `md schema validate`, the editor).
 //!
-//! The file is a tagged SimplifiedSchema document (`kind: schema`,
-//! `categories:`, `types:`). Each `types:` entry whose definition is a
-//! `function(...)`, or a union of them (an overload set), is a function; every
-//! other entry is a named helper type that signatures may reference
-//! (`agentic-cli`, `ip-address`), never a function. Reading the catalog
-//! performs no host probes, no filesystem I/O, and no context capture: the
-//! file and its file-form examples are compiled in.
+//! The shared Simplified Schema reader admits the document (`kind`,
+//! `description`, `categories`, `types`). Each `types:` entry whose
+//! definition is a `function(...)`, or a union of them (an overload set), is
+//! a callable; every other entry is a private helper type that signatures may
+//! reference (`agentic-cli`, `ip-address`). A catalog is never a schema
+//! target or an import source. Reading one performs no host probes, no
+//! filesystem I/O, and no context capture: the built-in files and their
+//! file-form examples are compiled in, and an authored catalog gets none.
 //!
-//! Every function is also registered for dispatch; the registry
+//! Every built-in function is also registered for dispatch; the registry
 //! (`expression::functions`) compiles each function's overloads from these
 //! descriptors and checks catalog/registry parity both ways.
 
+use std::ops::Range;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use indexmap::IndexMap;
@@ -26,7 +32,9 @@ use simplified_schema::simplified::{
     Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaRoot,
     StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document_with_mode, serialize_property_def,
 };
+use simplified_schema::errors::CatalogRelated;
 
+mod checks;
 mod roots;
 
 pub use roots::{ReservedRootDescriptor, RootEvaluation, RootMembers, reserved_root_descriptors};
@@ -41,6 +49,15 @@ pub(crate) const CATALOG_SOURCE: &str = include_str!("../../../../../../schemas/
 pub(crate) fn catalog_source() -> &'static str {
     CATALOG_SOURCE
 }
+
+/// The embedded source named by a built-in declaration's diagnostic label.
+#[must_use]
+pub fn embedded_catalog_source(path: &Path) -> Option<&'static str> {
+    (biscuit_file::PathIdentity::new(path) == biscuit_file::PathIdentity::new(Path::new(CATALOG_PATH)))
+        .then_some(CATALOG_SOURCE)
+}
+
+pub(crate) use checks::builtin_name_related;
 
 /// The file-form example artifacts a catalog entry may reference with
 /// `example(./function-examples/<name>.yaml)`, keyed by that reference
@@ -345,7 +362,7 @@ pub fn expression_function_catalog() -> &'static FunctionCatalog {
 pub(crate) fn expression_function_catalog_from_sources() -> &'static FunctionCatalog {
     static CATALOG: LazyLock<FunctionCatalog> = LazyLock::new(|| {
         crate::note_work!(ShippedRuntimePreparation);
-        load_catalog(CATALOG_SOURCE, CATALOG_PATH, EXAMPLE_FILES)
+        load_catalog(CATALOG_SOURCE, Path::new(CATALOG_PATH), StandaloneSchemaEnvelope::ExpressionSchema, EXAMPLE_FILES)
             .unwrap_or_else(|error| panic!("the embedded expression-function catalog does not load: {error}"))
     });
     &CATALOG
@@ -365,60 +382,121 @@ pub fn function_descriptors(name: &str) -> &'static [ExpressionFunctionDescripto
 /// Why a catalog document does not load.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CatalogError {
+    /// The shared document reader refused the text: YAML, envelope shape,
+    /// type grammar, or a check the standalone parser makes (an undeclared
+    /// category, overloads with one binding contract). Located by that
+    /// reader, as every other YAML kind is.
     #[error(transparent)]
     Schema(#[from] simplified_schema::SchemaError),
-    #[error("{path}: {message}")]
-    Invalid { path: String, message: String },
+    /// A callable check failed; `span` and `related` locate it as
+    /// [`simplified_schema::SchemaError::CallableCatalog`] does.
+    #[error("{}: {message}", path.display())]
+    Invalid {
+        path: PathBuf,
+        message: String,
+        span: Option<Range<usize>>,
+        related: Vec<CatalogRelated>,
+    },
 }
 
-/// Loads a catalog document. Strict: the tagged envelope with `categories:`,
-/// each function entry a `function` or a union of `function`s, one category
-/// per function, no entry written as null, and every file-form example present in `example_files` and
-/// valid under the example envelope.
+impl CatalogError {
+    /// The error every consumer reports: a reader refusal as it is, a
+    /// callable failure as [`simplified_schema::SchemaError::CallableCatalog`].
+    pub(crate) fn into_schema_error(self) -> simplified_schema::SchemaError {
+        match self {
+            Self::Schema(error) => error,
+            Self::Invalid { path, message, span, related } => {
+                simplified_schema::SchemaError::CallableCatalog { path, message, span, related }
+            }
+        }
+    }
+}
+
+/// Whose catalog is being read: a built-in one admits its own names (the
+/// built-in expression catalog projects the registered aliases), while an
+/// authored one (a host's, or any other file checked on its own) may not
+/// reuse a built-in expression name and must compile through the eager
+/// registration builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CatalogOrigin {
+    BuiltIn,
+    Authored,
+}
+
+/// Loads a built-in callable catalog of kind `expected` (an
+/// [`StandaloneSchemaEnvelope::is_callable_catalog`] envelope). Strict: the
+/// envelope the shared reader admits, at least one callable, each callable a
+/// `function` or a union of `function`s with one category, local helper
+/// references only, and every file-form example present in
+/// `example_files` (no filesystem fallback).
 ///
 /// The result owns every name, type, and example it projects and borrows
 /// nothing from `source` or `example_files`; nothing is built on an error
 /// path that outlives the call.
 pub(crate) fn load_catalog(
     source: &str,
-    path: &str,
+    path: &Path,
+    expected: StandaloneSchemaEnvelope,
     example_files: &[(&str, &str)],
 ) -> Result<FunctionCatalog, CatalogError> {
-    load_catalog_with_mode(source, path, example_files, PreparationMode::Runtime)
+    load_catalog_with_mode(source, path, expected, example_files, PreparationMode::Runtime)
 }
 
 /// [`load_catalog`] in `mode`; shipped-artifact generation passes
 /// [`PreparationMode::Uncached`].
 pub(crate) fn load_catalog_with_mode(
     source: &str,
-    path: &str,
+    path: &Path,
+    expected: StandaloneSchemaEnvelope,
     example_files: &[(&str, &str)],
     mode: PreparationMode<'_>,
 ) -> Result<FunctionCatalog, CatalogError> {
-    let invalid = |message: String| CatalogError::Invalid {
-        path: path.to_string(),
-        message,
-    };
-    let document = parse_standalone_schema_document_with_mode(source, std::path::Path::new(path), mode)?
-        .ok_or_else(|| invalid("not a SimplifiedSchema document; expected `kind: schema`".into()))?;
-    if document.envelope != StandaloneSchemaEnvelope::Tagged {
-        return Err(invalid("expected the tagged envelope (`kind: schema`, `categories:`, `types:`)".into()));
+    read_catalog(source, path, expected, example_files, mode, CatalogOrigin::BuiltIn)
+}
+
+/// Loads an authored callable catalog: [`load_catalog`] with no file-form
+/// examples, then the checks a built-in catalog skips. An expression
+/// catalog's canonical names may not be a built-in function's canonical name
+/// or alias, and every callable compiles through the eager registration
+/// builder with the catalog's local types only, as a host registration of it
+/// would.
+pub(crate) fn load_authored_catalog(
+    source: &str,
+    path: &Path,
+    expected: StandaloneSchemaEnvelope,
+) -> Result<FunctionCatalog, CatalogError> {
+    read_catalog(source, path, expected, &[], PreparationMode::Runtime, CatalogOrigin::Authored)
+}
+
+fn read_catalog(
+    source: &str,
+    path: &Path,
+    expected: StandaloneSchemaEnvelope,
+    example_files: &[(&str, &str)],
+    mode: PreparationMode<'_>,
+    origin: CatalogOrigin,
+) -> Result<FunctionCatalog, CatalogError> {
+    let expected_kind = expected.kind().filter(|_| expected.is_callable_catalog()).unwrap_or("expression-schema");
+    let at = checks::Locator::new(path);
+    let document = parse_standalone_schema_document_with_mode(source, path, mode)?
+        .ok_or_else(|| at.file(format!("not a callable catalog; expected `kind: {expected_kind}`")))?;
+    if document.envelope != expected || !expected.is_callable_catalog() {
+        let found = document.envelope.kind().map_or_else(|| "no `kind`".to_string(), |kind| format!("`kind: {kind}`"));
+        return Err(at.file(format!("expected `kind: {expected_kind}`, found {found}")));
     }
+    let at = at.with_map(document.named_type_source_map());
     let Some(categories) = document.categories.as_ref() else {
-        return Err(invalid("missing the `categories:` list".into()));
+        return Err(at.file("missing the `categories:` list".into()));
     };
     let Some(SchemaRoot::Single(types)) = document.schema() else {
-        return Err(invalid("`types:` must be a mapping of named types".into()));
+        return Err(at.file("`types:` must be a mapping of named types".into()));
     };
     let raw_entries = raw_type_entries(source);
-    if let Some(name) = null_type_entry(source) {
-        // A general schema file reads `types.x: null` as the `null` type; in
-        // the catalog that can only be a function signature left empty.
-        return Err(invalid(format!("`types.{name}` is null, not a function signature")));
-    }
 
+    // Classify every entry first, so a reference check can tell a helper
+    // from a callable written later in the table.
     let mut named_types = IndexMap::new();
-    let mut functions: Vec<CatalogFunction<'_>> = Vec::new();
+    let mut callables: Vec<(&String, Vec<&PropertyAtom>)> = Vec::new();
     for (name, def) in &types.properties {
         let atoms = overload_atoms(def);
         let function_count = atoms.iter().filter(|atom| is_function_atom(atom)).count();
@@ -427,39 +505,86 @@ pub(crate) fn load_catalog_with_mode(
             continue;
         }
         if function_count != atoms.len() {
-            return Err(invalid(format!(
-                "`types.{name}` mixes `function(...)` options with other types; a function entry is a \
-                 `function` or a union of `function`s"
-            )));
+            let mixed = atoms.iter().position(|atom| !is_function_atom(atom)).unwrap_or(0);
+            return Err(at.arm(
+                name,
+                mixed,
+                atoms.len(),
+                format!(
+                    "`types.{name}` mixes `function(...)` options with other types; a callable is a \
+                     `function` or a union of `function`s"
+                ),
+            ));
         }
-        let mut category = None;
-        for atom in &atoms {
-            if let Some(found) = category_of(atom) {
-                match category {
-                    None => category = Some(found),
-                    Some(first) if first != found => {
-                        return Err(invalid(format!(
-                            "`types.{name}`: overloads name different categories (`{first}`, `{found}`)"
-                        )));
-                    }
-                    Some(_) => {}
-                }
+        callables.push((name, atoms));
+    }
+    if callables.is_empty() {
+        return Err(at.declaration(
+            "`types` declares no callable; a callable catalog needs at least one `function(...)` entry".into(),
+        ));
+    }
+    let callable_names: Vec<&str> = callables.iter().map(|(name, _)| name.as_str()).collect();
+    if expected == StandaloneSchemaEnvelope::ExpressionSchema {
+        for &name in &callable_names {
+            if !super::is_callable_name(name) {
+                return Err(at.key(name, format!("`types.{name}` cannot be used as an expression call name")));
             }
         }
-        let category = category.ok_or_else(|| invalid(format!("`types.{name}` has no `category(...)`")))?;
-        let declarations: Vec<_> = atoms
+    }
+    for (name, def) in &types.properties {
+        checks::local_references(&at, name, def, &named_types, &callable_names)?;
+    }
+    checks::folded_names(&at, &callable_names)?;
+
+    let mut functions: Vec<CatalogFunction<'_>> = Vec::new();
+    for (name, atoms) in callables {
+        let mut category: Option<(usize, &str)> = None;
+        for (index, atom) in atoms.iter().enumerate() {
+            let Some(found) = category_of(atom) else { continue };
+            match category {
+                None => category = Some((index, found)),
+                Some((first_index, first)) if first != found => {
+                    return Err(at.arm_related(
+                        name,
+                        index,
+                        first_index,
+                        atoms.len(),
+                        format!("`types.{name}`: overloads name different categories (`{first}`, `{found}`)"),
+                        format!("overload {} names `{first}`", first_index + 1),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        let Some((_, category)) = category else {
+            return Err(at.key(name, format!("`types.{name}` has no `category(...)`; at least one overload must name one")));
+        };
+        let declarations: Vec<FunctionType> = atoms
             .iter()
             .filter_map(|atom| match &atom.ty {
                 TypeExpr::Function(function_type) => Some((**function_type).clone()),
                 _ => None,
             })
             .collect();
+        if expected == StandaloneSchemaEnvelope::MutationSchema
+            && let Some(overload) = declarations.iter().position(checks::declares_narrowing)
+        {
+            return Err(at.arm(
+                name,
+                overload,
+                atoms.len(),
+                format!(
+                    "`types.{name}`: a mutation declares no `narrows(...)`; narrowing describes what an \
+                     expression guard proves"
+                ),
+            ));
+        }
         super::call_binding::compile_declared_fact(name, &declarations)
-            .map_err(|error| invalid(format!("`types.{name}`: {error}")))?;
+            .map_err(|error| at.registration(name, atoms.len(), &error))?;
         let category_index = categories
             .iter()
             .position(|declared| declared.name == category)
-            .ok_or_else(|| invalid(format!("`types.{name}`: category `{category}` is not in `categories:`")))?;
+            .ok_or_else(|| at.key(name, format!("`types.{name}`: category `{category}` is not in `categories:`")))?;
         let raw = raw_entries.get(name.as_str()).cloned().unwrap_or_default();
         let raw = if raw.len() == atoms.len() { raw } else { vec![None; atoms.len()] };
         functions.push(CatalogFunction {
@@ -469,7 +594,6 @@ pub(crate) fn load_catalog_with_mode(
             raw,
         });
     }
-    functions.sort_by(|left, right| (left.category_index, left.name).cmp(&(right.category_index, right.name)));
 
     let catalog_categories: Box<[CatalogCategory]> = categories
         .iter()
@@ -478,6 +602,33 @@ pub(crate) fn load_catalog_with_mode(
             description: category.description.as_deref().map(Box::from),
         })
         .collect();
+
+    if origin == CatalogOrigin::Authored {
+        if expected == StandaloneSchemaEnvelope::ExpressionSchema {
+            for function in &functions {
+                checks::reserved_name(&at, function.name)?;
+            }
+        }
+        let resolver = |name: &str, reference: &str| {
+            (reference == LOCAL_REFERENCE).then(|| named_types.get(name).cloned()).flatten()
+        };
+        for function in &functions {
+            let overloads: Vec<FunctionType> = function
+                .atoms
+                .iter()
+                .filter_map(|atom| match &atom.ty {
+                    TypeExpr::Function(function_type) => Some((**function_type).clone()),
+                    _ => None,
+                })
+                .collect();
+            super::call_binding::FunctionRegistration::builder_from_types(function.name.as_str(), overloads)
+                .build_with(&resolver)
+                .map_err(|error| at.registration(function.name, function.atoms.len(), &error))?;
+        }
+    }
+
+    // Documentation order: category list order, then canonical name.
+    functions.sort_by(|left, right| (left.category_index, left.name).cmp(&(right.category_index, right.name)));
 
     let mut descriptors = Vec::new();
     let mut position_in_category = vec![0usize; catalog_categories.len()];
@@ -488,15 +639,22 @@ pub(crate) fn load_catalog_with_mode(
         raw,
     } in functions
     {
-        let aliases: Box<[Box<str>]> =
-            super::functions::registered_aliases(name).iter().map(|alias| Box::from(*alias)).collect();
+        // Only the built-in expression catalog projects the registered
+        // aliases; a mutation's verb is matched exactly, and an authored
+        // catalog's aliases come from its host's registration.
+        let aliases: Box<[Box<str>]> = if expected == StandaloneSchemaEnvelope::ExpressionSchema && origin == CatalogOrigin::BuiltIn {
+            super::functions::registered_aliases(name).iter().map(|alias| Box::from(*alias)).collect()
+        } else {
+            Box::default()
+        };
+        let overload_count = atoms.len();
         for (overload, (atom, raw)) in atoms.into_iter().zip(raw).enumerate() {
             let TypeExpr::Function(function_type) = &atom.ty else {
                 unreachable!("every overload atom is a function");
             };
             position_in_category[category_index] += 1;
             let examples = project_examples(name, atom, function_type, raw.as_deref(), example_files)
-                .map_err(&invalid)?;
+                .map_err(|message| at.arm(name, overload, overload_count, message))?;
             let parameters: Box<[FunctionParameterDescriptor]> = function_type
                 .parameters
                 .as_slice()
@@ -580,17 +738,8 @@ fn category_of(atom: &PropertyAtom) -> Option<&str> {
 /// Each `types:` entry's authored overload texts (one per list item, or the
 /// single string), so an inline example's result can be shown as written.
 /// Missing or unexpected shapes yield no text; the result then falls back to
-/// its JSON spelling.
-/// The first `types:` entry written as `null`, `~`, or an empty value.
-fn null_type_entry(source: &str) -> Option<String> {
-    let document = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).ok()?;
-    let types = document.get("types")?.as_mapping()?;
-    types
-        .iter()
-        .find(|(_, value)| value.is_null())
-        .and_then(|(key, _)| key.as_str().map(str::to_string))
-}
-
+/// its JSON spelling. The shared reader has already admitted `source`, so the
+/// parse here cannot disagree with it.
 fn raw_type_entries(source: &str) -> IndexMap<String, Vec<Option<String>>> {
     let Ok(document) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
         return IndexMap::new();
@@ -654,7 +803,9 @@ fn file_example(function: &str, reference: &str, example_files: &[(&str, &str)])
     let (path, text) = example_files
         .iter()
         .find(|(path, _)| *path == key)
-        .ok_or_else(|| format!("`types.{function}`: example file `{reference}` is not embedded"))?;
+        .ok_or_else(|| {
+            format!("`types.{function}`: example file `{reference}` is not one of this catalog's embedded examples")
+        })?;
     let object = simplified_schema::example::validate_example_bytes(reference, text.as_bytes())
         .map_err(|error| format!("`types.{function}`: {error}"))?;
     let invocation = object

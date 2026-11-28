@@ -1224,7 +1224,7 @@ fn build_resource_support() -> ProviderCapabilities {
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],
                 &["license", "compatibility", "metadata"],
-                "claudine/docs/research/skills/pi.md",
+                "claudine/docs/research/providers/skills/pi.md",
             )),
         },
         commands: ResourceSupport {
@@ -1237,7 +1237,7 @@ fn build_resource_support() -> ProviderCapabilities {
             properties: Some(ResourcePropertySchema::new(
                 &[],
                 &["description", "argument-hint"],
-                "claudine/docs/research/slash-commands/pi.md",
+                "claudine/docs/research/providers/slash-commands/pi.md",
             )),
         },
         agents: ResourceSupport {

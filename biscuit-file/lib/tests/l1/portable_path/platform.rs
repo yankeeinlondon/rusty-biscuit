@@ -62,14 +62,15 @@ fn a_unix_backslash_in_a_name_is_never_split() {
     let fx = Fixture::new();
     let cwd = fx.dir("repo/docs");
     let target = fx.file(r"repo/docs/my\report.md");
-    let error = evaluate_err(PortablePath::from_path(&target).with_ctx(&fx.ctx(&cwd, &[])));
-    assert!(matches!(error, PortablePathError::NoStrategyMatched { .. }), "{error}");
+    let ctx = fx.ctx(&cwd, &[]);
+    let slash_target = fx.file("repo/docs/my/report.md");
     for strategy in [P::SameDirRelative, P::RepoRoot(None), P::AbsolutePath] {
-        assert_eq!(
-            not_applicable(attempt_for(error.attempts(), &strategy)),
-            &NotApplicable::UnsafeSpelling(SpellingProblem::ChangesComponents),
-            "{strategy}"
-        );
+        let result = evaluate(PortablePath::from_path(&target).with_ctx(&ctx)
+            .with_strategy([strategy]));
+        assert!(result.reference().raw().ends_with(r"my\report.md"));
+        let resolved = result.reference().resolve_in_context(&ctx).unwrap().unwrap();
+        assert!(same_file(&resolved, &target));
+        assert!(!same_file(&resolved, &slash_target));
     }
 }
 

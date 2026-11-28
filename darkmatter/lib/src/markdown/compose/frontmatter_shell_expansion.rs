@@ -1501,6 +1501,10 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
     let scope = templates.map(|templates| SiteScope::new(options, templates.effective.clone()));
 
     for (index, candidate) in candidates.iter().enumerate() {
+        // A dry run prepares each value as the real run would, so the
+        // built-in blacklist still refuses, and defers the value the moment
+        // its preparation reaches a command.
+        let prepared = (|| -> Result<Pending, ShellExpansionError> {
         let site = match (templates, &hole_evaluator, &scope) {
             (Some(templates), Some(evaluator), Some(scope)) => {
                 template_site(candidate, provenance, templates, scope, evaluator, ctx)?
@@ -1638,6 +1642,22 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
                 }
             }
         };
+        Ok(pending_item)
+        })();
+        let pending_item = match (prepared, options.passive_session()) {
+            (Err(ShellExpansionError::SkippedInDryRun { command, .. }), Some(session)) => {
+                if let Some(authored) = frontmatter.as_map().get(&candidate.key).and_then(Value::as_str) {
+                    session.defer_value(
+                        &candidate.key,
+                        authored,
+                        crate::markdown::compose::passive::DeferralReason::Command { command },
+                        candidate.line,
+                    );
+                }
+                continue;
+            }
+            (prepared, _) => prepared?,
+        };
 
         pending.push((index, candidate.key.clone(), pending_item));
     }
@@ -1665,6 +1685,21 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
         })
         .collect();
     executions.sort_by_key(|(index, _, _)| *index);
+
+    // A deferred value keeps its authored text; it is data now, so the leak
+    // guard below and every later scan leave it as written.
+    if let Some(session) = options.passive_session() {
+        for candidate in &candidates {
+            if frontmatter
+                .as_map()
+                .get(&candidate.key)
+                .and_then(Value::as_str)
+                .is_some_and(|authored| session.deferred_value(authored).is_some())
+            {
+                provenance.data_mut().mark_key(&candidate.key);
+            }
+        }
+    }
 
     // Rewrite frontmatter values
     let fm_mut = frontmatter.as_map_mut();

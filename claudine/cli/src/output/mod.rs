@@ -335,13 +335,13 @@ pub(crate) fn log_dry_run(
     log::message(
         &Prose::new(format!(
             "<bold>Working directory:</bold> <dim>{}</dim>",
-            biscuit_file::to_portable_string(child_cwd)
+            biscuit_file::to_forward_slash_string(child_cwd)
         ))
         .render(term),
     );
 
     // Full command line
-    let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_portable_string(binary_path))
+    let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_forward_slash_string(binary_path))
         .chain(
             crate::commands::wrap::env::redact_sensitive_args(child_args)
                 .iter()
@@ -432,7 +432,7 @@ pub(crate) fn repo_flag_info_message(
             format!(
                 " <blue>{}</blue> points the provider at its overlay in <blue>{}</blue>; your home directory is unchanged.",
                 selector.env_var(),
-                biscuit_file::to_portable_string(root)
+                biscuit_file::to_forward_slash_string(root)
             )
         })
         .unwrap_or_default();
@@ -542,7 +542,7 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
             mcp_runtime
                 .temp_files
                 .iter()
-                .map(|path| biscuit_file::to_portable_string(path))
+                .map(|path| biscuit_file::to_forward_slash_string(path))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))));
@@ -698,7 +698,7 @@ pub(crate) fn clear_user_interrupt_for_tests() {
 pub(crate) fn format_launch_directory(directory: &Path) -> String {
     Prose::new(format!(
         "- <dim>starting agent in</dim> <blue>{}</blue>",
-        biscuit_file::to_portable_string(directory)
+        biscuit_file::to_forward_slash_string(directory)
     ))
     .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
     .render(&crate::log::terminal())

@@ -91,12 +91,6 @@ const ALLOWLIST: &[Allowance] = &[
         "`CLAUDE_CONFIG_DIR` locates Claude Code's session registry for steering",
     ),
     ambient("commands/uninstall.rs", "biscuit_file::home_dir", 1, "locates provider configuration to unregister hooks from"),
-    ambient(
-        "commands/wrap/composition/dry_run.rs",
-        "std::env::current_dir",
-        1,
-        "shortens a path in the dry-run report (rendering)",
-    ),
     ambient("commands/wrap/composition/staged_boot.rs", "std::env::var_os", 1, FORCE_COLOR),
     ambient(
         "commands/wrap/composition/timeouts.rs",

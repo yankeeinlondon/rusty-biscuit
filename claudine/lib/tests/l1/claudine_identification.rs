@@ -1,12 +1,13 @@
-//! Claudine's identifying trigger (`claudine/schemas/claudine-document.yaml`)
-//! and the narrowed root trigger (`claudine/schemas/claudine.yaml`), whose
-//! selectors must equal the identifying trigger's so every identified
-//! document receives the main host contract.
+//! How Claudine's triggers identify its documents. Every trigger of
+//! `claudine/registration/` identifies the host (there is no separate
+//! identifying file), and the two that type a Claudine Markdown document
+//! (`composition.yaml` and `inline-composition.yaml`) select it exactly one
+//! at a time, so each receives the main host contract.
 //!
 //! `initialize`, `cancelled`, and `finalize` are Darkmatter events the `md`
-//! host owns too, so neither file selects a document on them alone. The
-//! identifying trigger decides which host a document belongs to; the root
-//! trigger still types those three events for every document it selects.
+//! host owns too, so no file selects a document on them alone. The matching
+//! triggers decide which host a document belongs to; the selected trigger
+//! still types those three events.
 //! Each test reads the repository files it judges with `include_str!`.
 
 use std::path::{Path, PathBuf};
@@ -59,21 +60,35 @@ fn identifying(text: &str) -> IdentifyingTrigger {
     admit_identifying_trigger(&envelope(text).conditions, md_owned_names()).expect("admitted against md's names")
 }
 
+/// Claudine's triggers, each admitted as identifying.
+fn claudine_triggers() -> Vec<IdentifyingTrigger> {
+    claudine::composition::inventory::members_of(claudine::composition::inventory::MemberKind::Trigger)
+        .map(|member| identifying(member.text))
+        .collect()
+}
+
+/// Whether any Claudine trigger identifies `document`.
+fn identifies_claudine(triggers: &[IdentifyingTrigger], document: &Value, subject: &PathSubject) -> bool {
+    triggers.iter().any(|trigger| identifies(trigger, document, subject))
+}
+
 fn one(key: &str, value: Value) -> Value {
     json!({ key: value })
 }
 
 #[test]
-fn the_identifying_trigger_is_admitted_and_is_the_key_by_type_cross_product() {
-    let text = include_str!("../../../schemas/claudine-document.yaml");
-    let parsed = envelope(text);
-    assert!(admit_identifying_trigger(&parsed.conditions, md_owned_names()).is_ok());
-    assert_eq!(parsed.conditions, cross_product(&IDENTIFYING_KEYS), "one alternative per key and non-null type");
-    assert!(parsed.payload.is_none(), "identification adds no types: {:?}", parsed.payload);
-
-    // Claudine's runtime never applies or runs anything through it.
-    let embedded = claudine::composition::schema::bundle::CLAUDINE_SCHEMA_FILES;
-    assert!(embedded.iter().all(|(name, _)| *name != "claudine-document.yaml"), "not in the embedded bundle");
+fn every_claudine_trigger_is_admitted_as_identifying_and_no_identify_file_remains() {
+    let triggers: Vec<&str> = claudine::composition::inventory::members_of(claudine::composition::inventory::MemberKind::Trigger)
+        .map(|member| member.path)
+        .collect();
+    assert_eq!(triggers, ["composition.yaml", "inline-composition.yaml", "sequence-document.yaml"]);
+    for member in claudine::composition::inventory::members_of(claudine::composition::inventory::MemberKind::Trigger) {
+        assert!(admit_identifying_trigger(&envelope(member.text).conditions, md_owned_names()).is_ok(), "{}", member.path);
+    }
+    assert!(claudine::composition::inventory::member("claudine-document.yaml").is_none(), "no identify-only file");
+    // The cross product of the identifying keys is what any Claudine key
+    // identifies; the helper is kept for that description.
+    let _ = cross_product(&IDENTIFYING_KEYS);
 
     let owned = md_owned_names();
     for key in IDENTIFYING_KEYS {
@@ -86,29 +101,29 @@ fn the_identifying_trigger_is_admitted_and_is_the_key_by_type_cross_product() {
 
 #[test]
 fn every_identifying_key_at_any_non_null_value_identifies_claudine() {
-    let trigger = identifying(include_str!("../../../schemas/claudine-document.yaml"));
+    let triggers = claudine_triggers();
     for key in IDENTIFYING_KEYS {
         for value in non_null_values() {
             let document = one(key, value.clone());
-            assert!(identifies(&trigger, &document, &PathSubject::detached()), "{document}");
+            assert!(identifies_claudine(&triggers, &document, &PathSubject::detached()), "{document}");
         }
     }
     // A wrongly typed value still identifies Claudine, whose schema reports it.
     for document in [json!({ "agent": 7 }), json!({ "sequence": true }), json!({ "start": "stop" })] {
-        assert!(identifies(&trigger, &document, &PathSubject::detached()), "{document}");
+        assert!(identifies_claudine(&triggers, &document, &PathSubject::detached()), "{document}");
     }
     let mixed = json!({ "finalize": [{ "info": "done" }], "title": "x", "prompt": "hi" });
-    assert!(identifies(&trigger, &mixed, &PathSubject::detached()), "a shared event beside a Claudine key");
+    assert!(identifies_claudine(&triggers, &mixed, &PathSubject::detached()), "a shared event beside a Claudine key");
 }
 
 #[test]
 fn shared_events_md_keys_nulls_and_an_empty_document_do_not_identify_claudine() {
-    let trigger = identifying(include_str!("../../../schemas/claudine-document.yaml"));
+    let triggers = claudine_triggers();
     let subject = PathSubject::detached();
     for event in SHARED_EVENTS {
         for value in non_null_values() {
             let document = one(event, value);
-            assert!(!identifies(&trigger, &document, &subject), "{document}");
+            assert!(!identifies_claudine(&triggers, &document, &subject), "{document}");
         }
     }
     let together = json!({
@@ -116,56 +131,58 @@ fn shared_events_md_keys_nulls_and_an_empty_document_do_not_identify_claudine() 
         "cancelled": [{ "stderr": "cancelled" }],
         "finalize": [{ "info": "done" }],
     });
-    assert!(!identifies(&trigger, &together, &subject), "{together}");
+    assert!(!identifies_claudine(&triggers, &together, &subject), "{together}");
 
     let every_md_key: serde_json::Map<String, Value> =
         md_owned_names().iter().map(|name| (name.clone(), json!("x"))).collect();
-    assert!(!identifies(&trigger, &Value::Object(every_md_key), &subject), "every md key at once");
+    assert!(!identifies_claudine(&triggers, &Value::Object(every_md_key), &subject), "every md key at once");
 
     let nulls: serde_json::Map<String, Value> =
         IDENTIFYING_KEYS.iter().map(|key| ((*key).to_string(), Value::Null)).collect();
-    assert!(!identifies(&trigger, &Value::Object(nulls), &subject), "the nine keys, each null");
-    assert!(!identifies(&trigger, &json!({}), &subject), "an empty document");
+    assert!(!identifies_claudine(&triggers, &Value::Object(nulls), &subject), "the nine keys, each null");
+    assert!(!identifies_claudine(&triggers, &json!({}), &subject), "an empty document");
 }
 
 #[test]
-fn claudine_yaml_selects_exactly_the_identified_documents_and_never_on_shared_events_alone() {
-    let claudine = envelope(include_str!("../../../schemas/claudine.yaml")).conditions;
-    let identifying = envelope(include_str!("../../../schemas/claudine-document.yaml")).conditions;
-    // A document identified as Claudine's but not selected by claudine.yaml
+fn exactly_one_claudine_trigger_selects_each_identified_document_and_none_selects_shared_events_alone() {
+    let composition = envelope(include_str!("../../../registration/composition.yaml")).conditions;
+    let inline = envelope(include_str!("../../../registration/inline-composition.yaml")).conditions;
+    // A document identified as Claudine's but selected by neither trigger
     // would be judged without the main contract (`sequence: []` beside an
-    // invalid `timeout` once did), so the two selector sets are one.
-    assert_eq!(claudine, identifying, "claudine.yaml's selectors are the identifying trigger's");
-    assert_eq!(claudine, cross_product(&IDENTIFYING_KEYS), "claudine.yaml's selectors");
-
+    // invalid `timeout` once did); one selected by both would layer two
+    // contracts for one document.
     let subject = PathSubject::detached();
+    let selected_by = |document: &Value| (composition.matches(document, &subject), inline.matches(document, &subject));
     for key in &IDENTIFYING_KEYS {
         for value in non_null_values() {
             let document = one(key, value);
-            assert!(claudine.matches(&document, &subject), "{document} selects claudine.yaml");
+            let expected = if *key == "prompt" { (false, true) } else { (true, false) };
+            assert_eq!(selected_by(&document), expected, "{document}");
         }
-        assert!(!claudine.matches(&one(key, Value::Null), &subject), "`{key}: null` selects nothing");
+        assert_eq!(selected_by(&one(key, Value::Null)), (false, false), "`{key}: null` selects nothing");
     }
     for event in SHARED_EVENTS {
         for value in non_null_values() {
             let document = one(event, value);
-            assert!(!claudine.matches(&document, &subject), "{document} alone does not select claudine.yaml");
+            assert_eq!(selected_by(&document), (false, false), "{document} alone selects no Claudine trigger");
         }
     }
     let together = json!({ "initialize": [], "cancelled": [], "finalize": [] });
-    assert!(!claudine.matches(&together, &subject), "the three shared events together");
+    assert_eq!(selected_by(&together), (false, false), "the three shared events together");
     let with_prompt = json!({ "initialize": [], "cancelled": [], "finalize": [], "prompt": "hi" });
-    assert!(claudine.matches(&with_prompt, &subject), "a Claudine key beside them");
+    assert_eq!(selected_by(&with_prompt), (false, true), "a Claudine key beside them");
+    let sequence_with_prompt = json!({ "sequence": [], "prompt": "hi" });
+    assert_eq!(selected_by(&sequence_with_prompt), (true, false), "a sequence is never an inline composition");
 }
 
-/// A document claudine.yaml selects still gets its types for the shared
-/// events; without a Claudine key, claudine.yaml does not judge them.
+/// A document a Claudine trigger selects still gets its types for the shared
+/// events; without a Claudine key, no Claudine trigger judges them.
 #[test]
 fn a_selected_document_keeps_claudines_types_for_the_shared_events() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
-    let claudine = include_str!("../../../schemas/claudine.yaml");
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    let claudine = include_str!("../../../registration/composition.yaml");
+    let inline = include_str!("../../../registration/inline-composition.yaml");
     for (name, selector, event, stack, pointer) in [
         ("finalize-typo", "prompt: hi", "finalize", "[{ inf0: hi }]", "/finalize/0"),
         ("initialize-shell", "start: [stop]", "initialize", "[{ shell: ls }]", "/initialize/0"),
@@ -173,14 +190,14 @@ fn a_selected_document_keeps_claudines_types_for_the_shared_events() {
     ] {
         let selected = repo.write_document(&format!("{name}.md"), &format!("---\n{selector}\n{event}: {stack}\n---\n"));
         let judged = discovered.judge(&selected, claudine, inline).expect("judged");
-        assert!(judged.claudine, "{name}: `{selector}` selects claudine.yaml");
+        assert!(judged.claudine || judged.inline, "{name}: `{selector}` selects a Claudine trigger");
         assert!(judged.properties.contains(event), "{name}: Claudine types `{event}`");
         let found = problems(&judged.report);
         assert!(found.iter().any(|(path, _)| path == pointer), "{name}: rejected at `{pointer}`: {found:?}");
 
         let alone = repo.write_document(&format!("{name}-alone.md"), &format!("---\n{event}: {stack}\n---\n"));
         let judged = discovered.judge(&alone, claudine, inline).expect("judged");
-        assert!(!judged.claudine, "{name}: `{event}` alone selects nothing");
+        assert!(!judged.claudine && !judged.inline, "{name}: `{event}` alone selects nothing");
         assert!(!judged.properties.contains("prompt"), "{name}: no Claudine payload applies");
     }
 }
@@ -218,17 +235,17 @@ impl Launch {
 }
 
 /// Claudine's launch verdict judges a shared-events-only document without
-/// claudine.yaml, so a Claudine control in it is ordinary data; a `start:`
-/// selects claudine.yaml and the same control is checked. Claudine's
+/// composition.yaml, so a Claudine control in it is ordinary data; a `start:`
+/// selects composition.yaml and the same control is checked. Claudine's
 /// lifecycle parser still judges the events of both documents.
 #[test]
 fn the_launch_verdict_applies_claudine_yaml_only_beside_a_claudine_key() {
     let launch = Launch::new();
     let shared = launch.document("shared.md", "finalize: [stop]\ntimeout: [1]");
-    launch.verdict(&shared).expect("claudine.yaml does not type `timeout` here");
+    launch.verdict(&shared).expect("composition.yaml does not type `timeout` here");
 
     let claudine = launch.document("claudine.md", "start: [stop]\nfinalize: [stop]\ntimeout: [1]");
-    let error = launch.verdict(&claudine).expect_err("claudine.yaml types `timeout` as a string");
+    let error = launch.verdict(&claudine).expect_err("composition.yaml types `timeout` as a string");
     assert!(error.to_string().contains("/timeout"), "{error}");
 
     let shell = launch.document("shell.md", "initialize: [{ shell: ls }]");

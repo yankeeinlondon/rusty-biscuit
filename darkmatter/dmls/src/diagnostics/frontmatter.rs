@@ -41,7 +41,7 @@ use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::providers::frontmatter::ExpressionValue;
-use crate::source_map::SourceMap;
+use crate::source_map::{PositionEncoding, SourceMap};
 use crate::workspace::file_path_to_uri;
 
 /// All frontmatter/schema diagnostics for the current document, reading
@@ -171,7 +171,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     }
 
     if let SuggestionState::TriggerWarning(finding) = &overlay.suggestions {
-        let span = trigger_yaml_span(ctx.text, finding.cause()).unwrap_or(0..ctx.text.len());
+        let span = trigger_error_range(ctx.text, finding.cause());
         let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
         out.push(invalid_trigger_diagnostic_at(finding, range));
     }
@@ -179,7 +179,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     // Only a document whose `kind` names the trigger envelope, and that its
     // selected definition has not judged, carries this error.
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
-        let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
+        let span = trigger_error_range(ctx.text, error);
         out.push(diagnostic(
             ctx.source_map
                 .byte_range_to_lsp(span)
@@ -197,18 +197,57 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 /// A configuration-level host registration warning (a refused entry, a
 /// same-host conflict), published on the file it names at its line and
 /// column, or at the top when it has none.
-pub(crate) fn registration_diagnostic(found: &darkmatter::config::registration::RegistrationDiagnostic) -> Diagnostic {
-    let range = match found.line {
-        Some(line) => {
-            let start = lsp_types::Position {
-                line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
-                character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
-            };
-            Range { start, end: start }
-        }
-        None => zero_range(),
-    };
-    diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone())
+pub(crate) fn registration_diagnostic(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Diagnostic {
+    let range = registration_range(found, encoding).unwrap_or_else(zero_range);
+    let mut message = found.message.clone();
+    for related in found.related.iter().filter(|related| !related.file.is_absolute()) {
+        let position = related.line.zip(related.column).map(|(line, column)| format!(":{line}:{column}")).unwrap_or_default();
+        message.push_str(&format!("\n{} (at {}{position})", related.message, related.file.display()));
+    }
+    let mut out = diagnostic(range, registration_severity(found), source::SCHEMA, found.code, message);
+    out.related_information = registration_related(found, encoding);
+    out
+}
+
+/// A registration warning's secondary locations (the earlier declaration a
+/// name or alias collides with, the built-in a catalog name reuses), each
+/// positioned like the primary range. Embedded locations use the message.
+fn registration_related(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Option<Vec<DiagnosticRelatedInformation>> {
+    let related: Vec<DiagnosticRelatedInformation> = found
+        .related
+        .iter()
+        .filter_map(|related| {
+            let range = position_range(related.line, related.line_prefix.as_deref(), encoding).unwrap_or_else(zero_range);
+            Some(DiagnosticRelatedInformation {
+                location: Location { uri: file_path_to_uri(&related.file)?, range },
+                message: related.message.clone(),
+            })
+        })
+        .collect();
+    (!related.is_empty()).then_some(related)
+}
+
+/// The zero-width range at a registration warning's position in the file
+/// it names. Its column is a character count; the protocol column is the
+/// line text before it, which the loader kept from the bytes it read,
+/// counted in `encoding`.
+fn registration_range(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Option<Range> {
+    position_range(found.line, found.line_prefix.as_deref(), encoding)
+}
+
+fn position_range(line: Option<usize>, line_prefix: Option<&str>, encoding: PositionEncoding) -> Option<Range> {
+    let line = u32::try_from(line?.saturating_sub(1)).unwrap_or(u32::MAX);
+    let start = Position::new(line, line_prefix.map_or(0, |prefix| encoding.units(prefix)));
+    Some(Range { start, end: start })
 }
 
 fn registration_severity(found: &darkmatter::config::registration::RegistrationDiagnostic) -> DiagnosticSeverity {
@@ -232,22 +271,15 @@ fn host_diagnostics(
     for found in view.diagnostics() {
         let severity = registration_severity(found);
         let here = found.file == ctx.path;
-        let range = match (here, found.line) {
-            (true, Some(line)) => {
-                let start = lsp_types::Position {
-                    line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
-                    character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
-                };
-                Range { start, end: start }
-            }
-            _ => zero_range(),
-        };
+        let range = here.then(|| registration_range(found, ctx.source_map.encoding())).flatten().unwrap_or_else(zero_range);
         let message = match (here, found.line) {
             (true, _) => found.message.clone(),
             (false, Some(line)) => format!("{} ({}:{line})", found.message, found.file.display()),
             (false, None) => format!("{} ({})", found.message, found.file.display()),
         };
-        out.push(diagnostic(range, severity, source::SCHEMA, found.code, message));
+        let mut published = diagnostic(range, severity, source::SCHEMA, found.code, message);
+        published.related_information = registration_related(found, ctx.source_map.encoding());
+        out.push(published);
     }
     let Some(ast) = ast else {
         return;
@@ -407,8 +439,18 @@ fn schema_prepare_diagnostic_with_origin(
             if let SchemaError::SchemaDocument { path, .. } = other {
                 related.extend(named_types::referenced_definition_related(ctx, path, other).unwrap_or_default());
             }
-            let code_value = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other)
-                .unwrap_or(code::SCHEMA_PREPARE);
+            // Conflicting host triggers: each trigger file is related.
+            if let SchemaError::HostTriggerConflict(conflict) = other {
+                for (path, message) in [(&conflict.first, "the first conflicting trigger"), (&conflict.second, "the second conflicting trigger")] {
+                    if let Some(uri) = file_path_to_uri(path) {
+                        related.push(DiagnosticRelatedInformation { location: Location::new(uri, zero_range()), message: message.to_string() });
+                    }
+                }
+            }
+            let code_value = match other {
+                SchemaError::HostTriggerConflict(_) => code::HOST_TRIGGER_CONFLICT,
+                other => darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other).unwrap_or(code::SCHEMA_PREPARE),
+            };
             (code_value, other.to_string(), fallback_span.clone())
         }
     };
@@ -575,8 +617,8 @@ pub(crate) fn schema_problem_diagnostics(
         out.push(specialized);
     }
 
-    for problem in &report.problems {
-        if specialized_paths.contains(&problem.path) {
+    for problem in report.problems.iter().chain(&report.key_advice) {
+        if specialized_paths.contains(&problem.path) && problem.code != ValidationProblemCode::NearMissKey {
             continue;
         }
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict, grading) else {
@@ -619,7 +661,7 @@ pub(crate) fn schema_problem_diagnostics(
             severity,
             source::SCHEMA,
             code_value,
-            problem.message.clone(),
+            problem_message(problem),
         );
         diagnostic.related_information = schema_origin_related(ctx, bundle, problem);
         diagnostic.data = Some(schema_problem_data(problem));
@@ -646,6 +688,9 @@ pub(crate) fn schema_problem_diagnostics(
 pub(super) fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(hint) = &problem.hint {
+        data.insert("hint".to_string(), hint.clone().into());
+    }
     if let Some(applied) = &problem.default {
         data.insert(
             "schema_default".to_string(),
@@ -928,7 +973,7 @@ fn problem_range(
         ValidationProblemCode::MissingRequired => ast.parent_mapping_range(&problem.path),
         // The offending key node, recovered from `offending_property` (the
         // failure's `path` points at the parent object).
-        ValidationProblemCode::UnknownKey => problem
+        ValidationProblemCode::UnknownKey | ValidationProblemCode::RemovedKey | ValidationProblemCode::NearMissKey => problem
             .offending_property
             .as_deref()
             .and_then(|key| ast.key_span_for(&problem.path, key))
@@ -1833,7 +1878,20 @@ fn classify(
             (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR)
         }
         ValidationProblemCode::KindCheck => (code::SCHEMA_KIND_CHECK, DiagnosticSeverity::ERROR),
+        // A removed key never works, in any mode or document kind.
+        ValidationProblemCode::RemovedKey => (code::SCHEMA_REMOVED_KEY, DiagnosticSeverity::ERROR),
+        // Advice on legal data: never an error, even in strict mode.
+        ValidationProblemCode::NearMissKey => (code::SCHEMA_NEAR_MISS_KEY, DiagnosticSeverity::WARNING),
     })
+}
+
+/// A schema problem's diagnostic text: its message, then its hint when the
+/// schema proves one (`key `promt` …; did you mean `prompt`?`).
+pub(crate) fn problem_message(problem: &ValidationProblem) -> String {
+    match &problem.hint {
+        Some(hint) => format!("{}; {hint}", problem.message),
+        None => problem.message.clone(),
+    }
 }
 
 /// Builds a diagnostic with a stable source + code.
@@ -1862,6 +1920,21 @@ pub(crate) fn diagnostic(
 /// characters of the source with any initial BOM removed, so the column is
 /// walked in characters here and the source map converts the byte span into
 /// the negotiated position encoding.
+/// Where a trigger file's own `error` is in its `text`: the parser's line
+/// and column, else the node the error names
+/// ([`simplified_schema::triggers::envelope::trigger_error_span`], so a
+/// nested `match` condition is found at its value), and the whole document
+/// only when neither exists.
+fn trigger_error_range(text: &str, error: &SchemaError) -> std::ops::Range<usize> {
+    let error = match error {
+        SchemaError::TriggerLoad { source, .. } => source,
+        other => other,
+    };
+    trigger_yaml_span(text, error)
+        .or_else(|| simplified_schema::triggers::envelope::trigger_error_span(text, error))
+        .unwrap_or(0..text.len())
+}
+
 fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<usize>> {
     let (line, column) = match error {
         SchemaError::TriggerEnvelopeYaml { line: Some(line), column, .. } => (*line, column.unwrap_or(1)),

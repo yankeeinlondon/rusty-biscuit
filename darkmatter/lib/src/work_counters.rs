@@ -28,6 +28,10 @@ pub enum Work {
     TriggerDiscovery,
     /// An effective schema prepared for one document.
     EffectivePreparation,
+    /// An effective schema served from the preparation memo of a shared
+    /// observation of local files (a dry run's passes), in place of an
+    /// [`Work::EffectivePreparation`].
+    EffectivePreparationReuse,
     /// A `jsonschema` validator compiled with Darkmatter's formats and
     /// keywords, whoever asked for it.
     ValidatorCompile,
@@ -156,6 +160,7 @@ impl Work {
         Work::ExpressionParse,
         Work::TriggerDiscovery,
         Work::EffectivePreparation,
+        Work::EffectivePreparationReuse,
         Work::ValidatorCompile,
         Work::RewriteArmCompile,
         Work::AlphanumericCheckCompile,

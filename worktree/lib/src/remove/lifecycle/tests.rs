@@ -1246,7 +1246,7 @@ fn assert_changed(refusal: &Refusal, named: &Path) {
         .iter()
         .find_map(|outcome| sentence.strip_suffix(&format!(" changed after the question, {outcome}")));
     let Some(found) = found else { panic!("not a changed-after-the-question sentence: {sentence}") };
-    assert_eq!(biscuit_file::to_portable_string(Path::new(found)), biscuit_file::to_portable_string(named), "{sentence}");
+    assert_eq!(biscuit_file::to_forward_slash_string(Path::new(found)), biscuit_file::to_forward_slash_string(named), "{sentence}");
 }
 
 /// How a refusal names an entry Git or the link resolver reported: the long,

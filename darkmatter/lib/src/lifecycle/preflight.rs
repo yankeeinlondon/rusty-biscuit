@@ -263,7 +263,7 @@ pub enum PreflightError {
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleShellResolution {
         source_path: PathBuf,

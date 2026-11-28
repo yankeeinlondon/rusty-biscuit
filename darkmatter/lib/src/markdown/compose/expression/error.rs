@@ -60,6 +60,10 @@ pub enum FileRefFailure {
     /// requested. Unlike [`RemoteNotEnabled`](Self::RemoteNotEnabled), no
     /// later pass of the same run can read it.
     RemoteDenied,
+    /// The URL's host needs an approval (`permissions.network: ask`) this
+    /// run did not give, and the read has no prompt to ask with, so nothing
+    /// was requested.
+    RemoteNeedsApproval,
 }
 
 impl FileRefFailure {
@@ -107,6 +111,7 @@ impl FileRefFailure {
             FileRefFailure::FoundElsewhere => "found_elsewhere",
             FileRefFailure::RemoteNotEnabled => "remote_not_enabled",
             FileRefFailure::RemoteDenied => "remote_denied",
+            FileRefFailure::RemoteNeedsApproval => "remote_needs_approval",
         }
     }
 }
@@ -372,6 +377,15 @@ pub enum ExpressionError {
         refusal: super::read_gate::GateRefusal,
     },
 
+    /// A dry run could not produce this value without an effect: it reads a
+    /// value that needs a command, or calls a function that would start the
+    /// login shell or send a packet (see
+    /// [`passive`](crate::markdown::compose::passive)). Never recovered into
+    /// a value: `try` and `||` pass it through, so the surface that started
+    /// the evaluation keeps its authored text.
+    #[error("not available in a dry run: {}", .0.describe())]
+    Unavailable(Box<crate::markdown::compose::passive::DeferralReason>),
+
     /// An editor observation stopped before it could produce a value: a read
     /// its approvals do not cover, an input it cannot inspect, a remote body
     /// with no fresh cache entry, or an operation the editor does not run
@@ -565,6 +579,16 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 .and_then(|url| url.host_str().map(str::to_string))
                 .unwrap_or_default()
         ),
+        (FileRefFailure::RemoteNeedsApproval, _) => format!(
+            "{}(): {}",
+            diagnostic.function,
+            crate::markdown::compose::remote::RemoteReadError::ApprovalRequired {
+                host: url::Url::parse(&diagnostic.reference)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .unwrap_or_default(),
+            }
+        ),
         _ => crate::markdown::errors::with_hint_line(
             format!("invalid file path: {}", diagnostic.reference),
             diagnostic.glob_hint(),
@@ -586,7 +610,9 @@ impl FileReferenceDiagnostic {
         match self.kind {
             FileRefFailure::Malformed => ResolutionFailure::InvalidReference,
             FileRefFailure::NotFound | FileRefFailure::FoundElsewhere => ResolutionFailure::NoMatch,
-            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied => ResolutionFailure::UnsupportedRemote,
+            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied | FileRefFailure::RemoteNeedsApproval => {
+                ResolutionFailure::UnsupportedRemote
+            }
         }
     }
 
@@ -616,7 +642,7 @@ impl FileReferenceDiagnostic {
     ) -> Result<Self, simplified_schema::SchemaError> {
         use simplified_schema::SchemaError;
         let (reference, kind, source) = match error {
-            SchemaError::Unresolved { reference, source } => (reference, FileRefFailure::classify(&source), Some(source)),
+            SchemaError::Unresolved { reference, source, .. } => (reference, FileRefFailure::classify(&source), Some(source)),
             SchemaError::NoMatch { reference, .. } => (reference, FileRefFailure::NotFound, None),
             SchemaError::Io { path, source } => (
                 path.to_string_lossy().into_owned(),
@@ -754,6 +780,29 @@ impl ExpressionError {
         }
     }
 
+    /// Whether this failure means the read has no result yet, rather than a
+    /// failed one: a dry run did not attempt it ([`Unavailable`]), an editor
+    /// cannot observe it yet ([`ObservationPending`]), or a schema slot's gate
+    /// refused it before anything was opened ([`SlotReadRefused`]). Looks
+    /// through collection callback wrappers.
+    ///
+    /// Every wrapper that turns a failure into data (`try_frontmatter`'s
+    /// `{ ok: false }`, `try`'s fallback) must propagate such a failure
+    /// unchanged, so the surface that started the evaluation keeps its
+    /// deferral instead of settling on a value the run may never produce.
+    /// [`is_recoverable_read_failure`](Self::is_recoverable_read_failure) is
+    /// `false` for each of them.
+    ///
+    /// [`Unavailable`]: ExpressionError::Unavailable
+    /// [`ObservationPending`]: ExpressionError::ObservationPending
+    /// [`SlotReadRefused`]: ExpressionError::SlotReadRefused
+    pub fn withholds_result(&self) -> bool {
+        matches!(
+            self.without_callbacks(),
+            Self::Unavailable(_) | Self::ObservationPending { .. } | Self::SlotReadRefused { .. }
+        )
+    }
+
     /// Whether `try(expr, fallback)` may replace this failure of `expr` with
     /// its fallback: a typed failure to read a source that the request was
     /// allowed to read.
@@ -815,6 +864,7 @@ impl ExpressionError {
             | Self::Provider { .. }
             | Self::ContextNotCaptured { .. }
             | Self::SlotReadRefused { .. }
+            | Self::Unavailable(_)
             | Self::ObservationPending { .. }
             | Self::ContractViolation { .. }
             | Self::FunctionContextNotCaptured { .. }
@@ -893,6 +943,16 @@ impl ExpressionError {
             Self::Callback { source, .. } => source.place(root),
             Self::InvalidSpreadOperand { site, .. } => site.place_in(root),
             _ => {}
+        }
+    }
+
+    /// Why a dry run left this evaluation without a value, when that is the
+    /// failure ([`Unavailable`](Self::Unavailable), also inside a callback).
+    pub fn unavailable_reason(&self) -> Option<&crate::markdown::compose::passive::DeferralReason> {
+        match self {
+            Self::Unavailable(reason) => Some(reason),
+            Self::Callback { source, .. } => source.unavailable_reason(),
+            _ => None,
         }
     }
 
@@ -1247,6 +1307,21 @@ mod tests {
                     false,
                 ),
                 ("UnknownFunction", ExpressionError::UnknownFunction { name: "lenght".into() }, false),
+                (
+                    "Unavailable",
+                    ExpressionError::Unavailable(Box::new(
+                        crate::markdown::compose::passive::DeferralReason::NetworkNeedsApproval { url: "https://x/a.md".into() },
+                    )),
+                    false,
+                ),
+                (
+                    "ObservationPending",
+                    ExpressionError::ObservationPending {
+                        function: "frontmatter".into(),
+                        reason: crate::markdown::compose::expression::editor_reads::PendingReason::RemoteUnavailable,
+                    },
+                    false,
+                ),
                 ("Parse", ExpressionError::Parse("unexpected".into()), false),
                 ("InvalidCallback", ExpressionError::InvalidCallback { span: 0..1, message: "x".into() }, false),
                 ("Callback over a non-read failure", callback(other("upper")), false),
@@ -1413,6 +1488,22 @@ mod tests {
                 assert_eq!(error.is_recoverable_read_failure(), recoverable, "{name}");
                 let wrapped = callback(callback(error));
                 assert_eq!(wrapped.is_recoverable_read_failure(), recoverable, "{name} inside two callbacks");
+            }
+        }
+
+        /// The variants with no result yet are exactly the three that no
+        /// recovery wrapper may absorb, and `try` never recovers one.
+        #[test]
+        fn only_a_read_with_no_result_yet_withholds_its_result_and_try_never_recovers_one() {
+            let withholding = ["Unavailable", "ObservationPending", "SlotReadRefused"];
+            for (name, error, _) in cases() {
+                let expected = withholding.iter().any(|variant| name.starts_with(variant));
+                assert_eq!(error.withholds_result(), expected, "{name}");
+                let wrapped = callback(callback(error));
+                assert_eq!(wrapped.withholds_result(), expected, "{name} inside two callbacks");
+                if expected {
+                    assert!(!wrapped.is_recoverable_read_failure(), "{name}");
+                }
             }
         }
 

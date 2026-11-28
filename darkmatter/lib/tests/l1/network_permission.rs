@@ -2,7 +2,8 @@
 //! a schema slot may fetch: `allow` in the user file and, inside a
 //! repository, in both its committed and working-copy files permits every
 //! HTTP(S) host; a valid `deny` permits only the run's `--allow host=HOST`
-//! hosts; an invalid `permissions` block permits nothing. Consent never relaxes the transport rules: redirects stay
+//! hosts; a valid `ask` permits the same hosts and leaves every other URL
+//! needing approval; an invalid `permissions` block permits nothing. Consent never relaxes the transport rules: redirects stay
 //! refused, and a denied host's cached body is never served.
 //!
 //! Every case works in its own temp folder with a temp home, prepares its
@@ -22,6 +23,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const CHILD_TEXT: &str = "Remote child.";
 const ROWS_JSON: &str = "[\"a\", \"b\"]";
 const SLOT_APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+const SLOT_NETWORK_DENIED: &str = "dm.schema.slot_network_denied";
 
 /// Runs git with a fixture-local identity, so the caller's hooks and signing
 /// configuration never reach the fixture.
@@ -330,7 +332,9 @@ fn slot_refused(result: &Composed) -> bool {
     match result {
         Ok(_) => false,
         Err(failure) => {
-            error_diagnostics(&failure.error).iter().any(|record| record.code == SLOT_APPROVAL_REQUIRED)
+            error_diagnostics(&failure.error)
+                .iter()
+                .any(|record| record.code == SLOT_APPROVAL_REQUIRED || record.code == SLOT_NETWORK_DENIED)
                 || chain(failure).contains("denied")
         }
     }
@@ -343,10 +347,12 @@ async fn slot_and_composition_reads_decide_alike() {
     let server = server().await;
     let url = format!("{}/rows.json", server.uri());
     type Expectation = (&'static str, fn() -> ComposeOptions, bool);
-    let cases: [Expectation; 3] = [
+    let cases: [Expectation; 5] = [
         ("allow", ComposeOptions::new, true),
         ("deny", ComposeOptions::new, false),
         ("deny", exact_loopback, true),
+        ("ask", ComposeOptions::new, false),
+        ("ask", exact_loopback, true),
     ];
     for (network, options, allowed) in cases {
         let case = Case::new();
@@ -370,7 +376,7 @@ async fn slot_and_composition_reads_decide_alike() {
 // Every URL surface (`::file`, `::code`, a read-side expression, a schema
 // slot) under one configuration and the exact per-run host `127.0.0.1`.
 // An invalid `permissions` block (any non-null shape of `network` that is
-// not `allow`/`deny`, or any other invalid part of the block) is a located
+// not `allow`/`ask`/`deny`, or any other invalid part of the block) is a located
 // configuration error and no request; a valid `allow`/`deny`, or an omitted
 // block, fetches. A `null` is the same as leaving the key out.
 
@@ -471,4 +477,33 @@ async fn a_null_network_fetches_every_surface_for_an_exact_host_as_if_omitted() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn null_permissions_fetch_every_surface_for_an_exact_host_as_if_omitted() {
     assert_fetches("permissions: null\n").await;
+}
+
+/// Under fail-fast, a fetched child whose frontmatter does not parse fails
+/// under the frontmatter parse code, naming the URL, not as a generic composition
+/// failure; the same child with valid frontmatter composes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_remote_child_with_malformed_frontmatter_keeps_its_parse_code() {
+    let server = MockServer::start().await;
+    for (route, body) in [("/bad.md", "---\nkey: [unclosed\n---\nBad child.\n"), ("/good.md", "---\nkey: ok\n---\nGood child.\n")] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    let case = Case::new();
+    case.user("allow");
+
+    let good = composed(compose(&case, "good.md", &format!("::file {}/good.md\n", server.uri()), ComposeOptions::new()).await);
+    assert!(good.contains("Good child."), "{good}");
+
+    // Without fail-fast, composition tolerates a failed child as a placeholder.
+    let failure = compose(&case, "bad.md", &format!("::file {}/bad.md\n", server.uri()), ComposeOptions::new().with_fail_fast(true))
+        .await
+        .expect_err("malformed remote frontmatter fails");
+    let records = error_diagnostics(&failure.error);
+    let codes: Vec<&str> = records.iter().map(|record| record.code.as_str()).collect();
+    assert_eq!(codes, ["dm.frontmatter.yaml_parse"], "{}", chain(&failure));
+    assert!(chain(&failure).contains("/bad.md"), "the error names the URL: {}", chain(&failure));
 }

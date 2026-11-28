@@ -1,7 +1,7 @@
-//! `claudine sequence --dry-run` previews without effects: `shell:` and
-//! `side_effect:` tasks are rendered, not run, loops preview one pass, and no
-//! lifecycle event or `prep` target runs. `--dry-run-shell` runs the `shell:`
-//! tasks once, and nothing else.
+//! `claudine sequence --dry-run` has no effects: `shell:` and `side_effect:`
+//! tasks are reported as not checked and never run, a loop is walked once,
+//! and no lifecycle event or `prep` target runs. The report format itself is
+//! covered by `dry_run_check.rs`.
 
 use std::fs;
 
@@ -53,31 +53,21 @@ fn staged(fixture: &CliProcessFixture) -> bool {
         .is_ok_and(|index| index.windows(b"change.txt".len()).any(|window| window == b"change.txt"))
 }
 
-/// `--dry-run` renders `git add` and leaves the index untouched.
+/// `--dry-run` reports `git add` as an unchecked command and leaves the
+/// index untouched.
 #[cfg(unix)]
 #[test]
-fn a_dry_run_renders_a_shell_task_and_leaves_the_index_untouched() {
+fn a_dry_run_reports_a_shell_task_and_leaves_the_index_untouched() {
     let fixture = staging_fixture();
     let run = run(&fixture, &["--dry-run"]);
     assert!(run.status.success(), "stderr:\n{}", run.stderr);
-    assert!(prose(&run.stderr).contains("rendered (dry-run): would run `git add change.txt`"), "stderr:\n{}", run.stderr);
-    assert!(prose(&run.stderr).contains("Sequence previewed (dry-run): 1 step(s) rendered, none run"), "stderr:\n{}", run.stderr);
+    assert!(prose(&run.stderr).contains("not checked: command (a dry run runs no commands)"), "stderr:\n{}", run.stderr);
+    assert!(prose(&run.stderr).contains("Previewed 0 of 1 task."), "stderr:\n{}", run.stderr);
     assert!(!staged(&fixture), "the index is untouched");
 }
 
-/// `--dry-run --dry-run-shell` runs the `shell:` task once, so it stages.
-#[cfg(unix)]
-#[test]
-fn dry_run_shell_runs_the_shell_task_and_stages() {
-    let fixture = staging_fixture();
-    let run = run(&fixture, &["--dry-run", "--dry-run-shell"]);
-    assert!(run.status.success(), "stderr:\n{}", run.stderr);
-    assert!(!run.stderr.contains("would run `git add"), "stderr:\n{}", run.stderr);
-    assert!(staged(&fixture), "the shell task staged the file");
-}
-
-/// `--dry-run-shell` means nothing without `--dry-run`: a usage error that
-/// runs nothing.
+/// `--dry-run-shell` was removed: alone it is a usage error that runs
+/// nothing.
 #[test]
 fn dry_run_shell_without_dry_run_is_a_usage_error() {
     let fixture = CliProcessFixture::named("sequence-dry-run-usage");
@@ -88,11 +78,11 @@ fn dry_run_shell_without_dry_run_is_a_usage_error() {
     assert!(!fixture.cwd().join("trace.log").exists());
 }
 
-/// A loop whose condition waits for a file an agent would write previews one
-/// pass and ends; its lifecycle events and its `prep` target never run, and
-/// the target is listed.
+/// A loop whose condition waits for a file an agent would write is walked
+/// once and the check ends; its lifecycle events and its `prep` target never
+/// run.
 #[test]
-fn a_dry_run_previews_one_pass_of_a_file_dependent_loop_with_no_lifecycle_or_prep() {
+fn a_dry_run_walks_a_file_dependent_loop_once_with_no_lifecycle_or_prep() {
     let fixture = CliProcessFixture::named("sequence-dry-run-loop");
     fs::write(
         fixture.cwd().join("seq.md"),
@@ -119,9 +109,8 @@ sequence:
     let run = run(&fixture, &["--dry-run"]);
     assert!(run.status.success(), "stderr:\n{}", run.stderr);
     let prose = prose(&run.stderr);
-    assert!(prose.contains("`loop` previews one pass (dry-run); repetition is not evaluated: until `file_exists('agent-wrote.txt')`, max 50"), "stderr:\n{}", run.stderr);
-    assert!(prose.contains("prep target @helper.md (not run in a dry run)"), "stderr:\n{}", run.stderr);
-    assert!(prose.contains("`work` runs when `loop.count > 1` (not evaluated in a dry run)"), "stderr:\n{}", run.stderr);
+    assert!(prose.contains("task work (sequence[0])"), "stderr:\n{}", run.stderr);
+    assert!(prose.contains("Dry run found 0 errors and 0 warnings; 1 check not run."), "stderr:\n{}", run.stderr);
     for absent in ["trace.log", "helper.log", "work.log"] {
         assert!(!fixture.cwd().join(absent).exists(), "{absent} must not be written; stderr:\n{}", run.stderr);
     }
@@ -144,57 +133,45 @@ fn side_effects_run(flags: &[&str]) -> (CliProcessFixture, Run) {
     fs::write(fixture.cwd().join("seq.md"), SIDE_EFFECTS).unwrap();
     let run = run(&fixture, flags);
     assert!(run.status.success(), "{flags:?}; stderr:\n{}", run.stderr);
-    let prose = prose(&run.stderr);
-    assert!(prose.contains(r#"rendered (dry-run): would run `{"append_line":["scratch.txt","{{ flag }}"]}`"#), "{flags:?}; stderr:\n{}", run.stderr);
-    assert!(prose.contains(r#"rendered (dry-run): would run `{"set":{"flag":"changed"}}`"#), "{flags:?}; stderr:\n{}", run.stderr);
+    assert_eq!(prose(&run.stderr).matches("not checked: side effect (a dry run dispatches no side effects)").count(), 2, "{flags:?}; stderr:\n{}", run.stderr);
     assert!(!fixture.cwd().join("scratch.txt").exists(), "{flags:?}");
     (fixture, run)
 }
 
 /// A `side_effect:` task that writes a file and one that sets a runtime value
-/// are rendered with their authored arguments and not run under `--dry-run`:
-/// the file stays absent, and the `shell:` task is rendered too.
+/// are reported as not checked and not run under `--dry-run`: the file stays
+/// absent, and the `shell:` task is not run either.
 #[test]
-fn side_effect_tasks_are_rendered_and_never_run_in_a_dry_run() {
+fn side_effect_tasks_are_reported_and_never_run_in_a_dry_run() {
     let (_fixture, run) = side_effects_run(&["--dry-run"]);
-    assert!(prose(&run.stderr).contains("rendered (dry-run): would run `echo flag={{ flag }}`"), "stderr:\n{}", run.stderr);
+    assert!(prose(&run.stderr).contains("not checked: command (a dry run runs no commands)"), "stderr:\n{}", run.stderr);
     assert!(!run.stdout.contains("flag="), "stdout:\n{}", run.stdout);
 }
 
-/// `--dry-run-shell` runs the `shell:` task but still no `side_effect:` task:
-/// the command reads the value the unrun `set` would have replaced.
-// Asserts on what POSIX `sh` `echo` prints.
-#[cfg(unix)]
-#[test]
-fn dry_run_shell_still_renders_side_effect_tasks() {
-    let (_fixture, run) = side_effects_run(&["--dry-run", "--dry-run-shell"]);
-    assert!(run.stdout.contains("flag=original"), "stdout:\n{}\nstderr:\n{}", run.stdout, run.stderr);
-    assert!(!run.stdout.contains("flag=changed"), "stdout:\n{}", run.stdout);
+/// An inline container's `$schema` requiring a value that only a runtime
+/// write supplies is not failed by a dry run, which does not run the write.
+/// A real run then admits the container with the written value.
+fn assert_runtime_write_satisfies_the_inline_check(writer: &str) {
+    const CONTAINER: &str = "  - name: review\n    $schema: { reviewer: string(required) }\n    sequence: [{ name: sign, side_effect: { append_line: [signed.log, \"{{ reviewer }}\"] } }]\n";
+    let fixture = CliProcessFixture::named("sequence-dry-run-inline-check");
+    fs::write(fixture.cwd().join("seq.md"), format!("---\n{writer}{CONTAINER}---\n")).unwrap();
+
+    let preview = run(&fixture, &["--dry-run"]);
+    assert!(preview.status.success(), "{writer}\nstderr:\n{}", preview.stderr);
+    assert!(prose(&preview.stderr).contains("Dry run found 0 errors and 0 warnings"), "{writer}\nstderr:\n{}", preview.stderr);
+    assert!(!fixture.cwd().join("signed.log").exists(), "{writer}");
+
+    let real = run(&fixture, &["--silent"]);
+    assert!(real.status.success(), "{writer}\nstderr:\n{}", real.stderr);
+    assert_eq!(fs::read_to_string(fixture.cwd().join("signed.log")).unwrap().trim(), "ada", "{writer}");
 }
 
-/// An inline container's `$schema` requiring a value that only a runtime
-/// write supplies (an earlier task's `set`, or `initialize`'s) is not judged
-/// by a dry run, which neither runs the write nor fails: it names the check.
-/// A real run then admits the container with the written value.
 #[test]
-fn a_dry_run_names_an_inline_check_that_a_runtime_write_satisfies() {
-    const CONTAINER: &str = "  - name: review\n    $schema: { reviewer: string(required) }\n    sequence: [{ name: sign, side_effect: { append_line: [signed.log, \"{{ reviewer }}\"] } }]\n";
-    for (writer, label) in [
-        (format!("sequence:\n  - {{ name: mark, side_effect: {{ set: {{ reviewer: ada }} }} }}\n{CONTAINER}"), "tasks[1]"),
-        (format!("initialize: [{{ set: {{ reviewer: ada }} }}]\nsequence:\n{CONTAINER}"), "tasks[0]"),
-    ] {
-        let fixture = CliProcessFixture::named("sequence-dry-run-inline-check");
-        fs::write(fixture.cwd().join("seq.md"), format!("---\n{writer}---\n")).unwrap();
+fn a_dry_run_does_not_fail_an_inline_check_that_an_earlier_set_satisfies() {
+    assert_runtime_write_satisfies_the_inline_check("sequence:\n  - { name: mark, side_effect: { set: { reviewer: ada } } }\n");
+}
 
-        let preview = run(&fixture, &["--dry-run"]);
-        assert!(preview.status.success(), "{writer}\nstderr:\n{}", preview.stderr);
-        assert!(prose(&preview.stderr).contains(&format!("`{label}` checks its `$schema` at its turn (not evaluated in a dry run)")),
-            "{writer}\nstderr:\n{}", preview.stderr);
-        assert!(!preview.stderr.contains("failed its `$schema` check"), "{writer}\nstderr:\n{}", preview.stderr);
-        assert!(!fixture.cwd().join("signed.log").exists(), "{writer}");
-
-        let real = run(&fixture, &["--silent"]);
-        assert!(real.status.success(), "{writer}\nstderr:\n{}", real.stderr);
-        assert_eq!(fs::read_to_string(fixture.cwd().join("signed.log")).unwrap().trim(), "ada", "{writer}");
-    }
+#[test]
+fn a_dry_run_does_not_fail_an_inline_check_that_initialize_satisfies() {
+    assert_runtime_write_satisfies_the_inline_check("initialize: [{ set: { reviewer: ada } }]\nsequence:\n");
 }

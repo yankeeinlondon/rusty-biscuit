@@ -14,7 +14,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
 use darkmatter::markdown::output::command::{CommandValue, code_document};
-use darkmatter::markdown::reference::file_tree::{FileTree, FileTreeError};
+use darkmatter::markdown::reference::file_tree::FileTree;
 use darkmatter::markdown::reference::validate::ValidationReportView;
 use renderable::{CommandOutput as _, OutputOptions, TerminalProfile, Width};
 use serde_json::Value;
@@ -64,12 +64,11 @@ fn graph_value(
     }
 
     // A document that fails to prepare keeps its own records (an expression's
-    // location, a data file's `data_location`); the message, and so stderr, is
-    // the tree error's text as before.
-    tree.ensure_built().map_err(|error| match &error {
-        FileTreeError::Markdown(markdown) => ClassifiedFailure::report(eyre!("{error}"), error_diagnostics(markdown)),
-        _ => eyre!("{error}"),
-    })?;
+    // location, a data file's `data_location`), and a reference failure its
+    // code and details, as `md validate refs` reports them; the message, and
+    // so stderr, is the tree error's text.
+    tree.ensure_built()
+        .map_err(|error| ClassifiedFailure::report(eyre!("{error}"), error_diagnostics(&error)))?;
 
     let report = validate.then(|| tree.validation_report().cloned()).flatten();
     let mut data = match tree.graph() {

@@ -1,0 +1,39 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.schema.unknown_key",
+      "severity": "error",
+      "message": "Additional properties are not allowed ('whem' was unexpected)",
+      "source": {
+        "file": "/work/t.yaml",
+        "line": 3,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "did you mean `when`?",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "t",
+          "property": "sequence[0]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

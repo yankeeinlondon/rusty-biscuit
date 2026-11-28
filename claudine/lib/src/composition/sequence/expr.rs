@@ -15,7 +15,13 @@
 //! `config` replaces the frontmatter's `config` whole, for a dotted path and a
 //! bare `fm` alike. Reserved namespaces resolve first, so an
 //! item field can never stand in for `ctx`, `env`, or `fm`.
+//!
+//! Inside a sequence check every evaluation here carries the check's passive
+//! session ([`passive_scope`](super::super::passive_scope)), so an effectful
+//! function such as `has_alias` fails as unavailable instead of starting the
+//! login shell.
 
+use std::cell::OnceCell;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -43,6 +49,9 @@ pub struct SourceExpressionLookup<'a> {
     ctx: CtxLookup<'a>,
     file_resolution_context: &'a biscuit_file::FileResolutionContext,
     source_path: &'a Path,
+    /// Built once, on first use: Darkmatter's passive read check borrows it
+    /// (`resolution_context_ref`) to see a dry run's deferred values.
+    resolution: OnceCell<Option<ResolutionContext>>,
 }
 
 impl<'a> SourceExpressionLookup<'a> {
@@ -63,6 +72,7 @@ impl<'a> SourceExpressionLookup<'a> {
             ctx: CtxLookup::new(base_dir, file_resolution_context.env()),
             file_resolution_context,
             source_path,
+            resolution: OnceCell::new(),
         }
     }
 
@@ -130,16 +140,24 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context_ref().cloned()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
         // `None` makes a read-side function fail with Darkmatter's
         // "requires a document resolution context" error.
-        super::super::document_expression_resolution_context(
-            self.source_path,
-            None,
-            self.file_resolution_context,
-            None,
-        )
-        .inspect_err(|error| tracing::warn!(%error, "sequence expression context is invalid"))
-        .ok()
+        self.resolution
+            .get_or_init(|| {
+                super::super::document_expression_resolution_context(
+                    self.source_path,
+                    None,
+                    self.file_resolution_context,
+                    None,
+                )
+                .inspect_err(|error| tracing::warn!(%error, "sequence expression context is invalid"))
+                .ok()
+            })
+            .as_ref()
     }
 }
 
@@ -226,11 +244,25 @@ fn evaluate_authored<L: EvaluationLookup>(
     let failed = |source| CompositionError::SequenceExpressionFailed {
         expression: text.to_string(),
         source,
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let prepared = prepare_value(&Value::String(text.to_string()), mode)
         .map_err(|error| failed(SequenceExpressionCause::Prepare(error)))?;
     let session = EvaluationSession::associate(source_view(), lookup, [])
         .map_err(|error| failed(SequenceExpressionCause::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))))?;
+    // Under a dry run, interpolation keeps an unavailable span's authored
+    // text, which a source would then read as a name, a path, or a prompt.
+    // Each span is judged alone first, so the whole value is unavailable
+    // instead.
+    if mode == AuthoredMode::InterpolatedValue && super::super::passive_scope::current().is_some() {
+        for expression in prepared.expressions() {
+            if let Err(error) = evaluate_authored(expression.text(), AuthoredMode::Expression, lookup)
+                && error.deferral_reason().is_some()
+            {
+                return Err(error);
+            }
+        }
+    }
     evaluate_prepared(&prepared, &session).map_err(|error| {
         failed(match error {
             MarkdownError::Interpolation { cause, .. } => SequenceExpressionCause::Evaluate(cause),
@@ -281,6 +313,57 @@ mod tests {
             let actual = evaluate_whole(expression, &lookup).unwrap();
             assert_eq!(actual, expected, "{expression}");
         }
+    }
+
+    /// A fake `bash` that appends to `launches` each time it starts and
+    /// answers that the probed name is an alias.
+    #[cfg(unix)]
+    fn fake_login_shell(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let launches = dir.join("launches");
+        let bash = dir.join("bash");
+        std::fs::write(
+            &bash,
+            format!("#!/bin/sh\necho launched >> '{}'\nprintf 'darkmatter-shell-probe:alias\\n'\n", launches.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bash, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (bash, launches)
+    }
+
+    /// Outside a check the effectful call starts the login shell (which
+    /// proves the fake works); inside one it is refused before the shell
+    /// starts, as a whole value and as a span, while a pure call still
+    /// evaluates.
+    #[cfg(unix)]
+    #[test]
+    fn a_check_refuses_an_effectful_call_and_keeps_pure_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bash, launches) = fake_login_shell(dir.path());
+        std::fs::write(dir.path().join("ask.md"), "Ask.\n").unwrap();
+        let env = std::collections::HashMap::from([("SHELL".to_string(), bash.display().to_string())]);
+        let context = biscuit_file::FileResolutionContext::from_snapshot(dir.path(), None, env);
+        let frontmatter = Map::new();
+        let source = dir.path().join("sequence.md");
+        let lookup = || SourceExpressionLookup::new(&frontmatter, &context, &source);
+
+        {
+            let _scope = super::super::super::passive_scope::enter(
+                darkmatter::markdown::compose::passive::PassiveSession::new(),
+            );
+            for error in [
+                evaluate_whole("has_alias('ll') ? 'a' : 'b'", &lookup()).unwrap_err(),
+                render_interpolated("x-{{ has_alias('ll') }}", &lookup()).unwrap_err(),
+            ] {
+                assert!(error.deferral_reason().is_some(), "{error:?}");
+            }
+            assert_eq!(evaluate_whole("file_exists('./ask.md')", &lookup()).unwrap(), Value::Bool(true));
+            assert_eq!(render_interpolated("x-{{ file_exists('./ask.md') }}", &lookup()).unwrap(), json!("x-true"));
+            assert!(!launches.exists(), "a check started the login shell");
+        }
+
+        assert_eq!(evaluate_whole("has_alias('ll')", &lookup()).unwrap(), Value::Bool(true));
+        assert!(launches.exists(), "outside a check the call starts the login shell");
     }
 
     #[test]

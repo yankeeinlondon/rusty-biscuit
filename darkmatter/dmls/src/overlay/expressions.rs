@@ -1048,10 +1048,10 @@ fn local_detail(site: &TypeScope<'_>, name: &str) -> String {
 }
 
 /// The hover block for a host global or one of its members (`seq`,
-/// `seq.index`), from the host catalogs in the document's schema roots
-/// ([`darkmatter::markdown::schemas::catalog::host_catalogs`]). `None` when no
-/// catalog declares the root or the member. Only the declared shape is shown;
-/// which events may read the global is the host's.
+/// `seq.index`), from the host catalogs of the document's selected host view
+/// (a registered host's catalog, built from its namespace files). `None`
+/// when no catalog declares the root or the member. Only the declared shape
+/// is shown; which events may read the global is the host's.
 pub fn host_global_hover(name: &str, catalogs: &[GlobalCatalog]) -> Option<String> {
     let (root, member) = match name.split_once('.') {
         Some((root, member)) => (root, Some(member)),

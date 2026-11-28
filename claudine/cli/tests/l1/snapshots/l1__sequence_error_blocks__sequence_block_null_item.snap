@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: null sequence item
+┃ 
+┃ sequence item 4 is null; every item must be a scalar or an object
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Replace the null item with a name or an object, or remove it.

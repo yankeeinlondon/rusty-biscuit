@@ -115,9 +115,19 @@ pub struct PendingReference {
     pub reference: String,
 }
 
+/// An owner whose own preparation failed for a reason other than a missing
+/// input, under [`InputDiscoveryOptions::leaving_verdicts`].
+#[derive(Debug)]
+pub struct FailedOwner {
+    /// Index in [`SequenceInputInventory::owners`].
+    pub owner: usize,
+    /// The failure, as a discovery without `leaving_verdicts` raises it.
+    pub error: CompositionError,
+}
+
 /// Everything input collection needs to know before the graph is frozen, in
 /// first-encounter order.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SequenceInputInventory {
     /// Every owning document; the root is first.
     pub owners: Vec<InputOwner>,
@@ -127,11 +137,10 @@ pub struct SequenceInputInventory {
     pub inline_containers: Vec<InlineContainer>,
     /// References left pending by an owner's missing inputs.
     pub pending: Vec<PendingReference>,
-    /// Indices in [`Self::owners`] of the owners whose own preparation failed
-    /// for a reason other than a missing input, under
-    /// [`InputDiscoveryOptions::leaving_verdicts`]; their values were then
-    /// read as authored.
-    pub failed_owners: Vec<usize>,
+    /// The owners whose own preparation failed for a reason other than a
+    /// missing input, under [`InputDiscoveryOptions::leaving_verdicts`];
+    /// their values were then read as authored.
+    pub failed_owners: Vec<FailedOwner>,
     /// The parses discovery made, which the graph walk that follows reuses
     /// ([`super::build_preflight_graph_after_discovery`]).
     pub(crate) sources: super::NestedSources,
@@ -152,6 +161,10 @@ impl SequenceInputInventory {
         (!failures.is_empty()).then(|| CompositionError::SequenceMissingProperties {
             failure_count: failures.len(),
             failures,
+            // The combined report belongs to the root, the first owner.
+            site: Box::new(self.owners.first().map_or_else(crate::composition::SequenceSite::unlocated, |root| {
+                crate::composition::SequenceSite::file(&root.path)
+            })),
         })
     }
 }
@@ -164,6 +177,8 @@ pub struct InputDiscoveryOptions<'a> {
     caller_layers: Option<&'a CallerInputLayers>,
     invocation: Option<(&'a InvocationContext, &'a SourceContext)>,
     leave_verdicts: bool,
+    recover: bool,
+    prompt_memo: Option<&'a super::PromptMemo>,
 }
 
 impl<'a> InputDiscoveryOptions<'a> {
@@ -174,7 +189,10 @@ impl<'a> InputDiscoveryOptions<'a> {
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         compose_context: &'a ComposeContext,
     ) -> Self {
-        Self { file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false }
+        Self {
+            file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false,
+            recover: false, prompt_memo: None,
+        }
     }
 
     /// Resolve every reference from the repository context of the document
@@ -195,6 +213,25 @@ impl<'a> InputDiscoveryOptions<'a> {
     #[must_use]
     pub fn leaving_verdicts(mut self) -> Self {
         self.leave_verdicts = true;
+        self
+    }
+
+    /// Skip a task or group leg whose reading fails, and go on with its
+    /// siblings, instead of failing discovery: for a check, whose graph walk
+    /// reports that failure at the task
+    /// ([`super::check_sequence_tree`]). A failure outside every task (the
+    /// root's list or declarations) still fails discovery.
+    #[must_use]
+    pub fn recovering(mut self) -> Self {
+        self.recover = true;
+        self
+    }
+
+    /// Read each prompt document through `memo`, which a check shares with
+    /// its other passes, so a prompt is read once per check.
+    #[must_use]
+    pub(crate) fn with_prompt_memo(mut self, memo: &'a super::PromptMemo) -> Self {
+        self.prompt_memo = Some(memo);
         self
     }
 
@@ -238,6 +275,7 @@ pub fn discover_sequence_inputs(
     if let Some(Value::Object(setters)) = options.caller_layers.and_then(|layers| layers.set_overrides.as_ref()) {
         loader.caller_setters = setters.clone();
     }
+    loader.prompt_memo = options.prompt_memo.cloned();
     let root_path = source.resolved_path.clone();
     loader.ancestry.push((loader.source_path.clone(), None));
     let mut discovery = Discovery { loader, options, inventory: SequenceInputInventory::default() };
@@ -334,8 +372,8 @@ impl Discovery<'_> {
                 };
                 (values, Some(entry))
             }
-            Err(_) if self.options.leave_verdicts => {
-                self.inventory.failed_owners.push(self.inventory.owners.len());
+            Err(error) if self.options.leave_verdicts => {
+                self.inventory.failed_owners.push(FailedOwner { owner: self.inventory.owners.len(), error });
                 let authored = source.markdown.frontmatter().as_map().iter()
                     .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
                     .collect();
@@ -359,12 +397,28 @@ impl Discovery<'_> {
     fn walk_owner_list(
         &mut self, items: &[Value], declaring_path: &Path, list_property: &str, scope: &Scope<'_>,
     ) -> Result<(), CompositionError> {
+        let mut readable = Vec::with_capacity(items.len());
         for (index, item) in items.iter().enumerate() {
             if let Value::Object(map) = item {
-                grammar::validate_task_grammar(map, declaring_path, &format!("{list_property}[{index}]"))?;
+                let judged = grammar::validate_task_grammar(map, declaring_path, &format!("{list_property}[{index}]"));
+                if self.recovered(judged)?.is_none() {
+                    // Kept as a placeholder so later items keep their positions.
+                    readable.push(Value::Null);
+                    continue;
+                }
             }
+            readable.push(item.clone());
         }
-        self.walk_items(items, declaring_path, declaring_path, list_property, scope)
+        self.walk_items(&readable, declaring_path, declaring_path, list_property, scope)
+    }
+
+    /// `result`, or `Ok(None)` for a failure a recovering discovery skips.
+    fn recovered<T>(&self, result: Result<T, CompositionError>) -> Result<Option<T>, CompositionError> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(_) if self.options.recover => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     fn walk_items(
@@ -381,8 +435,12 @@ impl Discovery<'_> {
                 }
                 _ => continue,
             };
-            match self.executable_of(map, scope, declaring_path)? {
-                Executable::Found(field, value) => self.walk_executable(field, &value, map, origin, &property, scope)?,
+            let Some(executable) = self.recovered(self.executable_of(map, scope, declaring_path))? else { continue };
+            match executable {
+                Executable::Found(field, value) => {
+                    let walked = self.walk_executable(field, &value, map, origin, &property, scope);
+                    self.recovered(walked)?;
+                }
                 Executable::Pending(field, reference) => self.inventory.pending.push(PendingReference {
                     owner: scope.owner, source_path: declaring_path.to_path_buf(),
                     property: property_child(&property, field.key()), reference,
@@ -432,15 +490,27 @@ impl Discovery<'_> {
 
     /// Follow one executable. `options` is the task's map (its options, and
     /// for a list item its state too).
+    /// Walk one executable. A failure raised without a site is located at
+    /// the executable's field ([`CompositionError::locate_sequence`]), as the
+    /// graph walk locates it.
     fn walk_executable(
         &mut self, field: ExecutableField, value: &Value, options: &Map<String, Value>, origin: &Path,
         property: &str, scope: &Scope<'_>,
     ) -> Result<(), CompositionError> {
         let action_property = property_child(property, field.key());
+        self.walk_executable_unlocated(field, value, options, origin, property, &action_property, scope)
+            .map_err(|error| error.locate_sequence(origin, &action_property, None))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn walk_executable_unlocated(
+        &mut self, field: ExecutableField, value: &Value, options: &Map<String, Value>, origin: &Path,
+        property: &str, action_property: &str, scope: &Scope<'_>,
+    ) -> Result<(), CompositionError> {
         match field {
             ExecutableField::Prompt => {
-                let reference = expect_reference(value, "prompt", property)?;
-                if self.pending(&reference, scope, origin, &action_property) {
+                let reference = expect_reference(value, field, property, origin, action_property)?;
+                if self.pending(&reference, scope, origin, action_property) {
                     return Ok(());
                 }
                 let path = self.loader.load_prompt(&reference, origin)?;
@@ -462,27 +532,28 @@ impl Discovery<'_> {
                     // The container's own template, never its parent's,
                     // fills its rows, from the values its owner sees.
                     let inner = Scope { owner: scope.owner, template: declarations.template, values: Arc::clone(&scope.values) };
-                    self.walk_items(&items, origin, origin, &action_property, &inner)?;
+                    self.walk_items(&items, origin, origin, action_property, &inner)?;
                 }
                 SequenceSourceSpec::Reference(reference) => {
-                    if !self.pending(&reference.reference, scope, origin, &action_property) {
-                        self.walk_reference(&reference, origin, &action_property, scope.owner, InputOwnerRole::Nested)?;
+                    if !self.pending(&reference.reference, scope, origin, action_property) {
+                        self.walk_reference(&reference, origin, action_property, scope.owner, InputOwnerRole::Nested)?;
                     }
                 }
                 SequenceSourceSpec::Expression(_) | SequenceSourceSpec::Shell(_) => {
-                    return Err(CompositionError::SequenceInvalid(
-                        "a nested `sequence:` must be a list or file reference".into(),
+                    return Err(CompositionError::sequence_invalid(
+                        "a nested `sequence:` must be a list or file reference",
+                        crate::composition::SequenceSite::at(origin, action_property),
                     ));
                 }
             },
-            ExecutableField::Group => self.walk_group(value, origin, &action_property, scope)?,
+            ExecutableField::Group => self.walk_group(value, origin, action_property, scope)?,
             ExecutableField::Task => {
-                let reference = expect_reference(value, "task", property)?;
-                if self.pending(&reference, scope, origin, &action_property) {
+                let reference = expect_reference(value, field, property, origin, action_property)?;
+                if self.pending(&reference, scope, origin, action_property) {
                     return Ok(());
                 }
-                let path = self.loader.resolve_reference(&reference, origin)?;
-                let (document, _) = self.loader.load_data_document(&path)?;
+                let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Task)?;
+                let (document, _) = self.loader.load_data_document(&path, ExecutableField::Task)?;
                 let root = expect_object(&document.value, "task file", &path)?;
                 expect_kind(root, "task", &path)?;
                 let (field, value, options) = parse_task_object(root, &path, "")?;
@@ -508,8 +579,8 @@ impl Discovery<'_> {
                     return Ok(());
                 }
                 let (name, reference) = split_catalog_reference(raw);
-                let path = self.loader.resolve_reference(&reference, origin)?;
-                let (document, _) = self.loader.load_data_document(&path)?;
+                let path = self.loader.resolve_reference(&reference, origin, ExecutableField::Group)?;
+                let (document, _) = self.loader.load_data_document(&path, ExecutableField::Group)?;
                 let root = expect_object(&document.value, "group file", &path)?;
                 let (group, group_property) = match &name {
                     Some(name) => {
@@ -538,8 +609,9 @@ impl Discovery<'_> {
         for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
             let Value::Object(leg) = leg else { continue };
             let leg_property = property_child(property, &format!("tasks[{index}]"));
-            let (field, value, options) = parse_task_object(leg, origin, &leg_property)?;
-            self.walk_executable(field, &value, &options, origin, &leg_property, scope)?;
+            let walked = parse_task_object(leg, origin, &leg_property)
+                .and_then(|(field, value, options)| self.walk_executable(field, &value, &options, origin, &leg_property, scope));
+            self.recovered(walked)?;
         }
         Ok(())
     }
@@ -550,7 +622,7 @@ impl Discovery<'_> {
     fn walk_reference(
         &mut self, reference: &SequenceReference, origin: &Path, property: &str, owner: usize, role: InputOwnerRole,
     ) -> Result<(), CompositionError> {
-        let path = self.loader.resolve_reference(&reference.reference, origin)?;
+        let path = self.loader.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
         self.loader.enter(&path)?;
         let result = self.walk_referenced(reference, &path, origin, property, owner, role);
         self.loader.leave();
@@ -561,7 +633,7 @@ impl Discovery<'_> {
         &mut self, reference: &SequenceReference, path: &Path, origin: &Path, property: &str, owner: usize,
         role: InputOwnerRole,
     ) -> Result<(), CompositionError> {
-        let (document, _) = self.loader.load_data_document(path)?;
+        let (document, _) = self.loader.load_data_document(path, ExecutableField::Sequence)?;
         let whole = reference.offset.is_none() && reference.operator.is_none();
         if whole && let Some(root) = document.value.as_object() && root.contains_key("sequence") {
             grammar::validate_sequence_root(root, path)?;
@@ -582,17 +654,27 @@ impl Discovery<'_> {
         // directory; a nested container's from the selected file's.
         let rows_origin = if role == InputOwnerRole::RootReference { origin.to_path_buf() } else { path.to_path_buf() };
         let values = Arc::clone(&self.inventory.owners[owner].values);
-        let plan = source_resolution::plan_referenced_sequence(
-            reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true,
-            &super::super::SequenceSourceOptions::new(self.options.file_resolution_context),
-        )?;
+        let options = super::super::SequenceSourceOptions::new(self.options.file_resolution_context);
+        // A recovering discovery skips a selected row that does not read, or
+        // whose executable fails, as it skips an authored one; the graph walk
+        // reports it.
+        let recovered = if self.options.recover {
+            source_resolution::plan_referenced_sequence_recovering(
+                reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true, &options,
+            )?.0
+        } else {
+            super::super::normalize::RecoveredPlan::whole(source_resolution::plan_referenced_sequence(
+                reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true, &options,
+            )?)
+        };
         let scope = Scope { owner, template: None, values };
-        for (index, step) in plan.steps.iter().enumerate() {
+        for (step, ordinal) in recovered.plan.steps.iter().zip(&recovered.ordinals) {
             if let Some(executable) = &step.executable {
-                self.walk_executable(
+                let walked = self.walk_executable(
                     executable.field, &executable.value, &executable.options, &rows_origin,
-                    &format!("sequence[{index}]"), &scope,
-                )?;
+                    &format!("sequence[{ordinal}]"), &scope,
+                );
+                self.recovered(walked)?;
             }
         }
         Ok(())

@@ -1,28 +1,30 @@
-//! Selection parity for Claudine's shipped trigger files (`claudine.yaml`,
-//! `inline-compose.yaml`, `sequence.yaml` under `claudine/schemas/`): each
-//! selects exactly the documents it selected before the `schema-trigger`
-//! migration (`2026-10-27-darkmatter-lifecycle-ownership`, criterion 18).
+//! Selection parity for Claudine's shipped trigger files (`composition.yaml`,
+//! `inline-composition.yaml`, `sequence-document.yaml` under
+//! `claudine/registration/`): each selects exactly the documents it selected
+//! before the `schema-trigger` migration
+//! (`2026-10-27-darkmatter-lifecycle-ownership`, criterion 18).
 //!
 //! The expected table was recorded from the public scan at the revision
 //! before the migration (when the files declared `kind: trigger-schema` and
-//! used `any:`) and is not edited by it, with two later, deliberate changes.
+//! used `any:`) and is not edited by it, with three later, deliberate changes.
 //! `initialize`, `cancelled`, and `finalize` are events Claudine shares with
-//! Darkmatter's `md` host, so they no longer select `claudine.yaml` on their
+//! Darkmatter's `md` host, so they no longer select `composition.yaml` on their
 //! own and their rows select nothing. A non-null `sequence` identifies a
-//! Claudine document, so it now selects `claudine.yaml` beside
-//! `sequence.yaml`. The bundle is the one Claudine ships, registered as the
-//! last-resort location of a temporary repository whose `schemas/` folder is
-//! empty, and each document is judged through
-//! [`evaluate_registry`].
+//! Claudine document, so it now selects `composition.yaml` beside
+//! `sequence-document.yaml`. A document `inline-composition.yaml` selects is no
+//! longer also selected by `composition.yaml`, so exactly one of the two applies.
+//! The bundle is the registration compiled into Claudine, loaded as its
+//! registered host for a temporary repository whose `schemas/` folder is
+//! empty, and each document is judged by registered host selection
+//! ([`DarkmatterSchemas::registered_selection_for`]), which matches every
+//! trigger of the host.
 
 use std::collections::BTreeMap;
 
-use claudine::composition::schema::bundle::claudine_schema_bundle;
+use claudine::composition::schema::bundle::with_claudine_registration;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
-use simplified_schema::triggers::evaluate_registry;
-use serde_json::Value;
 
 /// Every top-level key Claudine's triggers read, plus one they do not.
 const KEYS: &[&str] = &[
@@ -82,12 +84,9 @@ fn selections(documents: &[(String, String)]) -> BTreeMap<String, Vec<String>> {
 
     let snapshot = RequestSnapshot::new(&docs).with_home(Some(home));
     let context = build_resolution_context(&snapshot).expect("fixture context");
-    let schemas = DarkmatterSchemas::new(context)
-        .with_embedded_trigger_bundle(claudine_schema_bundle())
-        .expect("bundle registers")
+    let schemas = with_claudine_registration(DarkmatterSchemas::new(context))
         .with_trigger_discovery()
         .expect("discovery succeeds");
-    let registry = schemas.trigger_registry().expect("discovery installed a registry");
     documents
         .iter()
         .enumerate()
@@ -95,12 +94,10 @@ fn selections(documents: &[(String, String)]) -> BTreeMap<String, Vec<String>> {
             let path = docs.join(format!("document-{index}.md"));
             std::fs::write(&path, format!("---\n{frontmatter}---\nBody.\n")).expect("write document");
             let markdown = Markdown::try_from(path.as_path()).expect("document loads");
-            let frontmatter =
-                Value::Object(markdown.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-            let selected = evaluate_registry(registry, &frontmatter, Some(&path))
-                .into_iter()
-                .filter(|evaluation| evaluation.matched)
-                .map(|evaluation| evaluation.trigger.source.file_name().expect("named trigger").to_string())
+            let selected = schemas
+                .registered_selection_for(&markdown)
+                .matched_triggers()
+                .map(|trigger| trigger.bundle_path.rsplit('/').next().expect("a file name").to_string())
                 .collect();
             (label.clone(), selected)
         })
@@ -109,18 +106,18 @@ fn selections(documents: &[(String, String)]) -> BTreeMap<String, Vec<String>> {
 
 /// `(label, selecting trigger files)` recorded before the migration.
 const RECORDED: &[(&str, &[&str])] = &[
-    ("agent=1", &["claudine.yaml"]),
-    ("agent=[1]", &["claudine.yaml"]),
+    ("agent=1", &["composition.yaml"]),
+    ("agent=[1]", &["composition.yaml"]),
     ("agent=null", &[]),
-    ("agent=text", &["claudine.yaml"]),
-    ("agent=true", &["claudine.yaml"]),
-    ("agent={ a: 1 }", &["claudine.yaml"]),
-    ("blocked=1", &["claudine.yaml"]),
-    ("blocked=[1]", &["claudine.yaml"]),
+    ("agent=text", &["composition.yaml"]),
+    ("agent=true", &["composition.yaml"]),
+    ("agent={ a: 1 }", &["composition.yaml"]),
+    ("blocked=1", &["composition.yaml"]),
+    ("blocked=[1]", &["composition.yaml"]),
     ("blocked=null", &[]),
-    ("blocked=text", &["claudine.yaml"]),
-    ("blocked=true", &["claudine.yaml"]),
-    ("blocked={ a: 1 }", &["claudine.yaml"]),
+    ("blocked=text", &["composition.yaml"]),
+    ("blocked=true", &["composition.yaml"]),
+    ("blocked={ a: 1 }", &["composition.yaml"]),
     ("cancelled=1", &[]),
     ("cancelled=[1]", &[]),
     ("cancelled=null", &[]),
@@ -128,12 +125,12 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("cancelled=true", &[]),
     ("cancelled={ a: 1 }", &[]),
     ("empty", &[]),
-    ("failure=1", &["claudine.yaml"]),
-    ("failure=[1]", &["claudine.yaml"]),
+    ("failure=1", &["composition.yaml"]),
+    ("failure=[1]", &["composition.yaml"]),
     ("failure=null", &[]),
-    ("failure=text", &["claudine.yaml"]),
-    ("failure=true", &["claudine.yaml"]),
-    ("failure={ a: 1 }", &["claudine.yaml"]),
+    ("failure=text", &["composition.yaml"]),
+    ("failure=true", &["composition.yaml"]),
+    ("failure={ a: 1 }", &["composition.yaml"]),
     ("finalize=1", &[]),
     ("finalize=[1]", &[]),
     ("finalize=null", &[]),
@@ -146,78 +143,78 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("initialize=text", &[]),
     ("initialize=true", &[]),
     ("initialize={ a: 1 }", &[]),
-    ("loop=1", &["claudine.yaml"]),
-    ("loop=[1]", &["claudine.yaml"]),
+    ("loop=1", &["composition.yaml"]),
+    ("loop=[1]", &["composition.yaml"]),
     ("loop=null", &[]),
-    ("loop=text", &["claudine.yaml"]),
-    ("loop=true", &["claudine.yaml"]),
-    ("loop={ a: 1 }", &["claudine.yaml"]),
-    ("model=1", &["claudine.yaml"]),
-    ("model=[1]", &["claudine.yaml"]),
+    ("loop=text", &["composition.yaml"]),
+    ("loop=true", &["composition.yaml"]),
+    ("loop={ a: 1 }", &["composition.yaml"]),
+    ("model=1", &["composition.yaml"]),
+    ("model=[1]", &["composition.yaml"]),
     ("model=null", &[]),
-    ("model=text", &["claudine.yaml"]),
-    ("model=true", &["claudine.yaml"]),
-    ("model={ a: 1 }", &["claudine.yaml"]),
-    ("prompt=1", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=1 sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=1 sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=1 sequence=null", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=1 sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=1 sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=1 sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=[1]", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=[1] sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=[1] sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=[1] sequence=null", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=[1] sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=[1] sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=[1] sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
+    ("model=text", &["composition.yaml"]),
+    ("model=true", &["composition.yaml"]),
+    ("model={ a: 1 }", &["composition.yaml"]),
+    ("prompt=1", &["inline-composition.yaml"]),
+    ("prompt=1 sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=1 sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=1 sequence=null", &["inline-composition.yaml"]),
+    ("prompt=1 sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=1 sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=1 sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=[1]", &["inline-composition.yaml"]),
+    ("prompt=[1] sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=[1] sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=[1] sequence=null", &["inline-composition.yaml"]),
+    ("prompt=[1] sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=[1] sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=[1] sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
     ("prompt=null", &[]),
-    ("prompt=null sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=null sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
+    ("prompt=null sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=null sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
     ("prompt=null sequence=null", &[]),
-    ("prompt=null sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=null sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=null sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=text", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=text sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=text sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=text sequence=null", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=text sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=text sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=text sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=true", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=true sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=true sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=true sequence=null", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt=true sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=true sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt=true sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt={ a: 1 }", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt={ a: 1 } sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt={ a: 1 } sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt={ a: 1 } sequence=null", &["claudine.yaml", "inline-compose.yaml"]),
-    ("prompt={ a: 1 } sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt={ a: 1 } sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("prompt={ a: 1 } sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("sequence=1", &["claudine.yaml", "sequence.yaml"]),
-    ("sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
+    ("prompt=null sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=null sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=null sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=text", &["inline-composition.yaml"]),
+    ("prompt=text sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=text sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=text sequence=null", &["inline-composition.yaml"]),
+    ("prompt=text sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=text sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=text sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=true", &["inline-composition.yaml"]),
+    ("prompt=true sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=true sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=true sequence=null", &["inline-composition.yaml"]),
+    ("prompt=true sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=true sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt=true sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt={ a: 1 }", &["inline-composition.yaml"]),
+    ("prompt={ a: 1 } sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt={ a: 1 } sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt={ a: 1 } sequence=null", &["inline-composition.yaml"]),
+    ("prompt={ a: 1 } sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt={ a: 1 } sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("prompt={ a: 1 } sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("sequence=1", &["composition.yaml", "sequence-document.yaml"]),
+    ("sequence=[1]", &["composition.yaml", "sequence-document.yaml"]),
     ("sequence=null", &[]),
-    ("sequence=text", &["claudine.yaml", "sequence.yaml"]),
-    ("sequence=true", &["claudine.yaml", "sequence.yaml"]),
-    ("sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("start=1", &["claudine.yaml"]),
-    ("start=[1]", &["claudine.yaml"]),
+    ("sequence=text", &["composition.yaml", "sequence-document.yaml"]),
+    ("sequence=true", &["composition.yaml", "sequence-document.yaml"]),
+    ("sequence={ a: 1 }", &["composition.yaml", "sequence-document.yaml"]),
+    ("start=1", &["composition.yaml"]),
+    ("start=[1]", &["composition.yaml"]),
     ("start=null", &[]),
-    ("start=text", &["claudine.yaml"]),
-    ("start=true", &["claudine.yaml"]),
-    ("start={ a: 1 }", &["claudine.yaml"]),
-    ("success=1", &["claudine.yaml"]),
-    ("success=[1]", &["claudine.yaml"]),
+    ("start=text", &["composition.yaml"]),
+    ("start=true", &["composition.yaml"]),
+    ("start={ a: 1 }", &["composition.yaml"]),
+    ("success=1", &["composition.yaml"]),
+    ("success=[1]", &["composition.yaml"]),
     ("success=null", &[]),
-    ("success=text", &["claudine.yaml"]),
-    ("success=true", &["claudine.yaml"]),
-    ("success={ a: 1 }", &["claudine.yaml"]),
+    ("success=text", &["composition.yaml"]),
+    ("success=true", &["composition.yaml"]),
+    ("success={ a: 1 }", &["composition.yaml"]),
     ("title=1", &[]),
     ("title=[1]", &[]),
     ("title=null", &[]),

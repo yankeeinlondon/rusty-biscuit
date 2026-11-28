@@ -65,7 +65,7 @@ and the repository's default `file-read` list (`&**/*.yaml` among others)
 committed:
 
 ```sh
-md schema validate claudine/docs/research/sandboxing/providers/sandboxing.yaml
+md schema validate claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml
 # ✔ … valid …  (os.yaml is pre-approved by permissions.file-read; the resolved schema was checked)
 md schema validate provider.md            # resolves os.yaml: the document is checked
 # with a user `file-read` entry "!&claudine/docs/os.yaml", nothing pre-approves the read:
@@ -249,8 +249,11 @@ $schema:
 ```
 
 - `md compose`, `md graph`, and `md validate refs` capture from their
-  request: the package layout from the repository the request found, the
-  other values the way the request captures a `ctx.*` group. A library
+  request: the package layout from the repository the request resolves in
+  (its nearest Git checkout, so a request in `app/vendor` with its own
+  `.git` reads `app/vendor`'s packages even when a library caller captured
+  its options in `app`), the other values the way the request captures a
+  `ctx.*` group. A library
   caller that composes with a fixed context of its own gets no new capture,
   and the slot fails with `dm.schema.slot_failed`, as a document expression
   reading that value would.
@@ -353,7 +356,8 @@ flowchart TD
    any of them removes that pre-approval. With no `file-read` written, the
    defaults apply: files with a common data or text extension (`txt`, `md`,
    `json`, `yaml`, `csv`, …) beside the reading document (user scope) or
-   anywhere in its repository (repository scope). See
+   anywhere in the repository the request resolves in (repository scope;
+   for a request in a checkout nested in another, the nested one). See
    [Defaults and overrides](../permissions.md#defaults-and-overrides) and
    [How the scopes combine](../permissions.md#how-the-scopes-combine).
 4. **Otherwise the approval handler is asked** (see
@@ -380,9 +384,25 @@ run, never by a saved approval:
   URL, and `--allow host=HOST` allows that host's URLs for one run, the same
   decision composition takes (see
   [Remote URL References](../remote-url-references.md#allowed-hosts));
-- without that consent, the read is asked about with two choices, allow
-  this URL for this run or deny it for this run, and fails with
-  `dm.schema.slot_approval_required` where nothing can ask.
+- under `permissions.network: ask`, a URL without that consent is asked
+  about with two choices, allow this URL for this run or deny it for this
+  run, and fails with `dm.schema.slot_approval_required` where nothing can
+  ask; a dry run sends no request and reports the schema as not checked;
+- under `permissions.network: deny` (the default), a URL without that
+  consent is refused without asking, with `dm.schema.slot_network_denied`.
+
+```yaml
+# ~/.darkmatter.yaml
+permissions:
+  network: deny
+```
+
+A slot `{{ load_data("https://example.com/os.yaml", "string[]") }}` then
+fails, with no request sent:
+
+```text
+load_data() may not read https://example.com/os.yaml: `permissions.network` is `deny`; allow the host for this run (`--allow host=HOST`), or set `permissions.network` to `ask` or `allow`
+```
 
 A "deny for this run" refuses the URL even when network consent would allow
 it. A slot's URL reads go through a remote runtime of their own, which may
@@ -962,7 +982,9 @@ observation is withheld.
 
 A failed slot is reported at the slot, in the file it is written in. The
 record's `source.file`, `line`, and `column` and its `span` (byte offsets in
-that file) point at the slot's `{{ … }}` as you wrote it:
+that file) point at the slot's `{{ … }}` as you wrote it. `line` and `column`
+are one-based and the column counts characters, as every record's does: in
+`os: enum(café, {{ 123 }})` the slot starts at column 16, not 17.
 
 | The slot is written in | The record names |
 | --- | --- |
@@ -1006,6 +1028,7 @@ The cause the expression failed with is kept:
 | the slot text is not an expression | `dm.schema.slot_syntax` | |
 | a refused binding or function | `dm.schema.slot_forbidden_binding`, `dm.schema.slot_forbidden_function` | the refused read's position |
 | a read no approval covers, or one denied for this run | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | `grants_needed` (approval only): the approvals any one of which would allow the read |
+| a URL read under `permissions.network: deny` that no `--allow host` covers | `dm.schema.slot_network_denied` | |
 | the configuration's `permissions` failed to load | `dm.config.invalid`, `dm.config.reference` | the configuration error's own fields |
 | a malformed data file, a contract mismatch | the `load_data` code (`dm.data.malformed`, …) | `data_location`, the position inside the data file |
 | a missing or unreadable file | `dm.schema.slot_failed` | the reference fields (`construct`, `reference`, `failure`) |
@@ -1034,7 +1057,7 @@ file to `permissions.file-read` and running again:
 ```json
 {
   "code": "dm.schema.slot_approval_required",
-  "source": { "file": "/repo/claudine/docs/research/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
+  "source": { "file": "/repo/claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
   "grants_needed": [
     { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
     { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }

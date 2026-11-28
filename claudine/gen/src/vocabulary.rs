@@ -403,7 +403,7 @@ fn emit_file(tables: &[(&str, &str, ErrorVocabulary)]) -> String {
     for (slug, _, _) in tables {
         if !PARSERLESS_SLUGS.contains(slug) {
             out.push_str(&format!(
-                "//   docs/research/agent-errors/{slug}.md (ordered vocabulary projection)\n"
+                "//   docs/research/providers/agent-errors/{slug}.md (ordered vocabulary projection)\n"
             ));
         }
     }

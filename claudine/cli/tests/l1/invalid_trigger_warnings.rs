@@ -206,7 +206,7 @@ fn an_authored_schema_naming_the_skipped_trigger_still_fails() {
     let doc = write_doc(
         &fixture,
         "names-trigger.md",
-        &format!("---\n$schema: {}\n---\nbody\n", biscuit_file::to_portable_string(&trigger)),
+        &format!("---\n$schema: {}\n---\nbody\n", biscuit_file::to_forward_slash_string(&trigger)),
     );
 
     let run = run(&fixture, "compose", &doc);

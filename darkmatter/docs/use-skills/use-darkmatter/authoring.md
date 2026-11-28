@@ -154,6 +154,15 @@ unknown `ctx.*` key gives a warning with a "did you mean" suggestion.
   `docs/topics/darkmatter-expressions.md#functions`.
 - A guard narrows a value's type for the code inside it. For example, inside
   `::block when="is_number(count)"`, `count` is known to be a number.
+- A registered host (configured via `register:` in `.darkmatter.yaml`) can
+  provide additional expression functions declared in a `kind: expression-schema`
+  catalog with a derived `.facts.json` companion. Those functions are available
+  for passive call checking and completion only on documents matched by that
+  host's triggers; evaluating one in `md compose` fails with
+  `host function <name>() requires the host runtime` because only the host
+  process runs its handlers. Callable catalogs (`expression-schema` and
+  `mutation-schema`) disallow `when`, are never `$schema` targets or import
+  sources, and hosts cannot register `mutation-schema` actions.
 
 ### Loading data
 

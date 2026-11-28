@@ -331,7 +331,7 @@ fn relative_globs_stay_inside_the_repository() {
         );
     }
     // An absolute root is not relative, so it may lie outside the repository.
-    let outside = biscuit_file::to_portable_string(&workspace.path().join("outside"));
+    let outside = biscuit_file::to_forward_slash_string(&workspace.path().join("outside"));
     let (value, _) = expression_value(&repo, &format!("find_files('{outside}/*.md')")).unwrap();
     assert_eq!(listed(&value), [canonical(workspace.path(), "outside/a.md")]);
 
@@ -366,7 +366,7 @@ fn an_out_of_tree_file_symlink_is_skipped_with_one_warning() {
             .collect()
     };
     let names_link_and_target = |warning: &ComposeWarning| {
-        let target = biscuit_file::to_portable_string(&std::fs::canonicalize(&secret).unwrap());
+        let target = biscuit_file::to_forward_slash_string(&std::fs::canonicalize(&secret).unwrap());
         warning.message.contains("docs/leak.md") && warning.message.contains(&target)
     };
 
@@ -454,7 +454,7 @@ fn assert_consumers_judge_directory_spelling(stored: &str, authored: &str, trave
     };
     #[cfg(not(unix))]
     let _ = traversal_only;
-    let repo_text = biscuit_file::to_portable_string(&repo);
+    let repo_text = biscuit_file::to_forward_slash_string(&repo);
     let env = std::collections::HashMap::from([("ROOT".to_string(), repo_text.clone())]);
     let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&repo)
         .with_home(biscuit_file::home_dir())
@@ -479,7 +479,7 @@ fn assert_consumers_judge_directory_spelling(stored: &str, authored: &str, trave
     let file_links = |pattern: &str| -> String {
         compose_in_repo("index.md", &format!("# Index\n\n::file-links {pattern}\n")).content().to_string()
     };
-    let value = biscuit_file::to_portable_string(&file);
+    let value = biscuit_file::to_forward_slash_string(&file);
     let admits = |pattern: &str| file_match_admits(&value, &[vec![pattern.to_string()]], &env_context);
 
     for mismatched in [format!("{repo_text}/{authored}/*.md"), format!("{{{{ROOT}}}}/{authored}/*.md")] {

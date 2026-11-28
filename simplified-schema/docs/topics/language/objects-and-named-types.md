@@ -296,6 +296,11 @@ Darkmatter ships the partials `fm`, `style`, `context-variables`, `error`,
 `timing`, `lifecycle`, and `md-lifecycle`. The two lifecycle partials are the
 ones written for reuse by other schemas; see
 [Lifecycle Event Typing](../../../../darkmatter/docs/topics/schemas/definition.md#lifecycle-event-typing).
+Darkmatter's callable catalogs, `functions.yaml` (`kind: expression-schema`)
+and `mutations.yaml` (`kind: mutation-schema`), are not partials, and their
+helper types are not importable: `recent-commits@darkmatter:functions` is
+`SchemaError::NoMatch`. A schema that needs one of those shapes declares it
+itself, as `context-variables` does for `recent-commits`.
 
 #### Merging use-site constraints
 
@@ -986,6 +991,81 @@ $schema:
 - **JSON Schema.** A closed root lowers to `additionalProperties: false`, and a
   raw JSON Schema root with `additionalProperties: false` is judged the same
   way.
+
+### Removed Keys (`removed(...)`)
+
+When a key is retired, declare it `removed(<replacement>)` instead of
+deleting it. The key then fails validation wherever it is written, with your
+replacement advice as the problem's hint, so an author learns what to write
+instead rather than seeing a generic unknown-key error (or, on an open
+object, no error at all).
+
+```yaml
+$schema:
+    name: string
+    fail_fast: "removed(set fail_fast on a group object)"
+```
+
+| Document | Valid? | Problem |
+|---|---|---|
+| `{ name: Ada }` | yes | |
+| `{ fail_fast: true }` | no | `dm.schema.removed_key`, hint `set fail_fast on a group object` |
+| `{ fail_fast: null }` | no | the same: presence is refused, whatever the value |
+
+- **Placement.** `removed(...)` is a block-form object property's whole
+  value. It is refused on a pattern key (`<string>`, `<starting::x->`), on a
+  `$`-prefixed key, as a `types` table entry, and inside an inline
+  `{ ... }` object.
+- **The replacement** is free text up to the final `)`, so it may hold
+  backticks, `;`, and parentheses. An empty one (`removed()`) is a schema
+  error.
+- **No type.** A removed key has no type, default, or `required`; it is
+  never offered as a completion or a did-you-mean suggestion.
+- **Patterns.** A removed key wins over a pattern key that also matches it,
+  and is reported once.
+- **Composition.** A removal travels through `...name` and `$extends` like a
+  member: a later declaration of the same key, literal or removed, replaces
+  it.
+- **The problem** points at the owning object (`path`), names the key in
+  `offending_property`, and is located at the key token, as an unknown key
+  is. `hint` carries the replacement.
+- **JSON Schema.** The key lowers to a `false` property schema, and the
+  owning object carries the advice in its `x-darkmatter-removed` annotation.
+
+### Advice on Near-Miss Keys (`$advise-unknown-keys`)
+
+An open object (one with a `<string>` catch-all) accepts any key, so a typo
+such as `promt` beside a declared `prompt` is silently kept as data. Opt the
+object into advice with `$advise-unknown-keys`, listing the exact key names
+never to advise on (`[]` for none):
+
+```yaml
+types:
+    task:
+        prompt: string
+        model: string
+        "<string>": unknown
+        $advise-unknown-keys: [agent]
+```
+
+`{ promt: x.md }` is still valid, and validation also returns one
+`dm.schema.near_miss_key` advice (`ValidationProblemCode::NearMissKey`) with
+hint `` did you mean `prompt`? ``.
+
+- **Never a failure.** Advice is returned beside an accepted value
+  (`ValidationSuccess::key_advice`), or asked for directly
+  (`SimplifiedSchema::key_advice`, `Prepared::key_advice`), whatever the
+  verdict. It is never among a failure's problems.
+- **When it is given.** Only for a key the object does not declare (removed
+  keys count as declared), that no intentional pattern key matches, that the
+  list does not exclude, and whose closest declared key is unique. The
+  catch-all never silences advice: it is what makes the key legal, not
+  evidence that it was meant.
+- **Value shapes.** The list must be a list of nonempty strings; `null`, a
+  scalar, a mapping, or a non-string item is a schema error. Absent means no
+  advice; `[]` means advice with no exclusions.
+- **Own declaration only.** Composition does not carry the opt-in from an
+  operand.
 
 ### Content-Format Types (`yaml` / `json`)
 

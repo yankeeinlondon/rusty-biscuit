@@ -163,6 +163,40 @@ let resolved = buffers::with_reads_retained(|| {
 });
 ```
 
+A retained scope ends with its host operation. A host whose work spans many
+operations and threads, such as a dry run that checks one document in
+several passes, keeps one `resolve::buffers::SharedReads` for the whole run
+instead. Put it in force on a thread with
+`resolve::buffers::enter_shared_reads(reads.clone())` (or run a closure under
+`with_shared_reads`): every file the resolver reads from the disk there is
+opened once for the whole `SharedReads`, and later reads, from any thread
+that holds a clone, get the first read's bytes. A host reads its own
+sources the same way with `SharedReads::read(path)`, which returns the bytes
+and the modification time from one open (`ReadSource`). A failed read is
+not kept. Guards still run first, so a path a guard refuses is refused even
+when the shared reads already hold it:
+
+```rust
+let reads = buffers::SharedReads::default();
+let first = buffers::with_shared_reads(&reads, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+let again = buffers::with_shared_reads(&reads, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+// the schema file was opened once; both resolutions saw the same bytes
+```
+
+A host can also keep work it derives from those bytes for the life of the
+observation: `SharedReads::memo::<T>()` returns the observation's one `T`
+(made on first request, shared by every clone), and
+`resolve::buffers::shared_reads_alone()` returns the `SharedReads` in force
+only while every schema read on the thread comes from it (no guard or bundle
+scope, no editor buffer), which is when that work is still what a fresh
+resolution would produce. Darkmatter keeps its prepared effective schemas
+this way.
+
+`resolve::buffers::open_source(path)` is that one open, for a reader with no
+`SharedReads`. A test can count how often it ran with
+`work_counters::source_opens(path)` (`work-counters` feature), and a host's
+test build can log every open with `resolve::buffers::observe_opens`.
+
 A host that must approve each file before it is read (Darkmatter's schema
 slots, whose reads need a grant) wraps the resolution in
 `resolve::buffers::guarded(guard, || ...)`. The guard is asked with each path
@@ -234,6 +268,23 @@ An `example(./ex.yaml)` that names a listed member is also refused
 still faces the normal example envelope check, so it fails as
 `SchemaError::InvalidExample`.
 
+Resolving a file's `$schema` follows only the declarations it uses. To hold
+a whole member to the bundle, also run `resolve::check_declared_types(text,
+path, &ctx, shipped)` inside the scope. It checks every declaration of the
+file's `types` table, used or not: each import, `$extends`, spread, union
+arm, and `Name@this` chain resolves, and each `example(…)` file is selected
+(not read). Run it after the member envelope
+(`member_envelope::admit_member`) admitted the file: it judges no shape of
+`types` the envelope owns. A file without `types`, or with a blank or
+`null` one (which the envelope admits only for a `kind: yaml-schema`
+definition), passes, and no template is evaluated:
+
+```rust
+// `optional: Options@./options.yaml` in `types`, used by nothing, unlisted
+let (checked, _) = bundle::with(&sources, || resolve::check_declared_types(&text, &path, &ctx, shipped));
+assert!(checked.is_err()); // SchemaError::BundleBoundary, BundleRefusal::Unlisted
+```
+
 An installed bundle's members keep their real paths under the bundle folder,
 so diagnostics and `reads.missing` name files a host can watch. An embedded
 bundle uses the virtual root `<name>` (`<claudine>/schemas/shared.yaml`),
@@ -242,7 +293,23 @@ same rules.
 
 The scope is independent of a host's template read gate
 (`slots::TemplateReads`): a template type's returned import must be a listed
-member *and* be admitted by the gate. The scope also governs reads a host
+member *and* be admitted by the gate. A template met inside the scope keeps
+the bundle: `PendingSchema::verified_bundle()` returns it, and
+`PendingSchema::resolve` re-enters it for the schema built from the slot
+values, even when it is called after `with` returned. A reference a slot
+returned that the bundle refuses is reported at that slot
+(`SlotResolutionError::Refused`). A host that caches resolutions keys them
+on `BundleSources::revision()`, which is a digest of the member bytes unless
+the host set its own with `with_revision`:
+
+```rust
+let (met, _) = bundle::with(&sources.with_revision(revision), || resolve_template());
+// later, outside any scope: the returned `Owner@./types.yaml` still reads
+// the verified bytes, and `Owner@./unlisted.yaml` is refused at its slot
+let resolved = pending.resolve(&host, &request);
+```
+
+The scope also governs reads a host
 makes through `resolve::buffers::read`, so run a slot's own data-file reads
 outside it. `BundleSources` is plain `Send + Sync` data; the scope applies to
 the calling thread and is restored when `with` returns.
@@ -262,8 +329,21 @@ consumes it:
 | `Failed(Resolution(source))` | `SchemaError::Unresolved { reference, source }` |
 | `Failed(Bundle(boundary))` | `SchemaError::BundleBoundary { reference, boundary }` |
 
-Every error carries the trimmed reference. See
+Every error carries the trimmed reference, and a `site` the resolver fills
+with the declaration that wrote it (`None` from a direct selection; see
+[Where a definition failure points](./diagnostics.md#where-a-definition-failure-points)). See
 [Diagnostics](./diagnostics.md#error-model) for the variants.
+
+Selection can succeed and the file still be refused for the way the
+declaration uses it: a types-only library named as a `$schema` target, a
+`yaml-schema`, `namespace-schema`, or `schema-trigger` file named anywhere,
+or a root-union schema named in a `Name@file` import. That refusal
+(`NotASchemaDocument` with a role reason, `UnsupportedJsonDialect`, a
+reference cycle) carries the same `site`, the declaration that named the
+file, so a host points at the line to change rather than at a file that is
+fine on its own. For example, `w: title@./composition.trigger.yaml` is
+refused with reason `TriggerEnvelope` at `w`. A file that fails on its own
+content (it does not parse, or is no schema at all) has no site.
 
 ## Inspecting the selected file
 

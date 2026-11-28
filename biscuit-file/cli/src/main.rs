@@ -6,7 +6,7 @@
 use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
 use biscuit_file::{
     FileReference, FileType, Indentation, Json5, Pdf, Toml, Yaml, detect_file_type,
-    to_portable_string, to_yaml_string,
+    to_forward_slash_string, to_yaml_string,
 };
 use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
@@ -469,7 +469,7 @@ fn run_reference(
             // by a script that has to work the same on every host. A Windows
             // namespace with no faithful portable spelling still prints
             // natively rather than as something unopenable.
-            println!("{}", to_portable_string(&path));
+            println!("{}", to_forward_slash_string(&path));
             Ok(())
         }
         Ok(None) => {

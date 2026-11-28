@@ -97,8 +97,11 @@ fn classify(text: &str, path: &Path) -> RootFileClass {
         Ok(Some(_)) => RootFileClass::SchemaTrigger,
         Err(_) => RootFileClass::FailedTrigger,
         Ok(None) => match parse_standalone_schema_document(text, path) {
-            // A `yaml-schema` is applied by `kind`, never named.
-            Ok(Some(document)) if document.envelope != StandaloneSchemaEnvelope::YamlSchema => {
+            // A `yaml-schema` is applied by `kind`, never named; a callable
+            // catalog is private to callable tooling, never an import source.
+            Ok(Some(document))
+                if document.envelope != StandaloneSchemaEnvelope::YamlSchema && !document.envelope.is_callable_catalog() =>
+            {
                 RootFileClass::NamedSchema
             }
             Ok(Some(_)) => RootFileClass::Unclassified,
@@ -1868,6 +1871,19 @@ mod tests {
         assert_eq!(classify(informal, path), RootFileClass::NamedSchema);
         assert_eq!(classify(&tagged, path), RootFileClass::NamedSchema);
         assert_eq!(classify("categories: [Core]\ntitle: string\n", path), RootFileClass::Unclassified);
+    }
+
+    /// A callable catalog in a schema root is authorable YAML, never a named
+    /// schema a bare name or `Name@file` import could select.
+    #[test]
+    fn a_callable_catalog_in_a_schema_root_is_not_a_named_schema() {
+        let path = Path::new("/schemas/project.yaml");
+        for kind in ["expression-schema", "mutation-schema"] {
+            let catalog = format!(
+                "kind: {kind}\ncategories: [Core]\ntypes:\n  label: function(parameters(name: string); returns(string); category(Core))\n"
+            );
+            assert_eq!(classify(&catalog, path), RootFileClass::Unclassified, "{kind}");
+        }
     }
 
     #[test]

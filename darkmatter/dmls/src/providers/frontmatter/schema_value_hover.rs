@@ -59,7 +59,7 @@ fn markdown(fact: &SchemaReferenceFact, repository_root: Option<&std::path::Path
                     SchemaError::NotASchemaDocument { path: rejected, .. } if rejected == path => {
                         text::not_a_schema_target(path, repository_root)
                     }
-                    SchemaError::UnsupportedJsonDialect { path: rejected, declared } if rejected == path => {
+                    SchemaError::UnsupportedJsonDialect { path: rejected, declared, .. } if rejected == path => {
                         text::unsupported_dialect_target(path, repository_root, declared)
                     }
                     other => text::unusable_schema_target(path, repository_root, &other.to_string()),

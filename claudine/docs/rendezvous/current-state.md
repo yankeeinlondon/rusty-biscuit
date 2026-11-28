@@ -12,7 +12,7 @@ blast_radius: ""
 > (see `claudine/features/_completed/2026-05-24-remote-signal/spec.md`). It has
 > since been renamed to **`rendezvous`**. The crates, binaries, endpoint env
 > vars, and mDNS service labels all use the new name; some research docs under
-> `claudine/docs/research/rendezvous/` still carry the old phrasing in prose.
+> `claudine/docs/research/external-crates/rendezvous/` still carry the old phrasing in prose.
 
 > **Local IPC.** The local control plane described below is documented
 > authoritatively in [`local-ipc.md`](./local-ipc.md) — transport selection,

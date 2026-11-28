@@ -14,14 +14,15 @@ use super::{SchemaRoot, SchemaShape, darkmatter_base_schema_ref};
 /// precedence).
 ///
 /// A root `$schema` union overlays the arm its shared literal discriminant
-/// selects in `frontmatter`; when no arm is unambiguously selected, every
-/// inline arm's properties merge, and a key contributed by more than one arm
-/// resolves to the union of those arms' atoms. A file-reference arm
+/// selects in `frontmatter`; when no arm is unambiguously selected, the
+/// inline arms that admit what `frontmatter` writes (or every inline arm,
+/// when none does) merge, and a key contributed by more than one arm
+/// resolves to the union of those arms' atoms
+/// ([`simplified_schema::root_union_property_shape`]). A file-reference arm
 /// contributes no properties.
 ///
 /// `frontmatter` is the authored frontmatter mapping as JSON; pass
-/// [`Value::Null`] when none is available, which disables discriminant
-/// narrowing.
+/// [`Value::Null`] when none is available, which disables narrowing.
 ///
 /// No trigger layer is applied; for a resolved document, use
 /// [`EffectiveSchema::property_shape`](super::EffectiveSchema::property_shape).

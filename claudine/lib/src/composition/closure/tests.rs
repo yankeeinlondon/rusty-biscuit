@@ -1011,7 +1011,7 @@ fn rehearsal_now() -> DateTime<Utc> {
 fn rehearsal_refuses_an_indented_baseline_with_the_editors_reason() {
     let original = INDENTED_BASELINE.to_string();
 
-    let error = rehearse_inline_baseline(&original, rehearsal_now()).unwrap_err();
+    let error = rehearse_inline_baseline(Path::new("doc.md"), &original, rehearsal_now()).unwrap_err();
 
     let MarkdownError::FrontmatterTextEdit { reason } = &error else {
         panic!("expected a refused frontmatter edit, got {error:?}");
@@ -1032,14 +1032,14 @@ fn rehearsal_accepts_a_column_zero_baseline_with_every_managed_property() {
         "Old body\n",
     );
 
-    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+    rehearse_inline_baseline(Path::new("doc.md"), original, rehearsal_now()).unwrap();
 }
 
 #[test]
 fn rehearsal_accepts_a_column_zero_baseline_with_only_a_prompt() {
     let original = "---\nprompt: Summarize the notes\n---\nOld body\n";
 
-    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+    rehearse_inline_baseline(Path::new("doc.md"), original, rehearsal_now()).unwrap();
 }
 
 /// A baseline that passes the rehearsal can still be made uneditable by the
@@ -1049,7 +1049,7 @@ fn rehearsal_accepts_a_column_zero_baseline_with_only_a_prompt() {
 fn a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate() {
     let dir = TempDir::new().unwrap();
     let original = "---\nprompt: Summarize the notes\ntitle: Notes\n---\nOld body\n";
-    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+    rehearse_inline_baseline(Path::new("doc.md"), original, rehearsal_now()).unwrap();
     let agent_wrote = concat!(
         "---\n",
         "    prompt: Summarize the notes\n",
@@ -1070,4 +1070,90 @@ fn a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate
     assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing written");
     restore_inline_baseline(&plan).unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+// -- YAML sources -------------------------------------------------------------
+
+/// A `kind: sequence` YAML file with a document-level `prompt`: the closure
+/// writes back a mapping, never a Markdown frontmatter fence.
+const YAML_SOURCE: &str = "kind: sequence\nprompt: \"Step {{ seq.name }}.\"\n# kept\nstatus: draft\nsequence:\n  - first\n";
+
+fn yaml_run(dir: &TempDir, agent_wrote: &str) -> (std::path::PathBuf, InlineClosurePlan) {
+    let file = dir.path().join("seq.yaml");
+    let plan = plan(&file, YAML_SOURCE);
+    std::fs::write(&file, agent_wrote).unwrap();
+    (file, plan)
+}
+
+#[test]
+fn a_yaml_source_is_stamped_in_place_and_stays_one_yaml_mapping() {
+    let dir = TempDir::new().unwrap();
+    let agent_wrote = YAML_SOURCE.replace("status: draft", "status: done");
+    let (file, plan) = yaml_run(&dir, &agent_wrote);
+
+    let artifact = written(reconcile_inline_artifact(&plan, rehearsal_now()).unwrap());
+
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(on_disk, artifact.text);
+    assert!(on_disk.starts_with(&agent_wrote), "authored bytes are kept:\n{on_disk}");
+    assert!(on_disk.contains("\nlast_updated: 2026-10-20\n"), "{on_disk}");
+    let root = biscuit_file::Yaml::new(&file).unwrap().as_json().unwrap();
+    assert_eq!(root["status"], "done");
+    assert!(root["hash"].is_string(), "{on_disk}");
+    assert!(!artifact.body_cleaned, "Markdown cleanup never touches YAML");
+    assert_eq!(artifact.frontmatter_delta.entries.len(), 1);
+}
+
+#[test]
+fn a_yaml_source_has_its_owned_prompt_restored_in_yaml() {
+    let dir = TempDir::new().unwrap();
+    let agent_wrote =
+        YAML_SOURCE.replace("status: draft", "status: done").replace("Step {{ seq.name }}.", "Other.");
+    let (file, plan) = yaml_run(&dir, &agent_wrote);
+
+    let artifact = written(reconcile_inline_artifact(&plan, rehearsal_now()).unwrap());
+
+    assert_eq!(artifact.restored_properties, vec!["prompt".to_string()]);
+    let root = biscuit_file::Yaml::new(&file).unwrap().as_json().unwrap();
+    assert_eq!(root["prompt"], "Step {{ seq.name }}.");
+    assert_eq!(
+        written_frontmatter(&plan, &artifact.text).get("prompt"),
+        Some(&serde_json::json!("Step {{ seq.name }}."))
+    );
+}
+
+#[test]
+fn a_yaml_source_changed_only_in_owned_properties_or_layout_is_unchanged() {
+    for agent_wrote in [
+        YAML_SOURCE.replace("Step {{ seq.name }}.", "Other."),
+        YAML_SOURCE.replace("# kept\n", ""),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let (file, plan) = yaml_run(&dir, &agent_wrote);
+
+        let outcome = reconcile_inline_artifact(&plan, rehearsal_now()).unwrap();
+
+        assert!(matches!(outcome, InlineReconciliation::Rejected(BodyRejection::Unchanged)));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing is written");
+    }
+}
+
+#[test]
+fn an_emptied_yaml_source_is_refused_as_empty() {
+    let dir = TempDir::new().unwrap();
+    let (_file, plan) = yaml_run(&dir, "\n");
+
+    let outcome = reconcile_inline_artifact(&plan, rehearsal_now()).unwrap();
+
+    assert!(matches!(outcome, InlineReconciliation::Rejected(BodyRejection::Empty)));
+}
+
+#[test]
+fn a_yaml_baseline_is_rehearsed_as_a_mapping_and_a_document_marker_is_refused() {
+    rehearse_inline_baseline(Path::new("seq.yaml"), YAML_SOURCE, rehearsal_now()).unwrap();
+
+    let marked = format!("---\n{YAML_SOURCE}");
+    let error = rehearse_inline_baseline(Path::new("seq.yaml"), &marked, rehearsal_now()).unwrap_err();
+
+    assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }), "{error:?}");
 }

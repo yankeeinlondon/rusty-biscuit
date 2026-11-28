@@ -1087,17 +1087,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 entry.branch.clone().unwrap_or_else(|| "unknown".to_string())
                             };
-                            let portable_path = biscuit_file::to_portable_string(&entry.path);
+                            let portable_path = biscuit_file::to_forward_slash_string(&entry.path);
                             let display_path = match home {
                                 Some(ref home) => match entry.path.strip_prefix(home) {
                                     Ok(stripped) => {
-                                        format!("~/{}", biscuit_file::to_portable_string(stripped))
+                                        format!("~/{}", biscuit_file::to_forward_slash_string(stripped))
                                     }
                                     Err(_) => portable_path.clone(),
                                 },
                                 None => portable_path.clone(),
                             };
-                            let href = biscuit_file::try_portable_string(&entry.path)
+                            let href = biscuit_file::try_forward_slash_string(&entry.path)
                                 .and_then(|path| url::Url::from_file_path(path).ok());
                             let location = href.map_or_else(
                                 || display_path.clone(),

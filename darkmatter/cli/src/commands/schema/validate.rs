@@ -23,7 +23,7 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaLayers, YamlOutcome};
+use darkmatter::markdown::schemas::{CALLABLE_CATALOG_CODE, DarkmatterSchemas, EffectiveSchema, Route, SchemaLayers, YamlOutcome};
 use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::{
@@ -64,6 +64,24 @@ enum FileOutcome {
     /// unavailable, never a success. `diagnostics` are the slots' own
     /// records, each at its slot.
     Slots { error: Box<SchemaError>, diagnostics: Vec<darkmatter::markdown::compose::expression::Diagnostic> },
+    /// A callable catalog failed the catalog reader's check
+    /// (`dm.schema.callable_catalog`): `at` is the failing declaration in
+    /// the document, `related` the other locations the failure involves.
+    CallableCatalog { error: Box<SchemaError>, at: CatalogMark, related: Vec<CatalogMark> },
+}
+
+/// One location of a [`FileOutcome::CallableCatalog`] failure, converted
+/// from the reader's byte span in its file's text.
+struct CatalogMark {
+    /// What is at the location; for the primary mark, the failure itself.
+    message: String,
+    /// The file the mark is in; `None` for the validated document itself.
+    file: Option<PathBuf>,
+    /// The 1-based line and character column of `span.start`; `None` when
+    /// the reader gave no span or the file's text could not be read.
+    position: Option<(usize, usize)>,
+    /// The byte range in the file's text, as the reader reported it.
+    span: Option<std::ops::Range<usize>>,
 }
 
 impl FileOutcome {
@@ -471,6 +489,16 @@ pub(crate) fn discover_document_triggers(schemas: DarkmatterSchemas) -> Result<D
     if schemas.file_resolution_context().repository_root().is_some() { schemas.with_trigger_discovery() } else { Ok(schemas) }
 }
 
+/// `schemas` with bare-name schema-root lookup but no triggers when its
+/// context is inside a repository (`--disable schema-triggers`).
+///
+/// ## Errors
+///
+/// When a schema root cannot be inspected.
+pub(crate) fn document_schema_roots(schemas: DarkmatterSchemas) -> Result<DarkmatterSchemas, SchemaError> {
+    if schemas.file_resolution_context().repository_root().is_some() { schemas.with_schema_root_lookup() } else { Ok(schemas) }
+}
+
 /// The effective schema of `document` from `schemas` (a baseline selection)
 /// in the document's `context`, with trigger discovery when
 /// `discover_triggers` and the context is inside a repository; `None` when no
@@ -489,7 +517,7 @@ pub(crate) fn effective_document_schema(
     discover_triggers: bool,
 ) -> Result<Option<EffectiveSchema>, SchemaError> {
     let schemas = schemas.with_file_resolution_context(context);
-    let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { schemas };
+    let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { document_schema_roots(schemas)? };
     schemas.effective_for(document)
 }
 
@@ -585,7 +613,10 @@ fn validate_one(
             (Err(err), discovery) => return early(FileOutcome::schema_error(err, &discovery_path), Some(discovery)),
         }
     } else {
-        (api, ValidationTimings::default())
+        match document_schema_roots(api) {
+            Ok(api) => (api, ValidationTimings::default()),
+            Err(err) => return early(FileOutcome::schema_error(err, &discovery_path), None),
+        }
     };
     let findings = api.discovery_findings().to_vec();
     let checked = |outcome, timings| CheckedFile { outcome, timings: Some(timings), findings: findings.clone() };
@@ -659,7 +690,10 @@ fn yaml_usage_error(assignments: &[Assignment], schema: Option<&Path>) -> Option
 /// Validates one whole YAML document in its own context: its claimed `kind`
 /// or root `$schema` selects the schema, and nothing else applies. A schema
 /// file whose shape passes is then resolved ([`resolve_schema_file`]), so a
-/// template is judged by what its slots return, never as written.
+/// template is judged by what its slots return, never as written. A callable
+/// catalog (`kind: expression-schema` or `kind: mutation-schema`) never is:
+/// its check ends with the catalog reader, so its slots and examples stay
+/// passive data.
 fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdRequest) -> FileOutcome {
     let path = biscuit_file::canonicalize_simplified(opened.path()).unwrap_or_else(|_| opened.path().to_path_buf());
     let text = match std::fs::read_to_string(&path) {
@@ -672,7 +706,10 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(document) => document,
         Err(err) => {
             let location = match &err {
-                SchemaError::SchemaDocument { span: Some(span), .. } => Some(simplified_schema::line_col_of_offset(&text, span.start)),
+                SchemaError::SchemaDocument { span: Some(span), .. } => {
+                    let position = darkmatter::config::load::line_column(&text, span.start);
+                    Some((position.line, position.column))
+                }
                 _ => None,
             };
             let message = match err {
@@ -686,30 +723,46 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(context) => context,
         Err(err) => return FileOutcome::YamlLoadError { message: format!("{err:#}"), location: None },
     };
-    let api = api.clone().with_file_resolution_context(context);
-    let outcome = match api.validate_loaded_yaml_document(&document) {
-        Ok(YamlOutcome::NoSchema) => FileOutcome::Validated {
-            report_valid: true,
-            problems: Vec::new(),
-            advisories: Vec::new(),
-            defaults: Vec::new(),
-            schema_label: None,
-            layers: AppliedLayers::default(),
-        },
-        Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
-            report_valid: validation.report.valid,
-            problems: validation.report.problems,
-            advisories: validation.report.advisories,
-            defaults: validation.report.defaults,
-            layers: AppliedLayers {
-                document: Some(DocumentSchema::Definition(validation.definition.clone())),
-                ..AppliedLayers::default()
+    // Registered hosts' `kind: yaml-schema` definitions are the lowest kind
+    // tier.
+    let hosts = request.registered_hosts(&context);
+    let mut api = api.clone().with_file_resolution_context(context);
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+    }
+    let (outcome, callable) = match api.validate_loaded_yaml_document(&document) {
+        Ok(YamlOutcome::NoSchema) => (
+            FileOutcome::Validated {
+                report_valid: true,
+                problems: Vec::new(),
+                advisories: Vec::new(),
+                defaults: Vec::new(),
+                schema_label: None,
+                layers: AppliedLayers::default(),
             },
-            schema_label: Some(validation.definition),
-        },
+            false,
+        ),
+        Ok(YamlOutcome::Validated(validation)) => {
+            let callable = matches!(&validation.route, Route::Kind(kind) if is_callable_kind(kind));
+            let outcome = FileOutcome::Validated {
+                report_valid: validation.report.valid,
+                problems: validation.report.problems,
+                advisories: validation.report.advisories,
+                defaults: validation.report.defaults,
+                layers: AppliedLayers {
+                    document: Some(DocumentSchema::Definition(validation.definition.clone())),
+                    ..AppliedLayers::default()
+                },
+                schema_label: Some(validation.definition),
+            };
+            (outcome, callable)
+        }
+        Err(err @ SchemaError::CallableCatalog { .. }) => {
+            return catalog_outcome(err, &path, &text, api.file_resolution_context());
+        }
         Err(err) => return FileOutcome::schema_error(err, &path),
     };
-    if !matches!(outcome, FileOutcome::Validated { report_valid: true, .. }) {
+    if callable || !matches!(outcome, FileOutcome::Validated { report_valid: true, .. }) {
         return outcome;
     }
     match resolve_schema_file(&api, &path, &text) {
@@ -718,20 +771,69 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
     }
 }
 
+/// Whether `kind`, a document's claimed kind, is one of the two callable
+/// catalog kinds.
+fn is_callable_kind(kind: &str) -> bool {
+    use simplified_schema::StandaloneSchemaEnvelope;
+    [StandaloneSchemaEnvelope::ExpressionSchema, StandaloneSchemaEnvelope::MutationSchema]
+        .into_iter()
+        .any(|envelope| envelope.kind() == Some(kind))
+}
+
+/// The [`FileOutcome::CallableCatalog`] of `error`, a catalog failure of the
+/// document at `path` whose text is `text`, each span converted to a line
+/// and column of its source. Built-in coordinates come from the embedded
+/// catalog. A checkout path is reported when its text matches that source.
+fn catalog_outcome(error: SchemaError, path: &Path, text: &str, context: &FileResolutionContext) -> FileOutcome {
+    let SchemaError::CallableCatalog { message, span, related, .. } = &error else {
+        return FileOutcome::schema_error(error, path);
+    };
+    let position = |text: &str, span: &Option<std::ops::Range<usize>>| {
+        span.as_ref().map(|span| {
+            let position = darkmatter::config::load::line_column(text, span.start);
+            (position.line, position.column)
+        })
+    };
+    let at = CatalogMark { message: message.clone(), file: None, position: position(text, span), span: span.clone() };
+    let related = related
+        .iter()
+        .map(|related| {
+            if related.file == path {
+                return CatalogMark { message: related.message.clone(), file: None, position: position(text, &related.span), span: related.span.clone() };
+            }
+            let resolved = if related.file.is_absolute() {
+                related.file.clone()
+            } else {
+                context.repository_root().unwrap_or(context.cwd()).join(&related.file)
+            };
+            let disk = std::fs::read_to_string(&resolved).ok();
+            let embedded = darkmatter::markdown::compose::expression::catalog::embedded_catalog_source(&related.file);
+            let matches = disk.as_deref().is_some_and(|disk| embedded.is_none_or(|embedded| disk == embedded));
+            let file = if matches { resolved } else { related.file.clone() };
+            let position = embedded.or(disk.as_deref()).and_then(|source| position(source, &related.span));
+            CatalogMark { message: related.message.clone(), file: Some(file), position, span: related.span.clone() }
+        })
+        .collect();
+    FileOutcome::CallableCatalog { error: Box::new(error), at, related }
+}
+
 /// Resolves `text`, the schema file at `path` whose shape already passed,
 /// as a document naming it would: every `{{ … }}` slot it holds (template
 /// constraints and template types) through the run's slot session, after
 /// one batched approval of the reads they name, then every import the
 /// result needs. A YAML document that is not a schema file has nothing to
-/// resolve.
+/// resolve, and a namespace file is never a schema target (its kind check
+/// already resolved it as a host's registration does). A callable catalog
+/// never reaches this function ([`validate_yaml`] routes it away).
 ///
 /// ## Errors
 ///
 /// A slot that was refused or failed, or a returned definition or import
 /// that does not resolve: the check is unavailable, never a success.
 fn resolve_schema_file(api: &DarkmatterSchemas, path: &Path, text: &str) -> Result<(), SchemaError> {
-    if !matches!(simplified_schema::parse_standalone_schema_document(text, path), Ok(Some(_))) {
-        return Ok(());
+    match simplified_schema::parse_standalone_schema_document(text, path) {
+        Ok(Some(document)) if document.envelope != simplified_schema::StandaloneSchemaEnvelope::NamespaceSchema => {}
+        _ => return Ok(()),
     }
     // A handler that cannot answer leaves the reads undecided, which the
     // resolution reports as approval-required.
@@ -896,7 +998,49 @@ fn render_pretty(
             let block = err.status_block(terminal);
             push_row(out, &block.render(terminal));
         }
+        FileOutcome::CallableCatalog { at, related, .. } => {
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>is not a valid callable catalog:</dim>_"
+            );
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
+            let bullet = format!(
+                "    - <red>error</red> <dim>[{CALLABLE_CATALOG_CODE}]</dim> {} <dim>(at {})</dim>",
+                escape_prose(&at.message).replace('\n', "\n      "),
+                escape_prose(&mark_location(file, at)),
+            );
+            push_row(out, &Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal));
+            for mark in related {
+                let line = format!(
+                    "        <dim>related:</dim> {} <dim>(at {})</dim>",
+                    escape_prose(&mark.message),
+                    escape_prose(&mark_location(file, mark)),
+                );
+                push_row(out, &Prose::new(line).render(terminal));
+            }
+        }
     }
+}
+
+/// `mark` as `path:line:column`, or the path alone when it is unlocated;
+/// `file` is the validated document as the user spelled it.
+fn mark_location(file: &Path, mark: &CatalogMark) -> String {
+    let path = mark.file.as_deref().unwrap_or(file).display();
+    match mark.position {
+        Some((line, column)) => format!("{path}:{line}:{column}"),
+        None => path.to_string(),
+    }
+}
+
+/// `mark`'s data record: its message, file, line, column, and byte span;
+/// `file` is the validated document as the user spelled it.
+fn mark_record(file: &Path, mark: &CatalogMark) -> serde_json::Value {
+    serde_json::json!({
+        "message": mark.message,
+        "file": mark.file.as_deref().unwrap_or(file).to_string_lossy(),
+        "line": mark.position.map(|(line, _)| line),
+        "column": mark.position.map(|(_, column)| column),
+        "span": mark.span,
+    })
 }
 
 /// One slot's record: its message, code, and position, then the grants any
@@ -983,6 +1127,12 @@ fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: 
     // suppressed empty / message-equal descriptions, so a `Some` here renders.
     if let Some(description) = problem.description.as_deref() {
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
+        push_row(out, &Prose::new(sub_line).render(terminal));
+    }
+    // What to do instead, when the schema proves it: a removed key's
+    // replacement, or the declared key an unknown key resembles.
+    if let Some(hint) = problem.hint.as_deref() {
+        let sub_line = format!("        <dim>hint:</dim> {}", Prose::escape_text_outside_code_spans(hint));
         push_row(out, &Prose::new(sub_line).render(terminal));
     }
     // The stable class of a failed `file` value (R5), on its own sub-line.
@@ -1075,6 +1225,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     if let Some(applied) = &p.default {
                         problem["default"] = applied_default_record(applied);
                     }
+                    // Present only when the schema proves one, so a problem
+                    // without a hint keeps its existing record.
+                    if let Some(hint) = &p.hint {
+                        problem["hint"] = hint.as_str().into();
+                    }
                     problem
                 })
                 .collect();
@@ -1160,8 +1315,26 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             if let Some(code) = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(err) {
                 record["code"] = json!(code);
             }
+            // A registered host's conflicting triggers name both files.
+            if let SchemaError::HostTriggerConflict(conflict) = err.as_ref() {
+                record["code"] = json!(darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE);
+                record["related"] = json!([conflict.first.display().to_string(), conflict.second.display().to_string()]);
+            }
             record
         }
+        FileOutcome::CallableCatalog { error, at, related } => json!({
+            "file": file_str,
+            "valid": false,
+            "schema": serde_json::Value::Null,
+            "error": "schema",
+            "code": CALLABLE_CATALOG_CODE,
+            "message": error.to_string(),
+            "line": at.position.map(|(line, _)| line),
+            "column": at.position.map(|(_, column)| column),
+            "span": at.span,
+            "related": related.iter().map(|mark| mark_record(file, mark)).collect::<Vec<_>>(),
+            "problems": [],
+        }),
     };
     if !warnings_json.is_empty() {
         value

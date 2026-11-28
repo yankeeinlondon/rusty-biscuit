@@ -707,11 +707,14 @@ mod shared_fields {
             expected_type: diagnostic["data"]["expected_type"].as_str().map(str::to_string),
             actual_type: diagnostic["data"]["actual_type"].as_str().map(str::to_string),
             span: None,
-            iteration_path: Default::default(),
             reference_details: None,
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: darkmatter::findings::Trail::default(),
         }
     }
 

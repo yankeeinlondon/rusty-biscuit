@@ -134,6 +134,7 @@ fn schema_validation_missing_required_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/plan.md"),
         problems: vec![ValidationProblem {
+            hint: None,
             path: "".to_string(),
             property: Some("spec".to_string()),
             message: "\"spec\" is a required property".to_string(),
@@ -165,6 +166,7 @@ fn schema_validation_wrong_type_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/config.md"),
         problems: vec![ValidationProblem {
+            hint: None,
             path: "/count".to_string(),
             property: None,
             message: "42 is not of type \"string\"".to_string(),
@@ -203,6 +205,7 @@ fn schema_validation_format_failure_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/doc.md"),
         problems: vec![ValidationProblem {
+            hint: None,
             path: "/cover".to_string(),
             property: None,
             message: "`` is not a valid file reference: file reference syntax is invalid: empty reference string".to_string(),
@@ -237,6 +240,7 @@ fn schema_validation_format_failure_escapes_markup() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/doc.md"),
         problems: vec![ValidationProblem {
+            hint: None,
             path: "/cover".to_string(),
             property: None,
             message: "no existing file matched reference `./<red>weird</red>.md` while resolving from `/tmp/test`".to_string(),
@@ -315,6 +319,7 @@ fn schema_validation_root_union_arm_index_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/union.md"),
         problems: vec![ValidationProblem {
+            hint: None,
             path: "/kind".to_string(),
             property: Some("kind".to_string()),
             message: "\"draft\" is not one of the allowed values".to_string(),
@@ -347,6 +352,7 @@ fn schema_validation_multiple_problems_renders_block() {
         path: PathBuf::from("/tmp/test/multi.md"),
         problems: vec![
             ValidationProblem {
+                hint: None,
                 path: "".to_string(),
                 property: Some("title".to_string()),
                 message: "\"title\" is a required property".to_string(),
@@ -365,6 +371,7 @@ fn schema_validation_multiple_problems_renders_block() {
                 default: None,
             },
             ValidationProblem {
+                hint: None,
                 path: "/version".to_string(),
                 property: None,
                 message: "\"alpha\" is not of type \"number\"".to_string(),
@@ -398,6 +405,7 @@ fn schema_validation_multiple_problems_renders_block() {
 #[test]
 fn schema_validation_default_problem_hint_names_the_schema_default() {
     let default_problem = ValidationProblem {
+        hint: None,
         path: "/doc".to_string(),
         property: Some("doc".to_string()),
         message: "file not found: ./note.md (the value is the schema default at schema location \

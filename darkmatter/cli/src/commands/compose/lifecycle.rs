@@ -50,8 +50,8 @@ use serde_json::{Map, Value};
 use crate::args::policy::ResolvedPolicy;
 
 use super::{
-    ComposedDocument, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
-    deliver_check_failure_warnings,
+    combined, ComposedDocument, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
+    deliver_check_failure_warnings, deliver_refused_check_warnings,
     open_output_artifact, preflight_approval_error, render_reference_report, render_reference_warnings,
     report_compose_diagnostics,
 };
@@ -410,7 +410,7 @@ impl<'a> ComposeHost<'a> {
         let mutation_root = compose
             .request
             .resolution_context()
-            .launch_magic_scope()
+            .launch_scope()
             .local_root()
             .to_path_buf();
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
@@ -458,7 +458,13 @@ impl<'a> ComposeHost<'a> {
                 let term_cell = OnceCell::new();
                 let _ = term_cell.set(self.effects.term.clone());
                 deliver_check_failure_warnings(&error, &self.request, &mut self.pending_triggers, self.document.sink, &term_cell);
-                ("references", error)
+                match combined::after_check_failure(self.md, &self.request, allow, &error, &self.launch_dir) {
+                    Some(combined) => {
+                        combined.deliver(self.document.sink, &self.launch_dir);
+                        ("references", unresolved_references())
+                    }
+                    None => ("references", error),
+                }
             })?;
             match check {
                 ReferenceCheck::Clean(summary) => {
@@ -474,20 +480,23 @@ impl<'a> ComposeHost<'a> {
                     self.deferred_report = Some(report);
                 }
                 ReferenceCheck::Refused(report) => {
-                    self.pending_triggers.hold(&report.trigger_warnings);
                     let term_cell = OnceCell::new();
                     let _ = term_cell.set(self.effects.term.clone());
-                    self.pending_triggers.deliver(self.document.sink, None, &term_cell);
-                    match self.document.sink {
-                        Some(sink) => sink.references(&report),
-                        None => {
+                    deliver_refused_check_warnings(&report, &mut self.pending_triggers, self.document.sink, &term_cell);
+                    let combined = combined::after_refusal(self.md, &self.request, &report, &self.launch_dir);
+                    match (self.document.sink, combined) {
+                        (Some(sink), Some(combined)) => {
+                            sink.summary(darkmatter::markdown::output::command::ReferenceSummary::from_report(&report));
+                            combined.deliver(Some(sink), &self.launch_dir);
+                        }
+                        (Some(sink), None) => sink.references(&report),
+                        (None, Some(combined)) => combined.deliver(None, &self.launch_dir),
+                        (None, None) => {
                             eprint!("{}", render_reference_report(&report, &self.launch_dir));
                             eprint!("{}", render_reference_warnings(&report, self.effects.term));
                         }
                     }
-                    // The sink already holds each broken reference's diagnostic;
-                    // this sentence only drives the `failed` stack.
-                    return Err(("references", ClassifiedFailure::report(eyre!("the document has unresolved references"), Vec::new())));
+                    return Err(("references", unresolved_references()));
                 }
             }
         }
@@ -525,7 +534,18 @@ impl<'a> ComposeHost<'a> {
                             &OnceCell::new(),
                         ),
                     }
-                    ("shell", preflight_approval_error(error))
+                    let error = preflight_approval_error(error);
+                    // The condition-blind walk can stop at an inclusion the
+                    // reference check left out with its block.
+                    match self.check_references.and_then(|policy| {
+                        combined::after_inclusion_stop(self.md, &self.request, policy, &error, &self.launch_dir, self.document.sink.is_some())
+                    }) {
+                        Some(combined) => {
+                            combined.deliver(self.document.sink, &self.launch_dir);
+                            ("references", unresolved_references())
+                        }
+                        None => ("shell", error),
+                    }
                 })?;
             // A trigger only a child composition skips holds is reported by
             // this walk alone, whatever the bootstrap found.
@@ -565,6 +585,9 @@ impl<'a> ComposeHost<'a> {
                 ("compose", compose_error(failure.error))
             })?;
         self.pending_triggers.merge_into(&mut report.warnings);
+        if let Some(warning) = combined::empty_body_warning(self.md, composed.content(), &report) {
+            report.add_warning(warning);
+        }
         if let Some(checked) = &self.deferred_report {
             report.warnings.retain(|warning| !super::reference_check_reported(warning, checked));
         }
@@ -675,6 +698,13 @@ impl MdRunHost for ComposeHost<'_> {
     fn interrupted(&self) -> bool {
         self.interrupted.load(Ordering::SeqCst)
     }
+}
+
+/// The failure of a preparation whose reference findings are already
+/// reported: the sink holds each one's diagnostic, so this sentence only
+/// drives the `failed` stack.
+fn unresolved_references() -> Report {
+    ClassifiedFailure::report(eyre!("the document has unresolved references"), Vec::new())
 }
 
 /// `report` as `md` renders an error: the styled block of a Darkmatter error

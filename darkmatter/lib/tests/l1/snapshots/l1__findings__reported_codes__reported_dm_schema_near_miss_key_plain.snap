@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ⚠ key `promt` is not a declared field, so it is kept as data
+      at doc.md:6:1
+      hint: did you mean `prompt`?

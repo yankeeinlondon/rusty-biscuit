@@ -238,7 +238,20 @@ fn source_aware_presentation_boundary_is_closed() {
         .expect("the pure envelope claims the document");
     assert!(matches!(document.declaration, SchemaDeclaration::Reference(_)));
 
-    let source = "$schema: !!str ./other.yaml\n";
+    let tagged = "$schema: !!str ./other.yaml\n";
+    let tagged_document = parse_standalone_schema_document(tagged, Path::new("/w/schema.yaml"))
+        .expect("a standard string tag projects")
+        .expect("the pure envelope claims the document");
+    assert_eq!(document.declaration, tagged_document.declaration);
+    let [reference] = tagged_document
+        .source_map
+        .spans(&SchemaSourcePath::root(), SchemaSpanKind::FileReference)
+    else {
+        panic!("expected one reference range");
+    };
+    assert_eq!(&tagged[reference.clone()], "./other.yaml");
+
+    let source = "kind: schema\n$schema:\n  ? &key field\n  : string\n";
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).expect("valid YAML fixture");
     let payload = yaml
         .as_mapping()
@@ -246,11 +259,11 @@ fn source_aware_presentation_boundary_is_closed() {
         .expect("schema payload");
     assert!(
         parse_schema_declaration(payload).is_ok(),
-        "the source-free semantic authority accepts the tagged value"
+        "the source-free semantic authority accepts the decorated mapping key"
     );
 
     let error = parse_standalone_schema_document(source, Path::new("/w/schema.yaml"))
-        .expect_err("tags are outside the source-aware grammar");
+        .expect_err("decorated mapping keys are outside the source-aware grammar");
     assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{error:?}");
     assert!(
         error

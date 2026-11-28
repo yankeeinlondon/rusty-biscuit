@@ -20,9 +20,9 @@ use simplified_schema::SimplifiedSchema;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-const SCHEMA_FILE: &str = "claudine/docs/research/sandboxing/providers/sandboxing.yaml";
+const SCHEMA_FILE: &str = "claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml";
 const DATA_FILE: &str = "claudine/docs/os.yaml";
-const DOCUMENT_FILE: &str = "claudine/docs/research/sandboxing/providers/provider.md";
+const DOCUMENT_FILE: &str = "claudine/docs/research/providers/sandboxing/providers/provider.md";
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
 /// A `permissions` block pre-approving no read.
 const NO_READS: &str = "permissions:\n    file-read: []\n";
@@ -74,7 +74,7 @@ fn canonical(fixture: &CliProcessFixture, relative: &str) -> String {
 /// `relative` as the envelope's `read_set` spells it: canonical, in portable
 /// forward-slash form (unlike the slot gate's native spelling).
 fn read_entry(fixture: &CliProcessFixture, relative: &str) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists"))
+    biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists"))
 }
 
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> Output {
@@ -131,7 +131,7 @@ fn diagnostic_codes(records: &Value) -> Vec<&str> {
 fn compose_resolves_the_shipped_schema_and_reports_its_data_file_read() {
     let Some(fixture) = sandbox(
         "slots-compose-control",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -147,7 +147,7 @@ fn compose_resolves_the_shipped_schema_and_reports_its_data_file_read() {
 fn compose_rejects_a_value_outside_the_resolved_list_naming_its_members() {
     let Some(fixture) = sandbox(
         "slots-compose-beos",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -165,7 +165,7 @@ fn compose_rejects_a_value_outside_the_resolved_list_naming_its_members() {
 fn compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed() {
     let Some(fixture) = sandbox(
         "slots-compose-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -177,7 +177,7 @@ fn compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed() {
     assert_eq!(report["document"], Value::Null, "{report:#}");
     assert_eq!(diagnostic_codes(&report["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
     let record = &report["diagnostics"][0];
-    assert_eq!(record["source"]["file"], canonical(&fixture, SCHEMA_FILE), "{record:#}");
+    assert_eq!(record["source"]["file"], read_entry(&fixture, SCHEMA_FILE), "{record:#}");
     assert_eq!(record["source"]["line"], 8, "the slot's line in the schema: {record:#}");
     assert_eq!(grants(record), data_file_grants(&fixture), "{record:#}");
     assert_eq!(report["read_set"], json!([]), "nothing unapproved was read: {report:#}");
@@ -204,7 +204,7 @@ fn compose_reads_nothing_for_an_unapproved_inline_slot() {
 fn compose_without_a_terminal_never_prompts_and_reports_the_approval_needed() {
     let Some(fixture) = sandbox(
         "slots-compose-no-terminal",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -223,7 +223,7 @@ fn compose_without_a_terminal_never_prompts_and_reports_the_approval_needed() {
 fn compose_with_user_permissions_reads_the_dirty_data_file() {
     let Some(fixture) = sandbox(
         "slots-compose-persisted",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -242,7 +242,7 @@ fn compose_with_user_permissions_reads_the_dirty_data_file() {
 fn compose_with_invalid_permissions_refuses_every_read() {
     let Some(fixture) = sandbox(
         "slots-compose-permissions-invalid",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -261,7 +261,7 @@ fn compose_with_invalid_permissions_refuses_every_read() {
 fn schema_validate_of_the_shipped_schema_file_resolves_its_slot() {
     let Some(fixture) = sandbox(
         "slots-validate-schema-file",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -279,7 +279,7 @@ fn schema_validate_of_the_shipped_schema_file_resolves_its_slot() {
 /// template".
 #[test]
 fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() {
-    let schema = include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let schema = include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml");
     let Some(fixture) = sandbox("slots-validate-schema-file-missing", schema, include_str!("../../../../claudine/docs/os.yaml")) else {
         return;
     };
@@ -291,7 +291,7 @@ fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() 
     assert_eq!(record["error"], "slots", "{report:#}");
     assert!(record.get("slots").is_none(), "{report:#}");
     assert_eq!(diagnostic_codes(&record["diagnostics"]), ["dm.schema.slot_failed"], "{report:#}");
-    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(canonical(&fixture, SCHEMA_FILE)), "{report:#}");
+    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(read_entry(&fixture, SCHEMA_FILE)), "{report:#}");
     assert_eq!(record["diagnostics"][0]["span"], first_slot_span(schema), "{report:#}");
 }
 
@@ -301,7 +301,7 @@ fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() 
 fn schema_validate_of_the_shipped_schema_file_with_a_dirty_data_file_needs_approval() {
     let Some(fixture) = sandbox(
         "slots-validate-schema-file-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -321,7 +321,7 @@ fn schema_validate_of_the_shipped_schema_file_with_a_dirty_data_file_needs_appro
 fn schema_validate_of_a_schema_file_with_a_dirty_data_file_prints_the_slot_failure() {
     let Some(fixture) = sandbox(
         "slots-validate-schema-file-plain",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -339,7 +339,7 @@ fn schema_validate_of_a_schema_file_with_a_dirty_data_file_prints_the_slot_failu
 fn schema_validate_of_a_document_resolves_with_the_repository_permissions() {
     let Some(fixture) = sandbox(
         "slots-validate-document-clean",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -354,7 +354,7 @@ fn schema_validate_of_a_document_resolves_with_the_repository_permissions() {
 fn schema_validate_of_a_document_with_an_unapproved_slot_is_unavailable_never_valid() {
     let Some(fixture) = sandbox(
         "slots-validate-document-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -376,7 +376,7 @@ fn schema_validate_of_a_document_with_an_unapproved_slot_is_unavailable_never_va
 fn clean_with_an_unapproved_slot_never_reports_the_document_clean() {
     let Some(fixture) = sandbox(
         "slots-clean-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -396,7 +396,7 @@ fn clean_with_an_unapproved_slot_never_reports_the_document_clean() {
 fn clean_of_a_document_valid_under_the_resolved_list_reports_no_findings() {
     let Some(fixture) = sandbox(
         "slots-clean-control",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -413,7 +413,7 @@ fn clean_of_a_document_valid_under_the_resolved_list_reports_no_findings() {
 fn graph_defers_an_unapproved_slot() {
     let Some(fixture) = sandbox(
         "slots-graph-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -428,7 +428,7 @@ fn graph_defers_an_unapproved_slot() {
 fn validate_refs_defers_an_unapproved_slot() {
     let Some(fixture) = sandbox(
         "slots-validate-refs-dirty",
-        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
@@ -591,7 +591,7 @@ fn first_slot_span(text: &str) -> Value {
 fn assert_slot_record(fixture: &CliProcessFixture, records: &Value, code: &str, file: &str, (line, column): (u64, u64), text: &str) {
     assert_eq!(diagnostic_codes(records), [code], "{records:#}");
     let record = &records[0];
-    assert_eq!(record["source"]["file"], json!(canonical(fixture, file)), "{record:#}");
+    assert_eq!(record["source"]["file"], json!(read_entry(fixture, file)), "{record:#}");
     assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&json!(line), &json!(column)), "{record:#}");
     assert_eq!(record["span"], first_slot_span(text), "{record:#}");
 }

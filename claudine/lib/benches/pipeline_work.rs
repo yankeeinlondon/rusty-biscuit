@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use claudine::composition::schema::TriggerFindings;
-use claudine::composition::schema::bundle::claudine_schema_bundle;
+use claudine::composition::schema::bundle::with_claudine_registration;
 use claudine::composition::{
     LoopAmbient, LoopCondition, LoopExpressionLookup, build_preflight_graph,
     capture_file_resolution_context, evaluate_condition, pre_validate_schema,
@@ -233,9 +233,8 @@ fn scrub_and_check(c: &mut Criterion) {
     });
     group.bench_function("one_discovery/files=10", |b| {
         b.iter(|| {
-            DarkmatterSchemas::new(document_context.clone())
-                .with_embedded_trigger_bundle(claudine_schema_bundle())
-                .and_then(DarkmatterSchemas::with_trigger_discovery)
+            with_claudine_registration(DarkmatterSchemas::new(document_context.clone()))
+                .with_trigger_discovery()
                 .expect("discovers")
         })
     });

@@ -528,6 +528,7 @@ fn origin_line(origin: &ShellCommandOrigin) -> usize {
     match origin {
         ShellCommandOrigin::Body { line } => *line,
         ShellCommandOrigin::ShellBlock { command_line, .. } => *command_line,
+        ShellCommandOrigin::Authored { site, .. } => origin_line(site),
         ShellCommandOrigin::Frontmatter { .. } => panic!("a body site has a body origin: {origin:?}"),
     }
 }

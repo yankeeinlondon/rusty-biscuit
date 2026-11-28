@@ -1,0 +1,40 @@
+# Written by Claudine from the registration compiled into it, and rewritten when that changes; do not edit.
+kind: darkmatter-host
+format_version: 2
+host: claudine
+version: "0.1.0"
+files:
+    - "./schemas/action.yaml"
+    - "./schemas/claudine-config.yaml"
+    - "./schemas/composition.yaml"
+    - "./schemas/content-policy.yaml"
+    - "./schemas/document.yaml"
+    - "./schemas/formal-sequence-file.yaml"
+    - "./schemas/group.yaml"
+    - "./schemas/inline-composition.yaml"
+    - "./schemas/lifecycle-events.yaml"
+    - "./schemas/linking.yaml"
+    - "./schemas/loop.yaml"
+    - "./schemas/seq.yaml"
+    - "./schemas/sequence-document.yaml"
+    - "./schemas/sequence.yaml"
+    - "./schemas/shared.yaml"
+lifecycle: "./globals.lifecycle.json"
+functions: []
+digests:
+    "./globals.lifecycle.json": "73347213b879e94fe6fc409e460f322fd03825d329e82d43b8163b35d367901a"
+    "./schemas/action.yaml": "b89504d935dc16eaa8b837245bbd244c33f59a7ac31e904f346d46bef833651f"
+    "./schemas/claudine-config.yaml": "f30826e53bd962fb90215b2ce8914cee9e091c2c6e196ed18ef70714be49b363"
+    "./schemas/composition.yaml": "809536767d5c1affc4a266ac109646da9dab0cda11caf44d6ea2750c780c8ded"
+    "./schemas/content-policy.yaml": "ee7e4cf48c4d427fecbbcae565cab3396be1c056e03ad59bbb1e143c1396bf26"
+    "./schemas/document.yaml": "423941088262a3c2c92874b003511bbae7f8f0ea528641953f36001e9e9df6ed"
+    "./schemas/formal-sequence-file.yaml": "53938b620adb5b128887491bc91a6d76cb263e1413e1dfb04c030ad154069521"
+    "./schemas/group.yaml": "f0d48134237690948c56112c4a973ccb8ae01c16d66dc637eb2ac0268371c405"
+    "./schemas/inline-composition.yaml": "e566de7abb6c6d7271a5f66dbbb568433fd35e79da4256436dc514394be8fd62"
+    "./schemas/lifecycle-events.yaml": "1c840391a3042758ad676453188892cad59a6ee56ebaa9bd0a00b4a228744905"
+    "./schemas/linking.yaml": "aef8bfba82cf2cabf58830a295ea635541104361676c5311d893b6a4dd16dd75"
+    "./schemas/loop.yaml": "05e035fa9dfd1690cab88781c97ad587b84d816bbb854cb7038840aceb9baf8d"
+    "./schemas/seq.yaml": "b7b3300a9aee14adaa29e44a5cc9b9b1bd5940d175550a5dfb80ecfc5ff2dd7a"
+    "./schemas/sequence-document.yaml": "074d26fce6fc7e780eeb029f51ed9d8d6ee0c8e557b4cedfdf17ec012027bb37"
+    "./schemas/sequence.yaml": "901bff4e2c2f15e6775b7c059e896e19d3446ea3c139e9148ebf73f7d85eaf89"
+    "./schemas/shared.yaml": "66088eb826a8ad509dcb3ae860d00f98156f04a103be28bbbf517f837cb7adc1"

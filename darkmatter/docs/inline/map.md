@@ -612,6 +612,7 @@ arbitrary callback results.
 | Invalid mapping result or failed destructuring | Fail composition |
 | Filter, sort, or stopping expression fails | Fail composition |
 | Body processing fails | Follow the existing directive's failure policy |
+| In a dry run, the `when=` gate, source, transform, `filter=`, `while=`, `until=`, or `sort=` reads a value the dry run does not have (a command's output, a missing input, a value the run writes first) or calls an effectful function | The whole region stays as written and nothing inside it runs; the dry run reports one `not checked` row for it |
 
 There is no automatic skip-on-error behavior. Existing explicit recovery
 options retain their meaning. A failed map does not report earlier rendered

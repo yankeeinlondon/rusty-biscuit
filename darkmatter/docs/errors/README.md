@@ -103,6 +103,9 @@ output fails the build.
 
 ## See Also
 
+- [The error-message standard](./message-standard.md): what a message says
+  (what failed, where, why, and how to fix it); this page covers how it is
+  laid out
 - [Composition problems](./composition-problems.md): what stops a run, and how
   a problem is located
 - [File reference failures](./file-reference-failures.md): the class every

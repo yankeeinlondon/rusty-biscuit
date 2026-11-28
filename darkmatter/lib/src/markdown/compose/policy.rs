@@ -97,6 +97,18 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (INVALID_FRONTMATTER_ASSIGNMENT_CODE, "an invalid `set=` assignment on a `::file` directive"),
     (REASSIGNED_FRONTMATTER_PROPERTY_CODE, "a property a `::file` directive assigns twice"),
     (SHELL_TIMEOUT_CODE, "a shell command timeout replaced by an empty string"),
+    (super::report_diagnostics::TOC_LINKING_INVALID_FILTER_CODE, "a `::toc-linking` `keep=` or `filter=` pattern that does not compile"),
+    (super::report_diagnostics::TOC_LINKING_INVALID_LEVEL_CODE, "a `::toc-linking` `level=` outside `h1`–`h6`"),
+    (super::report_diagnostics::TOC_LINKING_INVALID_CLEANUP_CODE, "a `::toc-linking` `cleanup=` naming an unknown service"),
+    (super::report_diagnostics::NORMALIZATION_LEVEL_OVERFLOW_CODE, "heading normalization skipped because it would push a heading past H6"),
+    (super::report_diagnostics::TRANSCLUSION_HEADING_OVERFLOW_CODE, "a transcluded heading re-leveled past H6 and written as bold text"),
+    (super::report_diagnostics::FILE_LINKS_INVALID_GLOB_CODE, "a `::file-links` glob that is invalid, leaves the file tree, or cannot be rooted"),
+    (super::report_diagnostics::FILE_LINKS_INVALID_DEPTH_CODE, "a `::file-links` `--depth` that is not a non-negative integer"),
+    (super::report_diagnostics::FILE_LINKS_MISSING_SOURCE_CODE, "a `::file-links` directive in a document with no source file"),
+    (super::report_diagnostics::FILE_LINKS_NOT_A_DIRECTORY_CODE, "a `::file-links --dir` target that is not a directory"),
+    (super::report_diagnostics::REFERENCE_FAILURE_CODE, "an inclusion target, a `::toc-linking` target chain, or a `::file-links --dir` target that does not resolve"),
+    (super::report_diagnostics::TRANSCLUSION_FAILURE_CODE, "an inclusion left out because its target cannot be transcluded (a file that is not Markdown, a URL while remote execution is disabled), or a tolerated child failure of another kind"),
+    (super::report_diagnostics::INPUT_READ_CODE, "an inclusion target, a `::toc-linking` target, or a `::file-links` directory that cannot be read"),
     (crate::config::load::CONFIG_NOT_SAVED_CODE, "an \"always allow\" approval that applies to this run only because it could not be saved"),
     (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
     (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
@@ -110,6 +122,9 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::collection_blocks::diagnostics::CALLBACK_FAILED_CODE, "a `::map` / `::filter` callback that failed"),
     (super::collection_blocks::diagnostics::VISIT_LIMIT_CODE, "a collection iteration that exceeded the visit limit"),
     (super::collection_blocks::diagnostics::EXPANSION_LIMIT_CODE, "a collection expansion that exceeded the byte limit"),
+    (simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE, "a key an open object accepts as data that closely resembles a declared field"),
+    (crate::findings::EMPTY_BODY_CODE, "a composed body that is proven empty"),
+    (crate::findings::NOT_CHECKED_CODE, "a check that could not run, with the finding that blocked it (always info)"),
 ];
 
 /// Which reported diagnostics block a composition.
@@ -234,5 +249,21 @@ mod tests {
         codes.dedup();
         assert_eq!(codes.len(), count);
         assert!(codes.iter().all(|code| code.starts_with("dm.")));
+    }
+
+    /// Every warning a composition reports under its own code is nameable by
+    /// `--deny`: the advisories this catalog's findings report join it.
+    #[test]
+    fn the_catalog_names_the_reported_advisory_warnings() {
+        for code in [
+            simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE,
+            crate::findings::EMPTY_BODY_CODE,
+            MISSING_TRANSCLUSION_CODE,
+        ] {
+            assert!(
+                COMPOSE_DIAGNOSTIC_CODES.iter().any(|(registered, _)| *registered == code),
+                "`{code}` is reported as a warning but `--deny` cannot name it"
+            );
+        }
     }
 }

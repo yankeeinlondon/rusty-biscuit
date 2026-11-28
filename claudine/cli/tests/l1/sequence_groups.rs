@@ -212,7 +212,7 @@ Body.
     );
 
     assert_eq!(code, 1, "stderr:\n{stderr}");
-    assert!(stderr.contains("removed") && stderr.contains("fail_fast") && stderr.contains("failure"), "{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("set fail_fast on a group object"), "{stderr}");
     assert!(trace(fixture.cwd()).is_empty(), "no task may run: {stderr}");
 }
 
@@ -248,7 +248,7 @@ Body.
     );
 
     assert_eq!(code, 1, "stderr:\n{stderr}");
-    assert!(stderr.contains("removed") && stderr.contains("fail_fast") && stderr.contains("failure"), "{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("set fail_fast on a group object"), "{stderr}");
     assert!(trace(fixture.cwd()).is_empty(), "no task may run: {stderr}");
 }
 

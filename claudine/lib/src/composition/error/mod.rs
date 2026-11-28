@@ -33,6 +33,8 @@ use thiserror::Error;
 
 mod lifecycle_authoring;
 mod lifecycle_preflight;
+mod site;
+pub use site::SequenceSite;
 #[allow(missing_docs)]
 mod render;
 use render::pointer_to_dotted;
@@ -65,8 +67,6 @@ pub enum ShellApprovalFailure {
     /// Approval was required, but no approval handler was available — a
     /// non-interactive run with an unwhitelisted command.
     NoHandler,
-    /// `--dry-run` cannot obtain the interactive approval the command needs.
-    DryRun,
 }
 
 impl ShellApprovalFailure {
@@ -75,7 +75,6 @@ impl ShellApprovalFailure {
         match self {
             ShellApprovalFailure::Blacklisted(_) => "blacklisted",
             ShellApprovalFailure::NoHandler => "no_handler",
-            ShellApprovalFailure::DryRun => "dry_run",
         }
     }
 
@@ -85,9 +84,9 @@ impl ShellApprovalFailure {
     /// error is not a licence to reword it.
     fn message(&self, command: &str, source_file: &Path, line: usize, property: Option<&str>) -> String {
         let location = match (line, property) {
-            (1.., _) => format!("{}:{line}", biscuit_file::to_portable_string(source_file)),
-            (0, Some(property)) => format!("{} (frontmatter `{property}`)", biscuit_file::to_portable_string(source_file)),
-            (0, None) => biscuit_file::to_portable_string(source_file),
+            (1.., _) => format!("{}:{line}", biscuit_file::to_forward_slash_string(source_file)),
+            (0, Some(property)) => format!("{} (frontmatter `{property}`)", biscuit_file::to_forward_slash_string(source_file)),
+            (0, None) => biscuit_file::to_forward_slash_string(source_file),
         };
         match self {
             ShellApprovalFailure::Blacklisted(reason) => {
@@ -96,11 +95,6 @@ impl ShellApprovalFailure {
             ShellApprovalFailure::NoHandler => format!(
                 "Shell command '{command}' at {location} requires approval but no approval \
                  handler is available. Add to whitelist or run interactively."
-            ),
-            ShellApprovalFailure::DryRun => format!(
-                "Cannot dry-run: shell command '{command}' requires interactive approval. \
-                 Run with --yolo to auto-approve, or pre-approve the command in your \
-                 configuration."
             ),
         }
     }
@@ -202,7 +196,7 @@ pub enum CompositionError {
     /// The Markdown file could not be loaded or parsed.
     #[error(
         "failed to load Markdown: {}: {source}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     MarkdownLoad {
         /// The file whose load/parse failed.
@@ -289,7 +283,7 @@ pub enum CompositionError {
     /// `::shell-block` command's own failure is `command`, reported at the
     /// same property. Its code is the `composition.failed` a `ComposeFailed`
     /// of the same directive has.
-    #[error("compose failed: {} (frontmatter `{property}`): {message}", biscuit_file::to_portable_string(source_path))]
+    #[error("compose failed: {} (frontmatter `{property}`): {message}", biscuit_file::to_forward_slash_string(source_path))]
     InlinePromptDirectiveFailed {
         /// The source file the property was authored in.
         source_path: PathBuf,
@@ -337,10 +331,13 @@ pub enum CompositionError {
         /// The hint's source-rooted property (`agent`, `tasks[1].with.agent`).
         property: String,
         /// The enclosing containers, outermost first (`group \`review\``).
-        containers: Vec<String>,
+        /// A boxed slice, so the variant stays within the error size limit.
+        containers: Box<[String]>,
         /// Why no provider can be selected. Boxed: the classified state it
         /// may carry would otherwise widen every `CompositionError`.
         problem: Box<SequenceTaskProviderProblem>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// The `agent` frontmatter property is not a valid type.
@@ -412,7 +409,7 @@ pub enum CompositionError {
     /// [`CompletionContext`]: super::completion::CompletionContext
     #[error(
         "inline completion for {} requires the active document's inline guard",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     InlineGuardMissing {
         /// The active document whose guard was absent.
@@ -422,7 +419,7 @@ pub enum CompositionError {
     /// The agent's inline document could not be read back after the run.
     #[error(
         "could not read the inline document {}: {source}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     InlineArtifactUnreadable {
         /// The active document the agent was asked to edit.
@@ -451,7 +448,7 @@ pub enum CompositionError {
     /// The caller rolls the document back to its pre-run bytes.
     #[error(
         "the agent's frontmatter edit to {} cannot be saved: {rejection}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     InlineAgentFrontmatterRejected {
         /// The active document the agent edited.
@@ -466,7 +463,7 @@ pub enum CompositionError {
     /// stamp: the closure refuses before writing anything.
     #[error(
         "the agent did not update {} (body {reason})",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     CompletionBodyUnchanged {
         /// The active document the verdict was taken against.
@@ -482,7 +479,7 @@ pub enum CompositionError {
     /// kept; only the run's terminal signal changes.
     #[error(
         "{} does not satisfy its schema at completion ({} {})",
-        biscuit_file::to_portable_string(source_path),
+        biscuit_file::to_forward_slash_string(source_path),
         problems.len(),
         if problems.len() == 1 { "problem" } else { "problems" }
     )]
@@ -504,7 +501,7 @@ pub enum CompositionError {
     /// was restored.
     #[error(
         "could not restore {} to its pre-run state: {source}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     InlineRollbackFailed {
         /// The active document whose restoration failed.
@@ -536,7 +533,7 @@ pub enum CompositionError {
     #[error(
         "inline-compose cannot start: the frontmatter of {} cannot be edited by the inline \
          closure: {source}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     InlineBaselineUnstampable {
         /// The active document whose baseline was rehearsed.
@@ -591,7 +588,7 @@ pub enum CompositionError {
     /// symlink) reaches a handler instead of only the flattened `Display` text.
     #[error(
         "insufficient file permissions (need read+write): {}: {source}",
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     )]
     InsufficientFilePermissions {
         /// The file whose read+write probe failed.
@@ -758,7 +755,7 @@ pub enum CompositionError {
     /// provider process exists yet.
     #[error(
         "lifecycle property `{property}` nests `{nested}` inside the string literal {literal} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleNestedSpanInLiteral {
         /// The prompt file whose lifecycle frontmatter holds the literal.
@@ -781,7 +778,7 @@ pub enum CompositionError {
     /// the body. Raised at prepare time, before any lifecycle event runs.
     #[error(
         "lifecycle `{property}` calls a function with an argument that can never bind ({source_path}): {source}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleCallRejected {
         /// The prompt file whose lifecycle frontmatter holds the call.
@@ -808,7 +805,7 @@ pub enum CompositionError {
     /// key and points to the lifecycle surface that replaces it.
     #[error(
         "removed validation/handler key `{key}` in {source_path}: {replacement}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     RemovedValidationKey {
         /// The prompt file whose frontmatter contained the removed key.
@@ -831,7 +828,7 @@ pub enum CompositionError {
     /// runs.
     #[error(
         "`{path}` uses the removed `{removed}` grammar ({source_path}); {replacement}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     RemovedGrammar {
         /// The document that holds the removed spelling.
@@ -853,7 +850,7 @@ pub enum CompositionError {
     /// offending node so the diagnostic can point at the right line.
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleStackInvalidShape {
         /// The prompt file whose lifecycle frontmatter held the malformed stack.
@@ -879,7 +876,7 @@ pub enum CompositionError {
     /// [`LifecycleStackInvalidShape`]: CompositionError::LifecycleStackInvalidShape
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWhenExpressionInvalid {
         /// The prompt file whose lifecycle frontmatter held the condition.
@@ -901,7 +898,7 @@ pub enum CompositionError {
     /// reported through this variant with a `message` that names the cause.
     #[error(
         "invalid lifecycle action `{raw}` in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionInvalidShortForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -918,7 +915,7 @@ pub enum CompositionError {
     /// type, or missing required parameter.
     #[error(
         "invalid lifecycle action `{action}` in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionInvalidLongForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -947,7 +944,7 @@ pub enum CompositionError {
     /// lifecycle verb.
     #[error(
         "unknown lifecycle action `{verb}` in `{property}` ({source_path}){rewrite}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleUnknownVerb {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -967,7 +964,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` in `{property}` received an object value where a scalar or array is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationPositional {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -982,7 +979,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `{property}.{path}` uses the removed positional `set` form ({source_path}); \
          use `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetPositionalRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -999,7 +996,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `{property}.{path}` must be a mapping, got {actual} ({source_path}); \
          use `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetNotMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1018,7 +1015,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `{property}.{path}` has invalid destination key `{key}`: {message} \
          ({source_path}); use literal non-empty keys in `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetInvalidKey {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1040,7 +1037,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` parameter `{param}` in `{property}` received an object value where a scalar is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationParameter {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1058,7 +1055,7 @@ pub enum CompositionError {
     /// (including `null`).
     #[error(
         "`{at}` must be a mapping, got {actual} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithNotMapping {
@@ -1082,7 +1079,7 @@ pub enum CompositionError {
     /// inject typed object or array values at individual keys.
     #[error(
         "`{at}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithWholeMapping {
@@ -1100,7 +1097,7 @@ pub enum CompositionError {
     /// frontmatter properties and are never interpolated.
     #[error(
         "`{at}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithDynamicKey {
@@ -1125,7 +1122,7 @@ pub enum CompositionError {
     /// carry secrets, so a diagnostic names properties, not contents.
     #[error(
         "`{at}` could not be resolved for {purpose}: {message} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path),
         purpose = with_purpose(property, target)
     )]
@@ -1157,7 +1154,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` in `{property}` does not accept a `with` overlay; \
          `with` is only valid on `proxy`, `retry`, and `prep` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWithUnsupported {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1171,7 +1168,7 @@ pub enum CompositionError {
     /// A positional lifecycle action received the wrong number of arguments.
     #[error(
         "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWrongArity {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1192,7 +1189,7 @@ pub enum CompositionError {
     #[error(
         "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
          Use the short form (`verb: value`) or the long form instead: {rewrite}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleShortFormRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1214,7 +1211,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle expression function `{verb}` in `{property}` does not support long form; \
          use the positional array form (`{verb}: [...]`) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleExpressionFunctionKeyValueUnsupported {
         /// The prompt file whose frontmatter held the action.
@@ -1232,7 +1229,7 @@ pub enum CompositionError {
     /// diagnostic can name both the action and the event.
     #[error(
         "lifecycle action `{action}` is not valid in the `{event}` event ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionPlacement {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1251,7 +1248,7 @@ pub enum CompositionError {
     /// Raised at parse time, before any lifecycle effect.
     #[error(
         "lifecycle event `{authored}` is named `{replacement}` by this host; write `{replacement}:` instead ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleRenamedEvent {
         /// The prompt file whose frontmatter holds the key.
@@ -1269,7 +1266,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle dictionary `{property}` has more than one flow-control directive; \
          at most one is allowed per dictionary ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleMultipleLifecycleActions {
         /// The prompt file whose lifecycle frontmatter held the dictionary.
@@ -1286,7 +1283,7 @@ pub enum CompositionError {
     /// counts as unconditional.
     #[error(
         "flow-control directive `{property}` must be the last item in its list ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionOrder {
         /// The prompt file whose lifecycle frontmatter held the list.
@@ -1303,7 +1300,7 @@ pub enum CompositionError {
     /// required target).
     #[error(
         "lifecycle action `{action}` in `{property}` has invalid arguments ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleInvalidArgs {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -1327,7 +1324,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle property `{property}` references `err` in the `{event}` event, \
          which never carries an error ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleErrNotAvailable {
         /// The prompt file whose lifecycle frontmatter held the reference.
@@ -1356,7 +1353,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleShellResolution {
         /// The prompt file whose lifecycle frontmatter held the command.
@@ -1388,7 +1385,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle shell command `{command}` at `{property}` was refused before it ran: {message} \
          ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleShellTemplateRefused {
         /// The prompt file whose lifecycle held the command.
@@ -1406,7 +1403,7 @@ pub enum CompositionError {
     },
 
     /// Cancellation cleanup cannot start a new attempt or transfer ownership.
-    #[error("lifecycle `{action}` cannot recover a cancelled primitive ({source_path})", source_path = biscuit_file::to_portable_string(source_path))]
+    #[error("lifecycle `{action}` cannot recover a cancelled primitive ({source_path})", source_path = biscuit_file::to_forward_slash_string(source_path))]
     LifecycleCancellationRecovery {
         /// Document whose cleanup requested recovery.
         source_path: PathBuf,
@@ -1423,7 +1420,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `resume` requires a live provider session to resume, but none \
          was captured (the provider had not launched) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleResumeWithoutSession {
         /// The prompt file whose stack requested resume.
@@ -1444,7 +1441,7 @@ pub enum CompositionError {
          to start a fresh session ({source_path})",
         plural = if facets.len() == 1 { "y" } else { "ies" },
         facets = facets.join(", "),
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleResumeIncompatible {
         /// The prompt file whose stack requested resume.
@@ -1465,7 +1462,7 @@ pub enum CompositionError {
         "lifecycle `{action}` at `{event}` is accepted, but its runtime effect is \
          not wired for this event; move the recovery to a post-launch event \
          (`failure`/`finalize`/`success`) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetupPhaseRecoveryUnsupported {
         /// The prompt file whose stack requested the action.
@@ -1486,7 +1483,7 @@ pub enum CompositionError {
          this prompt again later, via the rendezvous scheduler) is not ready to \
          receive prompts — use `retry`/`resume` for in-run recovery for now \
          ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleDeferNotImplemented {
         /// The prompt file whose stack requested `defer`.
@@ -1499,7 +1496,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `break` at `{property}` fired outside any loop ({source_path}); `break` ends \
          the nearest enclosing loop of a document, group, or sequence",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleBreakWithoutLoop {
         /// The file whose stack fired the `break`.
@@ -1514,7 +1511,7 @@ pub enum CompositionError {
     /// target's failure as its cause.
     #[error(
         "`prep` of `{target}` failed: {message} (`{property}` in {source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecyclePrepFailed {
         /// The file whose stack made the call.
@@ -1536,7 +1533,7 @@ pub enum CompositionError {
     #[error(
         "`{property}` could not edit the file: {} ({source_path})",
         edit_failure_detail(error, target),
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleEditFailed {
         /// The file whose stack ran the action.
@@ -1556,7 +1553,7 @@ pub enum CompositionError {
         "`prep` of `{target}` would re-enter an active call or exceed the hop limit ({limit}); \
          active chain: {chain} (`{property}` in {source_path})",
         chain = chain.join(" -> "),
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecyclePrepCycle {
         /// The file whose stack made the call.
@@ -1575,7 +1572,7 @@ pub enum CompositionError {
     /// library caller with no installed target runner.
     #[error(
         "lifecycle `prep` at `{property}` cannot run here: this caller runs no `prep` targets ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecyclePrepUnavailable {
         /// The file whose stack made the call.
@@ -1597,7 +1594,7 @@ pub enum CompositionError {
             Some(r) => format!(", reason `{r}`"),
             None => String::new(),
         },
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleRequeueEnqueueFailed {
         /// The prompt file whose stack requested `defer`.
@@ -1621,7 +1618,7 @@ pub enum CompositionError {
         "lifecycle `proxy` hand-off to `{target}` forms a cycle or exceeds the \
          proxy hop limit ({limit}); active chain: {chain} ({source_path})",
         chain = chain.join(" -> "),
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleProxyCycle {
         /// The prompt file whose stack requested the cyclic proxy.
@@ -1644,7 +1641,7 @@ pub enum CompositionError {
     /// diagnostic names the stage rather than claiming the action is invalid.
     #[error(
         "lifecycle `{verb}` cannot be honored at `{stage}`: {reason} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleTransitionUnownedAtStage {
         /// The document whose stack returned the transition.
@@ -1676,7 +1673,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `proxy` hand-off to `{target}` has no owning coordinator: \
          `{command}` prepares no active document to hand off to ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleProxyWithoutOwningCoordinator {
         /// The document whose stack authored the proxy.
@@ -1701,8 +1698,8 @@ pub enum CompositionError {
     #[error(
         "proxy target `{target_path}` could not be prepared: {reason} \
          (requested by {property} in {source_path})",
-        target_path = biscuit_file::to_portable_string(target_path),
-        source_path = biscuit_file::to_portable_string(source_path)
+        target_path = biscuit_file::to_forward_slash_string(target_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleProxyTargetBootstrapFailed {
         /// The resolved target that failed to bootstrap.
@@ -1725,7 +1722,7 @@ pub enum CompositionError {
     /// this error is returned, so callers should not double-emit them.
     #[error(
         "lifecycle `initialize` raised an error: {reason} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleInitializeFailed {
         /// The prompt file whose `initialize` stack raised the error.
@@ -1744,7 +1741,7 @@ pub enum CompositionError {
     /// propagation table) and never produces this variant.
     #[error(
         "lifecycle `loop` gate raised an error after pass {iteration}: {reason} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleLoopGateFailed {
         /// The file whose `loop:` gate stack raised the error.
@@ -1771,7 +1768,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `{event}` evaluation error in `{location}`: {message} ({source_path})",
         location = property.as_deref().unwrap_or(surface),
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleEvaluationError {
         /// The prompt file whose lifecycle event raised the error.
@@ -1797,82 +1794,182 @@ pub enum CompositionError {
     },
 
     // -- Sequence errors -------------------------------------------------------
-    /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
-    #[error("invalid sequence definition: {0}")]
-    SequenceInvalid(String),
+    /// A sequence definition is not well formed: the `sequence` value's type,
+    /// a task's `sequence` value, or a list the walk could not read.
+    #[error("invalid sequence definition: {message}")]
+    SequenceInvalid {
+        /// What is wrong, naming the authored key.
+        message: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// The sequence list is empty.
     #[error("sequence list is empty; at least one step is required")]
-    SequenceEmpty,
+    SequenceEmpty {
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
-    /// The external YAML file could not be loaded.
-    #[error("failed to load external sequence file: {context}: {source}")]
-    SequenceExternalLoad {
-        /// Display context: the raw reference (formatted as `` `raw` ``) for the
-        /// reference-resolution sites, or the resolved YAML path for the load
-        /// sites.
-        context: String,
-        /// The typed lower-layer cause.
+    /// A reference a sequence construct authors (`prompt:`, `task:`, `group:`,
+    /// `sequence:`) did not resolve to a file.
+    #[error("{} `{reference}` could not be resolved: {source}", field.noun())]
+    SequenceReferenceResolution {
+        /// The executable field that authored the reference; its noun names
+        /// the construct.
+        field: super::sequence::model::ExecutableField,
+        /// The reference as authored.
+        reference: String,
+        /// The resolver's probe record, when the reference parsed. Boxed: it
+        /// holds every candidate the resolver tried.
+        resolution: Option<Box<ResolutionDetail>>,
+        /// The referencing construct.
+        site: Box<SequenceSite>,
+        /// Why it did not resolve: [`SequenceLoadCause::Reference`],
+        /// [`SequenceLoadCause::NotFound`], or [`SequenceLoadCause::HomeDir`].
         #[source]
         source: SequenceLoadCause,
     },
 
-    /// The external YAML file has an unexpected root shape.
-    #[error("external sequence file has wrong structure: {0}")]
-    SequenceExternalWrongType(String),
+    /// A file a sequence construct references resolved but could not be read.
+    #[error("could not read {} `{}`: {source}", source_noun(*field), biscuit_file::to_forward_slash_string(path))]
+    SequenceSourceRead {
+        /// The executable field that referenced the file, once the caller
+        /// that knows it says so.
+        field: Option<super::sequence::model::ExecutableField>,
+        /// The file that could not be read.
+        path: PathBuf,
+        /// The referencing construct, or the file itself.
+        site: Box<SequenceSite>,
+        /// The read failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A file a sequence construct references was read but could not be
+    /// parsed; [`SourceParseStage`] says which operation failed.
+    #[error("{} `{}` {}: {source}", source_noun(*field), biscuit_file::to_forward_slash_string(path), stage.phrase())]
+    SequenceSourceParse {
+        /// The executable field that referenced the file, once the caller
+        /// that knows it says so.
+        field: Option<super::sequence::model::ExecutableField>,
+        /// The file that could not be parsed.
+        path: PathBuf,
+        /// The operation that failed.
+        stage: SourceParseStage,
+        /// The referencing construct, or the file itself.
+        site: Box<SequenceSite>,
+        /// The typed parse failure.
+        #[source]
+        source: SequenceLoadCause,
+    },
+
+    /// A referenced sequence file has an unexpected root shape.
+    #[error("`{}` has the wrong structure: {problem}", biscuit_file::to_forward_slash_string(path))]
+    SequenceExternalWrongType {
+        /// The referenced file.
+        path: PathBuf,
+        /// What shape it has and which it needs.
+        problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// An object step is missing the required `name` property.
-    #[error("sequence step at index {index} is missing required `name` property")]
-    SequenceStepNameMissing { index: usize },
+    #[error("step {} is missing its required `name` property", index + 1)]
+    SequenceStepNameMissing {
+        /// Zero-based step index; prose shows it one-based.
+        index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// The `name` property of an object step is not a string.
-    #[error("sequence step at index {index} has `name` of type {found}, expected string")]
-    SequenceStepNameWrongType { index: usize, found: String },
+    #[error("step {} has a `name` of type {found}; expected a string", index + 1)]
+    SequenceStepNameWrongType {
+        /// Zero-based step index; prose shows it one-based.
+        index: usize,
+        /// The JSON type found.
+        found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// A template key collides with a reserved sequence overlay key.
-    #[error("sequence template key `{0}` collides with reserved sequence key")]
-    SequenceReservedTemplateKey(String),
+    #[error("sequence template key `{key}` collides with reserved sequence key")]
+    SequenceReservedTemplateKey {
+        /// The reserved key.
+        key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// A step declared more than one executable field.
     ///
     /// A step runs the document body (no executable) or exactly one of
-    /// `prompt`/`shell`/`side_effect`/`group`/`task` — never several.
+    /// [`EXECUTABLE_KEYS`](super::sequence::reserved::EXECUTABLE_KEYS) —
+    /// never several.
     #[error(
-        "sequence step at index {index} declares multiple executable fields ({}); \
-         a step may declare at most one of prompt/shell/side_effect/group/task",
-        fields.join(", ")
+        "step {} declares more than one executable field ({}); a step declares at most one of {}",
+        index + 1,
+        fields.join(", "),
+        super::sequence::reserved::EXECUTABLE_KEYS.join(", ")
     )]
     SequenceExclusiveExecutable {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The executable field names found on the step.
         fields: Vec<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An authored step state key collides with a generated or root reserved key.
     #[error(
-        "sequence step at index {index} uses reserved key `{key}` as state; \
-         it is generated by Claudine and cannot be authored"
+        "step {} uses reserved key `{key}` as state; it is generated by Claudine and cannot be authored",
+        index + 1
     )]
     SequenceReservedStateKey {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The offending reserved key.
         key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task option is meaningless for the step's chosen executable.
-    #[error(
-        "sequence step at index {index} sets `{field}`, which is not valid for a \
-         `{executable}` task"
-    )]
+    #[error("step {} sets `{field}`, which is not valid for a `{executable}` task", index + 1)]
     SequenceInvalidTaskField {
-        /// Zero-based step index.
+        /// Zero-based step index; prose shows it one-based.
         index: usize,
         /// The offending task-option field.
         field: String,
         /// The executable the step declared.
         executable: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
+
+    /// A `kind: task` file or group leg names a key that is no field of its
+    /// executable's task.
+    #[error(
+        "`{key}` is not a field of a `{}` task; expected one of {}",
+        executable.key(),
+        allowed.join(", ")
+    )]
+    SequenceUnknownTaskField {
+        /// The key as authored.
+        key: String,
+        /// The task's executable.
+        executable: super::sequence::model::ExecutableField,
+        /// The fields that executable's task accepts.
+        allowed: Vec<String>,
+        /// The closest allowed field, when one is near
+        /// ([`darkmatter::catalog::suggest_strings`]).
+        suggestion: Option<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// The `<file-ref> [-> offset] [::op(args)]` suffix could not be parsed.
@@ -1882,11 +1979,18 @@ pub enum CompositionError {
         authored: String,
         /// What specifically was wrong with it.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator name is not one of `map`, `name`, or `template`.
-    #[error("unknown sequence source operator `{0}`; expected `map`, `name`, or `template`")]
-    SequenceUnknownOperator(String),
+    #[error("unknown sequence source operator `{operator}`; expected `map`, `name`, or `template`")]
+    SequenceUnknownOperator {
+        /// The operator as authored.
+        operator: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
 
     /// An operator was given the wrong number of arguments.
     #[error("sequence source operator `{operator}` takes {expected} argument(s), got {found}")]
@@ -1897,6 +2001,8 @@ pub enum CompositionError {
         expected: usize,
         /// How many were supplied.
         found: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An offset path segment does not exist in the source document.
@@ -1911,6 +2017,8 @@ pub enum CompositionError {
         failed_at: String,
         /// The JSON type of the value the failing segment was looked up on.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An offset path resolved to something that is not a list.
@@ -1920,6 +2028,8 @@ pub enum CompositionError {
         path: String,
         /// The JSON type actually found.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `->` offset was used against a line-delimited file.
@@ -1935,11 +2045,14 @@ pub enum CompositionError {
         path: PathBuf,
         /// The rejected format's display name (`JSONL`/`NDJSON`).
         format: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator was applied to an item that is not an object.
     #[error(
-        "sequence operator `{operator}` requires object items, but item {index} is {found}"
+        "sequence operator `{operator}` requires object items, but item {} is {found}",
+        index + 1
     )]
     SequenceOperatorItemNotObject {
         /// The operator name.
@@ -1948,10 +2061,15 @@ pub enum CompositionError {
         index: usize,
         /// The JSON type actually found.
         found: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// An operator's source field is missing from an item.
-    #[error("sequence operator `{operator}` cannot read `{field}`: item {index} does not have it")]
+    #[error(
+        "sequence operator `{operator}` cannot read `{field}`: item {} does not have it",
+        index + 1
+    )]
     SequenceOperatorMissingField {
         /// The operator name.
         operator: String,
@@ -1959,18 +2077,23 @@ pub enum CompositionError {
         field: String,
         /// Zero-based item index.
         index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `template(expr)` operator produced an empty or null name.
     #[error(
-        "sequence operator `template({expression})` produced an empty name for item {index}; \
-         a name must be a non-empty string"
+        "sequence operator `template({expression})` produced an empty name for item {}; \
+         a name must be a non-empty string",
+        index + 1
     )]
     SequenceOperatorEmptyName {
         /// Zero-based item index.
         index: usize,
         /// The template expression source.
         expression: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A dynamic `{{ … }}` or `template(...)` expression failed.
@@ -1981,6 +2104,8 @@ pub enum CompositionError {
         /// Whether it failed to parse or to evaluate, and why.
         #[source]
         source: SequenceExpressionCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `$( … )` sequence source could not be expanded.
@@ -1991,25 +2116,30 @@ pub enum CompositionError {
         /// Where in approval or execution it failed.
         #[source]
         source: SequenceShellCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A lenient (foreign-data) item was `null`.
-    #[error("sequence item {index} is null; every item must be a scalar or an object")]
+    #[error("sequence item {} is null; every item must be a scalar or an object", index + 1)]
     SequenceNullItem {
         /// Zero-based item index.
         index: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A step's normalized state failed its owner's `$state` schema.
     ///
-    /// `index` is zero-based within the owning list, so `source_path` and
-    /// `container` (the list's authored path: `sequence`, or
-    /// `sequence[1].sequence` for a nested container) are what tell two
-    /// owners' step 0 apart.
+    /// `index` is zero-based within the owning list (prose shows it
+    /// one-based), so `source_path` and `container` (the list's authored
+    /// path: `sequence`, or `sequence[1].sequence` for a nested container)
+    /// are what tell two owners' first steps apart.
     #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message} \
+        "step {} (`{id}`) failed schema validation at `{property}`: {message} \
          (`$state` of `{container}` in {source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        index + 1,
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceStateSchemaViolation {
         /// Zero-based step index.
@@ -2030,7 +2160,7 @@ pub enum CompositionError {
     /// where no inline list owns it, or supplied through a value route.
     #[error(
         "`{property}` is not accepted here ({source_path}): {hint}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceDeclarationMisplaced {
         /// The file holding the declaration, or the document a value route
@@ -2046,7 +2176,7 @@ pub enum CompositionError {
     /// `$state`, an empty union, a non-mapping `template`, …).
     #[error(
         "invalid sequence declaration `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceDeclarationShape {
         /// The file holding the declaration.
@@ -2061,7 +2191,7 @@ pub enum CompositionError {
     /// unparsable type string, a missing referenced file, a bad import).
     #[error(
         "sequence declaration `{property}` ({source_path}) could not be loaded: {source}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceDeclarationLoad {
         /// The file holding the declaration.
@@ -2077,7 +2207,7 @@ pub enum CompositionError {
     /// own `$schema` check, so the container never opened.
     #[error(
         "sequence container `{container}` ({source_path}) failed its `$schema` check at `{property}`: {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     SequenceContainerSchemaViolation {
         /// The file declaring the container.
@@ -2098,6 +2228,8 @@ pub enum CompositionError {
     SequenceReferenceCycle {
         /// The full canonical chain, from the entry document to the repeat.
         chain: Vec<PathBuf>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A referenced document could not be loaded or is not the expected `kind`.
@@ -2109,6 +2241,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// What was wrong with it.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `prompt:` task referenced a document that itself declares `sequence:`.
@@ -2123,6 +2257,20 @@ pub enum CompositionError {
         path: PathBuf,
         /// The document that referenced it.
         referenced_from: PathBuf,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
+    },
+
+    /// The file run as a sequence has no `sequence` key: `claudine sequence`
+    /// runs only a document that declares its task list (an empty list
+    /// included), so a prompt or data file is refused before any task.
+    // The file is the site's, so the message stays the same wherever it runs.
+    #[error("the file does not define a `sequence` property, so it is not a sequence document")]
+    SequenceUndefined {
+        /// The file run as the sequence.
+        path: PathBuf,
+        /// The file, with `sequence` as the missing property.
+        site: Box<SequenceSite>,
     },
 
     /// A construct that preflight recognizes but v1 deliberately does not run.
@@ -2135,6 +2283,8 @@ pub enum CompositionError {
         construct: String,
         /// Why it is rejected and what to do instead.
         detail: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `prompt:` task's document could not be launched at all.
@@ -2161,6 +2311,8 @@ pub enum CompositionError {
         /// Boxed to keep `CompositionError` small — it is the `Err` type of
         /// most composition `Result`s.
         snapshot: Option<Box<DiagnosticSnapshot>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A step has neither an executable nor a body to run.
@@ -2171,7 +2323,8 @@ pub enum CompositionError {
     /// so — the author either meant to write a body or to declare a task.
     #[error(
         "step {step} (`{name}`) has nothing to run: `{path}` composed to an empty body and the \
-         step declares no `prompt`, `shell`, `side_effect`, `task`, or `group`"
+         step declares no executable ({})",
+        super::sequence::reserved::EXECUTABLE_KEYS.join(", ")
     )]
     SequenceStepNotExecutable {
         /// One-based step position.
@@ -2180,6 +2333,8 @@ pub enum CompositionError {
         name: String,
         /// The sequence document whose body composed empty.
         path: PathBuf,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `{group}@{file-ref}` catalog reference did not resolve to one group.
@@ -2196,6 +2351,8 @@ pub enum CompositionError {
         problem: String,
         /// The names the catalog does define, for a did-you-mean list.
         available: Vec<String>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A group definition violates the group schema.
@@ -2207,6 +2364,8 @@ pub enum CompositionError {
         origin: PathBuf,
         /// The specific schema violation.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// Two tasks in the same parallel group write back to the same document.
@@ -2226,6 +2385,8 @@ pub enum CompositionError {
         first: String,
         /// The second task's label.
         second: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command reads a value no approval can cover: `err`,
@@ -2251,6 +2412,8 @@ pub enum CompositionError {
         /// Darkmatter's typed unavailable-binding error.
         #[source]
         source: Option<Box<darkmatter::markdown::compose::expression::ExpressionError>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A graph-phase shell command references the resolved target's identity.
@@ -2274,6 +2437,8 @@ pub enum CompositionError {
         root: String,
         /// A label locating the task.
         task: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command failed approval-time resolution or runtime
@@ -2289,6 +2454,8 @@ pub enum CompositionError {
         /// The typed lower-layer failure, when one was raised.
         #[source]
         source: Option<Box<MarkdownError>>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A late value a task's shell command reads was missing or invalid when
@@ -2305,6 +2472,8 @@ pub enum CompositionError {
         /// Darkmatter's typed `MissingValue` or `TemplateValueRejected`.
         #[source]
         source: Box<MarkdownError>,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's preflight-approved shell command resolves to different text
@@ -2333,6 +2502,8 @@ pub enum CompositionError {
         /// whose values changed, or a note that the change is not attributable
         /// to a named one.
         changed: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     // -- Atomic task execution (phase 7) ---------------------------------------
@@ -2354,6 +2525,8 @@ pub enum CompositionError {
         /// The parser's typed rejection.
         #[source]
         source: crate::harness::HarnessError,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command finished with a non-zero exit code.
@@ -2365,6 +2538,8 @@ pub enum CompositionError {
         command: String,
         /// The process exit code.
         code: i32,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command exceeded its per-command timeout and was killed.
@@ -2376,6 +2551,8 @@ pub enum CompositionError {
         command: String,
         /// The elapsed budget, in seconds.
         seconds: f64,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command was killed because it breached the per-task
@@ -2396,6 +2573,8 @@ pub enum CompositionError {
         /// Which capture limit tripped, the observed count, and the configured
         /// limit — what separates a slightly oversized command from a flood.
         trip: RunawayTrip,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command could not be spawned at all.
@@ -2408,6 +2587,8 @@ pub enum CompositionError {
         /// The underlying spawn failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command spawned and ran, but waiting on it failed, so
@@ -2427,6 +2608,8 @@ pub enum CompositionError {
         /// The underlying wait failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's shell command spawned, but exclusive ownership of its process
@@ -2445,6 +2628,8 @@ pub enum CompositionError {
         /// The underlying ownership failure.
         #[source]
         source: std::io::Error,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's `prompt:` document ran to completion but reported failure.
@@ -2456,6 +2641,8 @@ pub enum CompositionError {
         path: PathBuf,
         /// The provider's exit code.
         code: i32,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task's `side_effect:` value is not a side-effect action.
@@ -2469,6 +2656,8 @@ pub enum CompositionError {
         task: String,
         /// What the value was instead.
         problem: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task `with:` key targets a reserved key: a generated step field or
@@ -2483,6 +2672,8 @@ pub enum CompositionError {
         task: String,
         /// The refused `with` key.
         key: String,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task value failed just-in-time evaluation against the effective state.
@@ -2502,6 +2693,8 @@ pub enum CompositionError {
         /// [`LifecycleCause`]: super::lifecycle_context::LifecycleCause
         #[source]
         cause: super::lifecycle_context::LifecycleCause,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A task shape reached execution that only a later phase can schedule.
@@ -2513,13 +2706,8 @@ pub enum CompositionError {
         construct: String,
         /// What the author should do instead.
         detail: String,
-    },
-
-    /// One or more sequence steps failed provider/model resolution in non-TTY mode.
-    #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
-    SequenceSelectionFailed {
-        failures: Vec<SequenceSelectionFailure>,
-        failure_count: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// One or more sequence steps or sequence documents have missing
@@ -2535,6 +2723,8 @@ pub enum CompositionError {
         failures: Vec<SequenceMissingPropertiesEntry>,
         /// Number of entries that reported missing properties.
         failure_count: usize,
+        /// Where it was authored.
+        site: Box<SequenceSite>,
     },
 
     /// A `sequence` document authored `interactive: true` in its frontmatter.
@@ -2542,11 +2732,17 @@ pub enum CompositionError {
     /// Sequences are serial automation; interactive mode must be requested
     /// per-invocation with the `--interactive` flag instead.
     #[error(
-        "`interactive: true` is not allowed in a sequence document ({0}); \
+        "`interactive: true` is not allowed in a sequence document ({}); \
          use `compose` or `inline-compose` for dialog-shaped prompts, \
-         or pass `--interactive` to override a single sequence run"
+         or pass `--interactive` to override a single sequence run",
+        path.display()
     )]
-    SequenceInteractiveRejected(PathBuf),
+    SequenceInteractiveRejected {
+        /// The sequence document.
+        path: PathBuf,
+        /// Its `interactive` property.
+        site: Box<SequenceSite>,
+    },
 
     // -- Loop errors -----------------------------------------------------------
     /// A `loop:` block's configuration is invalid.
@@ -2557,7 +2753,7 @@ pub enum CompositionError {
     /// as a whole; `message` names keys by the same rooted path.
     #[error(
         "invalid loop definition ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LoopInvalid {
         /// The file that holds the `loop:` block.
@@ -2573,7 +2769,7 @@ pub enum CompositionError {
     #[error(
         "invalid loop definition ({source_path}): `{property}` template `{template}` failed \
          to {stage}: {source}",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         stage = source.stage()
     )]
     LoopMaxTemplateInvalid {
@@ -2595,7 +2791,7 @@ pub enum CompositionError {
     #[error(
         "`{property}` is not accepted on a {owner} loop ({source_path}); `on_rate_limit` \
          applies only to a document loop, whose provider reports rate limits",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LoopRateLimitPolicyNotAccepted {
         /// The file that holds the `loop:` block.
@@ -2610,7 +2806,7 @@ pub enum CompositionError {
     /// task entry carries `loop:`; `hint` names where this loop belongs.
     #[error(
         "`{property}` is not accepted here ({source_path}): {hint}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     TaskLoopMisplaced {
         /// The file that holds the task.
@@ -2625,7 +2821,7 @@ pub enum CompositionError {
     /// expression.
     #[error(
         "invalid task guard `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     TaskWhenInvalid {
         /// The file that holds the task.
@@ -2644,7 +2840,7 @@ pub enum CompositionError {
     /// fails rather than reading the guard as false.
     #[error(
         "task guard `{property}` could not be evaluated ({source_path}): {cause}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     TaskWhenEvaluationFailed {
         /// The file that holds the task.
@@ -2659,7 +2855,7 @@ pub enum CompositionError {
     /// `when:` at a sequence document's root, or on a group object.
     #[error(
         "`{property}` is not accepted here ({source_path}): {hint}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     WhenMisplaced {
         /// The file that holds the key.
@@ -2675,7 +2871,7 @@ pub enum CompositionError {
     #[error(
         "invalid `CLAUDINE_MAX_ITERATIONS` value `{value}` for the loop of {source_path}: \
          {reason}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LoopMaxIterationsEnvInvalid {
         /// The looping document.
@@ -2718,7 +2914,7 @@ pub enum CompositionError {
     /// runs again for the pass that already finished.
     #[error(
         "`{property}` failed after pass {iteration} ({source_path}): {source}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LoopEvaluationFailed {
         /// The file that authors the `loop:` block.
@@ -2737,7 +2933,7 @@ pub enum CompositionError {
     /// Nothing of the action is committed.
     #[error(
         "`{property}` failed after pass {iteration} ({source_path}): {source}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LoopActionWriteRefused {
         /// The file that authors the `loop:` block.
@@ -2754,7 +2950,7 @@ pub enum CompositionError {
     /// Loop execution exceeded its configured safety cap.
     #[error(
         "loop limit exceeded for {prompt_path} at iteration {iteration}; cap is {cap}",
-        prompt_path = biscuit_file::to_portable_string(prompt_path)
+        prompt_path = biscuit_file::to_forward_slash_string(prompt_path)
     )]
     LoopLimitExceeded {
         /// Maximum allowed iteration count.
@@ -2854,7 +3050,7 @@ pub enum CompositionError {
     /// Loop execution was interrupted by the user (SIGINT / Ctrl+C).
     #[error(
         "user interrupted looping operation in {prompt_path}",
-        prompt_path = biscuit_file::to_portable_string(prompt_path)
+        prompt_path = biscuit_file::to_forward_slash_string(prompt_path)
     )]
     LoopInterrupted {
         /// Prompt file being executed when the interrupt was observed.
@@ -2872,7 +3068,7 @@ pub enum CompositionError {
     /// for downstream tooling.
     #[error(
         "loop iteration {iteration} of {prompt_path}: {reason} (exit code {exit_code})",
-        prompt_path = biscuit_file::to_portable_string(prompt_path)
+        prompt_path = biscuit_file::to_forward_slash_string(prompt_path)
     )]
     LoopIterationFailed {
         /// 1-based iteration that failed.
@@ -2913,13 +3109,39 @@ pub enum CompositionError {
     /// [`SchemaParse`]: CompositionError::SchemaParse
     #[error(
         "schema load failed for {}: {message}",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     SchemaLoad {
         /// The prompt file whose `$schema` reference failed to load.
         source_path: PathBuf,
         /// Human-readable description of the failure.
         message: String,
+    },
+
+    /// A `$schema` template's `{{ … }}` slot could not be resolved, so the
+    /// document has no schema to be judged by: a read the captured
+    /// `permissions` refuse (`permissions.network: deny`) or that needs an
+    /// approval this run did not give (`ask` with no terminal to ask on), or
+    /// a slot whose evaluation failed.
+    ///
+    /// `slot_code` is Darkmatter's code for the first failed slot
+    /// (`dm.schema.slot_network_denied`, `dm.schema.slot_approval_required`,
+    /// `dm.schema.slot_failed`, …), the code a dry run reports for it.
+    #[error(
+        "schema slot failed for {}: {message}",
+        biscuit_file::to_forward_slash_string(source_path)
+    )]
+    SchemaSlotFailed {
+        /// The prompt file whose `$schema` holds the template.
+        source_path: PathBuf,
+        /// Darkmatter's code for the first failed slot.
+        slot_code: String,
+        /// Human-readable description of the failure.
+        message: String,
+        /// Darkmatter's typed record of each failed slot, at the slot where
+        /// its position is proven: what a dry run reports in place of this
+        /// launch-time wrapper.
+        slots: Vec<darkmatter::findings::Diagnostic>,
     },
 
     /// A `$schema` declaration could not be *parsed* or lowered to a JSON Schema.
@@ -2933,7 +3155,7 @@ pub enum CompositionError {
     /// [`SchemaLoad`]: CompositionError::SchemaLoad
     #[error(
         "schema parse failed for {}: {message}",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     SchemaParse {
         /// The prompt file whose `$schema` body failed to parse.
@@ -2957,7 +3179,7 @@ pub enum CompositionError {
     /// here so callers can choose their handling.
     #[error(
         "schema validation failed for {}: {message}",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     SchemaValidation {
         /// The prompt file being validated.
@@ -2981,7 +3203,7 @@ pub enum CompositionError {
     /// flag, etc.) and when the user has opted out via `prompt_for_missing`.
     #[error(
         "missing required schema {plural} for {}: {names}",
-        biscuit_file::to_portable_string(source_path),
+        biscuit_file::to_forward_slash_string(source_path),
         plural = if missing.len() == 1 { "property" } else { "properties" },
         names = format_missing_names(missing)
     )]
@@ -3008,7 +3230,7 @@ pub enum CompositionError {
     #[error(
         "missing required property `{property}` in {} has an unsupported \
          schema shape for interactive collection: {shape}",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     UnsupportedInteractiveSchema {
         /// The prompt file whose schema cannot be collected.
@@ -3033,7 +3255,7 @@ pub enum CompositionError {
     /// `reason` preserves the original file-reference failure text.
     #[error(
         "unresolved file reference for `{property}` in {}: {reason}",
-        biscuit_file::to_portable_string(source_path)
+        biscuit_file::to_forward_slash_string(source_path)
     )]
     UnresolvedFileReference {
         /// The prompt file whose schema declares the property.
@@ -3068,7 +3290,7 @@ pub enum CompositionError {
         provider.as_ref().map(|p| format!(" ({p})")).unwrap_or_default(),
         reset_at.as_ref().map(|r| format!("; resets at {}", r.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S"))).unwrap_or_default(),
         message.as_ref().map(|m| format!("\n  ↳ {m}")).unwrap_or_default(),
-        prompt_path = biscuit_file::to_portable_string(prompt_path)
+        prompt_path = biscuit_file::to_forward_slash_string(prompt_path)
     )]
     LoopRateLimited {
         /// 1-based iteration that produced the rate-limit trailer.
@@ -3118,14 +3340,13 @@ pub enum CompositionError {
     /// Composition succeeded but produced an empty body.
     ///
     /// The Markdown composed cleanly (no transclusion or shell-expansion
-    /// failures), but every block in the body evaluated to falsy or the
-    /// document had no body to begin with. Sending the result to a provider
+    /// failures), but the prompt is empty; `cause` says why. Sending the result to a provider
     /// CLI would surface as `"Input must be provided ..."` from the provider
     /// rather than naming the real cause, so the composition layer short-
     /// circuits here with an actionable error.
     #[error(
         "composed prompt body is empty for {}{}",
-        biscuit_file::to_portable_string(source_path),
+        biscuit_file::to_forward_slash_string(source_path),
         if provided_overrides.is_empty() {
             String::new()
         } else {
@@ -3142,6 +3363,8 @@ pub enum CompositionError {
         /// which variables were actually visible to `::block when=…`
         /// conditions when the body collapsed to nothing.
         provided_overrides: Vec<String>,
+        /// Why the body is empty, as far as the composition proved it.
+        cause: darkmatter::findings::EmptyBodyCause,
     },
 
     /// A frontmatter-rooted error carrying a captured source excerpt for
@@ -3175,6 +3398,26 @@ pub enum CompositionError {
         /// The original evaluation error (a
         /// [`Self::LifecycleEvaluationError`]).
         inner: Box<CompositionError>,
+    },
+
+    /// A real sequence run stopped at preflight with `cause`, and the passive
+    /// check found `report`'s problems at the same point.
+    ///
+    /// Every lifecycle and persisted field (`err.code`, `err.category`,
+    /// `err.disposition`, `err.origin`, `err.detail`, `err.msg`, severity,
+    /// and the one-level `err.cause`) is the cause's, so a `when:` clause
+    /// matches exactly what it matched before the report existed. The
+    /// wrapper adds no code of its own and no entry to the stored cause
+    /// chain: [`Diagnostic::diagnostic_source`] continues below the cause.
+    /// The CLI renders `report` in place of the cause's block, once.
+    #[error("{}", render::checked_diagnostic(cause))]
+    CheckFailed {
+        /// Every problem the passive check observed, in report order; its
+        /// first row need not be `cause`.
+        report: Box<darkmatter::findings::FindingReport>,
+        /// The typed failure the run returned, chosen in the old preflight
+        /// order.
+        cause: Box<CompositionError>,
     },
 }
 
@@ -3221,10 +3464,50 @@ pub enum MarkdownLoadCause {
     Yaml(#[from] biscuit_file::YamlError),
 }
 
-/// Heterogeneous lower-layer cause of an external sequence-file load failure.
+/// What a person calls the file a sequence error is about: the noun of the
+/// construct that referenced it, or `file` while no caller has said.
+fn source_noun(field: Option<super::sequence::model::ExecutableField>) -> &'static str {
+    field.map_or("file", super::sequence::model::ExecutableField::noun)
+}
+
+/// The operation a [`CompositionError::SequenceSourceParse`] failed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceParseStage {
+    /// Assembling a Markdown frontmatter from the file's values.
+    Frontmatter,
+    /// Parsing YAML text.
+    Yaml,
+    /// Converting parsed YAML to the data model (a non-string key, a tag).
+    YamlConversion,
+    /// Parsing JSON or JSON5 text.
+    Json5,
+    /// The duplicate-key check of a JSON-family document.
+    DuplicateKey,
+    /// Parsing one JSONL/NDJSON record.
+    JsonLine,
+}
+
+impl SourceParseStage {
+    /// The failure in prose, after the file's name.
+    #[must_use]
+    pub fn phrase(self) -> &'static str {
+        match self {
+            Self::Frontmatter => "could not be read as frontmatter",
+            Self::Yaml => "is not valid YAML",
+            Self::YamlConversion => "could not be converted from YAML",
+            Self::Json5 => "is not valid JSON",
+            Self::DuplicateKey => "repeats a key",
+            Self::JsonLine => "has a record that is not valid JSON",
+        }
+    }
+}
+
+/// Heterogeneous lower-layer cause of a sequence reference, read, or parse
+/// failure.
 ///
 /// Carried as the typed `#[source]` of
-/// [`CompositionError::SequenceExternalLoad`] so a programmatic handler can
+/// [`CompositionError::SequenceReferenceResolution`] and
+/// [`CompositionError::SequenceSourceParse`] so a programmatic handler can
 /// recover the concrete lower-layer type via [`std::error::Error::source`]
 /// instead of inspecting a flattened string.
 #[derive(Error, Debug)]
@@ -3559,6 +3842,20 @@ pub struct DroppedOptional {
     pub reason: String,
 }
 
+impl DroppedOptional {
+    /// The warning a run prints for this drop, which a dry run reports as its
+    /// warning row too.
+    pub fn message(&self) -> String {
+        format!(
+            "dropped optional schema property `{property}` (from {source}, at {stage}): {reason}",
+            property = self.property,
+            source = self.source.label(),
+            stage = self.stage.label(),
+            reason = self.reason,
+        )
+    }
+}
+
 /// Where the invalid value originated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DroppedOptionalSource {
@@ -3593,7 +3890,7 @@ fn edit_failure_detail(error: &darkmatter::editor::EditError, target: &Path) -> 
 fn render_reference_chain(chain: &[PathBuf]) -> String {
     chain
         .iter()
-        .map(|path| biscuit_file::to_portable_string(path))
+        .map(|path| biscuit_file::to_forward_slash_string(path))
         .collect::<Vec<_>>()
         .join(" → ")
 }
@@ -3668,17 +3965,196 @@ pub struct SequenceMissingPropertiesEntry {
     pub pointer_paths: Vec<String>,
 }
 
-/// Per-step failure information for sequence selection errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SequenceSelectionFailure {
-    /// 1-based step number.
-    pub step: usize,
-    /// Display name of the step.
-    pub step_name: String,
-    /// Why the step failed resolution.
-    pub reason: String,
-    /// Providers that were installed at the time of resolution.
-    pub installed: Vec<Provider>,
+impl CompositionError {
+    /// The error a display wrapper presents: through
+    /// [`Self::WithFrontmatter`], [`Self::LifecycleEvaluationAlreadyEmitted`],
+    /// and [`Self::CheckFailed`], which change how an error is shown but not
+    /// what it is; any other error is itself.
+    #[must_use]
+    pub fn presented(&self) -> &Self {
+        match self {
+            Self::WithFrontmatter { inner, .. }
+            | Self::LifecycleEvaluationAlreadyEmitted { inner }
+            | Self::CheckFailed { cause: inner, .. } => inner.presented(),
+            other => other,
+        }
+    }
+
+    /// The site of a `Sequence…` error, looking through its display wrappers
+    /// ([`Self::presented`]); `None` for any other error.
+    #[must_use]
+    pub fn sequence_site(&self) -> Option<&SequenceSite> {
+        match self.presented() {
+            Self::SequenceInvalid { site, .. }
+            | Self::SequenceEmpty { site, .. }
+            | Self::SequenceReferenceResolution { site, .. }
+            | Self::SequenceSourceRead { site, .. }
+            | Self::SequenceSourceParse { site, .. }
+            | Self::SequenceExternalWrongType { site, .. }
+            | Self::SequenceStepNameMissing { site, .. }
+            | Self::SequenceStepNameWrongType { site, .. }
+            | Self::SequenceReservedTemplateKey { site, .. }
+            | Self::SequenceExclusiveExecutable { site, .. }
+            | Self::SequenceReservedStateKey { site, .. }
+            | Self::SequenceInvalidTaskField { site, .. }
+            | Self::SequenceSourceSyntax { site, .. }
+            | Self::SequenceUnknownOperator { site, .. }
+            | Self::SequenceOperatorArity { site, .. }
+            | Self::SequenceOffsetMissing { site, .. }
+            | Self::SequenceOffsetNotAList { site, .. }
+            | Self::SequenceOffsetUnsupported { site, .. }
+            | Self::SequenceOperatorItemNotObject { site, .. }
+            | Self::SequenceOperatorMissingField { site, .. }
+            | Self::SequenceOperatorEmptyName { site, .. }
+            | Self::SequenceExpressionFailed { site, .. }
+            | Self::SequenceShellFailed { site, .. }
+            | Self::SequenceNullItem { site, .. }
+            | Self::SequenceReferenceCycle { site, .. }
+            | Self::SequenceReferenceInvalid { site, .. }
+            | Self::SequenceNestedSequence { site, .. }
+            | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceUndefined { site, .. }
+            | Self::SequenceTaskPromptLaunch { site, .. }
+            | Self::SequenceStepNotExecutable { site, .. }
+            | Self::SequenceGroupCatalogLookup { site, .. }
+            | Self::SequenceGroupInvalid { site, .. }
+            | Self::SequenceWriteBackCollision { site, .. }
+            | Self::SequenceShellLateBinding { site, .. }
+            | Self::SequenceShellTargetIdentity { site, .. }
+            | Self::SequenceShellResolution { site, .. }
+            | Self::SequenceShellLateValue { site, .. }
+            | Self::SequenceShellApprovalChanged { site, .. }
+            | Self::SequenceTaskTimeoutInvalid { site, .. }
+            | Self::SequenceTaskShellExit { site, .. }
+            | Self::SequenceTaskShellTimeout { site, .. }
+            | Self::SequenceTaskShellRunaway { site, .. }
+            | Self::SequenceTaskShellSpawn { site, .. }
+            | Self::SequenceTaskShellWait { site, .. }
+            | Self::SequenceTaskShellIsolation { site, .. }
+            | Self::SequenceTaskPromptFailed { site, .. }
+            | Self::SequenceTaskInvalidSideEffect { site, .. }
+            | Self::SequenceTaskWithReserved { site, .. }
+            | Self::SequenceTaskValueResolution { site, .. }
+            | Self::SequenceTaskUnsupported { site, .. }
+            | Self::SequenceMissingProperties { site, .. }
+            | Self::SequenceTaskProviderSelection { site, .. }
+            | Self::SequenceInteractiveRejected { site, .. }
+            | Self::SequenceUnknownTaskField { site, .. } => Some(site),
+            _ => None,
+        }
+    }
+
+    fn sequence_site_mut(&mut self) -> Option<&mut SequenceSite> {
+        match self {
+            Self::SequenceInvalid { site, .. }
+            | Self::SequenceEmpty { site, .. }
+            | Self::SequenceReferenceResolution { site, .. }
+            | Self::SequenceSourceRead { site, .. }
+            | Self::SequenceSourceParse { site, .. }
+            | Self::SequenceExternalWrongType { site, .. }
+            | Self::SequenceStepNameMissing { site, .. }
+            | Self::SequenceStepNameWrongType { site, .. }
+            | Self::SequenceReservedTemplateKey { site, .. }
+            | Self::SequenceExclusiveExecutable { site, .. }
+            | Self::SequenceReservedStateKey { site, .. }
+            | Self::SequenceInvalidTaskField { site, .. }
+            | Self::SequenceSourceSyntax { site, .. }
+            | Self::SequenceUnknownOperator { site, .. }
+            | Self::SequenceOperatorArity { site, .. }
+            | Self::SequenceOffsetMissing { site, .. }
+            | Self::SequenceOffsetNotAList { site, .. }
+            | Self::SequenceOffsetUnsupported { site, .. }
+            | Self::SequenceOperatorItemNotObject { site, .. }
+            | Self::SequenceOperatorMissingField { site, .. }
+            | Self::SequenceOperatorEmptyName { site, .. }
+            | Self::SequenceExpressionFailed { site, .. }
+            | Self::SequenceShellFailed { site, .. }
+            | Self::SequenceNullItem { site, .. }
+            | Self::SequenceReferenceCycle { site, .. }
+            | Self::SequenceReferenceInvalid { site, .. }
+            | Self::SequenceNestedSequence { site, .. }
+            | Self::SequenceUnsupportedConstruct { site, .. }
+            | Self::SequenceUndefined { site, .. }
+            | Self::SequenceTaskPromptLaunch { site, .. }
+            | Self::SequenceStepNotExecutable { site, .. }
+            | Self::SequenceGroupCatalogLookup { site, .. }
+            | Self::SequenceGroupInvalid { site, .. }
+            | Self::SequenceWriteBackCollision { site, .. }
+            | Self::SequenceShellLateBinding { site, .. }
+            | Self::SequenceShellTargetIdentity { site, .. }
+            | Self::SequenceShellResolution { site, .. }
+            | Self::SequenceShellLateValue { site, .. }
+            | Self::SequenceShellApprovalChanged { site, .. }
+            | Self::SequenceTaskTimeoutInvalid { site, .. }
+            | Self::SequenceTaskShellExit { site, .. }
+            | Self::SequenceTaskShellTimeout { site, .. }
+            | Self::SequenceTaskShellRunaway { site, .. }
+            | Self::SequenceTaskShellSpawn { site, .. }
+            | Self::SequenceTaskShellWait { site, .. }
+            | Self::SequenceTaskShellIsolation { site, .. }
+            | Self::SequenceTaskPromptFailed { site, .. }
+            | Self::SequenceTaskInvalidSideEffect { site, .. }
+            | Self::SequenceTaskWithReserved { site, .. }
+            | Self::SequenceTaskValueResolution { site, .. }
+            | Self::SequenceTaskUnsupported { site, .. }
+            | Self::SequenceMissingProperties { site, .. }
+            | Self::SequenceTaskProviderSelection { site, .. }
+            | Self::SequenceInteractiveRejected { site, .. }
+            | Self::SequenceUnknownTaskField { site, .. } => Some(site),
+            Self::WithFrontmatter { inner, .. } | Self::CheckFailed { cause: inner, .. } => inner.sequence_site_mut(),
+            _ => None,
+        }
+    }
+
+    /// A [`Self::SequenceUndefined`] for the file run as a sequence.
+    pub fn sequence_undefined(path: &Path) -> Self {
+        Self::SequenceUndefined { path: path.to_path_buf(), site: Box::new(SequenceSite::at(path, "sequence")) }
+    }
+
+    /// A [`Self::SequenceInvalid`] saying `message` at `site`.
+    pub fn sequence_invalid(message: impl Into<String>, site: SequenceSite) -> Self {
+        Self::SequenceInvalid { message: message.into(), site: Box::new(site) }
+    }
+
+    /// Locate a `Sequence…` error raised by a layer that did not know where:
+    /// fill its site's unknown parts with `property` of `file` and the task
+    /// named `task` ([`SequenceSite::fill`]). A located site, and any other
+    /// error, is returned unchanged, so the innermost caller that knows the
+    /// site decides it.
+    #[must_use]
+    pub fn locate_sequence(mut self, file: &Path, property: &str, task: Option<&str>) -> Self {
+        if let Some(site) = self.sequence_site_mut() {
+            site.fill(file, property, task);
+        }
+        self
+    }
+
+    /// Name the construct that referenced the file a
+    /// [`Self::SequenceSourceRead`] or [`Self::SequenceSourceParse`] is
+    /// about, when the reading layer did not know it.
+    #[must_use]
+    pub fn referenced_as(mut self, referencing: super::sequence::model::ExecutableField) -> Self {
+        if let Self::SequenceSourceRead { field, .. } | Self::SequenceSourceParse { field, .. } = &mut self
+            && field.is_none()
+        {
+            *field = Some(referencing);
+        }
+        self
+    }
+
+    /// Why a dry run left a sequence-source expression without a value, when
+    /// that is this failure: the expression called an effectful function or
+    /// read a deferred value under the check's passive session. A check
+    /// reports it as not checked, never as an error.
+    #[must_use]
+    pub fn deferral_reason(&self) -> Option<&darkmatter::markdown::compose::passive::DeferralReason> {
+        match self {
+            Self::SequenceExpressionFailed { source: SequenceExpressionCause::Evaluate(cause), .. } => {
+                cause.unavailable_reason()
+            }
+            _ => None,
+        }
+    }
 }
 
 impl CompositionError {
@@ -3714,7 +4190,7 @@ impl CompositionError {
         if let Self::FileReferenceNoMatch { suggestions, .. } = &mut self {
             *suggestions = paths
                 .into_iter()
-                .map(|path| biscuit_file::to_portable_string(Path::new(&path)))
+                .map(|path| biscuit_file::to_forward_slash_string(Path::new(&path)))
                 .collect();
         }
         self
@@ -3739,7 +4215,7 @@ impl CompositionError {
     /// carry no class here.
     pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
         use biscuit_file::ResolutionFailure;
-        match self {
+        match self.presented() {
             Self::InvalidReference { source, .. } => Some(source.resolution_failure()),
             Self::FileNotFound(_)
             | Self::FileReferenceNoMatch { .. }
@@ -3848,10 +4324,38 @@ impl CompositionError {
             Self::LifecycleEvaluationError { cause, .. }
             | Self::LifecycleWithEvaluationFailed { cause, .. } => cause.as_ref(),
             Self::SequenceTaskValueResolution { cause, .. } => Some(cause),
-            Self::WithFrontmatter { inner, .. } | Self::LifecycleEvaluationAlreadyEmitted { inner } => {
-                inner.lifecycle_cause()
-            }
+            Self::WithFrontmatter { inner, .. }
+            | Self::LifecycleEvaluationAlreadyEmitted { inner }
+            | Self::CheckFailed { cause: inner, .. } => inner.lifecycle_cause(),
             _ => None,
+        }
+    }
+
+    /// Wrap a preflight failure with the passive check's `report`.
+    ///
+    /// A `cause` that already carries a report keeps it: the first report
+    /// observed at the failure's boundary is the one rendered.
+    pub fn check_failed(cause: Self, report: darkmatter::findings::FindingReport) -> Self {
+        match cause {
+            already @ Self::CheckFailed { .. } => already,
+            cause => Self::CheckFailed { report: Box::new(report), cause: Box::new(cause) },
+        }
+    }
+
+    /// The passive check's report, when this is a [`Self::CheckFailed`].
+    pub fn check_report(&self) -> Option<&darkmatter::findings::FindingReport> {
+        match self {
+            Self::CheckFailed { report, .. } => Some(report),
+            _ => None,
+        }
+    }
+
+    /// The typed failure a [`Self::CheckFailed`] reports for; `self`
+    /// otherwise.
+    pub fn checked_cause(&self) -> &Self {
+        match self {
+            Self::CheckFailed { cause, .. } => cause,
+            other => other,
         }
     }
 
@@ -3946,6 +4450,7 @@ impl CompositionError {
     pub fn frontmatter_excerpt(&self) -> Option<&FrontmatterExcerpt> {
         match self {
             CompositionError::WithFrontmatter { excerpt, .. } => Some(excerpt),
+            CompositionError::CheckFailed { cause, .. } => cause.frontmatter_excerpt(),
             _ => None,
         }
     }
@@ -4045,7 +4550,7 @@ impl CompositionError {
             CompositionError::InteractiveHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("interactive".to_string()))
             }
-            CompositionError::SchemaLoad { .. } => {
+            CompositionError::SchemaLoad { .. } | CompositionError::SchemaSlotFailed { .. } => {
                 Some(FrontmatterHighlight::Property("$schema".to_string()))
             }
             CompositionError::SchemaParse {
@@ -4208,6 +4713,27 @@ pub enum SequenceTaskProviderProblem {
     /// A document's `agent` is an empty list, which the launch schema rejects.
     #[error("an `agent` list needs at least one entry")]
     EmptyAgentList,
+}
+
+impl SequenceTaskProviderProblem {
+    /// What can repair the failure. A provider flag replaces any `agent`
+    /// hint, and `--model` or a model variable any `model` hint, so a remedy
+    /// names one only where it would help: such a failure never occurs under
+    /// the source it would recommend.
+    pub fn remedy(&self) -> &'static str {
+        match self {
+            Self::Unresolvable { .. } => {
+                "Name an installed provider in that `agent`, or pass --claude, --codex, etc. to run every task on one provider."
+            }
+            Self::Circular(variable) if variable.ends_with("model") || variable.ends_with("MODEL") => {
+                "Write the model in that `model`, or pass --model or set MODEL so the hint is not read."
+            }
+            Self::Circular(_) => "Name the provider in that `agent`, or pass --claude, --codex, etc. so the hint is not read.",
+            Self::WrongType { .. } | Self::Evaluation(_) | Self::EmptyAgentList => {
+                "Correct that value: the task's prompt still reads it, whatever provider or model is chosen."
+            }
+        }
+    }
 }
 
 fn unresolvable_reason(state: &super::types::AgentResolutionState) -> String {

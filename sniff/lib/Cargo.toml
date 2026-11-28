@@ -46,6 +46,8 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
 sysinfo = "0.38.2"
+# Private profile folder for a PowerShell shell probe (`programs::windows_shells`).
+tempfile = "3"
 thiserror = "2.0"
 tracing = "0.1"
 tokio = { version = "1", features = ["rt"], optional = true }
@@ -118,7 +120,6 @@ git2 = { version = "0.20.3", default-features = false }
 libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1"
 serial_test = "3"
-tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"

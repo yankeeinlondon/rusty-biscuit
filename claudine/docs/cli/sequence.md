@@ -7,6 +7,7 @@ blast_radius:
   - claudine/cli/src/commands/wrap/sequence/
   - claudine/cli/src/commands/wrap/selection_ui.rs
   - claudine/lib/src/composition/sequence/
+  - claudine/cli/src/commands/document_check/
 ---
 # Claudine's `sequence` command
 
@@ -84,6 +85,25 @@ The `research` step has no executable, so it composes this document's body.
 `review` composes `prompts/review.md` with `topic` set, and `stage` runs a
 shell command. The step fields, the ways to supply a list (`sources`), and
 groups are covered in [Sequences](../topics/flow-control/sequences.md).
+
+### A file with no `sequence`
+
+A file without a `sequence` key is not a sequence, whatever else it holds.
+`claudine sequence` refuses it after its `initialize` event and before any
+task, with the code `composition.sequence_undefined`; `--dry-run` reports the
+same error and checks no tasks. An empty list (`sequence: []`) is a sequence
+with no steps and runs nothing successfully. To run a prompt document on its
+own, use `claudine compose`.
+
+The refusal happens before `start`, so a `blocked` handler sees it:
+
+```yaml
+---
+blocked:
+    - when: "err.code == 'composition.sequence_undefined'"
+      say: "That file is a prompt, not a sequence."
+---
+```
 
 ### Inputs and step types
 
@@ -359,7 +379,7 @@ say), that wins.
 - `Ctrl+S` accepts every row and starts the run.
 - `Esc` or Ctrl+C leaves the screen, starts no task, and exits `130`.
 - Shell commands are approved before the screen opens, and `--dry-run` never
-  opens it.
+  opens it; it reports each task the screen would ask about instead.
 
 ## Failures and exit codes
 
@@ -373,6 +393,43 @@ unhandled failure, and `130` after Ctrl+C, including cancellation on the
 provider review screen. A looping root sequence that ends through `break`
 exits with that `break`'s `code` (default `0`); see
 [Looping — Breaking out of a loop](../topics/flow-control/looping.md#breaking-out-of-a-loop). A preflight failure starts no step.
+
+A run that stops at preflight (a missing `prompt:` or `sequence:` file, an
+invalid group, a task without a usable provider, a missing input) prints the
+same report a [dry run](#dry-run) prints, with every error and warning it can
+prove at that point, instead of a single error block. The last line names
+the error the run returned, unless a row already says it:
+
+```text
+Sequence preflight found 2 errors and 0 warnings; no task ran
+
+task one (sequence[0])
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in needs.md
+      hint: add `topic` to the task's `with:`, or pass `topic=<value>`
+            after the file
+
+task two (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:7:13
+      hint: create missing.md before a real run, or correct the reference
+
+The run stopped at: <the error the run returned>
+```
+
+The exit status is still `1`, and the root's `blocked`, `failure`, and
+`finalize` handlers see that returned error in `err.*`, not the report's
+first row. Here the run met task two's missing file while loading the task
+graph, before it collected inputs, so `err.*` describes the missing file.
+See [Pre-Flight Checks — When preflight stops a sequence](../topics/pre-flight-checks.md#when-preflight-stops-a-sequence).
+
+When preflight passes, warnings that no earlier stage showed (a step's own
+`agent:` or `model:`, a misspelled step key) are printed once, under
+`Sequence preflight found 0 errors and 1 warning; the sequence runs`, before
+the first task starts. `--silent` leaves them out.
 
 ## Interactive sessions
 
@@ -397,35 +454,629 @@ Each step's provider session gets these variables:
 
 ## Dry run
 
-`--dry-run` runs the full preflight and then composes every step against the
-starting state, without launching a provider. It runs no lifecycle event and
-no `prep` target, previews each loop body once with pass 1's `loop` values,
-and shows each task guard, and each inline container's `$schema` check,
-instead of evaluating it. Missing inputs, document `$schema` values, and
-`$state` are still judged. `shell:` and
-`side_effect:` tasks are rendered, not run:
+`--dry-run` checks the sequence and previews what composes, without running
+anything: no provider, shell command, lifecycle event, prompt for input, or
+write. It reports every problem in one pass instead of stopping at the
+first.
 
-```text
-ℹ rendered (dry-run): would run `git add .`
-ℹ rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}`
-ℹ `tasks[1]` checks its `$schema` at its turn (not evaluated in a dry run)
+A sequence is checked in two stages. The dry run is the first: it sees
+everything it can without an effect, so you can fix the document before
+anything runs. The real run is the second: its preflight runs the same
+checks with the values it has collected, and either stops before the first
+task, with the same report, or warns once and runs.
+
+```mermaid
+flowchart TD
+    A["claudine sequence plan.yaml --dry-run"] --> B[Passive check of every task<br/>report on stderr, previews on stdout]
+    B --> C{any error or warning?}
+    C -- yes --> D[exit 2: fix the document]
+    D --> A
+    C -- no --> E[exit 0]
+    E --> F["claudine sequence plan.yaml"]
+    F --> G[Preflight: the same checks,<br/>with collected inputs and providers]
+    G -- a problem stops the run --> H["report, then 'The run stopped at: …'<br/>no task runs, exit 1"]
+    G -- passes --> I[new warnings, once] --> J[task 1, task 2, …]
 ```
 
-Before the steps, a preview lists each provider-launching task and its
-predicted provider (`--verbose` lists them for a live run too):
+Given this sequence, where `_find.md` exists and names no `agent`:
 
-```text
-ℹ Providers:
-ℹ implement → Codex
-ℹ notes → Claude (from the sequence)
-ℹ review → decided at launch
+```yaml
+# renderers/_fleet.yaml
+kind: sequence
+sequence:
+    - name: find
+      description: Find the Mermaid renderers and provide basic research
+      agent: opencode
+      model: gemini/neon
+      prompt: ./_find.md
+      with:
+          output: "./overview.md"
+    - name: metadata
+      description: extract metadata
 ```
 
-**Composition still runs its `$( … )` expansions**, so their side effects
-happen. `--dry-run --dry-run-shell` also runs each `shell:` task once during
-the preview, for real (`git add` stages); it never launches a provider, runs
-no `side_effect:` task, and turns no loop or lifecycle event back on.
-`--dry-run-shell` without `--dry-run` is a usage error.
+a dry run, with stderr redirected, reports every problem of both tasks:
+
+```text
+Dry run of renderers/_fleet.yaml (no commands run)
+
+task find (sequence[0])
+  ⚠ `agent: opencode` is step data (read as `seq.agent`), not the task's
+    provider
+      at renderers/_fleet.yaml:5:7
+      hint: to choose the provider, move it into the task's inputs:
+            `with: { agent: opencode }`
+  ⚠ `model: gemini/neon` is step data (read as `seq.model`), not the task's
+    model
+      at renderers/_fleet.yaml:6:7
+      hint: to choose the model, move it into the task's inputs: `with: {
+            model: gemini/neon }`
+  ✗ no provider for this task; a non-interactive run fails here
+      1. --provider flag             not given
+      2. agent= setter               not given
+      3. with.agent                  not set (see `agent:` above)
+      4. _find.md frontmatter agent  not set
+      5. _fleet.yaml agent           not set
+      hint: add `with: { agent: opencode }`, or run with `--provider
+            opencode`
+  ℹ not checked: model requirement (no provider)
+
+task metadata (sequence[1])
+  ✗ this task has no executable, so it would compose the body of
+    renderers/_fleet.yaml, and a YAML file has no body
+      at renderers/_fleet.yaml:10:7
+      hint: add an executable such as `prompt: ./metadata.md`
+  ℹ not checked: provider, inputs (no executable)
+
+Dry run found 2 errors and 2 warnings; 3 checks not run. Previewed 1 of 2 tasks.
+```
+
+The exit status is `2`, and `find`'s composed prompt follows on stdout. Add
+`prompt: ./_frontmatter.md` to `metadata` before that file exists, and the
+`find` rows are unchanged while `metadata` reports the missing file:
+
+```text
+task metadata (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./_frontmatter.md
+      resolved to renderers/_frontmatter.md (relative to renderers/_fleet.yaml)
+      at renderers/_fleet.yaml:12:15
+      hint: create renderers/_frontmatter.md before a real run, or
+            correct the reference
+  ℹ not checked: provider, inputs (the prompt file could not be read)
+```
+
+Each row has a severity (`✗` error, `⚠` warning, `ℹ` info), a message that
+names what failed and why, the place it was written when that is known, and
+a hint with the next step. A check that could not run is an `ℹ not checked`
+row that says what blocked it, instead of silence.
+
+What the check does:
+
+- No command runs, even with `--yolo`: `$( … )` values, `::shell` lines, and
+  `shell:` and `side_effect:` tasks are skipped and reported as not checked,
+  no approval is asked for, and no cache is read or written. No lifecycle
+  event, `prep` target, or loop pass runs.
+- A remote read (`load_data`, a read-side function, `::file`, `::code`, a
+  `prologue`, or a `$schema` slot given an `http`/`https` URL) follows
+  `permissions.network`, as the real run would:
+
+  | `network` | What the dry run does |
+  | --- | --- |
+  | `allow` | fetches it, without storing it |
+  | `ask` | sends no request; the read is one `ℹ not checked` row, and what depends on it stays as written in the preview, marked `[not evaluated in a dry run]` |
+  | `deny` | sends no request; the real run's refusal is an error row |
+
+  ```text
+  doc.md
+    ℹ not checked: interpolation (fetching `https://example.com/data.json`
+      needs network approval (`permissions.network: ask`), which a dry run
+      does not ask for)
+  ```
+
+  A sequence source (`sequence: "{{ load_data(…) }}"`) reads local files
+  only, under every setting, so a URL there is a finding and is never
+  fetched.
+- Each file and URL is read once per dry run. The check looks at a prompt
+  several times (its inputs, its inclusions, its preview, and a second
+  preview past a missing inclusion), and a sequence may run the same prompt
+  in several tasks; all of them use the one read, so every row judges the
+  same bytes. The same holds for the files a prompt reads (a `::file` or
+  `::code` target, a `prologue`/`epilogue`, its `$schema` file) and for a
+  referenced sequence, task, group, or catalog file. For example, two tasks running `./ask.md`, whose body calls
+  `load_data('https://example.com/data.json')`, read `ask.md` once and send
+  one request, and each task still gets its own rows. A URL that one
+  setting allowed is never served to a read whose `network` setting refuses
+  it: that read gets its own refusal. A prompt's schema is likewise prepared
+  once and reused by every check and task that uses it, while each task's
+  values are still judged by that schema on their own; a schema with
+  `{{ … }}` slots is prepared again for each use.
+- A sequence document whose own values its `$schema` refuses (the root's
+  `count: abc` under `count: number(required)`, or a referenced
+  `sequence: ./child.md` whose frontmatter does) is the error the real run
+  stops at, located at the value, under the root or the task that references
+  the document. Its tasks' providers are still checked; their inputs and
+  previews read the refused values, so they are `not checked`.
+- Each task is checked for a step-level `agent:`/`model:` (step data, not the
+  provider), a missing executable over a body-less document, a missing
+  `prompt:` file (with the resolved path and up to three nearby files), the
+  provider, and a model the provider requires.
+- The provider is chosen by the same rules a real run uses, and the finding
+  lists each source it read, in order, up to the one that decided:
+
+  ```text
+  task find (sequence[0])
+    ✗ no provider for this task; a non-interactive run fails here
+        1. --provider flag             not given
+        2. agent= setter               not given
+        3. with.agent                  not set (see `agent:` above)
+        4. _find.md frontmatter agent  not set
+        5. _fleet.yaml agent           not set
+        hint: add `with: { agent: opencode }`, or run with `--provider opencode`
+  ```
+
+  On a terminal the same finding is a warning, because a real run opens the
+  provider review screen and asks. An unknown provider name, or a provider
+  whose program is not on `PATH`, is an error either way.
+
+  A task whose `agent` is [decided at launch](#choosing-providers) is not
+  judged on the value it holds before the run. Its provider and the model
+  requirement are reported as not checked, with the reason, because a real
+  run reads them only when the task starts. Here an earlier task's
+  `success` writes `pick: goose`, and the reader's `agent` reads `pick`,
+  directly or through other values (`choice: "{{ mid }}"`,
+  `mid: "{{ pick }}"`):
+
+  ```text
+  task reader (sequence[1])
+    ℹ not checked: provider, model requirement (known only at launch: the
+      task's `agent` reads a value a lifecycle `set` may write before it runs)
+  ```
+
+  When the earlier task writes some other key, the reader's `agent` is
+  known before the run and is checked: `pick: nosuch` is then an unknown
+  provider, in a dry run and a real run alike. A `model` decided at launch
+  under a provider that is known leaves only the model requirement
+  unchecked.
+- A prompt's own checks read the same launch-time values the same way. A
+  value the run writes before the task composes is not judged on what it
+  holds now: a key any lifecycle `set` in the sequence may write (an
+  earlier task's `success`, the root's `initialize`), a `with:` value
+  derived from such a key, a later step's `seq.outputs`, `seq.run_id`, and
+  a loop pass's `loop.*`. Here `writer.md` writes `topic: a` on success,
+  and `reader.md` holds `topic: missing`, wholly guarded by
+  `::block when="topic == 'a'"`:
+
+  ```text
+  task reader (sequence[1])
+    ℹ not checked: `::block` condition (reads `topic`, which the run writes
+      before this point, so it is known only at launch)
+  ```
+
+  The preview keeps the block as written, marked `[not evaluated in a dry
+  run]`, instead of calling the prompt empty, and a schema problem with
+  `topic` is `not checked: schema check` instead of an error. A `::map` or
+  `::filter` whose source, callback, `when=`, `filter=`, `while=`,
+  `until=`, or `sort=` reads such a value (or calls an effectful function
+  such as `has_alias`) is kept whole the same way, its opening line marked,
+  and reported once:
+
+  ```text
+  task reader (sequence[1])
+    ℹ not checked: `::map`/`::filter` collection (reads `seq.outputs`, which
+      the run writes before this point, so it is known only at launch)
+  ```
+
+  The same collection over values known before the run is composed, and an
+  error on them (a sort key that is a boolean) is still reported. When the
+  writer sets some other key, `topic` is known before the run and the empty
+  prompt (or the schema error) is the proven error a real run also stops
+  at. The step's position (`seq.index`, `seq.name`, `seq.previous`, …), the
+  first step's empty `seq.outputs`, and literal values stay checked, and an
+  inclusion (`::file ./{{ topic }}.md`) is still resolved with the value it
+  holds before the run, because a real run's preflight requires the file
+  before any task runs. Two more passes read the values as they are before
+  any task: shell approval discovery composes each `prompt:` task's
+  frontmatter with no `seq` bound, so `ready: "{{ length(seq.outputs) > 0 ?
+  'yes' : 'no' }}"` fails there (`length` of `null`), as does
+  `step: "{{ seq.index + 1 }}"`, since the step's position is not bound
+  there either, and the pre-run probe
+  of a root body step composes the root's body with no outputs and nothing
+  a task writes, so a body wholly guarded by `length(seq.outputs) > 0` is
+  empty there. The dry run reports each as the error the real run stops at,
+  and still leaves the later value unchecked.
+- Approval discovery also refuses a document's shape, whatever its values:
+  `::file ./{{ topic }}.md` beside its own `topic: "{{ has_alias('zz') }}"`
+  names a file the walk cannot know, so a `prompt:` task or a root body
+  step built that way is an error row (`dm.shell.failure`, "dynamic
+  command shape") in the dry run and stops the real run. The same probe in
+  the task's `with:` is data the walk reads, so that inclusion is only
+  `not checked`.
+- A schema problem is graded by the route that meets it. An optional
+  property whose value fails its schema is dropped with a warning where the
+  real command drops it (`compose`, `inline-compose`, the sequence
+  document's own values, and a root step composing its body), so the dry run
+  reports the same warning as a `composition.optional_dropped` row and
+  previews without the value. Here `topic: missing` sits beside
+  `$schema: { topic: enum(a) }`:
+
+  ```text
+  doc.md
+    ⚠ dropped optional schema property `topic` (from frontmatter, at pre-
+      validation): "missing" is not one of "a"
+        at doc.md:3:8
+        hint: give `topic` a value its schema accepts, or remove it
+  ```
+
+  A sequence `prompt:` task's document, and a body step of a nested or
+  referenced sequence, are composed by the task's pre-launch check, which
+  refuses the value, so there it is the schema's error, as the task fails in
+  a real run. A required property's invalid or missing value is an error on
+  every route.
+- The whole tree is read the way a real run's preflight reads it: every root
+  task, group leg, nested or referenced sequence, `task:` file, and selected
+  catalog entry. A problem is reported under the task or leg it belongs to,
+  and the check goes on with that task's siblings, so one bad leg does not
+  hide the others. A task inside a group or sequence is labeled by the tasks
+  around it, and a file referenced twice is checked at each reference:
+
+  ```text
+  task first → inner (sequence[0])
+    ✗ the prompt file does not exist
+        prompt: ./gone.md
+        resolved to gone.md (relative to child.yaml)
+        at child.yaml:4:13
+
+  task again → inner (sequence[0])
+    ✗ the prompt file does not exist
+    ...
+  ```
+
+  This holds for every list whose rows can be told apart, wherever it comes
+  from: an inline list, a referenced sequence document, a referenced data
+  file (with or without `-> offset` and an operator), or a
+  `sequence: "{{ … }}"` value. A bad row, such as one naming both `shell:`
+  and `prompt:`, is reported at its own position, and the rows before and
+  after it are still checked and previewed. A row from a referenced
+  sequence document or data file is located in that file, at the row's line
+  and column (`at rows.yaml:3:3`); a row computed by an expression is
+  located only by the file that holds the expression.
+
+  A file that does not parse at all has no rows to tell apart, so its whole
+  list is reported as one problem, at the line and column where the parser
+  stopped: a YAML or Markdown frontmatter syntax error or repeated key, a
+  JSON or JSON5 trailing token or repeated key, or the JSON Lines record
+  that is malformed or repeats a key (counted in the file, blank lines
+  included). Line numbers are the file's own, so a Markdown file's count
+  includes its opening `---`. When the parser reports no position, the
+  finding names the file alone:
+
+  ```text
+  task l (sequence[3])
+    ✗ sequence `…/bad.jsonl` has a record that is not valid JSON: line
+      2: EOF while parsing a value at line 1 column 8
+        at bad.jsonl:2:8
+        hint: Fix line 2 of `…/bad.jsonl`: each line holds one JSON value.
+  ```
+
+  A list built by `$( … )` is reported as not checked, since only running its
+  command can produce it.
+
+  The same holds for every expression that decides the tasks: a
+  `sequence: "{{ … }}"` list, a `::template(…)` operator, and a `template:`
+  value, at the root or on a nested sequence. One that calls a function a dry
+  run does not call (`has_alias`, `ping`, `pr`, …) is not evaluated, and what
+  it decides is reported as not checked instead of being guessed. A pure
+  function such as `file_exists` is evaluated as usual:
+
+  ```yaml
+  sequence: "{{ has_alias('ll') ? [{name: 'ask', prompt: './ask.md'}] : [] }}"
+  ```
+
+  ```text
+  seq.md
+    ℹ not checked: tasks (`has_alias()` starts the login shell, which a dry run
+      does not do)
+  ```
+- Every task, group, catalog, and sequence file the check reads, YAML or
+  Markdown, is judged against its kind's definition, so a removed or
+  misspelled key is reported in any of them. Each file is judged once, and
+  each finding is reported under the task that uses the key, at the key's
+  line: a file two tasks reference reports its finding under both, and an
+  entry of a group catalog that no step selects reports nothing. The
+  sequence parser refuses the same key in a real run; the dry run shows that
+  refusal once, as the schema's finding. Here `child.yaml` holds a step with
+  `promt:` beside its `prompt:`, and the root runs it twice:
+
+  ```text
+  task a → s (sequence[0])
+    ⚠ key `promt` is not a declared field, so it is kept as data
+        at child.yaml:5:5
+        hint: did you mean `prompt`?
+
+  task b → s (sequence[0])
+    ⚠ key `promt` is not a declared field, so it is kept as data
+        at child.yaml:5:5
+        hint: did you mean `prompt`?
+  ```
+
+  In `--json` output every row of a task, including its `not checked`
+  rows, carries the task's `trail`, so the two occurrences stay apart.
+- Each missing required input is one `composition.missing_properties` finding
+  under its task: a warning when an interactive run could ask for every
+  missing value (`prompt_for_missing` is on, both stdin and stderr are
+  terminals, and every missing value has a type the input prompt can
+  collect), otherwise an error, since a run that cannot ask fails there.
+  A value that comes from a skipped command still counts as given. An
+  `inline-compose` prompt, or a sequence step with a string `prompt:`, is
+  judged as its launch judges it: a `required` value that is not `eager`
+  may stay absent for the agent to fill in, and is not reported.
+
+  A missing input never hides anything else. The check is never prompted
+  for it; what reads it stays in the preview as written, marked
+  `[missing input]`, and every check that does not read it still runs, so
+  a broken `::file` beside it is reported too and the rest of the prompt is
+  previewed:
+
+  ```yaml
+  ---
+  $schema:
+    topic: string(required)
+  ---
+  Static intro.
+
+  Topic is {{ topic }}.
+
+  ::file ./gone.md
+  ```
+
+  ```text
+  doc.md
+    ✗ file not found in `::file`
+        ::file ./gone.md
+        ...
+    ✗ `topic` (string) is required and has no value; a non-interactive run
+      fails here
+        hint: pass `topic=<value>` after the file, or give it a default
+  ```
+
+  ```text
+  Static intro.
+
+  Topic is {{ topic }} [missing input].
+  ```
+
+  Passing `topic=docs` removes only the input's finding, and creating
+  `gone.md` only the inclusion's; the inclusion a dry run cannot read is
+  left out of the preview. A file the root's `initialize` creates
+  (`ensure_file: [gen/notes.md, "…"]`, or `["{{ target }}", "…"]` with
+  `target: gen/notes.md`) is not missing: every read of it that does not
+  exist yet (an inclusion, a `prompt:`/`task:`/`group:`/`sequence:` file, a
+  `$schema`, `load_data`, `file_exists`, `find_files`) is one
+  `ℹ not checked` row, known only at launch, and what depends on it is
+  not checked either. A file it appends to (`append_line`, `append_jsonl`)
+  that exists already still exists, but what reads its content waits for
+  launch the same way. A prompt's own `initialize` and an earlier task
+  create their files too late for this; see
+  [Files the root's `initialize` creates](../topics/flow-control/sequences.md#files-the-roots-initialize-creates). A task whose sequence is missing an input reads
+  the answer the real run would collect: the input is reported once, by the
+  sequence, and the task's preview marks what reads it, including a
+  `with:` value derived from it, while the task's other checks still run.
+  This works the same for `compose` and `inline-compose`.
+- A file the real command would ask you to choose is a pending choice, a
+  `composition.file_choice_pending` warning that lists the files it found;
+  no chooser opens. Two routes ask: a bare file name such as `plan.md`,
+  which the real command looks up in your prompt folders, and a value such
+  as `spec=review` that names no file for a `file(eager; match(…))` input of
+  `compose` or `inline-compose`. The dry run runs the same search the
+  chooser runs before it shows anything:
+
+  ```text
+  doc.md
+    ⚠ `spec=review` names no file, so an interactive run asks which file to
+      use; 1 file matches
+        specs/review.md
+        in doc.md
+        hint: pass the file's path, such as `spec=specs/review.md`, to run
+              without the choice
+  ```
+
+  The input stays absent in the preview (`[missing input]`). Where the real
+  command would not ask, the finding is its refusal, an error:
+
+  | Situation | Finding |
+  | --- | --- |
+  | stdin or stderr is not a terminal | error: the missing file, with the picker's refusal; for an input, the schema's `no existing file matched` refusal |
+  | `--silent`, or `prompt_for_missing: false` | an input is the schema's refusal; a bare file name still asks, as the real picker does |
+  | a reference with a path (`./plan.md`, `docs/plan.md`, `@plan.md`) | error: the missing file; only a bare name is looked up |
+  | the search finds nothing | error: the missing file, with `no files matched` |
+  | a `sequence` root's input, or a task's input | error: a sequence never asks which file to use |
+
+- Each prompt is prepared exactly as the real command prepares it, including
+  `inline-compose`'s check that it could edit the file, but without any
+  effect. Whatever needs an effect is left as written in the preview, marked
+  `[not evaluated in a dry run]`, and reported as its own not-checked row,
+  while everything that does not depend on it is composed as usual:
+
+  ```text
+  doc.md
+    ℹ not checked: frontmatter value (needs the output of `git branch
+      --show-current`, which a dry run does not run)
+    ℹ not checked: `::block` condition, interpolation (reads `branch`, which is
+      not known until the document runs)
+  ```
+
+  ```text
+  # Release
+  On {{ branch }} [not evaluated in a dry run].
+  ::block when="branch == 'main'" [not evaluated in a dry run]
+  ...
+  ```
+
+  This covers a `$( … )` value and anything that reads it, a body `::shell`
+  line or `::shell-block`, a `::block` whose condition reads such a value, a
+  function that would start the login shell, send network packets, or query
+  a provider's API (`has_alias`, `ping`, `pr`, …), and a `$schema` slot whose
+  read would need approval. A task's `with:` values known at launch are
+  passed to its prompt as its turn would pass them. A prompt that composes
+  to nothing is an error that says why: no body, only whitespace, or each
+  `::block` left out by a false condition, with its line.
+- Each prompt's inclusions (`::file`, `::code`, `prologue:`, `epilogue:`,
+  and whatever they include) are checked on their own, the way a real run
+  checks them before anything runs: without reading any condition, so a
+  broken inclusion inside a `::block` whose condition is false is still an
+  error, as it is when the document runs. A preview that fails is its own
+  finding and hides no inclusion:
+
+  ```markdown
+  Intro.
+
+  ::file ./missing.md
+
+  Value {{ 3 / 0 }}
+  ```
+
+  ```text
+  doc.md
+    ✗ file not found in `::file`
+        ::file ./missing.md
+        ...
+    ✗ interpolation of `3 / 0` failed: division(): Division by zero
+  ```
+
+  Repairing either removes only its own row; a preview that stops at the
+  broken inclusion itself is not reported a second time, and neither is a
+  failure that both the input check and the preview meet (an
+  `inline-compose` `prompt:` is read as a frontmatter value first): it is
+  one row, at the line where it is written.
+
+  Whether a broken inclusion is tolerated is decided by the document that
+  writes it, as in a real run: a document with `ignore_invalid: true` (its
+  own, or passed down from the document that includes it) or
+  `IGNORE_INVALID` set tolerates its broken inclusions, so this check
+  reports none of them and one the preview reaches is the warning the real
+  run would print. A child that writes `ignore_invalid: false` is checked
+  even when its parent tolerates:
+
+  ```markdown
+  ---
+  ignore_invalid: true
+  ---
+  ::file ./child.md
+  ```
+
+  If `child.md` writes `ignore_invalid: false`, its broken `::file` is an
+  error; if it writes nothing, it takes its parent's `true` and the row is
+  the real run's warning:
+
+  ```text
+  doc.md
+    ✗ file not found in `::file`
+  ```
+
+  ```text
+  doc.md
+    ⚠ Transclusion error: …/child.md:6:1: I/O error: File not found: ./missing.md
+  ```
+
+  The warning stays when another inclusion is broken too. If `doc.md`
+  first includes a `./first.md` that does not exist, that inclusion is an
+  error and the preview is composed again with it left out, so the child's
+  warning is still reported beside it: one error and one warning. Creating
+  `first.md` leaves the warning alone, and creating the child's file too
+  makes the check clean.
+
+  An inclusion whose target reads a value the check does not have (a
+  missing input, a `$( … )` value, the result of a function it does not
+  call) names no file yet. It is left in the preview as written, with one
+  mark, and reported as not checked, never as a parse failure or a missing
+  file:
+
+  ```markdown
+  ::file ./{{ topic }}.md
+  ```
+
+  ```text
+  doc.md
+    ℹ not checked: transclusion (reads `topic`, which has no value)
+    ✗ `topic` (string) is required and has no value; …
+  ```
+
+  ```text
+  ::file ./{{ topic }}.md [missing input]
+  ```
+
+  Passing `topic=docs` makes it an ordinary inclusion, checked like any
+  other.
+- What the whole run shares is reported once, under the root document,
+  never again under each task that depends on it:
+
+  | Shared prerequisite | Reported as |
+  |---|---|
+  | `~/.claudine/config.yaml` (or the repository's) does not load | one error at the problem; the check goes on with the defaults |
+  | `~/.darkmatter.yaml` does not load (broken YAML, a duplicate key, a second document) | one `dm.config.invalid` error at the problem; each task's inputs and preview are `not checked (the configuration does not load)` |
+  | a `permissions` setting is invalid (`network: aswk`, `network: ""`, `network: [allow]`, a bad `file-read` or `shell-commands` entry) | one error at the value, even when the prompt reads nothing remote; a remote read the setting refuses is still its own error, with the configuration problem as its related location, and no request is sent |
+  | a schema trigger in a schema root fails to load | one `dm.schema.invalid_trigger` warning naming the trigger file |
+  | `.claudine/inline-compose.md` still holds retired instructions | one warning at that file, however many inline prompts read it |
+  | the launch directory's `.git` names no repository | one error, since a real run refuses to start |
+  | the launch directory cannot be read | one `io.read_failed` error, still in the dry run's report |
+
+  An absent or `null` setting is never an error: it takes its default. A
+  `permissions` block in `~/.claudine/config.yaml` that `~/.darkmatter.yaml`
+  points to is reported once, by Claudine's own configuration check.
+
+  For example, with `network: aswk` in `~/.darkmatter.yaml`, a dry run of a
+  local prompt exits 2 with one row, although a real run of that prompt
+  succeeds (it reads nothing remote):
+
+  ```text
+  doc.md
+    ✗ ~/.darkmatter.yaml:2:12 at `/permissions/network`: "aswk" is not one
+      of "allow", "ask" or "deny"
+        hint: fix the setting; a real run refuses every read and command
+              that needs the permission
+  ```
+- No configuration, cache, or other file is created, and nothing is
+  migrated.
+
+The report goes to stderr and each composed preview to stdout, so
+`claudine sequence plan.md --dry-run > previews.md` keeps only the previews.
+With `--json`, stdout holds one JSON report and nothing else, and stderr is
+empty:
+
+```json
+{
+  "file": "/work/renderers/_fleet.yaml",
+  "outcome": "failure",
+  "diagnostics": [{ "code": "composition.provider_unresolved", "severity": "error", "...": "..." }],
+  "summary": { "errors": 1, "warnings": 0, "info": 1 }
+}
+```
+
+`outcome` is `failure` when any finding is an error or a warning, else
+`success`; `file` is `null` when the root document could not be resolved. Each entry of
+`diagnostics` is the record Darkmatter's `md --output json` uses (see
+[Darkmatter's data contracts](darkmatter/docs/cli/data-contracts.md)), so a
+script tells findings apart by `code`, never by message text. Every failure
+the check meets, even a root document that cannot be read or an invalid
+configuration, is a finding in this one report.
+
+| Situation | Exit | Output |
+|---|---|---|
+| No finding, or only `info` findings | `0` | report and previews (or one JSON report) |
+| Any `error` or `warning` finding | `2` | the full report and previews (or one JSON report) |
+| A refused command line (`--json` without `--dry-run`, `--dry-run-shell`, a provider switch before the file) | `2` | the usage message on stderr; no report and no JSON |
+
+A dry run never exits `1`: tell a usage error apart from a report by
+whether a report (or JSON) was printed.
+
+`--dry-run-shell` was removed. It is a usage error, with or without
+`--dry-run`:
+
+```text
+error: `--dry-run-shell` was removed. Dry runs skip commands.
+  hint: use `--dry-run` to check and preview, or run the command without it
+```
 
 ## Flags
 
@@ -441,7 +1092,7 @@ Flags shared with `compose`:
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
 | Output | `-q`/`--quiet`, `--silent`, `--perf` (`-o`/`--output` is refused; see [What Claudine Writes](../topics/output.md)) |
 | Values | `--set <JSON>`, `--operation`/`--op <OP>` |
-| Rehearsal | `--dry-run`, `--dry-run-shell` |
+| Rehearsal | `--dry-run`, `--json` (with `--dry-run`) |
 
 `-y` is `--yolo`, not "answer yes". It turns on each provider's own
 auto-approval mode, and it approves every shell command during preflight

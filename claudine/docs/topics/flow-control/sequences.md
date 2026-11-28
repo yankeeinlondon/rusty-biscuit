@@ -253,7 +253,7 @@ levels, and the distinction is load-bearing:
 
 | Level | Value | Meaning |
 |---|---|---|
-| **Document** (frontmatter root) | prose string | Flips the whole sequence to **inline-compose**: the composed `prompt` is the agent prompt, and the provider's reply replaces the document body on disk. |
+| **Document** (frontmatter root) | prose string | Flips the whole sequence to **inline-compose**: the composed `prompt` is the agent prompt, and the provider's reply replaces the document body on disk. In a YAML sequence file, which has no body, the agent edits the file's properties and the file stays YAML ([inline steps of a YAML sequence file](../composition.md#inline-steps-of-a-yaml-sequence-file)). |
 | **Step / task** | file reference | Names a **prompt document** to compose and execute for that step. |
 
 ```yaml
@@ -1185,10 +1185,14 @@ Claudine walks the **entire task graph**:
   confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence. Preparation
-never degrades to best-effort.
+never degrades to best-effort. The run still returns the first failure in
+this order, but it prints every other error and warning it can prove at
+that point in one report, so one edit can fix them all; see
+[Pre-Flight Checks — When preflight stops a sequence](../pre-flight-checks.md#when-preflight-stops-a-sequence).
 
 An include that a prompt's `initialize` would create must already exist at this
-boundary. A missing include remains a typed preflight failure, with guidance to
+boundary. The root sequence's `initialize` runs before this boundary, so a
+file it creates is there. A missing include remains a typed preflight failure, with guidance to
 create it **before starting the sequence**. An earlier task in the same sequence
 cannot create it in time because no task starts before static preflight passes.
 Live standalone `compose` and `inline-compose` support initialization-created
@@ -1680,40 +1684,247 @@ An unhandled step failure stops the sequence. Document `fail_fast:` and the
 
 ### Dry run
 
-`--dry-run` performs the **full preflight**, then just-in-time-composes every
-step against the *initial* state — empty `seq.outputs`, no runtime mutations —
-without launching a provider and without inline-compose write-back.
-Late-binding references render exactly as a first-step composition would see
-them. Static validation and shell approval are the same as in a live run.
+`--dry-run` checks the whole sequence and previews each prompt that
+composes, without running anything. It reads the tree the way a real run's
+preflight does, reports every problem in one pass under the task it belongs
+to, and composes each prompt task against the state it has before the run.
+A value the run writes before a task composes is not read as settled (see
+[What a dry run reads as known only at launch](#what-a-dry-run-reads-as-known-only-at-launch)).
+The report goes to stderr, the previews
+to stdout, and the exit status is `2` when any finding is an error or a
+warning, else `0`. `--json` replaces both with one JSON report on stdout.
+See [claudine sequence — Dry run](claudine/docs/cli/sequence.md#dry-run) for the
+report's layout.
 
-What a dry run shows instead of doing:
+Nothing runs, even with `--yolo`:
 
 | Element | In a dry run |
 |---|---|
-| `shell:` task | Rendered, not run: `` rendered (dry-run): would run `<command>` `` with the approved bytes (or the template of a template-mode command). It publishes nothing. |
-| `side_effect:` task | Rendered with its authored action and arguments, templates unresolved: `` rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}` ``. It never writes a file or applies a runtime `set`. |
-| `loop:` | The body is visited once with pass 1's `loop.*` values: `` `loop` previews one pass (dry-run); repetition is not evaluated: until `<expr>`, max N ``. No gate, condition, or action is evaluated. |
-| Task `when:` | Shown, not evaluated: `` `<name>` runs when `<expr>` (not evaluated in a dry run) ``; the task is rendered. |
-| Inline container `$schema` | Shown, not evaluated: `` `<container>` checks its `$schema` at its turn (not evaluated in a dry run) ``. Its syntax is still checked, and the root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
-| Lifecycle events | None fire. |
-| `prep` | Targets do not run; a literal target is listed as `prep target @helper.md (not run in a dry run)`. |
+| `shell:` task | Not run. Reported as not checked; its command is not approved. |
+| `side_effect:` task | Not run. Reported as not checked; no file is written and no runtime `set` is applied. |
+| `$( … )` value, `::shell` line, `::shell-block` | Not run. Left as written in the preview, marked `[not evaluated in a dry run]`, and reported as not checked, together with anything that reads its value. |
+| A list built by `$( … )` | Not run, so its tasks are reported as not checked. |
+| `loop:` | No pass runs and no gate, condition, or action is evaluated. |
+| Task `when:` | Not evaluated; the task is checked as if it runs. |
+| Inline container `$schema` | Its syntax is checked; the values it judges at its turn are not, and it is reported as not checked. The root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
+| A sequence document whose own values or `$schema` fail | One error under the document (or the `sequence:` task that reached it). Its prompt tasks' inputs and previews, and its body steps' previews, are reported as not checked, since a live run stops at that verdict before they run. |
+| Lifecycle events | None fire. A value an event would `set` is known only at launch: what reads it is not checked (see below). A required input the root's `initialize` writes with a literal `set` is reported as not checked, not missing. A file the root's `initialize` creates is not checked, not missing (see [Files the root's `initialize` creates](#files-the-roots-initialize-creates)). |
+| `prep` | Targets do not run. |
+| Remote `::file` or `::code` | Fetched when the configured `network` permission allows the host, with nothing cached; a denied host is the same refusal a real run reports. |
+| Provider | Chosen by the same rules as a real run, and never launched. The finding lists each source it read; see [claudine sequence — Choosing providers](claudine/docs/cli/sequence.md#choosing-providers). |
+| Files | Nothing is written: no configuration, cache, approval record, or `inline-compose` write-back. |
 
-The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
+#### What a dry run reads as known only at launch
 
-> **Composition shell work still runs.** `$( … )` expansions in step documents
-> execute for real, because their output is what composition needs, so their
-> side effects happen. Dry-run does not provide filesystem isolation.
+Some values a task reads are written by the run before the task composes.
+The dry run cannot know them, so a check that reads one is reported as
+`not checked` instead of being judged on the value the file holds now:
 
-`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`)
-additionally runs each `shell:` task once, during the single preview pass:
+| Value | Example | Known only at launch |
+|---|---|---|
+| A key any lifecycle `set` in the sequence may write | an earlier task's `success: [{ set: { topic: a } }]`, the root's `initialize` | yes, for every task's prompt |
+| A `with:` value that reads such a key, directly or through the sequence's values | `with: { topic: "{{ choice }}" }` with `choice: "{{ topic }}"` | yes |
+| `seq.outputs` | `::block when="length(seq.outputs) > 0"` | yes, except for a first step outside any loop, whose outputs are empty |
+| `seq.run_id` | | yes |
+| `loop.*` inside a looping container or document | `::block when="loop.count >= 1"` | yes |
+| `group.*` inside a group (a leg of an inline group, a group file, or a catalog entry, at any depth below it) | `::block when="group.topic == 'research'"` | yes: the group binds it only when it starts, from `variables` it reads again then. Outside every group the read is the scope error both runs refuse |
+| The step's position and neighbors | `seq.index`, `seq.name`, `seq.is_last`, `seq.previous` | no: the plan fixes them |
+| A literal value | `with: { topic: a }` beside a write of another key | no |
 
-```sh
-claudine sequence --dry-run --dry-run-shell release.md
+What counts is the value a read selects, not how the expression is
+written: `seq.outputs`, `seq['outputs']`, `(seq).outputs`, and
+`seq['out' + 'puts']` are all the same launch-time read, and
+`seq['index'] == 2` is the same static check as `seq.index == 2`. A
+prompt's own `seq:` frontmatter property, read as `fm.seq.outputs` or
+`fm['seq'].outputs`, is the document's value and is checked as written.
+
+A read of such a value behaves like any value a dry run leaves as written:
+
+```mermaid
+flowchart LR
+    W["writer.md: success sets topic"] --> R["reader.md reads topic"]
+    R --> B["::block when=topic == 'a'<br/>shown as written, conditional"]
+    R --> S["$schema on topic<br/>not checked: schema check"]
+    R --> I["{{ topic }}<br/>left as written, marked"]
 ```
 
-Those commands have their real effects (a `git add` stages), but no provider
-launches, no `side_effect:` task runs, and no loop repetition or lifecycle
-event is turned back on.
+So a prompt wholly guarded by `::block when="topic == 'a'"` previews the
+block as written, marked `[not evaluated in a dry run]`, with one
+`ℹ not checked: ` row, and is not called empty. When the earlier task
+writes an unrelated key instead, `topic` is known and the empty prompt is
+the proven error the real run also stops at.
+
+The rule is the same one that decides a provider at launch: a key counts as
+written when any lifecycle stack, side effect, or document the walk reads
+may `set` it, whatever its position, so a document's own `success` writing
+a key it reads also leaves that read unchecked. Two checks keep the value
+as it is before the run, because a real run makes them before any task:
+an inclusion's target (`::file ./{{ topic }}.md` must exist when the
+sequence starts) and a sequence document's own `$schema`. When the
+sequence starts no step has a position yet, so an inclusion target that
+reads `seq.index` reads it as unset: `::file ./{{ seq.index == 2 ? 'a' :
+'missing' }}.md` is checked as `./missing.md`, as the real run checks it. A group value is
+likewise unset then: `::file ./{{ group.topic }}.md` in a group leg is
+checked as `./.md` and reported missing, as the real run reports it, even
+when the group's `topic` names a file that exists. A standalone
+`compose` or `inline-compose` composes the document with its own values,
+which its `initialize` writes do not change, so those dry runs judge them
+as written. A *file* that `initialize` creates is different: see the next
+section.
+
+#### Files the root's `initialize` creates
+
+A real run runs the root document's `initialize` before it reads anything
+else, so a file that event creates exists by the time an inclusion, a task
+file, a schema, or a data read needs it, and a file it appends to already
+holds the new lines. The dry run runs no event, so it looks for those
+writes in the stack instead: each `ensure_file`, `append_line`, or
+`append_jsonl`, including one under a `when:` branch. A verdict that depends
+on what such a file holds, or on whether it exists, is reported as
+`ℹ not checked`, known only at launch, instead of being judged on the file
+as it is now:
+
+```yaml
+---
+agent: claude
+initialize:
+  - ensure_file: [gen/notes.md, "Notes."]
+sequence:
+  - name: review
+    prompt: review.md        # review.md has `::file gen/notes.md`
+---
+```
+
+```text
+ℹ not checked: transclusion (reads `gen/notes.md`, which the run creates before this point, so it is known only at launch)
+```
+
+| Reader | What is not checked |
+|---|---|
+| `::file`, `::code`, `prologue:`, `epilogue:` | the inclusion; the preview keeps it as written |
+| `prompt:`, `task:`, `group:`, a group catalog, a nested `sequence:` file | the task, and everything below it |
+| the root `sequence:` file | the tasks |
+| `$schema` | the schema check and the preview it judges |
+| `load_data(…)`, `frontmatter(…)`, `try_frontmatter(…)`, `markdown_title(…)`, `markdown_body_empty(…)`, `validate_schema(…)` (the document, its `$schema` file, and the files its named types import) | the interpolation or `::block` condition that reads it |
+| `file_exists(…)` | the `::block` condition, for a file that does not exist yet |
+| `find_files(…)` | the condition or interpolation, when a file the run creates could join the listing |
+
+What each effect changes decides which verdicts wait:
+
+| Effect | The file does not exist yet | The file exists |
+|---|---|---|
+| `ensure_file` | its existence and content | nothing: the effect leaves an existing file as it is |
+| `append_line`, `append_jsonl` | its existence and content | its content; it still exists, so `file_exists` stays `true` |
+
+For example, a root that appends a row to an existing, blank
+`gen/rows.jsonl` leaves `::block when="length(load_data('gen/rows.jsonl')) > 0"`
+unchecked, where an `ensure_file` on the same file keeps the empty-body
+error, since the run reads the same blank file. An appended row to an
+existing root `sequence: list.yaml` leaves the task list unchecked: the run
+reads the rows the append adds.
+
+The rules that decide what counts:
+
+- **Only the root's `initialize` counts**: the sequence document's, or the
+  document's own for `compose` and `inline-compose`. A prompt's own
+  `initialize` and an earlier task run after the sequence pre-flight has
+  read every inclusion, so a file they would create is still missing in
+  both runs (see [Phase 1 — Static preflight](#phase-1--static-preflight)).
+- **A file is matched by the entry it names**, not by its spelling:
+  `./gen/../gen/notes.md`, a path through a symbolic link, or another case
+  on a case-insensitive volume all name the same file.
+- **A file no effect changes is read as it is.**
+- **Anything else is still missing.** A sibling `::file missing.md` beside
+  an initialized `::file gen/notes.md` is refused in both runs, while the
+  initialized one stays unchecked.
+- **A target written with `{{ … }}` is resolved as the run resolves it**,
+  from the root's own values and the values passed after the file
+  (`target: gen/notes.md` and `ensure_file: ["{{ target }}", "Notes."]` is
+  the file `gen/notes.md`). It is resolved only when it reads nothing the
+  event alone knows: no function call, no `ctx` or `env`, no value a `set`
+  in the stack writes, and no value that is itself a `{{ … }}` or `$( … )`.
+- **A target the dry run cannot resolve claims no file**, but no file it
+  could create is reported missing, and no file it could append to is
+  judged on its current bytes. Its literal text bounds where that is:
+  `ensure_file: ["gen/{{ lower(name) }}.md"]` leaves a missing
+  `gen/anything.md` unchecked and still refuses a missing `other/x.md`; a
+  target that starts with `{{ … }}` could be any file in the mutation root.
+- **A target outside the mutation root does not count.** The effect refuses
+  to write outside the repository (or, outside any repository, the launch
+  folder), so the real `initialize` fails there and creates nothing. The
+  dry run reads the file as it is, so `ensure_file: ../elsewhere/notes.md`
+  beside `::file ../elsewhere/notes.md` is reported missing.
+
+Two more passes of a real run compose a task's prompt before any task
+starts, and the dry run makes each with the state the run has then. What
+either refuses is an error row, the failure the real run stops at; the
+preview of the later composition still leaves the launch-time value
+unchecked, so the exit status `2` never comes from a verdict on it:
+
+| Pass | What it composes | State it reads | Example it refuses |
+|---|---|---|---|
+| Shell approval discovery | every `prompt:` task's document: its frontmatter values, `::shell` directives, and the inline `prompt` | no `seq`, `loop`, or `group` yet: each reads as `null` | `ready: "{{ length(seq.outputs) > 0 ? 'yes' : 'no' }}"`: `length` of `null` (`dm.expression.evaluation_failure`) |
+| The pre-run probe of each root step | a root step with no executable composes the root's body | the step's position, no outputs yet, the root `initialize` writes, and nothing a task writes | a body wholly guarded by `::block when="length(seq.outputs) > 0"`, or by a key a prompt task's `success` writes: the empty body (`dm.compose.empty_body`) |
+
+The approval pass reads every `seq` member as `null`, the step's position
+included: `step: "{{ seq.index + 1 }}"` in a prompt's frontmatter stops the
+run there, though the same expression in the prompt's body, which the pass
+does not evaluate, is composed at the task's turn with its position. The
+dry run therefore makes this pass for every prompt that reads `seq`,
+`loop`, or `group`, or includes another file (whose reads it cannot see
+from the prompt), and for no other. The approval pass does not evaluate
+`::block` conditions, so a prompt guarded by `seq.outputs` stays conditional; a probe that reads a key the
+root's `initialize` writes leaves it unchecked, since the dry run does not
+run `initialize`.
+
+Both passes read a value the dry run cannot know as unknown, as the preview
+does: a missing input, a `with:` value known only at the task's turn
+(`topic: "{{ has_alias('ll') }}"`), a `$( … )` value, or a file the root's
+`initialize` creates. A `::file ./{{ topic }}.md` or `prologue:` that
+names its file by such a value is `ℹ not checked`, never a parse failure or
+a missing file, and a prompt whose only other content was left out is not
+reported empty, since the real run includes whatever that value names.
+
+What the approval pass refuses can also be the document's shape rather
+than a value. It approves the exact command or inclusion that will run, so
+a `::shell` line, `::file`/`::code` target, or `as_markdown(…)` argument
+built from a value it does not evaluate as composition will is refused
+whatever that value turns out to be: a shell probe (`has_alias(…)`), a
+lazy `current.*` read, a frontmatter `$( … )` value, or a frontmatter
+value that reads one. The dry run reports that refusal as the run's error
+(`dm.shell.failure`, "dynamic command shape"), for a `prompt:` task and for
+a root step composing the root's body alike:
+
+```markdown
+---
+topic: "{{ has_alias('zz') }}"
+---
+::file ./{{ topic }}.md
+```
+
+The same value supplied by the caller is different: a task's
+`with: { topic: "{{ has_alias('zz') }}" }` reaches the prompt as data,
+which the approval pass reads like any other input, so the shape is known
+and only the value waits. Both runs accept it, and the dry run leaves the
+inclusion `ℹ not checked`.
+
+A dry run never asks, so a choice a real run would ask you for is graded by
+whether that real run could ask:
+
+- **A task with no provider** is a warning when stderr is a terminal (the
+  real run opens the provider review screen) and an error otherwise. An
+  unknown provider name, or one whose program is not on `PATH`, is an error
+  either way.
+- **A missing required input** is a warning when the real run could collect
+  every missing value (`prompt_for_missing` is on, stdin and stderr are both
+  terminals, and each value has a type the input prompt can collect), and an
+  error otherwise.
+
+Either way the exit status is `2`, so a script running without a terminal
+sees the same verdict a person would.
+
+`--dry-run-shell` was removed; it is a usage error with or without
+`--dry-run`. To see what a `shell:` task does, run the sequence.
 
 ## Requiring caller input
 
@@ -1787,7 +1998,8 @@ sequence:
 
 `claudine sequence root.yaml` prints `ada`, and nothing is reported missing.
 A dry run fires no `initialize`, so under `--dry-run` the same file reports
-`who` missing; supply it as a setter (`who=ada`) to preview it.
+the input `who` as not checked rather than missing; supply it as a setter
+(`who=ada`) to preview with it.
 
 When only the root is missing inputs and it has steps that compose a prompt,
 the report lists them under those steps instead (`Step 1: p (/work/f.md)`),
@@ -1888,10 +2100,8 @@ flowchart TD
     S -->|unrecovered; finalize| E[Propagate outward; root exits 1]
 ```
 
-Dry-run fires no lifecycle events recursively and launches no provider or
-inline write-back. It renders shell tasks rather than running them (unless
-`--dry-run-shell` is given), but composition shell expansions still run against
-initial state and can have real effects. See [Dry run](#dry-run).
+A dry run fires no lifecycle events, at any depth, and runs no command or
+provider. See [Dry run](#dry-run).
 
 
 ## Cancellation

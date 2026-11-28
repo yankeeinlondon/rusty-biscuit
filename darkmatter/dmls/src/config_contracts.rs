@@ -37,11 +37,11 @@ use simplified_schema::resolve::ResolvedSchema;
 
 /// The virtual path Claudine's configuration schema is cited under; the
 /// same one Claudine prepares it under.
-pub const CLAUDINE_CONFIG_SCHEMA_PATH: &str = "claudine/schemas/claudine-config.yaml";
+pub const CLAUDINE_CONFIG_SCHEMA_PATH: &str = "claudine/registration/claudine-config.yaml";
 
 /// Claudine's configuration schema, compiled in from Claudine's own source
 /// file, so the two never differ.
-pub const CLAUDINE_CONFIG_SCHEMA_SOURCE: &str = include_str!("../../../claudine/schemas/claudine-config.yaml");
+pub const CLAUDINE_CONFIG_SCHEMA_SOURCE: &str = include_str!("../../../claudine/registration/claudine-config.yaml");
 
 /// The program a configuration file configures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

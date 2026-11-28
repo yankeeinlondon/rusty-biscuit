@@ -1187,7 +1187,7 @@ fn starting_preflight_status_precedes_phase_1c_work() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
-        stderr.to_lowercase().contains("sequence missing properties"),
+        stderr.contains("missing required properties"),
         "the fixture must abort inside Phase 1c for this test to prove \
          anything; stderr:\n{stderr}"
     );
@@ -1212,7 +1212,7 @@ fn preflight_statuses_bracket_phase_1c() {
     )
     .unwrap();
 
-    let (stderr, _) = run_preflight(&fixture, &md_file, &["--dry-run"]);
+    let (stderr, _) = run_preflight(&fixture, &md_file, &[]);
     let starting = stderr
         .find("Starting pre-flight checks")
         .unwrap_or_else(|| panic!("no starting status; stderr:\n{stderr}"));

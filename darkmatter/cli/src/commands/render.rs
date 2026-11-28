@@ -186,7 +186,7 @@ impl Render<'_> {
             }
         };
 
-        let document = opened.map(|opened| PathBuf::from(biscuit_file::to_portable_string(opened.path())));
+        let document = opened.map(|opened| PathBuf::from(biscuit_file::to_forward_slash_string(opened.path())));
         let inline_rules: Vec<Diagnostic> =
             scan_inline_hr_warnings(md.content()).iter().map(|warning| inline_rule_record(warning, document.as_deref())).collect();
         let denied = self.stop_if_denied(&style, &inline_rules);
@@ -363,7 +363,7 @@ fn warning_row(warning: &darkmatter::markdown::compose::ComposeWarning) -> Strin
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::prelude::{Status, StatusState};
     let location = warning.path.as_ref().zip(warning.line_number).map_or_else(String::new, |(path, line)| {
-        format!("{}:{line}: ", biscuit_file::to_portable_string(path))
+        format!("{}:{line}: ", biscuit_file::to_forward_slash_string(path))
     });
     Status::from_prose(format!("{location}{}", Prose::escape_text_outside_code_spans(&warning.message)))
         .with_line_breaks(LineBreaks::Hard)

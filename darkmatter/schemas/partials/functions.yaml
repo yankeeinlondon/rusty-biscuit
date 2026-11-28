@@ -1,4 +1,4 @@
-kind: schema
+kind: expression-schema
 categories:
     - |-
         Type Predicates ->

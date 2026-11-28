@@ -30,7 +30,8 @@ impl DarkmatterSchemas {
     /// ## Errors
     ///
     /// - [`SchemaError::NotASchemaDocument`] when `text` is not a schema
-    ///   document;
+    ///   document, or is a callable catalog
+    ///   ([`NotSchemaReason::CallableCatalog`]);
     /// - [`SchemaError::SlotResolution`] when a slot was refused or failed,
     ///   or its value (a template type's returned definition included) is
     ///   not usable, with the slot's typed cause;
@@ -41,7 +42,7 @@ impl DarkmatterSchemas {
     pub fn resolve_schema_file(&self, path: &Path, text: &str) -> Result<ResolvedSchema, SchemaError> {
         let document = parse(path, text)?;
         with_text(path, text, || {
-            let template = biscuit_file::to_portable_string(path);
+            let template = biscuit_file::to_forward_slash_string(path);
             let roots = simplified_schema::roots::SchemaRoots::for_document(&self.file_resolution_context)?;
             let export = if document.exports_schema {
                 Some(match self.prepare_export(&document, path, text, roots.search_paths()) {
@@ -61,6 +62,7 @@ impl DarkmatterSchemas {
                 (None, None) => Err(SchemaError::NotASchemaDocument {
                     path: path.to_path_buf(),
                     reason: NotSchemaReason::NoSchemaProperty,
+                    site: None,
                 }),
             }
         })
@@ -144,7 +146,7 @@ impl DarkmatterSchemas {
             );
         }
         let (Some(base), Some(file_name)) = (path.parent(), path.file_name()) else {
-            return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
+            return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty, site: None });
         };
         let reference = Value::String(format!("./{}", file_name.to_string_lossy()));
         super::resolve::resolve_authored_schema_with_roots(&reference, None, base, roots, &self.file_resolution_context)
@@ -170,9 +172,16 @@ impl DarkmatterSchemas {
     }
 }
 
+/// The schema document `text` declares. A callable catalog is refused: its
+/// signatures and private helpers are judged by the catalog reader, never
+/// resolved as an export, an import library, or a template.
 fn parse(path: &Path, text: &str) -> Result<StandaloneSchemaDocument, SchemaError> {
-    simplified_schema::parse_standalone_schema_document(text, path)?
-        .ok_or_else(|| SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty })
+    let document = simplified_schema::parse_standalone_schema_document(text, path)?
+        .ok_or_else(|| SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty, site: None })?;
+    if document.envelope.is_callable_catalog() {
+        return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::CallableCatalog, site: None });
+    }
+    Ok(document)
 }
 
 /// The named types of `document`: those beside its export, or the payload of

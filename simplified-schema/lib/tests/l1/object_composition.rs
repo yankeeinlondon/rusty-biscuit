@@ -1269,7 +1269,7 @@ fn composition_content_reads_no_file_for_an_imported_operand() {
         "kind: schema\n$schema:\n  value: local\ntypes:\n  local: \"{ ...base@./types.yaml }\"\n",
     ] {
         let error = lowering_error(text);
-        let SchemaError::Unresolved { reference, source } = error.as_ref() else { panic!("`{text}`: {error:?}") };
+        let SchemaError::Unresolved { reference, source, .. } = error.as_ref() else { panic!("`{text}`: {error:?}") };
         assert_eq!(reference, "base@./types.yaml");
         assert!(matches!(source, biscuit_file::FileReferenceError::ResolutionUnavailable { .. }), "{source:?}");
     }

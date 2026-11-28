@@ -1120,8 +1120,7 @@ parser's line and column.
 
 Malformed YAML always keeps a line and column. A second
 document is reported at the `---` that starts it, a non-string key and a tag
-at the key or tag itself. A duplicate key is located less precisely: at the
-start of the mapping that holds it.
+at the key or tag itself, and a duplicate key at its second spelling.
 
 ## Loading data into a schema
 

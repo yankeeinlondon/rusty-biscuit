@@ -89,7 +89,8 @@ These are **never** converted:
 - a single value into a list (`"a"` is not `["a"]`);
 - text into an object or list (`"[1, 2]"` stays text);
 - text that is not a number (`"pear"`, `"NaN"`, `"0x10"`, `"1,000"`, `"5."`);
-- a number or boolean into `alphanumeric`, which must already be text;
+- a number or boolean into `alphanumeric` or `string(no-coerce)`, which must
+  already be text;
 - anything into `unknown`, which keeps every value as written.
 
 Because `null` never converts, a written `null` at a required property whose

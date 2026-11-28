@@ -40,6 +40,7 @@ pub(crate) fn parse_page_blocks_in(
             PageBlockError::UnmatchedEnd {
                 ctx: Box::new(ctx.clone()),
                 line,
+                authored: None,
             }
         }
         super::super::block_pairs::BlockPairError::UnterminatedBlock {
@@ -50,6 +51,7 @@ pub(crate) fn parse_page_blocks_in(
             ctx: Box::new(ctx.clone()),
             opening_line: line,
             opening_text,
+            authored: None,
         },
         super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
             PageBlockError::ParseDirective {
@@ -57,6 +59,7 @@ pub(crate) fn parse_page_blocks_in(
                 line,
                 message: format!("Unexpected content after ::end-block: '{content}'"),
                 note: None,
+                authored: None,
             }
         }
         other => PageBlockError::ParseDirective {
@@ -64,6 +67,7 @@ pub(crate) fn parse_page_blocks_in(
             line: other.line(),
             message: other.to_string(),
             note: other.note(),
+            authored: None,
         },
     })?;
 
@@ -186,6 +190,7 @@ fn parse_block_options(
                 line: e.line,
                 message: e.message,
                 note: None,
+                authored: None,
             })?;
         cursor.skip_ws();
         cursor
@@ -195,6 +200,7 @@ fn parse_block_options(
                 line: e.line,
                 message: e.message,
                 note: None,
+                authored: None,
             })?;
         cursor.skip_ws();
         let value = cursor
@@ -204,6 +210,7 @@ fn parse_block_options(
                 line: e.line,
                 message: e.message,
                 note: None,
+                authored: None,
             })?;
 
         match key.as_str() {

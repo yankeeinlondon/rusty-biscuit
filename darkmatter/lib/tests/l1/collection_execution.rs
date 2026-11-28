@@ -557,7 +557,7 @@ fn callback_runtime_child_exhaustion_cannot_be_hidden_by_a_fallback() {
 fn callback_runtime_nested_failure_reports_every_original_position() {
     let error = failed("{{ map({team: [1]}, {value} => filter(value, n => frontmatter('./missing.md'))) }}");
     let diagnostic = &error_diagnostics(&error)[0];
-    assert_eq!(diagnostic.iteration_path.to_string(), "map[team] → filter[0]");
+    assert_eq!(diagnostic.iteration_path().to_string(), "map[team] → filter[0]");
     assert!(diagnostic.source.is_some());
     let MarkdownError::Interpolation { cause, .. } = error else { panic!("{error:?}") };
     assert!(matches!(cause.without_callbacks(), darkmatter::markdown::compose::expression::ExpressionError::FileReference(_)));

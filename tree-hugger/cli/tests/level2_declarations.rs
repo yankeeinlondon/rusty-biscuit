@@ -121,7 +121,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// `path` as a single word for the POSIX shell in the pane (slash separators
 /// for Git Bash on Windows; single quotes keep spaces together).
 fn shell_word(path: &Path) -> String {
-    let portable = biscuit_file::to_portable_string(path);
+    let portable = biscuit_file::to_forward_slash_string(path);
     format!("'{}'", portable.replace('\'', "'\\''"))
 }
 
@@ -1235,7 +1235,7 @@ fn reader_path(path: &Path) -> String {
     if cfg!(unix) {
         return canonical.to_string_lossy().into_owned();
     }
-    let portable = biscuit_file::to_portable_string(&canonical);
+    let portable = biscuit_file::to_forward_slash_string(&canonical);
     portable.strip_prefix("//?/").map(str::to_owned).unwrap_or(portable)
 }
 
@@ -1268,7 +1268,7 @@ fn run_tags_reader(root: &Path, scratch: &Path, cases: &[ReaderCase]) -> std::pr
     std::fs::write(&script_path, script).expect("write reader script");
     let run = format!(
         "lua local ok, err = pcall(dofile, {}); if not ok then io.stderr:write(tostring(err) .. '\\n'); vim.cmd('cquit 1') end",
-        lua_string(&biscuit_file::to_portable_string(&script_path)),
+        lua_string(&biscuit_file::to_forward_slash_string(&script_path)),
     );
     std::process::Command::new("nvim")
         .args(["--headless", "-u", "NONE", "-i", "NONE", "-n", "-c", &run, "-c", "qa!"])

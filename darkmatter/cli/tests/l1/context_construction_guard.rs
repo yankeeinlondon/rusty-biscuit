@@ -33,6 +33,13 @@ const ALLOWLIST: &[Allowance] = &[
     allow(Gate::AmbientState, "artifact.rs", "std::env::var", 1, "`MD_DRY_RUN` test hook that skips launching a viewer"),
     allow(
         Gate::AmbientState,
+        "source_open_log.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records every shared source open for read-once tests",
+    ),
+    allow(
+        Gate::AmbientState,
         "commands/compose.rs",
         "std::env::var",
         1,

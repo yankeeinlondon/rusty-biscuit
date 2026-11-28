@@ -524,7 +524,7 @@ mod tests {
         let context = biscuit_file::FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
             .with_repository_root(&repo);
         let mut registrations = crate::overlay::hosts::HostRegistrations::default();
-        registrations.prepare(&context);
+        registrations.prepare(&context, std::time::Instant::now());
 
         let folders = registrations.watch_folders();
         let options: DidChangeWatchedFilesRegistrationOptions =

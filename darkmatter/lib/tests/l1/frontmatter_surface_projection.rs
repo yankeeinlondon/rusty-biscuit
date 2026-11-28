@@ -99,7 +99,7 @@ fn is_not_pre_approved(err: &MarkdownError) -> bool {
 }
 
 fn portable(path: &Path) -> String {
-    biscuit_file::to_portable_string(path)
+    biscuit_file::to_forward_slash_string(path)
 }
 
 #[test]

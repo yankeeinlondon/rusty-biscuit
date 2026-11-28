@@ -41,6 +41,15 @@
   console during the exit drain. `unchained-ai` and `git-wt-cli` already
   build it, so it adds no crate to `Cargo.lock`.
 
+## Registration Inventory
+
+- The `claudine` library takes `serde_yaml_ng` 0.10 as a dependency and as its
+  only build dependency. `build.rs` walks `claudine/registration/` with the
+  same source module the library compiles (`composition/inventory/walk.rs`)
+  and refuses a member whose `kind` envelope is ill-formed, so the YAML
+  parser must be available to both. `serde_yaml_ng` is already in
+  `Cargo.lock` through Darkmatter and Simplified Schema; no crate is added.
+
 ## Audio Handoff
 
 - Both Claudine crates enable Playa's `native-playback` feature. Linux CI

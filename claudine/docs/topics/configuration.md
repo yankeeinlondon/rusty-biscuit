@@ -8,7 +8,7 @@ Claudine reads two YAML files:
 | repository | `{repo-root}/.claudine/config.yaml` | only the overrides listed below, plus `permissions` |
 
 Both are described by one shipped schema,
-[`claudine/schemas/claudine-config.yaml`](../../schemas/claudine-config.yaml):
+[`claudine/registration/claudine-config.yaml`](../../registration/claudine-config.yaml):
 its `user-config` type is the user file and its `repository-config` type is the
 repository file. The schema is the authority for every setting's shape and for
 the user file's defaults, so an editor with a SimplifiedSchema language server
@@ -57,11 +57,24 @@ flowchart TD
   keeps every default.
 - **Located.** Each problem names the file, line, column, and the JSON pointer
   of the value (`~/.claudine/config.yaml:4:12 at /protect/enabled: …`).
-- **Closed.** A key the scope does not declare is an error at that key. A
-  repository file that sets `tts`, for example, fails.
+- **Closed.** A key the scope does not declare is an error at that key, and
+  its line and column are the key's own. A repository file that sets `tts`,
+  for example, fails. The same holds inside a setting that takes several
+  forms: `tts: { provider: say, pitch: 3 }` is reported as the unknown key
+  `pitch` at `/tts`, because no form of `tts` declares it, while a key one
+  form does declare is never reported as unknown.
 - **Semantic checks** run after the schema: sound effect names, Protect
   patterns and `allow_paths`, exit-expression regexes and `scope` agents, and
   that the active messenger route exists.
+
+To check every file at once without running anything else, use
+[`claudine doctor`](../cli/doctor.md). It reads the user files, and inside a
+repository its files too, with these same rules, but never stops at the
+first problem and never writes: a missing file is not created and a legacy
+`config.json` is not converted. Unknown keys are listed, with their line and
+column, under its `stray-config-keys` row. It shows where each problem is and
+what kind it is, never the value; each remedy names a command that prints
+the full message ([where the full message is printed](../cli/doctor.md#where-the-full-message-is-printed)).
 
 ## Defaults and inheritance
 
@@ -168,6 +181,33 @@ actions:
 … at /actions/session_start/0: an action is now written as a mapping keyed by its kind, not with `type:`; write `{ bash: { command: "./notify.sh" } }`
 ```
 
+The rest of a flat entry is still judged as its keyed form would be, and
+reported beside the migration message at the key the file wrote: a
+misspelled setting (`timout: 5` beside `command:`) is an unknown key at
+`/actions/session_start/0/timout`, on the misspelled key's own line, and a
+wrong-typed one (`timeout_ms: soon`) is an invalid value at
+`/actions/session_start/0/timeout_ms`. The keyed spelling the message gives
+copies every field as written, a misspelled one included, so correct those
+too.
+
+The rules that judge the whole file are checked beside a flat entry too, so
+one load names every edit the file needs. Writing both `preferred_agent` and
+`favorite_agent` is reported at `/favorite_agent`, and an exit expression
+that writes both `pattern` and `patterns`, or neither, at its own entry
+(`/exit_expressions/0`, or `/exit_expressions/rules/0` in the layered
+form), whatever form the actions and routes take and whatever else the
+schema refuses:
+
+```yaml
+exit_expressions:
+  - pattern: STOP         # /exit_expressions/0: write `pattern` or `patterns`, not both
+    patterns: [HALT]
+actions:
+  session_start:
+    - type: bash          # /actions/session_start/0: the keyed spelling
+      command: ./notify.sh
+```
+
 Replace each flagged entry with the spelling the message gives. Kinds are
 written in snake_case (`discord_webhook`, `slack_webhook`), and the message
 already converts a hyphenated `provider: slack-webhook`. Only the file
@@ -194,11 +234,47 @@ In Claudine, `network` decides only what composition may fetch: a `::file` or
 `::code` URL, a `prologue` or `epilogue` URL, and a URL given to a read-side
 function such as `load_data`. With `network: allow` in effect, this prompt
 includes the remote file; with the default `deny`, preparation fails and the
-host is never contacted:
+host is never contacted. `network: ask` fails the same way, with an error
+naming the setting, because Claudine does not ask about composition reads
+(set `allow` to fetch):
 
 ```markdown
 ::file https://example.com/guidelines.md
 ```
+
+A `$schema` slot that reads a URL is the one read Claudine can ask about. It
+is resolved before the agent launches, in a real run and a dry run alike,
+and the composition reuses that result:
+
+| `network` | Real run | Dry run |
+| --- | --- | --- |
+| `allow` | fetches, then launches | fetches |
+| `ask` | asks on a terminal; with none, fails with `dm.schema.slot_approval_required` | sends nothing; a `not checked` row |
+| `deny` | fails with `dm.schema.slot_network_denied`, sending nothing | the same refusal as an error row |
+
+An invalid `network` value (`aswk`, `""`, a list) is not one of these three:
+a real run still runs a prompt that reads nothing remote, refuses every remote
+read with the configuration error, and sends nothing; a dry run reports the
+setting once as an error at its value, whatever the prompt reads. An absent or
+`null` value is `deny`.
+
+```yaml
+# schema.yaml, referenced as `$schema: ./schema.yaml`
+kind: schema
+$schema:
+    os: "enum({{ load_data('https://example.com/os.yaml', 'string[]') }})"
+```
+
+A refused slot stops the run with `composition.schema_slot_failed`, whose
+`slot_code` detail is the slot's own code, so a `failure` handler can tell
+the cases apart (`when: "err.detail.slot_code == 'dm.schema.slot_network_denied'"`).
+Claudine has no per-run host allowance, so its refusals name the
+`permissions.network` setting as the remedy.
+
+A `--dry-run` reports a refused slot by the slot's own code, at the slot in
+the schema file, once for each task that reads the schema (for example
+`dm.schema.slot_forbidden_binding at schema.yaml:3:20` for a slot that reads a
+bare document key), never also as `composition.schema_slot_failed`.
 
 It does not limit the agent's own network access once it runs.
 
@@ -212,37 +288,104 @@ permission in one place:
 # ~/.darkmatter.yaml
 permissions: ~/.claudine/config.yaml
 register:
-    - ~/.claudine/darkmatter-host.yaml
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
 ```
 
 The `register` entry is Claudine's host registration: setup publishes it
-before writing either file and adds the entry last, so `md` and DMLS
+before writing either file and writes the entry last, so `md` and DMLS
 recognize Claudine documents anywhere (see
 [The published host registration](schemas.md#the-published-host-registration)).
+Of the entries naming the new manifest or the one earlier releases
+published, `~/.claudine/darkmatter-host.yaml` (even when that file no longer
+exists), in any spelling, the first is kept, rewritten in place to the new
+path with the comment on its line, and every later one is removed together
+with the comment on its line; other hosts' entries and the remaining
+comments are kept. The old manifest and its `~/.claudine/darkmatter-host/` folder are
+removed once the entry is written. The entry is written even when the
+`permissions` handshake below reports a conflict, and a repository's
+`.darkmatter.yaml` is never changed.
 
-First-run setup writes Claudine's own file, then Darkmatter's:
+Setup runs on the first `claudine` command that finds no configuration,
+and whenever you run [`claudine setup`](../cli/setup.md). The command is how
+an existing install moves from an earlier registration format (the retired
+format 1 layout or an older format 2 manifest at the fixed path) to the
+current format 3 manifest in place: it writes members first and the manifest
+last, never asks a question, keeps every setting, unrelated `register`
+entry, and comment you wrote, and changes nothing when run again.
+
+```sh
+claudine setup
+```
+
+Setup runs these steps in this order, so a step that fails leaves what
+the earlier steps wrote in a usable state:
+
+```mermaid
+flowchart TD
+    S["setup starts"] --> P{"1. publish the registration<br/>under ~/.claudine/registrations/"}
+    P -- fails --> X["stop with an error:<br/>no configuration is written"]
+    P -- "published, or already current" --> H["2. write Claudine's config.yaml<br/>and the permissions handshake"]
+    H -- "Claudine's own write fails" --> Y["stop with an error"]
+    H -- "done, or a permissions conflict (warning)" --> R{"3. register the manifest<br/>in ~/.darkmatter.yaml"}
+    R -- fails --> W["warning: the old files are kept"]
+    R -- done --> C{"4. remove the old<br/>~/.claudine/darkmatter-host* files"}
+    C -- "a link is in the way" --> L["warning: nothing is removed"]
+    C -- done --> OK["setup complete"]
+```
+
+Publishing again later, without touching either configuration file, is
+`claudine registrations publish`; see
+[Hand edits, recovery, and overrides](schemas.md#hand-edits-recovery-and-overrides)
+for when you need it.
+
+Setup writes Claudine's own file, then Darkmatter's. On an existing
+configuration, `claudine setup` changes Claudine's file only where this
+table gives it a `permissions` block:
 
 | `~/.darkmatter.yaml` before setup | What setup does |
 |---|---|
-| missing, or without `permissions` | writes the reference above (and any other missing Darkmatter setting at its default); Claudine's file gets the default block if it has none |
+| missing, or without `permissions` (`permissions: null` counts as without) | writes the reference above (and any other missing Darkmatter setting at its default); Claudine's file gets the default block if it has none |
 | an inline `permissions` block | copies the block into `~/.claudine/config.yaml`, then replaces it in `.darkmatter.yaml` with the reference |
 | an inline block, and Claudine's file already has a different one | changes neither block and warns, naming both files; the inline block stays in force until you keep one of them |
-| a reference to `~/.claudine/config.yaml` | nothing |
+| a reference to `~/.claudine/config.yaml` | nothing, except that Claudine's file gets the default block if it has none |
 | a reference to another file | nothing; Claudine does not take over another program's block |
 
 Both files are written in one locked transaction, Claudine's first: if the
 second write fails, `.darkmatter.yaml` still holds its original block, and
 the next setup finishes the move. Comments and every other setting in both
-files are kept, and running setup again changes nothing. Repository setup
+files are kept, and running setup again changes nothing. A `null`
+`permissions` in either file is read as no block, as both programs' loaders
+read it: setup never copies `null`, and a Claudine file holding `null` gets
+the default block. Repository setup
 does the same with `{repo-root}/.darkmatter.yaml` and
 `{repo-root}/.claudine/config.yaml` (referenced as `./.claudine/config.yaml`),
 and fails before writing anything outside a repository. With no home
 directory, setup writes only Claudine's file and says that Darkmatter's was
 not set up.
 
+`claudine doctor` reports the state of this handoff for the user scope, and
+for a repository whose two files both exist, in its
+`darkmatter-permissions` row. `claudine doctor --fix` makes the same move
+as setup when Darkmatter's file has no `permissions` or an inline block
+Claudine can take over, with the same order and the same guarantee that a
+failed second write leaves the original block in force. Unlike setup, it
+edits only existing, valid files (a `.darkmatter.yaml` whose `register`
+setting is invalid is left for you to correct, since Darkmatter's writer
+would refuse the edited file, and a scope whose edit would reach an inline
+root mapping or a `permissions` value with an anchor or tag, which
+Darkmatter's format-preserving editor cannot change in place, is left for
+you to rewrite in block form), never writes through a
+symbolic link, never
+writes a reference to a Claudine file that a link places outside its scope
+(your home, or the repository), and never resolves a conflict: two different blocks stay an error until you
+keep one. See [`claudine doctor` → Permissions repair](../cli/doctor.md#permissions-repair).
+
 The same steps are available to Rust callers as
 `claudine::config::setup::setup_with_darkmatter(context, scope, write)`,
-where `write` is the caller's own write of Claudine's file. To undo the move,
+where `write` is the caller's own write of Claudine's file;
+`claudine::config::setup::setup_claudine(context, scope, write)` runs the
+whole setup, publication, registration, and removal of the old files
+included, and reports each step. To undo the move,
 `md init --inline` writes the block back into `~/.darkmatter.yaml`; see
 [`md init`](../../../darkmatter/docs/cli/init.md).
 

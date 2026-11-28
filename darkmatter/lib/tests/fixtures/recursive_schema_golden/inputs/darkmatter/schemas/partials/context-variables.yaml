@@ -4,6 +4,15 @@
 # reads them. Declared once in `darkmatter.yaml` for both roots.
 kind: schema
 types:
+    # The same type as the expression catalog's `recent-commits` helper (the
+    # result of `recent_commits(count)`); a callable catalog is not an import
+    # source, so each file declares it and a test keeps the two equal.
+    recent-commits: |-
+        string[]
+        -> Recent commits, newest first, each rendered exactly as
+        `sniff repo recent-commits --plain` renders it (a multi-line block).
+        The result of `recent_commits(count)` and the type of
+        `ctx.recent_commits`.
     context:
         cwd: "string(generated) -> Absolute launch directory captured when the composition request began, or null when ambient capture failed."
         self: "string(generated) -> Absolute canonical native path of the root document, or null for URL and in-memory roots."
@@ -55,7 +64,7 @@ types:
         repo_root: "string(generated) -> Absolute repository root path, or null when unavailable."
         branch: "string(generated) -> Current local Git branch name, or null outside a repository or at detached HEAD."
         worktree: "string(generated) -> Current linked Git worktree name, or null in the main worktree or outside a repository."
-        recent_commits: "recent-commits(generated; required)@darkmatter:functions -> Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository."
+        recent_commits: "recent-commits(generated; required) -> Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository."
         is_monorepo: "boolean(generated; required) -> Whether the current repository is a monorepo."
         package_root: "string(generated) -> Absolute current package root path, or null when unavailable."
         package_area_root: "string(generated) -> Absolute current package area root path, or null when unavailable."
@@ -105,4 +114,3 @@ types:
         gateway_v6: "string(generated) -> Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address."
         agent: "string(generated; required) -> The agentic CLI provider being used in the current session."
         model: 'string(generated; required) -> Active model identifier, trimmed from the MODEL env var; defaults to "default".'
-

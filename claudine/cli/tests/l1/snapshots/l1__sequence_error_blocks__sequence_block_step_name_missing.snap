@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: step without a name
+┃ 
+┃ step 1 is missing its required name property
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Add a name: to the step.

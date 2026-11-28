@@ -16,8 +16,7 @@ mod union_fixtures;
 mod position_fixtures;
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
-// Only its host texts and lifecycle writer are used here.
-#[allow(dead_code)]
+// Only its bundles are used here; the module allows its own dead code.
 #[path = "../../../lib/tests/host_fixtures/mod.rs"]
 mod host_fixtures;
 
@@ -25,6 +24,10 @@ mod approval_prompt;
 mod claudine_schema_bundle;
 mod collection_blocks;
 mod compose_collection_controls;
+mod compose_combined_report;
+mod compose_shared_observations;
+mod compose_inclusion_failure_findings;
+mod compose_portable_paths;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;
@@ -36,6 +39,8 @@ mod clean_schema;
 mod code_block;
 mod host_registration;
 mod compose_foreign_documents;
+mod compose_host_scope;
+mod host_runtime_scope;
 mod compose_array_rendering;
 mod compose_base_schema;
 mod compose_basic;
@@ -55,6 +60,7 @@ mod compose_lifecycle;
 mod compose_loader_wiring;
 mod compose_lazy_roots;
 mod compose_literal_only;
+mod compose_missing_target_recovery;
 mod compose_nested_markdown;
 mod compose_page_blocks;
 mod compose_perf;
@@ -109,7 +115,9 @@ mod md_process_fixture;
 mod path_lookup_guard;
 mod policy_verbs;
 mod prose_escape_guard;
+mod reference_bare_schema;
 mod reference_report;
+mod reference_report_baselines;
 mod render_basic;
 mod render_alias_parity;
 mod render_dispatch;
@@ -157,3 +165,4 @@ mod lifecycle_passive_surfaces;
 mod lifecycle_schema_fallback;
 mod schema_recursive;
 mod yaml_serializer_guard;
+mod schema_key_hints;

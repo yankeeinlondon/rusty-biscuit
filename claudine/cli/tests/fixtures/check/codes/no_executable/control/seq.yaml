@@ -1,0 +1,4 @@
+sequence:
+  - name: metadata
+    prompt: ./metadata.md
+    with: { agent: claude }

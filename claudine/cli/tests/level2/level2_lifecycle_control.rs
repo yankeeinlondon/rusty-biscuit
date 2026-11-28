@@ -7889,7 +7889,7 @@ const DIAG_PREPARATION_FAILURE: DiagnosticFixture = DiagnosticFixture {
     target_doc: "---\ntitle: preparation failure target\n---\n::file _no_such_partial.md\n",
     direct_setters: "",
     overlay: "{}",
-    identity: "TransclusionError: I/O failure",
+    identity: "TransclusionError: file not found in ::file",
     attribution: "no_such_partial.md",
 };
 

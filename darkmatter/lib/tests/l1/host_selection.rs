@@ -1,9 +1,11 @@
 //! Host selection (`config::registration::{select, RegisteredHosts}`) and the
 //! registered layer of `DarkmatterSchemas`: which host a document belongs
 //! to, how the identified host's triggers layer between the baseline and the
-//! schema roots' triggers, the legacy root-catalog fallback and its
-//! suppression for registered hosts, conflicts, ambiguity, cache identity,
-//! inspection, and composition with and without a caller's own host.
+//! schema roots' triggers, ordinary trigger semantics (literals, `$path`,
+//! malformed operands, matcher-only triggers), the absence of any root-catalog
+//! host, moved copies, conflicts, ambiguity, registered YAML kinds, cache
+//! identity, inspection, and composition with and without a caller's own
+//! host.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,7 +53,7 @@ fn effective_schema(schemas: &DarkmatterSchemas, markdown: &Markdown) -> Effecti
 // ── identification and layering ─────────────────────────────────────────────
 
 #[test]
-fn an_identified_document_layers_the_host_triggers_in_manifest_order() {
+fn an_identified_document_layers_the_host_triggers_in_bundle_path_order() {
     let fixture = Fixture::new();
     let hosts = fixture.hosts(&[HOST]);
     let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", WIDGET_DOCUMENT);
@@ -61,28 +63,42 @@ fn an_identified_document_layers_the_host_triggers_in_manifest_order() {
     assert!(selection.diagnostics.is_empty(), "{:#?}", selection.diagnostics);
     let HostSelection::Registered(profile) = &selection.selection else { panic!("acme: {:?}", selection.selection) };
     assert_eq!(profile.host(), "acme");
+    assert_eq!(selection.matched, [0, 1], "gadget and widget both match");
 
     let effective = effective_schema(&schemas, &markdown);
     let widget = fixture.path("host/schemas/widget.yaml");
     let gadget = fixture.path("host/schemas/gadget.yaml");
-    assert_eq!(trigger_files(&effective), [widget.clone(), gadget.clone()]);
+    assert_eq!(trigger_files(&effective), [gadget.clone(), widget.clone()]);
     let registered = effective.layers().registered.as_ref().expect("a registered origin");
     assert_eq!((registered.host.as_str(), registered.version.as_str()), ("acme", "1.2.0"));
     assert_eq!(registered.manifest, fixture.manifest());
     assert_eq!(registered.revision, profile.revision());
-    assert_eq!(registered.triggers, [widget.clone(), gadget.clone()]);
+    assert_eq!(registered.triggers, [gadget.clone(), widget.clone()]);
     // `size: big` breaks the registered `widget.size: number`; the payload's
     // `widget@./library.yaml` import resolved from the trigger's own folder.
     assert_eq!(problem_paths(&effective, &markdown), ["/widget/size"]);
     assert!(effective.dependencies().contains(&fixture.path("host/schemas/library.yaml")), "{:?}", effective.dependencies());
+}
 
-    // The manifest's order is the layer order.
+/// The order of `files` is no part of a host: reordering it keeps the
+/// revision, the selection, the matched triggers, and the layer order.
+#[test]
+fn reordered_files_keep_the_revision_and_the_selection() {
+    let fixture = Fixture::new();
+    let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", WIDGET_DOCUMENT);
+    let before = fixture.hosts(&[HOST]);
     fixture.edit_manifest(|manifest| {
         manifest.replace("    - ./schemas/widget.yaml\n    - ./schemas/gadget.yaml\n", "    - ./schemas/gadget.yaml\n    - ./schemas/widget.yaml\n")
     });
-    let reordered = fixture.hosts(&[HOST]);
-    let schemas = DarkmatterSchemas::new(fixture.context().for_source(fixture.path("work/doc.md"))).with_registered_hosts(reordered);
-    assert_eq!(trigger_files(&effective_schema(&schemas, &markdown)), [gadget, widget]);
+    let after = fixture.hosts(&[HOST]);
+    assert_eq!(before.loaded().profiles[0].revision(), after.loaded().profiles[0].revision());
+
+    let selected = |hosts: &Arc<RegisteredHosts>| {
+        let schemas = DarkmatterSchemas::new(context.clone()).with_registered_hosts(Arc::clone(hosts));
+        let selection = schemas.registered_selection_for(&markdown);
+        (selection.matched_triggers().map(|trigger| trigger.bundle_path.clone()).collect::<Vec<_>>(), trigger_files(&effective_schema(&schemas, &markdown)))
+    };
+    assert_eq!(selected(&before), selected(&after));
 }
 
 #[test]
@@ -114,7 +130,7 @@ fn a_same_basename_root_trigger_overrides_a_declaration_without_shadowing_the_re
     let effective = effective_schema(&schemas, &markdown);
     assert_eq!(
         trigger_files(&effective),
-        [fixture.path("host/schemas/widget.yaml"), fixture.path("host/schemas/gadget.yaml"), fixture.path("work/schemas/widget.yaml")]
+        [fixture.path("host/schemas/gadget.yaml"), fixture.path("host/schemas/widget.yaml"), fixture.path("work/schemas/widget.yaml")]
     );
     // Both apply: the registered `widget` still rejects `size: big`, and the
     // root's `gadget: number` wins over the registered `gadget: string`.
@@ -136,7 +152,7 @@ fn a_registered_trigger_also_visible_in_a_root_applies_once() {
     let gadget = fixture.path("work/schemas/gadget.yaml");
     assert_eq!(files.iter().filter(|file| **file == widget).count(), 1, "{files:?}");
     assert_eq!(files.iter().filter(|file| **file == gadget).count(), 1, "{files:?}");
-    assert_eq!(&files[..2], [widget, gadget], "kept as the registered occurrences: {files:?}");
+    assert_eq!(&files[..2], [gadget, widget], "kept as the registered occurrences: {files:?}");
 }
 
 #[test]
@@ -156,40 +172,25 @@ fn the_authored_schema_overrides_a_registered_trigger() {
     assert!(problem_paths(&effective, &markdown).is_empty(), "the document's `size: string` wins");
 }
 
-// ── legacy fallback ─────────────────────────────────────────────────────────
+// ── no root-catalog host ────────────────────────────────────────────────────
 
 #[test]
-fn a_root_host_catalog_of_an_unregistered_host_is_the_legacy_fallback() {
+fn a_root_local_globals_lifecycle_and_function_catalog_supply_no_host() {
     let fixture = Fixture::new();
-    let hosts = fixture.hosts(&[HOST]);
     fixture.root_catalog("work/schemas", "other");
-    let (markdown, context) = fixture.document(&fixture.repository(None), "work/notes.md", "---\ntitle: Notes\n---\n");
-
-    let selected = select(Some(&hosts), &darkmatter::markdown::schemas::frontmatter_as_json(&markdown), None, &context);
-    let HostSelection::Legacy(legacy) = &selected.selection else { panic!("legacy: {:?}", selected.selection) };
-    assert_eq!(legacy.lifecycle().expect("a lifecycle profile").registry().host(), "other");
-    assert_eq!(legacy.globals().len(), 1);
-    assert_eq!(legacy.globals()[0].0, fixture.path("work/schemas/globals.yaml"));
-    assert_eq!(legacy.functions().len(), 1);
-}
-
-#[test]
-fn a_registered_host_whose_identity_did_not_match_is_no_legacy_fallback_outside_its_area() {
-    let fixture = Fixture::new();
-    let hosts = fixture.hosts(&[HOST]);
-    // The acme catalog also sits in the tree's schema root.
-    fixture.root_catalog("work/schemas", "acme");
-    let (markdown, context) = fixture.document(&fixture.repository(None), "work/notes.md", "---\ntitle: Notes\n---\n");
+    let (markdown, context) = fixture.document(&fixture.repository(None), "work/notes.md", "---\ntitle: Notes\nrun:\n  count: 1\n---\n");
     let frontmatter = darkmatter::markdown::schemas::frontmatter_as_json(&markdown);
 
-    let selected = select(Some(&hosts), &frontmatter, None, &context);
-    assert!(matches!(selected.selection, HostSelection::Md), "{:?}", selected.selection);
-    // Without the registration the same catalog is the compatibility host.
-    assert!(matches!(select(None, &frontmatter, None, &context).selection, HostSelection::Legacy(_)));
+    let unregistered = select(None, &frontmatter, Some(&fixture.path("work/notes.md")), &context);
+    let registered = select(Some(&fixture.hosts(&[HOST])), &frontmatter, Some(&fixture.path("work/notes.md")), &context);
+
+    assert!(matches!(unregistered.selection, HostSelection::Md), "{:?}", unregistered.selection);
+    assert!(matches!(registered.selection, HostSelection::Md), "{:?}", registered.selection);
+    assert!(unregistered.diagnostics.is_empty() && registered.diagnostics.is_empty());
 }
 
 #[test]
-fn a_registered_host_whose_identity_did_not_match_is_no_legacy_fallback_inside_its_package_area() {
+fn a_registered_host_s_catalog_in_its_package_area_root_supplies_nothing_more() {
     let fixture = Fixture::new();
     let hosts = fixture.hosts(&[HOST]);
     // A Claudine-like package area holding the host's catalog, lifecycle
@@ -202,20 +203,160 @@ fn a_registered_host_whose_identity_did_not_match_is_no_legacy_fallback_inside_i
 
     let selected = select(Some(&hosts), &frontmatter, Some(&document), &context);
     assert!(matches!(selected.selection, HostSelection::Md), "a shared-only document stays md: {:?}", selected.selection);
-    let HostSelection::Legacy(legacy) = select(None, &frontmatter, Some(&document), &context).selection else {
-        panic!("the unregistered control is legacy")
-    };
-    assert_eq!(legacy.lifecycle().unwrap().registry().host(), "acme");
-    assert_eq!(legacy.functions().len(), 1);
+    assert!(matches!(select(None, &frontmatter, Some(&document), &context).selection, HostSelection::Md));
 }
 
-// ── conflicts and ambiguity ─────────────────────────────────────────────────
+// ── trigger semantics ───────────────────────────────────────────────────────
+
+/// `fixture` with the `acme` bundle plus the trigger `schemas/extra.yaml`
+/// (`text`), and the registered hosts.
+fn with_trigger(fixture: &Fixture, text: &str) -> Arc<RegisteredHosts> {
+    fixture.install_bundle("host", &Bundle::acme().with_file("schemas/extra.yaml", text));
+    let hosts = fixture.hosts(&[HOST]);
+    assert!(hosts.diagnostics().is_empty(), "{:#?}", hosts.diagnostics());
+    hosts
+}
+
+/// The selection of the frontmatter `yaml` for the document `relative`.
+fn select_yaml(fixture: &Fixture, hosts: &RegisteredHosts, relative: &str, yaml: &str) -> darkmatter::config::registration::Selected {
+    let (markdown, context) = fixture.document(&fixture.context(), relative, &format!("---\n{yaml}---\nBody.\n"));
+    hosts.identify(&darkmatter::markdown::schemas::frontmatter_as_json(&markdown), Some(&fixture.path(relative)), &context)
+}
+
+fn matched_paths(selected: &darkmatter::config::registration::Selected) -> Vec<String> {
+    selected.matched_triggers().map(|trigger| trigger.bundle_path.clone()).collect()
+}
+
+#[test]
+fn a_literal_trigger_matches_only_an_equal_value() {
+    let fixture = Fixture::new();
+    let hosts = with_trigger(&fixture, "kind: schema-trigger\nmatch:\n    kind: literal(sequence; required)\n");
+
+    let equal = select_yaml(&fixture, &hosts, "work/doc.md", "kind: sequence\n");
+    let other = select_yaml(&fixture, &hosts, "work/doc.md", "kind: other\n");
+    let schema_key = select_yaml(&fixture, &hosts, "work/doc.md", "$schema:\n  kind: string\nkind: sequence\n");
+
+    assert!(matches!(equal.selection, HostSelection::Registered(_)), "{:?}", equal.selection);
+    assert_eq!(matched_paths(&equal), ["schemas/extra.yaml"]);
+    assert!(matches!(other.selection, HostSelection::Md), "{:?}", other.selection);
+    assert_eq!(matched_paths(&schema_key), ["schemas/extra.yaml"], "a `$schema` key is ignored");
+}
+
+#[test]
+fn a_path_qualified_trigger_matches_only_under_its_pattern() {
+    let fixture = Fixture::new();
+    let hosts = with_trigger(&fixture, "kind: schema-trigger\nmatch:\n    all:\n        - bolt: string(required)\n        - $path: \"notes/**\"\n");
+
+    // Bare patterns read from the document's tree root: the repository.
+    let repository = fixture.repository(None);
+    let at = |relative: &str| {
+        let (markdown, context) = fixture.document(&repository, relative, "---\nbolt: x\n---\n");
+        hosts.identify(&darkmatter::markdown::schemas::frontmatter_as_json(&markdown), Some(&fixture.path(relative)), &context)
+    };
+    let inside = at("work/notes/a.md");
+    let outside = at("work/a.md");
+    let detached = hosts.identify(&serde_json::json!({ "bolt": "x" }), None, &fixture.context());
+
+    assert_eq!(matched_paths(&inside), ["schemas/extra.yaml"]);
+    assert!(matches!(outside.selection, HostSelection::Md), "{:?}", outside.selection);
+    assert!(matches!(detached.selection, HostSelection::Md), "no path defeats `$path`: {:?}", detached.selection);
+}
+
+#[test]
+fn a_matcher_only_trigger_identifies_the_host_and_layers_nothing() {
+    let fixture = Fixture::new();
+    let hosts = with_trigger(&fixture, "kind: schema-trigger\nmatch:\n    bolt: string(required)\n");
+    let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", "---\nbolt: x\n---\n");
+    let schemas = DarkmatterSchemas::new(context).with_registered_hosts(hosts);
+
+    let selected = schemas.registered_selection_for(&markdown);
+
+    let HostSelection::Registered(profile) = &selected.selection else { panic!("acme: {:?}", selected.selection) };
+    let index = profile.triggers().iter().position(|trigger| trigger.bundle_path == "schemas/extra.yaml").unwrap();
+    assert_eq!(selected.matched, [index]);
+    let layered = schemas.effective_for(&markdown).expect("the schema assembles");
+    assert!(layered.as_ref().is_none_or(|effective| trigger_files(effective).is_empty()), "no payload layers");
+}
+
+#[test]
+fn matched_lists_exactly_the_matching_triggers() {
+    let fixture = Fixture::new();
+    let hosts = fixture.hosts(&[HOST]);
+
+    let gadget = select_yaml(&fixture, &hosts, "work/doc.md", "gadget: name\n");
+    let widget = select_yaml(&fixture, &hosts, "work/doc.md", "widget:\n  size: 3\n");
+
+    assert_eq!((gadget.matched.clone(), matched_paths(&gadget)), (vec![0], vec!["schemas/gadget.yaml".to_string()]));
+    assert_eq!((widget.matched.clone(), matched_paths(&widget)), (vec![1], vec!["schemas/widget.yaml".to_string()]));
+}
+
+/// The relay's presence triggers (`unknown[](required)`): an operand of the
+/// wrong type defeats the gate, so the document stays `md`; a document with
+/// only shared lifecycle keys does too.
+#[test]
+fn a_malformed_presence_operand_or_a_shared_event_only_document_stays_md() {
+    let fixture = Fixture::new();
+    fixture.install_relay("relay");
+    let hosts = fixture.hosts(&["../relay/darkmatter-host.yaml"]);
+    assert!(hosts.diagnostics().is_empty(), "{:#?}", hosts.diagnostics());
+
+    let control = select_yaml(&fixture, &hosts, "work/doc.md", "sequence: []\n");
+    let malformed = select_yaml(&fixture, &hosts, "work/doc.md", "sequence: 42\n");
+    let shared = select_yaml(&fixture, &hosts, "work/doc.md", "composed:\n  - info: c\nfailed:\n  - info: f\ninitialize:\n  - info: i\n");
+
+    assert!(matches!(control.selection, HostSelection::Registered(_)), "{:?}", control.selection);
+    assert!(matches!(malformed.selection, HostSelection::Md), "{:?}", malformed.selection);
+    assert!(matches!(shared.selection, HostSelection::Md), "{:?}", shared.selection);
+    assert!(malformed.diagnostics.is_empty() && shared.diagnostics.is_empty());
+}
+
+// ── registered YAML kinds ───────────────────────────────────────────────────
+
+#[test]
+fn a_registered_yaml_kind_is_indexed_by_the_kinds_it_claims() {
+    let fixture = Fixture::new();
+    fixture.install_bundle(
+        "host",
+        &Bundle::acme().with_file(
+            "schemas/roster.yaml",
+            "kind: yaml-schema\n$schema:\n    kind: literal(roster; required)\n    platforms: string[](required)\n",
+        ),
+    );
+    let hosts = fixture.hosts(&[HOST]);
+    assert!(hosts.diagnostics().is_empty(), "{:#?}", hosts.diagnostics());
+
+    let [definition] = hosts.loaded().profiles[0].yaml_kinds() else { panic!("one definition") };
+    assert_eq!(definition.source().path, "schemas/roster.yaml");
+    assert_eq!(definition.source().file, fixture.path("host/schemas/roster.yaml"));
+    let kinds: Vec<&str> = hosts.yaml_kinds().claims().map(|(kind, _)| kind).collect();
+    assert_eq!(kinds, ["roster"]);
+    assert!(matches!(hosts.yaml_kinds().claim("roster"), Some(simplified_schema::yaml_documents::Claim::Healthy(_))));
+}
+
+// ── copies, conflicts, and ambiguity ────────────────────────────────────────
+
+#[test]
+fn a_moved_copy_collapses_into_one_agreed_claim_and_selects_once() {
+    let fixture = Fixture::new();
+    fixture.install("moved/acme");
+    let hosts = fixture.hosts(&[HOST, "../moved/acme/darkmatter-host.yaml"]);
+    assert!(hosts.diagnostics().is_empty(), "{:#?}", hosts.diagnostics());
+    assert_eq!(hosts.claims().len(), 1);
+    assert!(matches!(&hosts.claims()[0], darkmatter::config::registration::HostClaim::Agreed { collapsed, .. } if collapsed.len() == 1));
+
+    let selected = select_yaml(&fixture, &hosts, "work/doc.md", "gadget: name\n");
+
+    let HostSelection::Registered(profile) = &selected.selection else { panic!("acme: {:?}", selected.selection) };
+    assert_eq!(profile.manifest().path, fixture.manifest(), "the first claim stands for both");
+    assert!(selected.diagnostics.is_empty());
+}
+
 
 #[test]
 fn conflicting_claims_of_one_host_identify_nothing_and_never_fall_back() {
     let fixture = Fixture::new();
     fixture.install("other");
-    fixture.write("other/darkmatter-host.yaml", &MANIFEST.replace("version: 1.2.0", "version: 1.3.0"));
+    fixture.write("other/darkmatter-host.yaml", &fixture.manifest_text("other").replace("version: 1.2.0", "version: 1.3.0"));
     let hosts = fixture.hosts(&[HOST, "../other/darkmatter-host.yaml"]);
     assert_eq!(hosts.diagnostics().iter().filter(|diagnostic| diagnostic.code == HOST_REGISTRATION_CODE).count(), 2);
     fixture.root_catalog("work/schemas", "legacy");
@@ -262,11 +403,11 @@ fn a_changed_host_revision_never_reuses_a_validator() {
     let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", WIDGET_DOCUMENT);
     let first = fixture.hosts(&[HOST]);
     let again = fixture.hosts(&[HOST]);
-    // Only the global catalog's description changes: the trigger payloads are
+    // Only the namespace's description changes: the trigger payloads are
     // equal, the revision is not.
-    let description = GLOBALS.replace("the acme host's globals", "the acme host's renamed globals");
-    fixture.write("host/schemas/globals.yaml", &description);
-    fixture.write("host/schemas/globals.lifecycle.json", &lifecycle_artifact_for("acme", &description));
+    let description = RUN_NAMESPACE.replace("The current pass.", "The pass, renamed.");
+    fixture.write("host/schemas/run.yaml", &description);
+    fixture.write_member("host", "schemas/globals.lifecycle.json", &lifecycle_artifact_for("acme", &[("schemas/run.yaml", &description)]));
     let changed = fixture.hosts(&[HOST]);
     assert_ne!(first.loaded().profiles[0].revision(), changed.loaded().profiles[0].revision());
 
@@ -298,7 +439,7 @@ fn the_registered_trace_names_the_manifest_revision_and_each_trigger() {
     let matched: Vec<(String, bool)> =
         trace.triggers.iter().map(|trigger| (trigger.source.to_string(), trigger.matched)).collect();
     assert_eq!(matched.len(), 2);
-    assert!(!matched[0].1 && matched[1].1, "widget did not match, gadget did: {matched:?}");
+    assert!(matched[0].1 && !matched[1].1, "gadget matched, widget did not: {matched:?}");
 }
 
 // ── composition ─────────────────────────────────────────────────────────────

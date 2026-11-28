@@ -2,8 +2,9 @@
 //!
 //! These Level 1 subprocess tests keep the producer and consumer honest: the
 //! exact magic token emitted by `claudine __complete` is passed unchanged to a
-//! second `claudine compose --dry-run` process. The composed body identifies
-//! which ordered magic root execution selected.
+//! second `claudine compose --dry-run` process, whose passive check previews
+//! the composed body on stdout. That body identifies which ordered magic root
+//! execution selected.
 
 
 use crate::common;
@@ -20,14 +21,27 @@ fn emitted_magic_token(cwd: &std::path::Path, home: &std::path::Path, partial: &
     candidates.into_iter().next().unwrap()
 }
 
+/// An executable `claude` on the fixture's `PATH`: the check needs a chosen,
+/// installed provider to report a clean preview, and never runs it.
+fn install_claude_stub(fixture: &CliProcessFixture) {
+    let path = fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
 fn compose_dry_run(fixture: &CliProcessFixture, launch: &std::path::Path, token: &str) -> String {
+    install_claude_stub(fixture);
     let output = fixture
         .command_builder()
         // The launch directory decides which magic root wins, which is the
         // round trip's whole subject.
         .ambient_context(launch)
         .build()
-        .args(["compose", "--dry-run", token])
+        .args(["compose", token, "--claude", "--dry-run"])
         .assert()
         .success()
         .get_output()

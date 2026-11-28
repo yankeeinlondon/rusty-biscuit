@@ -1,47 +1,52 @@
-//! Claudine's shipped artifact: the prepared form of its compiled-in schema
-//! bundle and host catalog.
+//! Claudine's shipped artifact: the prepared form of its registration
+//! inventory.
 //!
-//! Claudine compiles in the files under `claudine/schemas/`
-//! ([`CLAUDINE_SCHEMA_FILES`](super::bundle::CLAUDINE_SCHEMA_FILES)) and its
-//! host catalog ([`HOST_CATALOG_TEXT`]). Preparing them (resolving and
-//! lowering each trigger payload, checking it merges and compiles, and
-//! loading the catalog) used to run on first use in every process. The
-//! checked-in artifact, `claudine/lib/generated/shipped.json`, holds the
-//! result; [`registry`] loads it once per process through the shared
-//! mechanism ([`simplified_schema::shipped`]) after proving it describes
-//! exactly the compiled text, the current Simplified Schema and Darkmatter
+//! Claudine compiles in the files under `claudine/registration/`
+//! ([`crate::composition::inventory`]). Preparing them (resolving and
+//! lowering each trigger payload, checking it merges and compiles, preparing
+//! the namespace catalog and the YAML kind definitions) used to run on first
+//! use in every process. The checked-in artifact,
+//! `claudine/lib/generated/shipped.json`, holds the result; [`registry`]
+//! loads it once per process through the shared mechanism
+//! ([`simplified_schema::shipped`]) after proving it describes exactly the
+//! compiled inventory, the current Simplified Schema and Darkmatter
 //! artifacts it was built over, and this crate's [`PREPARATION_REVISION`].
 //!
 //! Each payload member is a section decoded on first read. A refused
 //! artifact or section is never used; its consumer prepares from the
-//! compiled text instead, as it always did:
+//! compiled text instead:
 //!
 //! | View | Consumer | Fallback |
 //! | --- | --- | --- |
-//! | [`Registry::bundle`] | [`BUNDLE`], attached by [`claudine_schema_bundle`](super::bundle::claudine_schema_bundle) | trigger discovery prepares each document |
-//! | [`Registry::globals`] | [`claudine_globals`](super::globals::claudine_globals) | the catalog loaded from [`HOST_CATALOG_TEXT`] |
+//! | [`Registry::registered`] | [`registered_payload`], served to [`claudine_hosts`](super::bundle::claudine_hosts)'s profile | registration prepares the trigger's payload |
+//! | [`Registry::globals`] | [`claudine_globals`](super::globals::claudine_globals) | the namespace members prepared ([`prepare_namespace_catalog`]) |
+//! | [`Registry::kinds`] | [`formal_sequence_kind`] | the `yaml-schema` members prepared ([`prepare_kinds`]) |
 //!
-//! Discovery's selection rules do not change: a same-name file in a schema
-//! root still replaces a bundle document and is prepared at run time.
-//! Regenerate with `just shipped-schemas` from the repository root after
-//! editing `claudine/schemas/` or the code that prepares it; see
-//! `claudine/docs/topics/schemas.md`.
+//! Every record keeps its member's bundle path (`schemas/seq.yaml`) as its
+//! provenance. Regenerate with `just shipped-schemas` from the repository
+//! root after editing `claudine/registration/` or the code that prepares
+//! it; see `claudine/docs/topics/schemas.md`.
 
 use std::sync::OnceLock;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalCatalogRecord};
 use darkmatter::markdown::schemas::shipped::{self as darkmatter_shipped, FreshDarkmatter};
-use darkmatter::markdown::schemas::triggers::prepare_trigger_bundle;
-use simplified_schema::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord};
 use serde::{Deserialize, Serialize};
 use simplified_schema::embedded::EmbeddedDocument;
 use simplified_schema::shipped::{
-    self as mechanism, Acceptance, AcceptedArtifact, ArtifactDescriptor, FreshLower, LowerArtifact, PreparationMode,
+    self as mechanism, Acceptance, AcceptedArtifact, ArtifactDescriptor, CanonicalDigestRecord, FreshLower, LowerArtifact,
     RecordError, Refusal, Section, Sections,
 };
+use simplified_schema::simplified::DefinitionTable;
+use simplified_schema::triggers::assemble::ResolvedPayload;
+use simplified_schema::SchemaShape;
 
-use super::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, source_bundle};
-use super::globals::{CLAUDINE_GLOBALS, HOST_CATALOG_PATH, HOST_CATALOG_TEXT, globals_from_sources};
+use super::globals::{CLAUDINE_GLOBALS, HOST_CATALOG_IDENTITY, globals_from_sources, prepare_namespace_catalog};
+use crate::composition::inventory::{self, MemberKind};
 
 /// The owner name in Claudine's artifact header.
 pub const OWNER: &str = "claudine";
@@ -49,7 +54,7 @@ pub const OWNER: &str = "claudine";
 /// Claudine's preparation revision. Increment it whenever code changes what
 /// the shipped sources prepare to (a record's shape, or how the bundle or the
 /// host catalog is prepared), then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 5;
+pub const PREPARATION_REVISION: u32 = 7;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "claudine/lib/generated/shipped.json";
@@ -61,21 +66,23 @@ pub const REGENERATE_COMMAND: &str = "just shipped-schemas";
 /// The checked-in artifact compiled into this build.
 pub const ARTIFACT: &[u8] = include_bytes!("../../../generated/shipped.json");
 
-/// Every compiled-in text Claudine's preparation reads, by virtual path: each
-/// bundle document as `claudine/{file}` (the identity a
-/// [`PreparedTriggerBundle`] matches), then the host catalog at
-/// [`HOST_CATALOG_PATH`], whose nested path is never mistaken for a bundle
-/// document.
+/// Every compiled-in text Claudine's preparation reads, by virtual path:
+/// every inventory member as `claudine/registration/{path}`. A change to any
+/// member's bytes makes the artifact stale.
 pub fn sources() -> &'static [EmbeddedDocument<'static>] {
     static PATHS: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
     static SOURCES: OnceLock<Vec<EmbeddedDocument<'static>>> = OnceLock::new();
     SOURCES.get_or_init(|| {
-        let paths = PATHS.get_or_init(|| source_bundle().documents());
-        let mut documents: Vec<EmbeddedDocument<'static>> =
-            paths.iter().map(|(path, text)| EmbeddedDocument { path, text }).collect();
-        documents.push(EmbeddedDocument { path: HOST_CATALOG_PATH, text: HOST_CATALOG_TEXT });
-        documents
+        let paths = PATHS.get_or_init(|| {
+            inventory::members().iter().map(|member| (source_identity(member.path), member.text)).collect()
+        });
+        paths.iter().map(|(path, text)| EmbeddedDocument { path, text }).collect()
     })
+}
+
+/// The source identity of inventory member `path` in the artifact header.
+fn source_identity(path: &str) -> String {
+    format!("{}/{path}", inventory::SOURCE_DIR)
 }
 
 /// What Claudine's artifact must describe over `sources` and the lower
@@ -94,16 +101,102 @@ pub fn descriptor_over<'a>(sources: &'a [EmbeddedDocument<'a>], lower: &'a [Lowe
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaudinePayload {
-    /// What trigger discovery derives from the bundle, in sorted file order.
-    pub bundle: TriggerBundleRecord,
-    /// The host catalog, `claudine/schemas/globals.yaml`, resolved.
+    /// Each trigger member's payload as registration prepares it, in
+    /// bundle-path order.
+    pub registered: Vec<RegisteredTriggerRecord>,
+    /// The host catalog, prepared from the inventory's namespace members.
     pub globals: GlobalCatalogRecord,
+    /// The inventory's `yaml-schema` members, prepared, in bundle-path order.
+    pub kind_definitions: Vec<KindRecord>,
+}
+
+/// One prepared `kind: yaml-schema` member: what a document of its kinds is
+/// validated against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KindRecord {
+    /// The member's bundle path (`schemas/formal-sequence-file.yaml`), its
+    /// provenance.
+    pub path: String,
+    /// The kinds its `$schema` claims, in first-declared order.
+    pub kinds: Vec<String>,
+    /// The lowered JSON Schema of its `$schema`, an object.
+    pub json_schema: serde_json::Value,
+}
+
+/// One trigger member's registered payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredTriggerRecord {
+    /// The member's bundle path (`schemas/composition.yaml`), its provenance.
+    pub path: String,
+    /// Its prepared payload; `null` for a matcher-only trigger.
+    #[serde(deserialize_with = "simplified_schema::shipped::present")]
+    pub payload: Option<RegisteredPayloadRecord>,
+}
+
+/// A registered trigger payload, resolved and checked inside the embedded
+/// bundle: an object schema or a root union of object schemas.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredPayloadRecord {
+    /// The lowered JSON Schema.
+    pub json_schema: serde_json::Value,
+    /// The object payload's shape; `null` for a root union or a payload with
+    /// no SimplifiedSchema projection.
+    #[serde(deserialize_with = "simplified_schema::shipped::present")]
+    pub shape: Option<SchemaShape>,
+    /// A root union's inline arms; `null` for an object payload.
+    #[serde(deserialize_with = "simplified_schema::shipped::present")]
+    pub union_arms: Option<Vec<SchemaShape>>,
+    /// The cyclic named types the payload reaches, in allocation order.
+    pub definitions: DefinitionTable,
+    /// The bundle file declaring each imported default, by property path.
+    pub default_files: Vec<DefaultFileRecord>,
+    /// The canonical digest of `json_schema`.
+    pub digest: CanonicalDigestRecord,
+}
+
+/// One entry of a payload's imported-default files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultFileRecord {
+    /// The object-property path of the defaulted property.
+    pub property: Vec<String>,
+    /// The declaring file's virtual path with `/` separators on every
+    /// platform (`<claudine>/schemas/shared.yaml`).
+    pub file: String,
+}
+
+/// `path` spelled with `/` separators, so the artifact's bytes do not depend
+/// on the platform that generated it.
+fn portable_path(path: &std::path::Path) -> Option<String> {
+    let parts = path.components().map(|part| part.as_os_str().to_str()).collect::<Option<Vec<_>>>()?;
+    Some(parts.join("/"))
+}
+
+/// A [`portable_path`] spelling as this platform's path: the value uncached
+/// preparation produces.
+fn native_path(portable: &str) -> PathBuf {
+    portable.split('/').collect()
+}
+
+/// An accepted [`KindRecord`], ready to validate with.
+#[derive(Debug)]
+pub struct PreparedKind {
+    /// [`KindRecord::path`].
+    pub path: String,
+    /// [`KindRecord::kinds`].
+    pub kinds: Vec<String>,
+    /// [`KindRecord::json_schema`], shared by every validator built from it.
+    pub json_schema: std::sync::Arc<serde_json::Value>,
 }
 
 /// An accepted artifact's entries, one [`Section`] per payload member.
 struct Prepared {
-    bundle: Section<PreparedTriggerBundle>,
+    registered: Section<HashMap<String, Option<ResolvedPayload>>>,
     globals: Section<GlobalCatalog>,
+    kinds: Section<Vec<PreparedKind>>,
 }
 
 /// Claudine's loaded artifact, or why it was refused. Every view returns the
@@ -156,7 +249,11 @@ impl Registry {
             Ok(accepted) => accepted.payload(),
             Err(refusal) => return Err(refusal.clone()),
         };
-        let refusals = [prepared.bundle.get(accept_bundle).err(), prepared.globals.get(accept_globals).err()];
+        let refusals = [
+            prepared.registered.get(accept_registered).err(),
+            prepared.globals.get(accept_globals).err(),
+            prepared.kinds.get(accept_kinds).err(),
+        ];
         match refusals.into_iter().flatten().next() {
             Some(refusal) => Err(refusal.clone()),
             None => Ok(()),
@@ -167,22 +264,36 @@ impl Registry {
         self.artifact.as_ref().ok().map(AcceptedArtifact::payload)
     }
 
-    /// The accepted prepared bundle; `None` when the artifact or the section
-    /// was refused, so discovery prepares each bundle document.
-    pub fn bundle(&self) -> Option<&PreparedTriggerBundle> {
-        self.accepted()?.bundle.get(accept_bundle).ok()
+    /// The accepted registered payloads, by trigger bundle path (`None`
+    /// for a matcher-only trigger); `None` when the artifact or the section
+    /// was refused, so registration prepares each payload.
+    pub fn registered(&self) -> Option<&HashMap<String, Option<ResolvedPayload>>> {
+        self.accepted()?.registered.get(accept_registered).ok()
     }
 
     /// Claudine's host catalog.
     ///
     /// ## Panics
     ///
-    /// When the accepted entry is unavailable and the compiled-in catalog
-    /// does not load: a build defect a test catches.
+    /// When the accepted entry is unavailable and the namespace members do
+    /// not prepare: a build defect a test catches.
     pub fn globals(&self) -> &GlobalCatalog {
         match self.accepted().map(|prepared| prepared.globals.get(accept_globals)) {
             Some(Ok(catalog)) => catalog,
             _ => globals_from_sources(),
+        }
+    }
+
+    /// The inventory's prepared `yaml-schema` members.
+    ///
+    /// ## Panics
+    ///
+    /// When the accepted entry is unavailable and the members do not
+    /// prepare: a build defect a test catches.
+    pub fn kinds(&self) -> &[PreparedKind] {
+        match self.accepted().map(|prepared| prepared.kinds.get(accept_kinds)) {
+            Some(Ok(kinds)) => kinds,
+            _ => kinds_from_sources(),
         }
     }
 }
@@ -199,47 +310,240 @@ pub fn registry() -> &'static Registry {
     REGISTRY.get_or_init(|| Registry::load(Some(ARTIFACT)))
 }
 
-/// The process registry's prepared bundle, attached to
-/// [`claudine_schema_bundle`](super::bundle::claudine_schema_bundle). Served
-/// only while the supplied bundle has Claudine's name and exactly the files
-/// it was prepared from.
-pub static BUNDLE: PreparedBundleDescriptor = PreparedBundleDescriptor { owner: OWNER, provider: || registry().bundle() };
-
-fn accept_sections(_: &Acceptance<'_>, sections: &mut Sections) -> Result<Prepared, RecordError> {
-    Ok(Prepared { bundle: sections.take("bundle")?, globals: sections.take("globals")? })
+/// The process registry's prepared payload of the trigger at bundle path
+/// `path`, which [`claudine_hosts`](super::bundle::claudine_hosts) serves to
+/// registration; `None` when the artifact or its section was refused, or for
+/// a matcher-only trigger, so registration prepares it from text. The
+/// artifact describes exactly the compiled inventory, so a served payload
+/// was prepared from the bytes the profile verifies.
+pub fn registered_payload(path: &str) -> Option<ResolvedPayload> {
+    registry().registered()?.get(path)?.clone()
 }
 
-fn accept_bundle(acceptance: &Acceptance<'_>, record: TriggerBundleRecord) -> Result<PreparedTriggerBundle, RecordError> {
-    if record.bundle != CLAUDINE_SCHEMA_BUNDLE_NAME {
-        return Err(RecordError::new("/bundle", format!("`{}` is not Claudine's bundle", record.bundle)));
+fn accept_sections(_: &Acceptance<'_>, sections: &mut Sections) -> Result<Prepared, RecordError> {
+    Ok(Prepared {
+        registered: sections.take("registered")?,
+        globals: sections.take("globals")?,
+        kinds: sections.take("kind_definitions")?,
+    })
+}
+
+fn accept_registered(
+    _: &Acceptance<'_>,
+    records: Vec<RegisteredTriggerRecord>,
+) -> Result<HashMap<String, Option<ResolvedPayload>>, RecordError> {
+    let expected: Vec<String> = inventory::members_of(MemberKind::Trigger).map(|member| member.bundle_path()).collect();
+    if records.len() != expected.len() {
+        return Err(RecordError::new("", format!("{} triggers are recorded, {} are compiled in", records.len(), expected.len())));
     }
-    PreparedTriggerBundle::from_record(acceptance, "", record)
+    records
+        .into_iter()
+        .zip(expected)
+        .enumerate()
+        .map(|(index, (record, path))| {
+            let at = format!("/{index}");
+            if record.path != path {
+                return Err(RecordError::new(format!("{at}/path"), format!("`{}` is recorded where `{path}` belongs", record.path)));
+            }
+            let Some(payload) = record.payload else { return Ok((path, None)) };
+            if !payload.json_schema.is_object() {
+                return Err(RecordError::new(format!("{at}/payload/json_schema"), "a payload lowers to a JSON Schema object"));
+            }
+            if payload.union_arms.is_some() == payload.shape.is_some() {
+                return Err(RecordError::new(
+                    format!("{at}/payload"),
+                    "a payload records an object shape or root-union arms, not both",
+                ));
+            }
+            let digest = payload
+                .digest
+                .digest()
+                .map_err(|message| RecordError::new(format!("{at}/payload/digest/revision"), message))?;
+            let resolved = ResolvedPayload {
+                json_schema: Arc::new(payload.json_schema),
+                shape: payload.shape.map(Arc::new),
+                union_arms: payload.union_arms.map(Arc::from),
+                definitions: Arc::new(payload.definitions),
+                dependencies: Vec::new(),
+                searched: Vec::new(),
+                advisories: Vec::new(),
+                pending: None,
+                digest: Some(digest),
+                default_files: payload.default_files.into_iter().map(|entry| (entry.property, native_path(&entry.file))).collect(),
+            };
+            Ok((path, Some(resolved)))
+        })
+        .collect()
 }
 
 fn accept_globals(_: &Acceptance<'_>, record: GlobalCatalogRecord) -> Result<GlobalCatalog, RecordError> {
-    if record.identity != HOST_CATALOG_PATH {
+    if record.identity != HOST_CATALOG_IDENTITY {
         return Err(RecordError::new("/identity", format!("`{}` is not the host catalog", record.identity)));
     }
     GlobalCatalog::from_record(record, CLAUDINE_GLOBALS)
 }
 
+fn accept_kinds(_: &Acceptance<'_>, records: Vec<KindRecord>) -> Result<Vec<PreparedKind>, RecordError> {
+    let expected: Vec<String> = inventory::members_of(MemberKind::YamlSchema).map(|member| member.bundle_path()).collect();
+    if records.len() != expected.len() {
+        return Err(RecordError::new("", format!("{} kinds are recorded, {} are compiled in", records.len(), expected.len())));
+    }
+    records
+        .into_iter()
+        .zip(expected)
+        .enumerate()
+        .map(|(index, (record, path))| {
+            let at = format!("/{index}");
+            if record.path != path {
+                return Err(RecordError::new(format!("{at}/path"), format!("`{}` is recorded where `{path}` belongs", record.path)));
+            }
+            if !record.json_schema.is_object() {
+                return Err(RecordError::new(format!("{at}/json_schema"), "a kind lowers to a JSON Schema object"));
+            }
+            if record.kinds.is_empty() {
+                return Err(RecordError::new(format!("{at}/kinds"), "a kind definition claims at least one kind"));
+            }
+            Ok(PreparedKind { path: record.path, kinds: record.kinds, json_schema: std::sync::Arc::new(record.json_schema) })
+        })
+        .collect()
+}
+
+/// Prepares every `yaml-schema` member of the inventory from its embedded
+/// bytes inside the inventory's bundle scope, as a reader of the published
+/// bundle prepares it, and returns its record.
+///
+/// ## Errors
+///
+/// A message naming the first member that does not prepare or claims no
+/// kind.
+pub fn prepare_kinds() -> Result<Vec<KindRecord>, String> {
+    use simplified_schema::yaml_documents::{RegisteredDefinition, RegisteredSource};
+    let sources = inventory::bundle_sources();
+    let context = inventory::bundle_context();
+    inventory::members_of(MemberKind::YamlSchema)
+        .map(|member| {
+            let path = member.bundle_path();
+            let location = sources.path_of(&path).ok_or_else(|| format!("`{path}` is not a bundle member"))?;
+            let (resolved, _) = simplified_schema::resolve::bundle::with(sources, || {
+                simplified_schema::resolve::prepare_yaml_schema_text(
+                    &location,
+                    member.text,
+                    &[],
+                    &context,
+                    darkmatter::markdown::schemas::shipped_sources(),
+                )
+            });
+            let resolved = resolved.map_err(|error| format!("`{path}` does not prepare: {error}"))?;
+            let json_schema = resolved.json_schema.clone();
+            let source = RegisteredSource { host: crate::composition::registration::HOST_ID.to_string(), path: path.clone(), file: location };
+            let definition =
+                RegisteredDefinition::new(source, member.text, resolved, path.clone()).map_err(|error| format!("`{path}` claims no kind: {error}"))?;
+            Ok(KindRecord { kinds: definition.definition().kinds().to_vec(), path, json_schema })
+        })
+        .collect()
+}
+
+/// [`prepare_kinds`], once per process: the fallback when the shipped
+/// artifact's entry was refused.
+fn kinds_from_sources() -> &'static [PreparedKind] {
+    static KINDS: OnceLock<Vec<PreparedKind>> = OnceLock::new();
+    KINDS.get_or_init(|| {
+        darkmatter::note_work!(ShippedRuntimePreparation);
+        prepare_kinds()
+            .unwrap_or_else(|error| panic!("Claudine's YAML kinds must prepare: {error}"))
+            .into_iter()
+            .map(|record| PreparedKind { path: record.path, kinds: record.kinds, json_schema: std::sync::Arc::new(record.json_schema) })
+            .collect()
+    })
+}
+
+/// The prepared kind that claims `kind: sequence`
+/// (`schemas/formal-sequence-file.yaml`).
+///
+/// ## Panics
+///
+/// When no inventory member claims `sequence`: a build defect a test
+/// catches.
+pub fn formal_sequence_kind() -> &'static PreparedKind {
+    registry()
+        .kinds()
+        .iter()
+        .find(|kind| kind.kinds.iter().any(|claimed| claimed == "sequence"))
+        .expect("Claudine's inventory defines `kind: sequence`")
+}
+
 /// Prepares the payload from the compiled sources over the freshly prepared
-/// Simplified Schema data `lower`, consulting no artifact, registry, or
-/// identity-keyed memo, and runs every check discovery and catalog loading
-/// run.
+/// Simplified Schema data `lower`, and runs every check discovery and
+/// catalog loading run. The trigger bundle consults no artifact, registry,
+/// or identity-keyed memo. The namespace catalog and the YAML kinds resolve
+/// inside the inventory's bundle scope, which has no uncached mode, so they
+/// read the lower registries; a registry serves only an artifact whose
+/// recorded sources match the compiled text.
 ///
 /// ## Errors
 ///
 /// A message naming the first source that does not prepare or check.
-pub fn prepare_payload(lower: &FreshLower) -> Result<ClaudinePayload, String> {
-    let mode = PreparationMode::Uncached(lower);
-    let bundle = prepare_trigger_bundle(source_bundle(), mode).map_err(|error| error.to_string())?;
-    let catalog = [EmbeddedDocument { path: HOST_CATALOG_PATH, text: HOST_CATALOG_TEXT }];
-    let globals = GlobalCatalogRecord::prepare(HOST_CATALOG_PATH, &catalog, CLAUDINE_GLOBALS, mode)
-        .map_err(|error| error.to_string())?;
+pub fn prepare_payload(_lower: &FreshLower) -> Result<ClaudinePayload, String> {
+    let registered = prepare_registered()?;
+    let catalog = prepare_namespace_catalog()?;
+    let globals = GlobalCatalogRecord::of(HOST_CATALOG_IDENTITY, &catalog.catalog);
     GlobalCatalog::from_record(globals.clone(), CLAUDINE_GLOBALS)
         .map_err(|error| format!("the host catalog record does not rebuild: {}", error.message))?;
-    Ok(ClaudinePayload { bundle, globals })
+    let kind_definitions = prepare_kinds()?;
+    Ok(ClaudinePayload { registered, globals, kind_definitions })
+}
+
+/// Prepares every trigger member of the inventory as registration prepares
+/// it in process ([`darkmatter::config::registration::prepare_embedded_payload`]
+/// over the compiled registration's embedded snapshot), and returns its
+/// records in bundle-path order.
+///
+/// ## Errors
+///
+/// A message naming the first trigger that does not prepare, carries an
+/// advisory (which the record does not keep), or names a file outside the
+/// embedded bundle.
+pub fn prepare_registered() -> Result<Vec<RegisteredTriggerRecord>, String> {
+    let snapshot = super::bundle::snapshot_of(crate::composition::registration::RegistrationInventory::compiled_claudine())
+        .map_err(|refusal| format!("the compiled registration does not verify: {}", refusal.message))?;
+    let owned = darkmatter::config::registration::md_owned_names();
+    inventory::members_of(MemberKind::Trigger)
+        .map(|member| {
+            let path = member.bundle_path();
+            let matcher_only = simplified_schema::triggers::parse_trigger_envelope_from_str(member.text)
+                .map_err(|error| format!("`{path}` is not a valid trigger: {error}"))?
+                .is_some_and(|envelope| envelope.payload.is_none());
+            if matcher_only {
+                return Ok(RegisteredTriggerRecord { path, payload: None });
+            }
+            let payload = darkmatter::config::registration::prepare_embedded_payload(&snapshot, &path, owned)
+                .map_err(|error| format!("`{path}` does not prepare: {error}"))?
+                .ok_or_else(|| format!("`{path}` is not a schema trigger"))?;
+            if !payload.advisories.is_empty() {
+                return Err(format!("`{path}` prepares with advisories, which the artifact does not record: {:?}", payload.advisories));
+            }
+            let default_files = payload
+                .default_files
+                .iter()
+                .map(|(property, file)| {
+                    portable_path(file)
+                        .map(|file| DefaultFileRecord { property: property.clone(), file })
+                        .ok_or_else(|| format!("`{path}` names a default file that is not UTF-8"))
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(RegisteredTriggerRecord {
+                path,
+                payload: Some(RegisteredPayloadRecord {
+                    digest: CanonicalDigestRecord::of(&payload.json_schema),
+                    json_schema: (*payload.json_schema).clone(),
+                    shape: payload.shape.as_deref().cloned(),
+                    union_arms: payload.union_arms.as_deref().map(<[SchemaShape]>::to_vec),
+                    definitions: (*payload.definitions).clone(),
+                    default_files,
+                }),
+            })
+        })
+        .collect()
 }
 
 /// A fresh, uncached generation of Claudine's artifact.

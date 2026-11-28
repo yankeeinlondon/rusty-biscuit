@@ -189,6 +189,12 @@ types:
 `parameters(...)` and `returns(...)` are required; the rest are optional.
 Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
 
+A host's callable catalog (`kind: expression-schema` or
+`kind: mutation-schema`) is the same `types:` mapping with a private scope:
+its signatures may name the file's own helper types, but no other file can
+import them or its callables, and the catalog is never a document's schema
+(see [Callable catalogs](schema-documents.md#callable-catalogs-kind-expression-schema-and-kind-mutation-schema)).
+
 | Constraint | Meaning |
 |---|---|
 | `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |
@@ -618,7 +624,40 @@ An arm is selected **only when** all of the following hold:
 - the instance contains that key with an authored value, and
 - exactly **one** arm's typed literal equals the instance value.
 
-Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep byte-identical `anyOf` diagnostics.
+Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep the ordinary union report described below.
+
+### Unknown Keys in a Union
+
+When a value fails a union only because it carries a key the union does not
+allow, you get the same unknown-key problem a plain closed object gives, not
+the generic "is not valid under any of the schemas" union failure:
+
+```yaml
+$schema:
+    tts: "boolean | { provider: string, voice: string }"
+```
+
+| Value of `tts` | Reported |
+| --- | --- |
+| `{ provider: say, bogus: 1 }` | `Additional properties are not allowed ('bogus' was unexpected)` at `/tts`, with `offending_properties: ["bogus"]` |
+| `{ provider: 3, bogus: 1 }` | that unknown-key problem and the type problem at `/tts/provider` |
+
+A key is reported only when **every arm that could hold the value rejects
+it**. An arm whose type, `literal`, or `enum` cannot match the value at all
+(`boolean` above, for a mapping) is left out of the decision. Every other arm
+must reject the key at that same mapping, so a key another arm declares, or
+one an open mapping (a `<string>` catch-all, the `object` type) admits, is
+never called unknown:
+
+| Union | Value | Reported |
+| --- | --- | --- |
+| `{ a: number } \| { b: number }` | `{ a: 1, zzz: 1 }` | unknown key `zzz` |
+| `{ a: number } \| { b: number }` | `{ a: 1, b: 1 }` | the ordinary union failure: each key is known to one arm |
+| `{ a: number } \| { b: number, <string>: string }` | `{ a: 1, zzz: 3 }` | no unknown key: the second arm admits `zzz` and reports the values it rejects |
+
+The rule sees through a union nested at the same place, such as an arm that
+names another union type, and applies wherever the union sits: a property, a
+list item, or a nested field.
 
 ### Choosing an Arm: Reporting versus Changing Data
 
@@ -651,7 +690,7 @@ flowchart TD
 | Conversion (validation and compose) | An arm accepts the value as written; otherwise exactly one arm is reachable, or the number-over-boolean or JSON-over-YAML tie-breaker settles it ([Choosing a Union Option](../conversion.md#choosing-a-union-option)). Arm order never matters. | The value is left as written; a tie no tie-breaker settles is an error naming each reading. |
 | Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](types.md#files)). | The value is left unchanged. |
 | Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
-| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
+| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. At the root, with no tag, an arm that types a key the document writes with a value as `null` alone drops out (`root_union_property_shape`). | Every applicable alternative is offered or listed. |
 
 The same rules apply to every item of a `U[]` list, judged on its own, so
 neighboring items can select different arms. Closest-arm scoring only ever

@@ -212,7 +212,7 @@ pub(crate) fn run_composition_inner(
     // replaces this with the view it captures for itself.
     // One TTS pre-warm worker for the whole command, shared by every document
     // a handoff adopts; dropping it on return cancels unfinished preparation.
-    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(false);
     let mut invocation = crate::request::with_darkmatter_config(InvocationContext::capture(crate::request::snapshot())?)
         .with_environment_source(crate::request::document_environment_source())
         .with_prewarm(prewarm.handle());
@@ -302,10 +302,16 @@ pub(crate) fn run_composition_inner(
         interactive_opts,
     )
     .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    // The pre-launch check resolves a `$schema` template through the session
+    // the document's first composition then takes, so both read the same
+    // snapshot under the same `permissions`.
+    let mut launch_slot_session = None;
     let (source, mut set_overrides) = if staged_boot::authors_initialize(&source) {
         (source, set_overrides)
     } else {
         let term = crate::log::terminal();
+        let session = crate::commands::wrap::launch_slot_session(&invocation, &file_resolution_context)
+            .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         let pre = pre_validate_with_interactive_collection(
             &source,
             set_overrides.as_ref(),
@@ -316,8 +322,10 @@ pub(crate) fn run_composition_inner(
             !caller_input_records.is_empty(),
             kind.mode(),
             invocation.trigger_findings(),
+            Some(&session),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+        launch_slot_session = Some(session);
         emit_dropped_optional_warnings(&pre.dropped_optionals);
         // Pre-validation may have supplied a missing value or dropped an
         // invalid optional; the caller records must carry the same values,
@@ -425,6 +433,7 @@ pub(crate) fn run_composition_inner(
             invocation.clone(),
             source_context,
             None,
+            launch_slot_session.take(),
         )?;
 
         match outcome {
@@ -533,6 +542,7 @@ pub(crate) fn prepare_and_run_active_document(
     invocation: InvocationContext,
     source_context: SourceContext,
     step_scope: Option<&StepScope>,
+    launch_slot_session: Option<Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<(ActiveDocumentOutcome, Option<std::path::PathBuf>)> {
     let perf_enabled = shared.perf;
     // Captured for frontmatter-excerpt enrichment of any error rendered below;
@@ -599,10 +609,8 @@ pub(crate) fn prepare_and_run_active_document(
     // adopted target — is booted in stages: nothing may dereference a body
     // dependency before its `initialize` has had the chance to create it. The
     // command-level body audit below is therefore skipped for it; the staged
-    // boot audits the stabilized reread instead. A dry run fires no lifecycle
-    // event, so it keeps the eager path and may still report a transclusion
-    // only `initialize` would have created.
-    let staged = !shared.dry_run && staged_boot::authors_initialize(&source);
+    // boot audits the stabilized reread instead.
+    let staged = staged_boot::authors_initialize(&source);
 
     // Build per-document provider-selection state from the invocation owner
     // and definitive source bundle without another repository observation.
@@ -640,7 +648,6 @@ pub(crate) fn prepare_and_run_active_document(
                 &raw_hints,
                 shared.explicit_provider(),
                 shared.model.as_deref(),
-                shared.dry_run,
                 shared.silent,
                 &source.resolved_path,
             )
@@ -741,7 +748,6 @@ pub(crate) fn prepare_and_run_active_document(
             ),
             Some(Arc::clone(shared_approval_cache)),
         ),
-        shared.dry_run,
         shared.yolo,
     );
 
@@ -770,6 +776,7 @@ pub(crate) fn prepare_and_run_active_document(
             &approval_options,
             kind.mode(),
             &mut prep_substages,
+            launch_slot_session.as_ref(),
         )?
     };
 
@@ -811,6 +818,7 @@ pub(crate) fn prepare_and_run_active_document(
         prepared_context,
         document_epoch,
         step_scope,
+        launch_slot_session,
     )?;
 
     Ok((outcome, commit_repo_root))
@@ -846,6 +854,7 @@ fn eager_shell_preflight(
     approval_options: &claudine::harness::ShellApprovalOptions,
     mode: claudine::composition::CompositionMode,
     prep_substages: &mut Vec<crate::perf::SubstageTiming>,
+    slot_session: Option<&Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<DocumentBoot> {
     // The audit composes through the same canonical options, with the same
     // overlay and caller layers, as the preparation that executes the
@@ -862,12 +871,12 @@ fn eager_shell_preflight(
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
         // Discovery, not judgment: this pass exists to find `::shell`
         // directives. The verdict belongs to canonical preparation — and for
-        // an `initialize`-declaring dry run, which still reaches this audit,
-        // withholding it keeps the schema from outranking `initialize` (R4) —
-        // and reporting one here would render Darkmatter's raw error instead
+        // an `initialize`-declaring document, withholding it keeps the schema
+        // from outranking `initialize` (R4) — and reporting one here would render Darkmatter's raw error instead
         // of the typed one the direct route renders (AC28).
         defer_schema_verdict: true,
         proxy_overlay: proxy_overlay.clone(),
+        slot_session: slot_session.cloned(),
         ..PrepareOptions::new(file_resolution_context.clone())
     }
     .with_layered_overrides(caller_overrides.clone());
@@ -1217,6 +1226,11 @@ fn build_and_run_loop(
                 // frontmatter, shell audit, and — carried on the prepared
                 // input layers — every lifecycle event it fires.
                 iteration_options.loop_values = Some(ctx.ambient.clone());
+                // A later pass reads what the agent left behind: its `$schema`
+                // template resolves afresh, not from pass 1's snapshot.
+                if ctx.iteration > 1 {
+                    iteration_options.slot_session = None;
+                }
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
                         // The reread extends the snapshot `initialize` ran with.
@@ -1543,7 +1557,6 @@ fn build_execution_request(
         operation: effective_operation(shared, step_scope),
         sandbox: shared.sandbox,
         repo: shared.repo,
-        dry_run: shared.dry_run,
         mcp: shared.mcp,
         mcp_use: shared.mcp_use.clone(),
         strict: shared.strict,
@@ -1640,6 +1653,9 @@ fn execute_loop_or_single(
     prepared_context: darkmatter::markdown::compose::ComposeContext,
     document_epoch: claudine::invocation_context::DocumentEpoch,
     step_scope: Option<&StepScope>,
+    // The session the document's pre-launch check resolved its `$schema`
+    // template with, for its first run.
+    launch_slot_session: Option<Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared, document_epoch.environment());
 
@@ -1702,6 +1718,11 @@ fn execute_loop_or_single(
         proxy_overlay: proxy_overlay.clone(),
         // Each iteration supplies its own (`run_loop_with_overrides` below).
         loop_values: None,
+        passive: None,
+        allow_missing_transclusions: false,
+        // The pre-launch check's session serves this document's first run;
+        // a later pass resolves through its own.
+        slot_session: launch_slot_session,
     };
 
     let is_proxy_target = adopted_handoff.is_some();
@@ -1733,86 +1754,84 @@ fn execute_loop_or_single(
         }
     };
 
-    if !shared.dry_run {
-        let loop_result = build_and_run_loop(
-            &source,
-            &loop_prepare_options,
-            loop_options,
-            schema_stage,
-            staged.as_ref(),
-            &boot_approval_options,
-            entry,
-            kind,
-            &file_for_loop,
-            resolved_target.clone(),
-            system_prompt_args,
-            &env_overrides,
-            &shared_approval_cache,
-            header_emitted,
-            &prep_context,
-            &prepared_context,
-            &document_epoch,
-            verbose,
-            shared,
-            &proxy_overlay,
-            &handoff_ledger,
-            step_scope,
-        )?;
-        if let Some(loop_result) = loop_result {
-            if let Some(error) = loop_result.error {
-                // The interrupt path already announced itself via the INFO
-                // status line; suppress the red `Error:` echo and exit with
-                // the conventional 130 code so the shell sees a clean Ctrl+C.
-                if matches!(error, CompositionError::LoopInterrupted { .. }) {
-                    return Ok(ActiveDocumentOutcome::done(loop_result.final_exit_code));
-                }
-                // Rate-limit halt has its own conventional exit code
-                // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
-                // transient halt and retry-after-cool-off. Render the styled
-                // error block inline, then return `Ok(75)` so the outer
-                // process exits with the right code.
-                if matches!(error, CompositionError::LoopRateLimited { .. }) {
-                    emit_rate_limit_halt(&error);
-                    return Ok(ActiveDocumentOutcome::done(
-                        claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE,
-                    ));
-                }
-                // A late-binding evaluation error surfaced by the loop engine
-                // (`initialize` / `loop` gate) has no stderr renderer in the
-                // lib; emit its styled block here, at the consumption boundary,
-                // before returning (no further lifecycle events fire). Marks it
-                // already-emitted so the outer renderer does not double-emit.
-                let error = crate::output::error_walker::emit_lifecycle_evaluation_error_block(
-                    error,
-                    &wrap_terminal(),
-                );
-                return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
+    let loop_result = build_and_run_loop(
+        &source,
+        &loop_prepare_options,
+        loop_options,
+        schema_stage,
+        staged.as_ref(),
+        &boot_approval_options,
+        entry,
+        kind,
+        &file_for_loop,
+        resolved_target.clone(),
+        system_prompt_args,
+        &env_overrides,
+        &shared_approval_cache,
+        header_emitted,
+        &prep_context,
+        &prepared_context,
+        &document_epoch,
+        verbose,
+        shared,
+        &proxy_overlay,
+        &handoff_ledger,
+        step_scope,
+    )?;
+    if let Some(loop_result) = loop_result {
+        if let Some(error) = loop_result.error {
+            // The interrupt path already announced itself via the INFO
+            // status line; suppress the red `Error:` echo and exit with
+            // the conventional 130 code so the shell sees a clean Ctrl+C.
+            if matches!(error, CompositionError::LoopInterrupted { .. }) {
+                return Ok(ActiveDocumentOutcome::done(loop_result.final_exit_code));
             }
-            // The engine's surfaced handoff is consumed here, never dropped
-            // (R1). A loop document whose `initialize`, an iteration's terminal
-            // stack, or the loop gate proxies ends the source and hands the run
-            // to the active-document coordinator, which reruns loop-vs-single for
-            // the target (R7). It is not an extra iteration of the source loop.
-            if let Some(handoff) = loop_result.handoff {
-                return Ok(ActiveDocumentOutcome::Handoff(handoff));
+            // Rate-limit halt has its own conventional exit code
+            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+            // transient halt and retry-after-cool-off. Render the styled
+            // error block inline, then return `Ok(75)` so the outer
+            // process exits with the right code.
+            if matches!(error, CompositionError::LoopRateLimited { .. }) {
+                emit_rate_limit_halt(&error);
+                return Ok(ActiveDocumentOutcome::done(
+                    claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE,
+                ));
             }
-            // A `break`'s code is the process exit code only for the root
-            // invocation's loop; a document looping inside a sequence step
-            // records it in the summary and the run continues.
-            let mut exit_code = loop_result.final_exit_code;
-            if let Some(broken) = &loop_result.broken {
-                use claudine::composition::lifecycle::LifecycleEmitter as _;
-                claudine::composition::DefaultLifecycleEmitter.emit_info(&broken.summary(), &wrap_terminal());
-                if step_scope.is_none() {
-                    exit_code = i32::from(broken.code);
-                }
-            }
-            return Ok(ActiveDocumentOutcome::Done {
-                exit_code,
-                // A loop a `break` ended before any pass ran published nothing.
-                final_output: (loop_result.iteration_count > 0).then_some(loop_result.last_output),
-            });
+            // A late-binding evaluation error surfaced by the loop engine
+            // (`initialize` / `loop` gate) has no stderr renderer in the
+            // lib; emit its styled block here, at the consumption boundary,
+            // before returning (no further lifecycle events fire). Marks it
+            // already-emitted so the outer renderer does not double-emit.
+            let error = crate::output::error_walker::emit_lifecycle_evaluation_error_block(
+                error,
+                &wrap_terminal(),
+            );
+            return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
         }
+        // The engine's surfaced handoff is consumed here, never dropped
+        // (R1). A loop document whose `initialize`, an iteration's terminal
+        // stack, or the loop gate proxies ends the source and hands the run
+        // to the active-document coordinator, which reruns loop-vs-single for
+        // the target (R7). It is not an extra iteration of the source loop.
+        if let Some(handoff) = loop_result.handoff {
+            return Ok(ActiveDocumentOutcome::Handoff(handoff));
+        }
+        // A `break`'s code is the process exit code only for the root
+        // invocation's loop; a document looping inside a sequence step
+        // records it in the summary and the run continues.
+        let mut exit_code = loop_result.final_exit_code;
+        if let Some(broken) = &loop_result.broken {
+            use claudine::composition::lifecycle::LifecycleEmitter as _;
+            claudine::composition::DefaultLifecycleEmitter.emit_info(&broken.summary(), &wrap_terminal());
+            if step_scope.is_none() {
+                exit_code = i32::from(broken.code);
+            }
+        }
+        return Ok(ActiveDocumentOutcome::Done {
+            exit_code,
+            // A loop a `break` ended before any pass ran published nothing.
+            final_output: (loop_result.iteration_count > 0).then_some(loop_result.last_output),
+        });
     }
 
     if let Some(staged) = staged {

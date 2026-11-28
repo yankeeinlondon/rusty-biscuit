@@ -238,7 +238,7 @@ fn failed_resolution_still_errors_and_returns_no_partial_record() {
     let error = repo.resolve("./payload.yaml", &[]).expect_err("the import matches nothing");
 
     assert!(
-        matches!(&error, SchemaError::NoMatch { reference, bare_name: false } if reference == "shared/missing.yaml"),
+        matches!(&error, SchemaError::NoMatch { reference, bare_name: false, .. } if reference == "shared/missing.yaml"),
         "{error:?}"
     );
 }

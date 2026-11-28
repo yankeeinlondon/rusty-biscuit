@@ -26,7 +26,7 @@ mod container;
 mod iterate;
 mod jit;
 mod phase1c;
-mod providers;
+pub(crate) mod providers;
 mod report;
 mod resolve;
 mod review;
@@ -96,7 +96,6 @@ fn approve_preflight_graph(
             claudine::harness::CapturedPermissions::for_source(invocation, source_context.file_resolution_context()),
             Some(approval_cache),
         ),
-        shared.dry_run,
         shared.yolo,
     );
 
@@ -113,60 +112,11 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |reference: &composition::PromptReference| -> Result<
-        darkmatter::markdown::compose::ComposeRequest,
-        claudine::composition::CompositionError,
-    > {
-        let path = reference.path.as_path();
-        composing.replace(Some(path.to_path_buf()));
-        let source_context = invocation
-            .derive_source(path)
-            .expect("resolved prompt document always has a parent directory");
-        let document = darkmatter::markdown::Markdown::try_from(path)
+    let compose_options = |reference: &composition::PromptReference| {
+        composing.replace(Some(reference.path.clone()));
+        let document = darkmatter::markdown::Markdown::try_from(reference.path.as_path())
             .expect("preflight graph already loaded the prompt document");
-        // The graph's launch snapshot, extended with any group this referenced
-        // document needs: plain `ctx.*` stays launch-anchored no matter where
-        // the prompt document is stored, while the document's own
-        // `SourceContext` below still drives its file resolution.
-        let requirements =
-            darkmatter::markdown::compose::ContextRequirements::for_document(&document);
-        let mut context = graph_context.clone();
-        approval_epoch.extend_launch_context(&mut context, &requirements);
-        let mut opts = claudine::composition::compose_options_with_context(context)
-            .with_context_authority(approval_epoch.compose_context_authority())
-            .with_source_file(path)
-            .with_deferred_schema_verdict(true)
-            // Defer the lifecycle subtree exactly as the per-step template
-            // preflight does: this pass exists to discover `::shell`
-            // directives, and resolving a deferred `success:`/`failure:` read
-            // -side file reference here would trip on a file that event has
-            // not created yet.
-            .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
-            .with_deferred_shell_roots(reference.deferred_shell_roots());
-        // The task's approval-time `with` reaches its document as data, as
-        // it does at the task's turn, and a relative file value in it
-        // resolves from the file that authored it, never the launch folder.
-        if !reference.with.is_empty() {
-            let with = serde_json::Value::Object(reference.with.clone());
-            let with_source_context = invocation
-                .derive_source(&reference.with_origin)
-                .expect("a preflight task always has an authoring source");
-            let records = composition::CallerInputLayers::from_caller_overrides(
-                Some(with.clone()),
-                with_source_context.file_resolution_context().clone(),
-            )
-            .caller_input_records;
-            opts = composition::LayeredOverrides::data(Some(&with))
-                .apply_to(opts)
-                .with_caller_input_records(records);
-        }
-        if let Some(area) = launch_area {
-            opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
-        }
-        Ok(claudine::composition::compose_request(
-            opts,
-            source_context.file_resolution_context().clone(),
-        )?)
+        approval_compose_request(invocation, graph_context, &approval_epoch, launch_area, reference, &document)
     };
 
     let result =
@@ -179,6 +129,68 @@ fn approve_preflight_graph(
                 }
             })?;
     Ok(result.approved_commands)
+}
+
+/// The request a sequence's approval discovery composes `reference`'s
+/// document with ([`composition::resolve_graph_shell_approvals`]): the
+/// graph's launch snapshot extended for the document, the lifecycle subtree
+/// excluded, the schema verdict deferred, the sequence's late roots and the
+/// task's late `with` keys declared, and its approval-time `with` as data.
+/// No `seq`, `loop`, or `group` value is bound. A dry run builds its own
+/// discovery with this request too, made passive.
+#[allow(clippy::result_large_err)]
+pub(crate) fn approval_compose_request(
+    invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
+    approval_epoch: &claudine::invocation_context::DocumentEpoch,
+    launch_area: Option<&std::path::Path>,
+    reference: &composition::PromptReference,
+    document: &darkmatter::markdown::Markdown,
+) -> Result<darkmatter::markdown::compose::ComposeRequest, claudine::composition::CompositionError> {
+    let path = reference.path.as_path();
+    let source_context = invocation
+        .derive_source(path)
+        .expect("resolved prompt document always has a parent directory");
+    // The graph's launch snapshot, extended with any group this referenced
+    // document needs: plain `ctx.*` stays launch-anchored no matter where
+    // the prompt document is stored, while the document's own
+    // `SourceContext` below still drives its file resolution.
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(document);
+    let mut context = graph_context.clone();
+    approval_epoch.extend_launch_context(&mut context, &requirements);
+    let mut opts = claudine::composition::compose_options_with_context(context)
+        .with_context_authority(approval_epoch.compose_context_authority())
+        .with_source_file(path)
+        .with_deferred_schema_verdict(true)
+        // Defer the lifecycle subtree exactly as the per-step template
+        // preflight does: this pass exists to discover `::shell`
+        // directives, and resolving a deferred `success:`/`failure:` read
+        // -side file reference here would trip on a file that event has
+        // not created yet.
+        .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
+        .with_deferred_shell_roots(reference.deferred_shell_roots());
+    // The task's approval-time `with` reaches its document as data, as
+    // it does at the task's turn, and a relative file value in it
+    // resolves from the file that authored it, never the launch folder.
+    if !reference.with.is_empty() {
+        let with = serde_json::Value::Object(reference.with.clone());
+        let with_source_context = invocation
+            .derive_source(&reference.with_origin)
+            .expect("a preflight task always has an authoring source");
+        let records = composition::CallerInputLayers::from_caller_overrides(
+            Some(with.clone()),
+            with_source_context.file_resolution_context().clone(),
+        )
+        .caller_input_records;
+        opts = composition::LayeredOverrides::data(Some(&with))
+            .apply_to(opts)
+            .with_caller_input_records(records);
+    }
+    if let Some(area) = launch_area {
+        opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
+    }
+    Ok(claudine::composition::compose_request(opts, source_context.file_resolution_context().clone())?)
 }
 
 /// Submit every early lifecycle phrase the preflight graph reaches for TTS
@@ -231,7 +243,7 @@ fn is_missing_include(error: &CompositionError) -> bool {
     matches!(
         error,
         CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(inner))
-            if matches!(inner.as_ref(), TransclusionError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
+            if matches!(inner.without_site(), TransclusionError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
     )
 }
 
@@ -298,15 +310,13 @@ pub(crate) fn execute_sequence(
     // The root's events read its prepared values, as a referenced document's
     // events read its own. Before `initialize` the caller's values are all
     // there is; `start` prepares them again with what has been written and
-    // collected since. A preview fires no event.
-    let event_values = if shared.dry_run { None } else {
-        root_event_values(&RootEventInputs {
-            source, overrides: user_set_overrides.as_ref(), runtime_writes: serde_json::Map::new(),
-            caller_input_records: &caller_input_records, launch: invocation.launch_file_resolution_context(),
-            launch_area: Some(file_resolution_context.request_cwd()), compose_context: &context,
-            file_resolution_context: &file_resolution_context,
-        })
-    };
+    // collected since.
+    let event_values = root_event_values(&RootEventInputs {
+        source, overrides: user_set_overrides.as_ref(), runtime_writes: serde_json::Map::new(),
+        caller_input_records: &caller_input_records, launch: invocation.launch_file_resolution_context(),
+        launch_area: Some(file_resolution_context.request_cwd()), compose_context: &context,
+        file_resolution_context: &file_resolution_context,
+    });
     let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(event_values.unwrap_or_else(|| frontmatter.clone()));
     let live = Mutex::new(frontmatter_view.clone());
     let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
@@ -318,41 +328,35 @@ pub(crate) fn execute_sequence(
         effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,
         source_path: &source.resolved_path, repo_root: source_context.repository_root(), messaging: &messaging, settings: &settings };
     // A looping root allocates its loop before `initialize`, which already
-    // reads the first pass's values. A dry run previews one pass, with pass
-    // 1's values, and lists the root's `prep` targets without running them.
+    // reads the first pass's values.
     let frame = root_loop_frame(source, &frontmatter, shared, &invocation, &file_resolution_context, &context)?;
-    if shared.dry_run {
-        use claudine::composition::lifecycle::LifecycleEmitter as _;
-        if let (Some(frame), Some(value)) = (&frame, frontmatter.get("loop")) {
-            let location = claudine::composition::LoopLocation::document_root(&source.resolved_path);
-            if let Ok(block) = claudine::composition::parse_loop_block(value, claudine::composition::LoopOwner::Sequence, &location) {
-                emitter.emit_info(&claudine::composition::looping::dry_run_loop_note(&location.property, &block.config, frame.max()), &term);
-            }
-        }
-        for target in lifecycle.literal_prep_targets() {
-            log::message(&super::composition::dry_run::render_prep_target(&target, &term));
-        }
-    }
     let prewarm = invocation.prewarm().with_injected_keys(
         composition::sequence::reserved::ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string())
             .chain(user_set_overrides.as_ref().and_then(serde_json::Value::as_object).into_iter().flat_map(|map| map.keys().cloned())),
     );
     let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime), frame, prewarm);
-    if !shared.dry_run {
-        match root.event(LifecycleSignal::Initialize, None)? {
-            ContainerEventDecision::Continue => {},
-            ContainerEventDecision::Skip => return Ok(0),
-            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
-            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 }
-                else if let Some(code) = (!failed).then(|| root.broken_exit_code()).flatten() { code }
-                else { i32::from(failed) }),
-            other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
-        }
+    match root.event(LifecycleSignal::Initialize, None)? {
+        ContainerEventDecision::Continue => {},
+        ContainerEventDecision::Skip => return Ok(0),
+        ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+        ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 }
+            else if let Some(code) = (!failed).then(|| root.broken_exit_code()).flatten() { code }
+            else { i32::from(failed) }),
+        other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
     }
     let mut startup_timings = startup_timings;
     loop {
         let outcome = execute_sequence_inner(source, root_sequence, shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
-        if shared.dry_run { return outcome; }
+        // A failure before `start` is a preflight stop: its typed error is
+        // settled, so the passive report is taken here, in the state the run
+        // stopped in, and changes nothing the lifecycle below reads.
+        let outcome = match outcome {
+            Err(error) if !root.started => {
+                let values = preflight_values(root.collected_overrides.clone().flatten().or_else(|| user_set_overrides.clone()), &runtime);
+                Err(with_preflight_report(error, &crate::commands::document_check::RunState { root: source, invocation: &invocation, shared, values }))
+            }
+            other => other,
+        };
         let (signal, error) = match &outcome {
             Ok(130) => {
                 root.runner.cancel(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
@@ -377,6 +381,31 @@ pub(crate) fn execute_sequence(
             ContainerEventDecision::Skip => return Ok(0),
             other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
         }
+    }
+}
+
+/// The values a real run's passive report reads: the caller's (and those
+/// collected for it), then every runtime write so far.
+fn preflight_values(overrides: Option<serde_json::Value>, runtime: &composition::RuntimeState) -> serde_json::Map<String, serde_json::Value> {
+    let mut values = match overrides {
+        Some(serde_json::Value::Object(values)) => values,
+        _ => serde_json::Map::new(),
+    };
+    values.extend(runtime.mutations());
+    values
+}
+
+/// `error` with the passive check's report of every problem observable
+/// where the run stopped, when the error is a typed composition failure and
+/// the check found an error or warning; `error` unchanged otherwise.
+fn with_preflight_report(error: color_eyre::eyre::Report, state: &crate::commands::document_check::RunState<'_>) -> color_eyre::eyre::Report {
+    let cause = match error.downcast::<CompositionError>() {
+        Ok(cause) => cause,
+        Err(error) => return error,
+    };
+    match crate::commands::document_check::preflight_failure_report(state) {
+        Some(report) => CompositionError::check_failed(cause, report).into(),
+        None => cause.into(),
     }
 }
 
@@ -494,11 +523,7 @@ fn execute_sequence_inner(
 
     let mut perf_accumulator = if perf_enabled {
         startup_timings.map(|timings| {
-            let mut acc = crate::perf::SequencePerfAccumulator::new(timings);
-            if shared.dry_run {
-                acc.set_dry_run();
-            }
-            acc
+            crate::perf::SequencePerfAccumulator::new(timings)
         })
     } else {
         None
@@ -530,6 +555,9 @@ fn execute_sequence_inner(
 
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
+    // Values are collected once, on the attempt whose preflight first
+    // passes; that attempt alone shows the advisory warnings.
+    let first_preflight = root.collected_overrides.is_none();
 
     // The sequence document's own hints, with `--set` `agent`/`model` above
     // them: what its body steps run on, and the outermost fallback for a
@@ -559,7 +587,7 @@ fn execute_sequence_inner(
     // ones behind `when:` guards that read false today — is approved: the
     // first task's as resolved bytes when every value exists now, every other
     // command with a placeholder by its typed shape. A failure blocks the root
-    // container before any child starts; `--dry-run` performs the same walk.
+    // container before any child starts.
     // One base launch context for the whole graph, captured before per-task
     // target selection: every launch-facing graph expression (`when:` guards,
     // command interpolation, task/group variable defaults) projects the
@@ -706,7 +734,7 @@ fn execute_sequence_inner(
     let cli_model = shared.model.as_deref();
     // Agent-resolution TTY gate keys off `stderr` only — the prompting and
     // status channel — exactly like direct compose's
-    // `resolve_live_target_with_tty`. A redirected stdout (`sequence doc.md >
+    // `decide_target`. A redirected stdout (`sequence doc.md >
     // out.md`) must still prompt as long as stderr is a terminal; gating on
     // stdout would wrongly abort that normal CLI pattern.
     let is_tty = std::io::stderr().is_terminal();
@@ -738,10 +766,9 @@ fn execute_sequence_inner(
                     favorite,
                     environment: prep_context.invocation.document_environment(),
                     silent,
-                    dry_run: shared.dry_run,
                 },
             )?;
-            if !shared.dry_run && !is_tty && let Some(unresolved) = selections.first_unresolved() {
+            if !is_tty && let Some(unresolved) = selections.first_unresolved() {
                 let providers::TaskTarget::Unresolved { state, own_hint, .. } = &unresolved.target else {
                     unreachable!("first_unresolved returns an unresolved target");
                 };
@@ -767,10 +794,10 @@ fn execute_sequence_inner(
             Ok(selections)
         })
         .map_err(|failure| failure.error)?;
-    if !shared.dry_run && review::needs_review(is_tty, &selections) {
+    if review::needs_review(is_tty, &selections) {
         // The state-specific pre-prompt message (a styled `Invalid Agent:`
         // line, the zero-installed-list breakdown) shares its source of truth
-        // with the dry-run table cell and the no-TTY abort body.
+        // with the no-TTY abort body.
         let root_state = claudine::composition::classify_agent_resolution(&raw_hints, snapshot);
         if let Some(markup) = super::composition::agent_prompt_message(&root_state, &source.resolved_path) {
             log::message(&claudine::composition::agent_message_prose(markup).render(&log::terminal()));
@@ -786,7 +813,7 @@ fn execute_sequence_inner(
     if let Some(layers) = &recheck_owners {
         root_plan_request.recheck_owners(layers)?;
     }
-    if !silent && (shared.dry_run || verbose > 0) {
+    if !silent && verbose > 0 {
         emit_provider_plan(&selections);
     }
     let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> =
@@ -796,14 +823,12 @@ fn execute_sequence_inner(
     // known, so a forwarded switch a task's provider types differently fails
     // before the first task runs. Tasks decided at launch are checked before
     // their spawn. Sequence tasks are never interactive.
-    if !shared.dry_run {
-        for selection in selections.iter() {
-            if let Some(target) = selection.target.planned()
-                && let Some(profile) = super::profile::profile_for_provider(target.provider)
-            {
-                super::provider_tail_report::SwitchContext::for_launch(profile, true)
-                    .check(&shared.provider_tail)?;
-            }
+    for selection in selections.iter() {
+        if let Some(target) = selection.target.planned()
+            && let Some(profile) = super::profile::profile_for_provider(target.provider)
+        {
+            super::provider_tail_report::SwitchContext::for_launch(profile, true)
+                .check(&shared.provider_tail)?;
         }
     }
 
@@ -848,8 +873,8 @@ fn execute_sequence_inner(
     };
 
     // The first step composes against the root's `initialize` writes, so the
-    // probe does too; a dry run fired no lifecycle and composes without them.
-    let initialized = (!shared.dry_run).then(|| root.runtime.snapshot());
+    // probe does too.
+    let initialized = Some(root.runtime.snapshot());
     let Some(validated) = run_phase_1c_with_schema(
         source,
         &plan,
@@ -892,6 +917,22 @@ fn execute_sequence_inner(
     // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
 
+    // Warnings no earlier stage showed (key advice, step data that looks like
+    // a selection), once, before the first task. Inputs and providers are
+    // settled by now, so nothing reported here waits on an answer.
+    if first_preflight && !silent {
+        let state = crate::commands::document_check::RunState {
+            root: source,
+            invocation: &prep_context.invocation,
+            shared,
+            values: preflight_values(validated.resolved_overrides.clone(), &root.runtime),
+        };
+        if let Some(report) = crate::commands::document_check::preflight_advisories(&state) {
+            let launch_dir = prep_context.invocation.launch_cwd().to_path_buf();
+            log::message(&crate::commands::document_check::render_preflight_report(&report, None, &log::terminal(), Some(&launch_dir)));
+        }
+    }
+
     let mut run_context = iterate::SequenceRunContext {
         plan: &plan,
         graph: &graph,
@@ -924,26 +965,24 @@ fn execute_sequence_inner(
     // the caller as a root without a loop does.
     loop {
         run_context.loop_values = root.loop_values();
-        if !shared.dry_run {
-            root.enter_pass();
-            root.started = true;
-            // Each entry reads the root's values as prepared now, from the
-            // file as it reads now: what the caller supplied and was
-            // collected, then every write so far.
-            let live = composition::reload_composition_source(source).ok();
-            if let Some(values) = root_event_values(&RootEventInputs {
-                source: live.as_ref().unwrap_or(source), overrides: run_context.user_set_overrides.as_ref(), runtime_writes: root.runtime.mutations().into_iter().collect(),
-                caller_input_records: &caller_input_records, launch: prep_context.invocation.launch_file_resolution_context(),
-                launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()), compose_context: &graph_context,
-                file_resolution_context: &file_resolution_context,
-            }) {
-                root.refresh_event_values(values);
-            }
-            let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
-            if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
-                root.pending = Some(decision);
-                return Ok(1);
-            }
+        root.enter_pass();
+        root.started = true;
+        // Each entry reads the root's values as prepared now, from the
+        // file as it reads now: what the caller supplied and was
+        // collected, then every write so far.
+        let live = composition::reload_composition_source(source).ok();
+        if let Some(values) = root_event_values(&RootEventInputs {
+            source: live.as_ref().unwrap_or(source), overrides: run_context.user_set_overrides.as_ref(), runtime_writes: root.runtime.mutations().into_iter().collect(),
+            caller_input_records: &caller_input_records, launch: prep_context.invocation.launch_file_resolution_context(),
+            launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()), compose_context: &graph_context,
+            file_resolution_context: &file_resolution_context,
+        }) {
+            root.refresh_event_values(values);
+        }
+        let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
+        if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
+            root.pending = Some(decision);
+            return Ok(1);
         }
         let (summary, interrupt_observed) =
             iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
@@ -958,14 +997,13 @@ fn execute_sequence_inner(
             acc.set_invocation_work(&prep_context.invocation.work_snapshot());
         }
 
-        let looping = !shared.dry_run && root.frame.is_some();
+        let looping = root.frame.is_some();
         let code = report::emit_sequence_summary(
             &summary,
             if looping { None } else { perf_accumulator.take() },
             &interrupted,
             interrupt_observed,
             silent,
-            shared.dry_run,
         )?;
         if !looping || code != 0 {
             emit_perf(perf_accumulator.take());
@@ -1002,8 +1040,7 @@ fn execute_sequence_inner(
 }
 
 /// List each provider-launching task with the provider it is predicted to
-/// run, or how its provider is decided: always under `--dry-run`, and under
-/// `--verbose` for a live run.
+/// run, or how its provider is decided, under `--verbose`.
 fn emit_provider_plan(selections: &providers::TaskSelections) {
     let rows = providers::plan_rows(selections);
     if rows.is_empty() {

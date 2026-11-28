@@ -1,0 +1,104 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.reference.missing_document",
+      "severity": "error",
+      "message": "the prompt file does not exist",
+      "source": {
+        "file": "/work/seq.md",
+        "line": 5,
+        "column": 13,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "prompt:",
+      "reference": "./missing.md",
+      "failure": "no-match",
+      "included_via": [],
+      "base": "/work/seq.md",
+      "resolved": "/work/missing.md",
+      "hint": "create missing.md before a real run, or correct the reference",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0].prompt"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: provider (the prompt file could not be read)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "the prompt file does not exist",
+          "source": {
+            "file": "/work/seq.md",
+            "line": 5,
+            "column": 13,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: inputs (the prompt file could not be read)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "the prompt file does not exist",
+          "source": {
+            "file": "/work/seq.md",
+            "line": 5,
+            "column": 13,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 2
+  }
+}

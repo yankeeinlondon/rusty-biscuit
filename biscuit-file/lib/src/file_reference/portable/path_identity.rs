@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 ///
 /// An identity is never rendered as reference text and never turned back into
 /// a native spelling; render generated text through
-/// [`try_portable_string`](crate::try_portable_string) instead.
+/// [`try_forward_slash_string`](crate::try_forward_slash_string) instead.
 ///
 /// Two identities are equal when they name the same location by the lexical
 /// rules below. Conservative inequality (failing to recognize an alias) is

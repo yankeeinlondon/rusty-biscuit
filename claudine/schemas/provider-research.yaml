@@ -1,0 +1,13 @@
+kind: schema
+description: a master sheet of all of the metadata extracted from research on Agentic CLI's
+$provider:
+    $extends:
+        [
+            "acp",
+            "agent-cli",
+            "agent-errors",
+            "agent-logging",
+            "agent-models",
+            "agent-permissions",
+            "hooks",
+        ]

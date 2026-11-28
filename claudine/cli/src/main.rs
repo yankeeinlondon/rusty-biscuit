@@ -63,27 +63,20 @@ fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::Argu
 /// Check if the Claudine config file exists and is valid. If not (missing or
 /// old-format that was backed up), run the initialization process so a
 /// config is available for the command about to run.
-/// Republishes Claudine's host revision under the launch home when it is
-/// missing or stale ([`claudine::composition::registration::publish`]). A
-/// failure is a warning: the last complete revision stays published, and
-/// `~/.darkmatter.yaml` is never written here.
-fn refresh_host_registration() {
-    let Some(home) = request::snapshot().home() else {
-        return;
-    };
-    let revision = claudine::composition::registration::HostRevision::claudine();
-    if let Err(error) = claudine::composition::registration::publish(home, revision) {
-        log::warn(&format!(
-            "Claudine's Darkmatter host registration was not refreshed, so the last published revision stays in use: {error}"
-        ));
+async fn ensure_config_exists() -> Result<()> {
+    if !load_existing_config()? {
+        commands::init_wizard::run_initialization().await?;
     }
+    Ok(())
 }
 
-async fn ensure_config_exists() -> Result<()> {
+/// Loads the user's Claudine configuration, reporting its load notices;
+/// `false` when there is none to use (missing, or a pre-2026 file the load
+/// backed up), so initialization must write one.
+pub(crate) fn load_existing_config() -> Result<bool> {
     // A legacy `config.json` counts: the load below converts it.
     if !claudine::dispatch::loader::user_config_exists() {
-        commands::init_wizard::run_initialization().await?;
-        return Ok(());
+        return Ok(false);
     }
 
     // The file exists, but it may be a legacy or pre-2026 file. The load
@@ -98,13 +91,10 @@ async fn ensure_config_exists() -> Result<()> {
                     _ => log::message(&text),
                 }
             }
-            Ok(())
+            Ok(true)
         }
-        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => {
-            // Old-format was detected and backed up; re-run initialization.
-            commands::init_wizard::run_initialization().await?;
-            Ok(())
-        }
+        // Old-format was detected and backed up; initialization runs again.
+        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => Ok(false),
         // Other errors (parse, validation) should propagate.
         Err(e) => Err(e.into()),
     }
@@ -332,6 +322,8 @@ fn main() -> Result<()> {
     }
     #[cfg(feature = "test-fixtures")]
     commands::wrap::exec::completion_fixture::initialize()?;
+    #[cfg(feature = "test-fixtures")]
+    claudine::composition::source_open_log::install();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -436,6 +428,10 @@ fn run() -> Result<std::convert::Infallible> {
         shutdown::exit_before_runtime(0);
     }
 
+    // Claudine has no per-run `--allow host=HOST`, so a refused remote read
+    // names the `network` setting alone.
+    let _ = darkmatter::config::network::install_network_remedy(darkmatter::config::network::NetworkRemedy::Setting);
+
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
     let arg_parse_start = std::time::Instant::now();
@@ -504,6 +500,17 @@ async fn async_main(
     shutdown::finish(code).await
 }
 
+/// The exit code of a dry run `cli` asks for whose request could not be
+/// captured (`error`), reported as its only finding; `None` when `cli` is
+/// not a dry run.
+fn unprepared_dry_run(cli: &Cli, error: &(dyn std::error::Error + 'static)) -> Option<i32> {
+    if cli.help {
+        return None;
+    }
+    let (mode, shared, _) = cli.command.as_ref().and_then(commands::document_check::dry_run_request)?;
+    Some(commands::document_check::run_unprepared(mode, shared, error))
+}
+
 /// Parse the CLI and run the selected command, returning its exit code.
 async fn dispatch(
     argv: Vec<OsString>,
@@ -519,18 +526,38 @@ async fn dispatch(
         log::message(&refusal);
         return Ok(args::EXIT_USAGE);
     }
+    if cli.command.as_ref().is_some_and(commands::document_check::asks_for_dry_run_shell) {
+        log::message(commands::document_check::DRY_RUN_SHELL_REMOVED);
+        return Ok(args::EXIT_USAGE);
+    }
     let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
         claudine::child_environment::LaunchDirectoryMode::ProviderHook
     } else {
         claudine::child_environment::LaunchDirectoryMode::Ordinary
     };
-    let launch_dir = claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
-    request::initialize(launch_dir)?;
+    // A dry run reports even an unreadable launch directory as its one
+    // finding, never through the standard error report.
+    let launch_dir = match claudine::child_environment::initialize_process_launch_directory(launch_mode) {
+        Ok(launch_dir) => launch_dir,
+        Err(error) => return unprepared_dry_run(&cli, &error).map_or_else(|| Err(error.into()), Ok),
+    };
+    if let Err(error) = request::initialize(launch_dir) {
+        return unprepared_dry_run(&cli, &error).map_or_else(|| Err(error.into()), Ok);
+    }
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_caller_arguments(&mut cli, caller_arguments);
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
+
+    // A document dry run is the passive check, dispatched before tracing,
+    // the Darkmatter configuration load (which can create or migrate files),
+    // the wrapper, and first-run setup; it reports every failure itself.
+    if !cli.help
+        && let Some((mode, shared, args)) = cli.command.as_ref().and_then(commands::document_check::dry_run_request)
+    {
+        return Ok(commands::document_check::run(mode, shared, args));
+    }
 
     let tracing_start = std::time::Instant::now();
     telemetry::init_tracing(cli.debug);
@@ -540,6 +567,21 @@ async fn dispatch(
 
     if cli.help || cli.command.is_none() {
         return commands::help::run().map(|()| 0);
+    }
+
+    // Ahead of Darkmatter's configuration and first-run setup: listing reads
+    // only the embedded inventory, and `publish` writes only the registration
+    // tree, so neither needs nor changes any configuration.
+    if let Some(Commands::Registrations(args)) = &cli.command {
+        return commands::registrations::run(args).map(|()| 0);
+    }
+
+    // Also ahead of Darkmatter's configuration and first-run setup: a missing
+    // or broken configuration is what `doctor` diagnoses, so reading it here
+    // would stop the diagnosis, and setup or conversion would write files an
+    // inspection must leave as found.
+    if let Some(Commands::Doctor(args)) = &cli.command {
+        return commands::doctor::run(args);
     }
 
     // Darkmatter's configuration is read once, before any hook, agent,
@@ -561,16 +603,6 @@ async fn dispatch(
                 }
             }
         }
-    }
-
-    // Keep Claudine's Darkmatter host registration current: an upgraded
-    // binary republishes its revision on its next substantive launch. A
-    // hook, `steer`, completion, and `uninstall` stay passive.
-    if !matches!(
-        cli.command,
-        Some(Commands::Handle(_) | Commands::Steer(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Uninstall(_))
-    ) {
-        refresh_host_registration();
     }
 
     let perf_enabled = perf_bootstrap.enabled;
@@ -611,11 +643,16 @@ async fn dispatch(
     // Commands that must work without config (handle is a hook callback,
     // completions is shell setup, __complete runs under a shell completion
     // pipeline, and steer must never change configuration or prompt a
-    // `--json` caller). Everything else requires config, and a missing one
-    // starts the interactive setup wizard.
+    // `--json` caller; setup loads or writes its own without prompting).
+    // Everything else requires config, and a missing one starts the
+    // interactive setup wizard.
     let needs_config = !matches!(
         command,
-        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Steer(_)
+        Commands::Handle(_)
+            | Commands::Completions(_)
+            | Commands::Complete(_)
+            | Commands::Steer(_)
+            | Commands::Setup(_)
     );
 
     let perf_config_loading = if needs_config {
@@ -654,6 +691,7 @@ async fn dispatch(
         Commands::Providers(args) => commands::providers::run(args),
         Commands::Signals(args) => commands::signals::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
+        Commands::Setup(args) => commands::setup::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
         Commands::Claude(_)
@@ -679,6 +717,8 @@ async fn dispatch(
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
+        Commands::Registrations(_) => unreachable!("`registrations` is handled before configuration loads"),
+        Commands::Doctor(_) => unreachable!("`doctor` is handled before configuration loads"),
     };
     result.map(|()| 0)
 }
@@ -873,12 +913,13 @@ mod composition_help {
             let compact = rendered(command);
             let long_manual = composition_help_command(command, true).render_long_help().to_string();
             assert!(
-                long_manual.contains("The commands have real effects"),
+                long_manual.contains("Every problem found is reported"),
                 "{command}: the long-help paragraph this check relies on moved: {long_manual}"
             );
-            assert!(compact.contains("--dry-run-shell"), "{command}: {compact}");
+            assert!(compact.contains("--json"), "{command}: {compact}");
+            assert!(!compact.contains("--dry-run-shell"), "{command} lists the removed switch: {compact}");
             assert!(
-                !compact.contains("The commands have real effects"),
+                !compact.contains("Every problem found is reported"),
                 "{command} renders the long help paragraph: {compact}"
             );
         }
@@ -917,7 +958,7 @@ mod composition_help {
             let cases: [(&[&str], ErrorKind); 5] = [
                 (&["claudine", command, "x.md", "--provider", "nope"], ErrorKind::InvalidValue),
                 (&["claudine", command, "x.md", "--provider"], ErrorKind::InvalidValue),
-                (&["claudine", command, "x.md", "--dry-run-shell"], ErrorKind::MissingRequiredArgument),
+                (&["claudine", command, "x.md", "--json"], ErrorKind::MissingRequiredArgument),
                 (&["claudine", command, "x.md", "-i", "--no-interactive"], ErrorKind::ArgumentConflict),
                 (&["claudine", command, "x.md", "--quiet", "--silent"], ErrorKind::ArgumentConflict),
             ];
@@ -932,7 +973,7 @@ mod composition_help {
             }
             // The controls are valid once the defect is removed.
             assert!(parse_without_help(&["claudine", command, "x.md", "--provider", "claude"]).is_ok());
-            assert!(parse_without_help(&["claudine", command, "x.md", "--dry-run", "--dry-run-shell"]).is_ok());
+            assert!(parse_without_help(&["claudine", command, "x.md", "--dry-run", "--json"]).is_ok());
 
             // `PartitionError` is private to `argv`; its derived `Debug` names
             // the variant and both fields.

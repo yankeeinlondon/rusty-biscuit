@@ -495,7 +495,7 @@ fn seeded_launch_scope_keeps_at_local_while_sigils_follow_the_source() {
     let launch = snapshot(&launch_dir, &home).with_repository_root(&launch_repo);
     let source = snapshot(&source_dir, &home)
         .with_repository_root(&source_repo)
-        .with_launch_magic_scope(launch.launch_magic_scope().clone());
+        .with_launch_scope(launch.launch_scope().clone());
 
     assert_eq!(
         plan_paths("@x.md", &source),

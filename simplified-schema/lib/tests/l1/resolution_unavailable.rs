@@ -31,7 +31,7 @@ fn a_schema_file_reference_is_resolved_only_with_the_file_feature() {
         assert!(resolved.json_schema["properties"]["title"].is_object(), "{}", resolved.json_schema);
     } else {
         match result {
-            Err(SchemaError::Unresolved { reference, source: FileReferenceError::ResolutionUnavailable { .. } }) => {
+            Err(SchemaError::Unresolved { reference, source: FileReferenceError::ResolutionUnavailable { .. }, .. }) => {
                 assert_eq!(reference, "./types.yaml");
             }
             other => panic!("expected an unavailable resolution, got {other:?}"),

@@ -175,11 +175,7 @@ impl TaskExecution<'_> {
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
                 execution.prewarm_container(runner.guard_mut().config(), &live.lock().expect(SLOT_POISONED).clone());
             }
-            let event = if self.prompt.is_dry_run() {
-                let outcome = Default::default();
-                let decision = runner.record_outcome(signal, &outcome);
-                crate::composition::lifecycle::runtime::ContainerEventResult { outcome, decision }
-            } else { runner.execute_event(signal, &stack) };
+            let event = runner.execute_event(signal, &stack);
             match event.decision {
                 Decision::Continue if signal == LifecycleSignal::Initialize => {
                     checkpoint = crate::composition::looping::PassCheckpoint::take(&runtime);
@@ -251,9 +247,7 @@ impl TaskExecution<'_> {
                     result.result = super::PrimaryResult::Interrupted;
                     return result;
                 }
-                // A dry run previews one pass: it never runs the gate or reads
-                // the condition.
-                Decision::Finished { failed: false } if frame.is_some() && !self.prompt.is_dry_run() => {
+                Decision::Finished { failed: false } if frame.is_some() => {
                     let frame = frame.as_mut().expect("guarded by the match");
                     let ambient = frame.ambient();
                     let gate_value = binding.event_value(LifecycleSignal::Loop);

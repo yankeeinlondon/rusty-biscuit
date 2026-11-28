@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ Transclusion error: [ROOT]/work/doc.md:3:1: Unsupported file type for
+    transclusion: [ROOT]/work/data.bin
+      at doc.md:3:1

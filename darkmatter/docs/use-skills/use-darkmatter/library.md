@@ -61,7 +61,11 @@ Other useful methods:
   (`NoChange` … `Rewritten`), section changes, and frontmatter changes.
 - `links()`, `image_references()`, `inline_html_links()`
 - `validate_references(ReferenceValidationOptions)` returns a report with
-  `is_valid()` and `issues`.
+  `is_valid()` and `issues`. A malformed inclusion that composition rejects
+  (`::file` with no target, `prologue: 3`, …), an included file that cannot
+  be loaded, or a `when=` that fails to evaluate is an `Err`, never a clean
+  report. The reference graph fails the same way, and
+  `transclusions_with_options` on a malformed inclusion.
 - `cleanup()` and `cleanup_with(&MarkdownRuleOverrides)` format the body. To
   get `md clean` behavior exactly (frontmatter repair and diagnostics), use
   `markdown::cleanup::clean_document`.
@@ -156,6 +160,7 @@ schema `file` values too.
 | `--width N` | `with_output_width(renderable::output::Width)` |
 | `--disable baseline-schema` / explicit baseline | build options without `with_darkmatter_baseline_schema()`, or pass `with_baseline_schema(SchemaRoot)` |
 | skip a stage | `.disable(ComposeOperation::Normalization)` or `.only(&[…])` |
+| (no flag) a passive rehearsal | `with_dry_run()`: nothing with an effect runs (no command, login shell, packet, provider query, approval, or cache); each construct that needs one stays as written and is recorded in `passive_session().deferrals()` (see below) |
 | `::map`/`::filter` limits | `with_max_iteration_visits(NonZeroU64)`, `with_max_expansion_bytes(NonZeroU64)` (defaults 100,000 and 16 MiB) |
 
 The `ComposeOperation` stages are `FrontmatterInterpolation`,
@@ -190,6 +195,98 @@ With no handler, a command that is not whitelisted fails composition with
 `ShellExpansionError::ApprovalRequired`. The built-in blacklist cannot be
 overridden. Call `compose_preflight` first if you want to show the user the
 list of commands before anything runs.
+
+### Dry runs from a library
+
+`ComposeOptions::with_dry_run()` composes with no effect. Whatever needs one
+is left in the output exactly as written, and everything independent of it
+composes as usual. Each thing left is a `Deferral` in
+`options.passive_session()`:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+
+let options = ComposeOptions::new().with_dry_run();
+let session = options.passive_session().expect("a dry run has a session").clone();
+// … compose with `options` …
+for deferral in session.deferrals() {
+    // construct: FrontmatterValue, Interpolation, ShellDirective,
+    // ShellBlock, BlockCondition, Collection, SchemaTemplate,
+    // SchemaCheck, or Transclusion
+    println!("{:?} `{}`: {}", deferral.construct, deferral.authored, deferral.reason.describe());
+}
+```
+
+- A `$( … )` frontmatter value, a body `::shell` line or `::shell-block`,
+  and a call that starts the login shell (`has_alias`, `can_execute`, …),
+  sends packets (`ping`), or queries a provider (`pr`, `cicd`, …) are
+  deferred.
+- A read of a deferred value is unavailable, through any expression:
+  the `{{{ … }}}` span stays as written, a `::block` whose condition reads it
+  stays whole, a `::map`/`::filter` whose gate, source, callback, or option
+  reads it stays whole and inert (a `Collection` deferral), and a
+  frontmatter value that reads it is deferred too.
+  `try(…)` and `||` never recover it.
+- An inclusion whose target reads such a value names no file yet: a
+  `::file`/`::code` line holding a span left as written stays as written,
+  and a `prologue`/`epilogue` value that is deferred or holds one adds
+  nothing. Each is a `Transclusion` deferral, never a parse failure or a
+  missing file. A caller can declare a value it has not got with
+  `session.defer_absent("topic", reason)` before composing, and the same
+  holds for what reads it. A value the run will replace before this
+  composition is declared with `session.defer_written("topic", reason)`
+  (or a member path such as `seq.outputs`): it is unavailable whatever it
+  holds now and however a read spells it (`seq['outputs']`,
+  `(seq).outputs`), an explicit `fm.seq.outputs` of the document's own
+  property aside, and a schema problem with it is a `SchemaCheck` deferral
+  rather than a failure.
+- No approval is asked for and no cache is read or written. A `$schema` slot
+  whose read needs approval is deferred (`SchemaTemplate`) and its checks are
+  not run. An allowed remote read is fetched without being stored.
+- A blacklisted command and a denied remote read are still refused.
+
+### Collecting findings
+
+`darkmatter::findings` is what a host uses to report many problems at once
+instead of stopping at the first, with the same `Diagnostic` record `md
+--output json` prints:
+
+```rust
+use darkmatter::findings::{Diagnostic, DiagnosticSource, FindingSink, Severity, Subject};
+
+let mut sink = FindingSink::new();
+let doc = sink.register_subject(Subject::document("notes.md", None));
+let found = sink.push(doc, Diagnostic::actionable(
+    "my.code", Severity::Error,
+    "the template file does not exist",           // what failed, and why
+    "create template.md, or correct the reference", // the next step, required
+).with_source(DiagnosticSource::at(Some("notes.md".into()), 4, 1)));
+sink.not_checked(doc, "inputs", "the template could not be read", Some(found));
+let report = sink.finish();   // counts(), has_problems(), diagnostics(), render_human(..)
+```
+
+Pushing a finding equal to one already held for the subject (code,
+severity, message, location, and trail) stores nothing and returns the held
+one's id. So does a finding that differs only in naming the file alone where
+the held one names a line in it: two producers that report one problem keep
+the located copy, whichever came first.
+
+- Subjects keep the order they were registered in; equivalent findings for
+  one subject collapse.
+- `not_checked` records one `dm.check.not_checked` `info` finding, with the
+  blocking finding as `related` when it has a location. When a subject is
+  one occurrence among several that share a file (a task two references
+  reach), `not_checked_within(…, trail)` gives the record that
+  occurrence's `trail`, so the occurrences stay apart in JSON output.
+- `findings::reference::check_document` turns a confirmed no-match of a
+  document-valued reference into `dm.reference.missing_document`, with the
+  resolved path, searched locations, and up to three suggestions.
+- `EmptyBodyCause` says why a body is empty: `AuthoredEmpty`, `Whitespace`,
+  `ExcludedBlocks` (each block's line and condition), or `EmptyRendered`.
+- Write messages to the four-part standard in
+  `darkmatter/docs/errors/message-standard.md`: what failed (the author's
+  construct), where (a proven position, else the file alone), why (only the
+  cause that applies), and how to fix it (the hint).
 
 ## Evaluate one expression
 

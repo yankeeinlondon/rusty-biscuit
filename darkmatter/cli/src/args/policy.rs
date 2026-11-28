@@ -211,7 +211,7 @@ pub const POLICY_REGISTRY: &[PolicyEntry] = &[
         kind: PolicyKind::Feature,
         commands: &[Compose, Clean, SchemaValidate],
         codes: &[],
-        summary: "schema-trigger discovery and bare-name schema-root lookup",
+        summary: "schema-trigger discovery",
     },
     PolicyEntry {
         id: "collection-blocks",

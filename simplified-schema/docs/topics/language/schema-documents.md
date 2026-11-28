@@ -1,6 +1,6 @@
 # Schema Resolution and Standalone Documents
 
-How a schema reference finds its file, how a standalone YAML file declares that it holds a SimplifiedSchema (or defines a YAML document kind), and how the library checks that file before reading it.
+How a schema reference finds its file, how a standalone YAML file declares that it holds a SimplifiedSchema (or defines a YAML document kind, or declares a host namespace), and how the library checks that file before reading it.
 
 ## Schema Resolution
 
@@ -83,7 +83,9 @@ flowchart TD
     M -->|yes| OKJ[raw JSON Schema]
     X -->|no| K{kind: yaml-schema?}
     K -->|yes| SK[NotASchemaDocument: SelectedByKind]
-    K -->|no| Y{YAML envelope with $schema?}
+    K -->|no| T{kind: schema-trigger?}
+    T -->|yes| TE[NotASchemaDocument: TriggerEnvelope]
+    T -->|no| Y{YAML envelope with $schema?}
     Y -->|fails its definition| AD[SchemaDocument: does not satisfy its definition]
     Y -->|yes| OKY[SimplifiedSchema]
     Y -->|types only| TO[NotASchemaDocument: TypesOnly]
@@ -96,11 +98,13 @@ flowchart TD
 | YAML with `$schema` (informal, or `kind: schema`) that [satisfies its definition](#admission-checking-an-envelope-against-its-definition) | accepted |
 | `kind: yaml-schema`, well formed or not | `NotASchemaDocument` (`SelectedByKind`); [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced), never referenced |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
+| `kind: schema-trigger`, well formed or not | `NotASchemaDocument` (`TriggerEnvelope`); a trigger activates by placement and match, never by reference |
 | a recognized envelope its definition rejects (`types: [a, b]`, `description: ""`, a misspelled `typed:`) | `SchemaDocument` "the `kind: schema` envelope does not satisfy its definition ..." |
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
 | YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema` or `kind: yaml-schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
-| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location |
+| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location; a duplicate key at its second spelling, with the first spelling's line and column in the message |
+| `kind: expression-schema` or `kind: mutation-schema`, well formed or not | `NotASchemaDocument` (`CallableCatalog`); a [callable catalog](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) describes signatures, not documents |
 | JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
 | JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
 | JSON declaring 2020-12 that fails the dialect's meta-schema | `InvalidJsonSchema` |
@@ -108,10 +112,16 @@ flowchart TD
 The meta-schema check runs offline; nothing is fetched. These rules apply only
 to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
 `kind: schema` or informal envelope, a `types`-only one included, but never a
-`kind: yaml-schema` file. Other kinded YAML, such as ordinary data
-(`kind: roster`) or a [schema trigger](#who-owns-each-definition)
-(`kind: schema-trigger`), is never a target either: it fails with one of the
-rows above.
+`kind: yaml-schema`, `kind: namespace-schema`, `kind: expression-schema`,
+`kind: mutation-schema`, or `kind: schema-trigger` file,
+and never a schema whose `$schema` is a root union or a whole-file reference
+(`RootUnionImport`, `ReferenceImport`: it has no named types of its own).
+Other kinded YAML, such as ordinary data (`kind: roster`), is never a target
+either: it fails with one of the rows above. A refusal of a valid file for the
+way it was named (`TypesOnly`, `SelectedByKind`, `NamespaceCatalog`,
+`CallableCatalog`, `TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`, and
+`UnsupportedJsonDialect`) names the declaration that asked for it as its
+[site](../diagnostics.md#where-a-definition-failure-points).
 
 ### Migrating Raw JSON Schema Written in YAML
 
@@ -142,7 +152,7 @@ A YAML map of SimplifiedSchema types written without the envelope
 
 ## Standalone Schema Documents
 
-A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes four envelopes:
+A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes six envelopes:
 
 | Envelope | Recognized by | Carries | Its definition | A `$schema` target or `Name@file` source? |
 |---|---|---|---|---|
@@ -150,10 +160,14 @@ A standalone YAML file can be a SimplifiedSchema authoring document, recognized 
 | [`kind: schema`](#kind-schema) (`Tagged`) | `kind: schema` | `$schema`, `types`, or both, and optionally `description`, `categories`; a `types`-only file may also carry a `name` | `schema.yaml` | yes; a `types`-only file is an import source only |
 | [`kind: yaml-schema`](#kind-yaml-schema) (`YamlSchema`) | `kind: yaml-schema` | `$schema` (required), and optionally `types`, `description`, `categories` | `yaml-schema.yaml` | no: [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced) |
 | [`kind: namespace-schema`](#kind-namespace-schema) (`NamespaceSchema`) | `kind: namespace-schema` | `namespace` and `$schema` (required), and optionally `description`, `types` | `namespace-schema.yaml` | no: [a host's catalog input](#kind-namespace-schema) |
+| [`kind: expression-schema`](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) (`ExpressionSchema`) | `kind: expression-schema` | `categories` and `types` (required), and optionally `description` | `expression-schema.yaml` | no: a callable catalog |
+| [`kind: mutation-schema`](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema) (`MutationSchema`) | `kind: mutation-schema` | `categories` and `types` (required), and optionally `description` | `mutation-schema.yaml` | no: a callable catalog |
 
 `StandaloneSchemaEnvelope::kind()` returns the `kind` that claims an
 envelope: `Some("schema")`, `Some("yaml-schema")`, `Some("namespace-schema")`,
-or `None` for the informal one. Before its payload is read, every recognized envelope is
+`Some("expression-schema")`, `Some("mutation-schema")`, or `None` for the
+informal one. `label()` is the envelope as a refusal names it, and
+`allowed_keys()` the top-level keys its definition allows. Before its payload is read, every recognized envelope is
 [admitted](#admission-checking-an-envelope-against-its-definition) against its
 definition, so a misspelled key or a metadata value of the wrong shape is
 reported where it was written.
@@ -257,8 +271,8 @@ types:
 - It is never a reference. `Name@file` imports and every lookup still name
   the file by its path. `StandaloneSchemaDocument::name` returns it.
 - Within one schema root it must be unique among the triggers and `types`-only
-  libraries that declare one (see [Trigger labels and local
-  types](#trigger-labels-and-local-types)).
+  libraries that declare one (see [A label is unique within its schema
+  root](#a-label-is-unique-within-its-schema-root)).
 
 A host's global catalog (such as Darkmatter's `darkmatter.yaml`) is an
 ordinary `kind: schema` envelope with `$schema` declarations. The host
@@ -373,9 +387,13 @@ classifies a `yaml-schema` the same way.
 
 ### Categories
 
-Every envelope may also declare a `categories:` list beside `types:`. Each
-entry is a name, optionally followed by `-> description`; a description may
-span lines. Documentation shows categories in list order.
+A `categories:` list beside `types:` names the groups that `category(X)`
+constraints may use. The informal, `kind: schema`, and `kind: yaml-schema`
+envelopes may declare one; a callable catalog (`kind: expression-schema` or
+`kind: mutation-schema`) must, as described in
+[Callable catalogs](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema).
+Each entry is a name, optionally followed by `-> description`; a description
+may span lines. Documentation shows categories in list order.
 
 ```yaml
 kind: schema
@@ -395,13 +413,17 @@ types:
 ```
 
 When a file declares `categories:`, every `category(X)` in its `types` must
-name a listed category, compared exactly (`math` is not `Math`). Without the
-list any name is accepted; `categories: null` is the same as no list, and an
-empty `categories: []` is rejected. A blank name and a repeated name are
-schema-load errors naming the entry, such as `categories[1]`. `categories`
-must be a list (a single string is not wrapped into one); a number entry is
-read as its text, so `- 5` is the category `5`, while a `null` or mapping
-entry is rejected.
+name a listed category, compared exactly (`math` is not `Math`). In every
+envelope an empty `categories: []` is rejected, a blank name and a repeated
+name are schema-load errors naming the entry, such as `categories[1]`, and
+`categories` must be a list (a single string is not wrapped into one).
+
+The optional envelopes are lenient about the rest: without the list any
+category name is accepted, `categories: null` is the same as no list, and a
+number entry is read as its text, so `- 5` is the category `5`, while a
+`null` or mapping entry is rejected. A callable catalog is admitted strictly
+instead: omitting `categories`, writing `categories: null`, or listing a
+number entry is refused, and every callable must name a listed category.
 
 ### Whole-File References and Named Imports
 
@@ -423,6 +445,69 @@ $schema:
     display-name: name@./schemas/person.yaml
     ages: age[]@./schemas/person.yaml
 ```
+
+### Callable catalogs: `kind: expression-schema` and `kind: mutation-schema`
+
+A callable catalog lists the signatures of functions a host can call, for
+call checking and documentation. It describes callables, not documents, so it
+exports no `$schema`:
+
+| Kind | What its callables are |
+|---|---|
+| `expression-schema` | value-producing expression functions, such as `project_slug(name)` |
+| `mutation-schema` | signature-backed lifecycle actions, such as `set_frontmatter` |
+
+In this expression catalog, `Label` is a private helper type used by the
+first overload of `project_slug`. Both overloads belong to the `Text` category.
+
+```yaml
+kind: expression-schema
+description: Text helpers.
+categories:
+    - Text -> Transform text.
+types:
+    Label: string(min(1)) # Require a nonempty label.
+    project_slug:
+        - |-
+            function(
+                parameters(x: Label);
+                returns(string);
+                category(Text);
+            ) -> Converts a label to kebab-case.
+        - |-
+            function(
+                parameters(x: null);
+                returns(null);
+            ) -> Passes null through unchanged (inherits category Text).
+```
+
+| Key | Rule |
+|---|---|
+| `kind` | `expression-schema` or `mutation-schema` |
+| `categories` | required, a non-empty list of `Name` or `Name -> description` entries (see [Categories](#categories)) |
+| `types` | required, a non-empty mapping of callables (a `function(...)` or a union of them) and helper types |
+| `description` | optional string; an authored `""` is allowed |
+
+The shape is admitted **strictly**: nothing is converted, so `description:
+123` is refused rather than read as `"123"`. No other key is allowed
+(`$schema`, `name`, and `when` included), `description`, `categories`, and
+`types` may not be written as `null`, and neither may a `types` entry: a bare
+`Label:` declares nothing, while the quoted `Label: "null"` is the null type.
+
+Everything in `types` is private to the file. A catalog is never a `$schema`
+target, a `Name@file` import source, a trigger, or an expandable types
+library: naming one is `NotASchemaDocument` (`CallableCatalog`), well formed
+or not, from a file on disk, an embedded document, or a registered bundle.
+Put types several files share in a `kind: schema` library.
+
+This library checks the document's structure and type syntax: the
+definitions above, category entries, undeclared categories, each type
+string's grammar, and duplicate overloads. Opened as a whole YAML document,
+a catalog's kind check runs that same parse and reads no file: an import
+named inside it is not resolved. What makes a declaration a valid callable
+(every callable names a category, a callable is not mixed with an ordinary
+type, names do not collide, local helpers resolve) is checked by the host
+that reads the catalog, such as Darkmatter.
 
 ### `kind: namespace-schema`
 
@@ -450,11 +535,27 @@ types:
 | `types` | optional mapping of named types, `{}` included; private to this file |
 
 No other key is allowed, and neither `description` nor `types` may be written
-as `null`: omit the key instead. Opened as a whole YAML document, a namespace
-file is judged by `namespace-schema.yaml` alone, which admits a `null`
-optional field and a reference `$schema`; **planned**: the parser's refusals
-apply there too. Which names a host reserves (its own globals, expression
-roots) is the host's check, not this library's.
+as `null`: omit the key instead. Which names a host reserves (its own
+globals, expression roots) is the host's check, not this library's.
+
+Opened as a whole YAML document (`md schema validate loop.yaml`, or the file
+open in the editor), a namespace file is first judged by
+`namespace-schema.yaml`, which reads a `null` optional field as absent and
+admits a reference `$schema`. Its `namespace-schema` kind check then runs the
+same preparation a host's registration runs
+([`prepare_namespace_document`](#resolving-a-namespaces-payload)), so the
+file is reported exactly as registering it would refuse it:
+
+```text
+kind: namespace-schema
+namespace: thing
+description:           # kind check: `description`: must not be null; omit it instead
+$schema:
+    item: Missing      # kind check: unknown named type `Missing` in the inline `$schema`
+```
+
+This checks the file itself; naming it from another document is still
+refused (see below).
 
 Read one with `parse_namespace_schema_document(text, path)`, which admits it
 against `namespace-schema.yaml` and returns a `NamespaceSchemaDocument`:
@@ -462,6 +563,49 @@ against `namespace-schema.yaml` and returns a `NamespaceSchemaDocument`:
 `source_map`, the private `local_types`, and `path`, the file the host
 resolves its imports from and reports against. It reads no file and resolves
 nothing; `Ok(None)` means the text claims another kind.
+
+#### Resolving a namespace's payload
+
+A host turns a namespace file into the declaration of its one global with
+`resolve::resolve_namespace_payload(text, path, &context, shipped)`. It
+resolves `$schema` as one object whose properties are the namespace's
+members, with the file's `types` as the names `$schema` can use. The
+namespace file is the origin of everything in it: its imports resolve from
+the file's folder, and an error points into the file.
+
+```yaml
+# registration/loop.yaml
+kind: namespace-schema
+namespace: loop
+$schema:
+    count: number(integer; min(1))
+    item: entry               # a private type, from `types` below
+    owner: person@./shared.yaml # an import, resolved beside this file
+types:
+    entry: "{ id: string, label: string }"
+```
+
+```rust
+use simplified_schema::resolve::resolve_namespace_payload;
+use simplified_schema::{SchemaRoot, parse_namespace_schema_document};
+
+let document = parse_namespace_schema_document(&text, &path)?.expect("a namespace schema");
+let resolved = resolve_namespace_payload(&text, &path, &context, shipped)?;
+let Some(SchemaRoot::Single(members)) = resolved.simplified else { unreachable!() };
+// `document.namespace` is "loop"; `members` holds `count`, `item`, and `owner`.
+```
+
+Envelope admission is the caller's step (`parse_namespace_schema_document`);
+`resolve_namespace_payload` reads only `$schema` and `types`, and refuses a
+`$schema` that is not a mapping. `resolve::prepare_namespace_document(text,
+path, &context, shipped)` is the two steps together, plus the check that the
+result is one object: it returns the `NamespaceSchemaDocument`, the resolved
+object, and its `ResolvedSchema`, or a `NamespaceDocumentError` saying which
+step refused the file. Every reader that judges a namespace file calls it, so
+they all accept and refuse the same files. An empty `$schema: {}` resolves to an object
+with no members. A host that loads the namespace from a checked bundle runs
+this inside the bundle's scope, so its imports follow
+[path-based imports](#path-based-imports-inside-a-bundle).
 
 A namespace file is never a schema in its own right:
 
@@ -500,7 +644,8 @@ types:
   the span.
 - `description` is a string.
 - `types` is a mapping of named types, `{}` included. They are local to the
-  trigger: its inline `$schema` names them (here `headline`), and no other
+  trigger: its inline `$schema` names them (here `headline`), in every
+  inline arm of a registered host's root-union payload too, and no other
   file can import them, because a trigger file is never an import source.
   With a `types` table, the `$schema` entries are not named types themselves,
   as in a `kind: schema` document. Shared types belong in a `types`-only
@@ -508,12 +653,86 @@ types:
 - None of the three may be written as `null`; omit the key instead. Any other
   key is refused.
 
-Discovery checks names per schema root and per embedded bundle, before
-filename shadowing: two files of one root (a trigger and a trigger, or a
-trigger and a `types`-only library) that declare the same `name` are both
-reported, each at its own `name`, and neither is installed as a trigger. The
-same name in two different roots is allowed. A shadowed file is read for its
-`name` only.
+#### A label is unique within its schema root
+
+A `name` only helps a reader if it points at one file, so discovery refuses a
+label that two files of one source share. The check runs per schema root and
+per embedded bundle, before filename shadowing: two files of one root (a
+trigger and a trigger, or a trigger and a `types`-only library) that declare
+the same `name` are both reported, each at its own `name`, and neither is
+installed as a trigger.
+
+```yaml
+# schemas/first.yaml
+kind: schema-trigger
+name: twin
+match:
+    alpha: string(required)
+```
+
+```yaml
+# schemas/library.yaml
+kind: schema
+name: twin
+types:
+    Id: string
+```
+
+Each file gets an invalid-trigger finding at its `name` value (line 2,
+column 7 here). Its message names the file as `twin (schemas/first.yaml)`
+and its cause names every other participant (paths shortened here):
+
+```text
+`name`: `twin` is also declared by `schemas/library.yaml` in the same schema source; every file declaring it is ignored
+```
+
+- The same name in two different roots is allowed; each root is judged on
+  its own.
+- A file shadowed by a same-named file in an earlier root still counts toward
+  its own root's names. It is read for its `name` only.
+- A `types`-only library that takes part in a duplicate is reported as an
+  invalid schema trigger too, and its types still import as `Name@file`,
+  because imports name files by path, never by label.
+
+### Path-based imports inside a bundle
+
+A host can load triggers, `types`-only libraries, and namespace files from a
+*bundle*: a folder whose member files the host has already read and checked,
+such as a published host registration. While the host resolves those files
+under the bundle's scope, a file reference reaches another file only by its
+path relative to the file that writes it, never by a label or a search:
+
+```yaml
+# schemas/composition.yaml, a member of the bundle
+kind: schema-trigger
+match:
+    prompt: string(required)
+$schema:
+    $extends: common-attributes@./shared.yaml # a listed member: served from its checked bytes
+    owner: person@../people/person.yaml       # people/person.yaml: fine when listed
+```
+
+| Written in a bundle member | Result |
+| --- | --- |
+| `Name@./shared.yaml`, `Name@../lib/base.yaml` landing on a listed member | resolved from that member's checked bytes |
+| a `./` or `../` path to a file in the folder that is not listed | refused without reading it |
+| a `../` path that leaves the bundle | refused |
+| a bare name (`Name@shared.yaml`), `~/`, an absolute path, or a schema-root lookup | refused |
+| a host's built-in name, such as `Name@darkmatter:lifecycle` | resolved as always |
+
+A refusal is a `SchemaError::BundleBoundary` that names the reference and the
+bundle:
+
+```text
+schema reference `shared.yaml` is refused: bundle `claudine`: a bundle file is referenced only as `./…` or `../…` from the file that names it
+```
+
+This keeps a bundle meaning the same thing wherever it is copied: no member
+can depend on a schema root, the home folder, or a file someone added after
+the check. The same rules cover `$schema` file targets, `$extends` and
+`...spread` operands, and `example(file)`. See
+[Resolving inside a bundle](../selecting-schema-files.md#resolving-inside-a-bundle)
+for the API and every refusal.
 
 ### Admission: Checking an Envelope Against Its Definition
 
@@ -531,9 +750,11 @@ flowchart LR
     R -->|"kind: schema, informal"| S[admit against schema.yaml]
     R -->|"kind: yaml-schema"| Y[admit against yaml-schema.yaml]
     R -->|"kind: namespace-schema"| NS[admit against namespace-schema.yaml]
+    R -->|"kind: expression-schema / mutation-schema"| CC[admit strictly against catalog definition]
     S --> A{admitted?}
     Y --> A
     NS --> A
+    CC --> A
     A -->|no| E[SchemaDocument at the offending token]
     A -->|yes| P[parse $schema and types]
     P --> C[category, overload, and suggestion checks]
@@ -542,8 +763,10 @@ flowchart LR
 
 A file *referenced* as a schema is refused as
 [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced)
-before admission when it is a `yaml-schema`, and as a
-[catalog input](#kind-namespace-schema) when it is a `namespace-schema`.
+before admission when it is a `yaml-schema`, as a
+[catalog input](#kind-namespace-schema) when it is a `namespace-schema`, and as
+a [callable catalog](#callable-catalogs-kind-expression-schema-and-kind-mutation-schema)
+when it is an `expression-schema` or `mutation-schema`.
 
 #### Who Owns Each Definition
 
@@ -553,19 +776,24 @@ before admission when it is a `yaml-schema`, and as a
 | `simplified-schema/schemas/yaml-schema.yaml` | `kind: yaml-schema`, itself included | this library |
 | `simplified-schema/schemas/schema-trigger.yaml` | `kind: schema-trigger` | this library |
 | `simplified-schema/schemas/namespace-schema.yaml` | `kind: namespace-schema` | this library |
+| `simplified-schema/schemas/expression-schema.yaml` | `kind: expression-schema` | this library |
+| `simplified-schema/schemas/mutation-schema.yaml` | `kind: mutation-schema` | this library |
 
-All four are compiled in as
+All six are compiled in as
 `simplified_schema::envelope::ENVELOPE_DEFINITIONS`, keyed by the virtual
 paths `SCHEMA_DEFINITION_PATH`, `YAML_SCHEMA_DEFINITION_PATH`,
-`SCHEMA_TRIGGER_DEFINITION_PATH`, and `NAMESPACE_SCHEMA_DEFINITION_PATH`;
-admission reads no file. All four are `kind: yaml-schema` documents, and
+`SCHEMA_TRIGGER_DEFINITION_PATH`, `NAMESPACE_SCHEMA_DEFINITION_PATH`,
+`EXPRESSION_SCHEMA_DEFINITION_PATH`, and `MUTATION_SCHEMA_DEFINITION_PATH`;
+admission reads no file. All six are `kind: yaml-schema` documents, and
 together they seed every YAML document-kind registry
 (`simplified_schema::yaml_documents::KindRegistry`). `schema.yaml`,
-`yaml-schema.yaml`, and `namespace-schema.yaml` admit envelopes. The trigger
+`yaml-schema.yaml`, `namespace-schema.yaml`, `expression-schema.yaml`, and
+`mutation-schema.yaml` admit envelopes (the two callable catalog definitions
+strictly, without metadata coercion). The trigger
 definition is a kind definition like one a user writes: it validates a
 trigger file when that file is opened as a YAML document, while trigger
 discovery (`simplified_schema::triggers`) reads triggers with its own parser.
-A host prepares the four for its registry with its own `ShippedSources`
+A host prepares all six for its registry with its own `ShippedSources`
 (`yaml_documents::prepare_shipped_definitions`) and may record the prepared
 form in its own shipped artifact; Darkmatter does. This is the definition
 of a `yaml-schema`:

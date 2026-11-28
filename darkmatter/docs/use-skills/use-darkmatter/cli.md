@@ -40,7 +40,7 @@ removes the alias and registers completion:
 | `md hash FILE\|DIR` | Markdown-aware hashes; `--save` stores them, `--diff` reports drift | `terminal` |
 | `md graph FILE [--validate]` | dependency (transclusion/reference) graph | `terminal` |
 | `md validate refs FILE` | broken links, images, transclusions, CSS imports | `terminal` |
-| `md schema validate FILE…` | frontmatter (or a whole YAML file) against its schema | `terminal` |
+| `md schema validate FILE…` | frontmatter (or a whole YAML file, including `expression-schema` and `mutation-schema` callable catalogs) against its schema | `terminal` |
 | `md schema detect FILE…` | infer a schema from documents (`--output json-schema` too) | `terminal` |
 | `md schema triggers FILE` | which schema triggers apply and why | `terminal` |
 | `md schema about` | SimplifiedSchema language reference | `terminal` |
@@ -65,6 +65,24 @@ These commands read stdin when no file is given (or the file is `-`):
 
 The reports from `validate refs`, `graph --validate`, `schema validate`, and
 `hash --diff` are the deliverable, so they go to stdout.
+
+Host registration conflicts in `diagnostics` include `related` entries with
+the other declaration's `message` and `source`. Read
+`.related[]?.source` to extract those positions from a data report.
+
+Every record in `diagnostics` (from `md`, DMLS, or Claudine's `--dry-run
+--json`) has `code`, `severity` (`error`, `warning`, `info`), `message`, and
+`source` (`file`, one-based `line` and `column`, `null` when no authored
+position is proven). Optional fields, omitted when empty: `hint` (the next
+step), `related` (other locations, as `message` + `source`), `notes`
+(supporting lines with no location), and `trail` (how the problem was
+reached, outermost first: transclusions, `::map`/`::filter` items, and host
+constructs; `md compose` and Claudine write it, while `md validate refs`,
+`md graph`, and other commands keep their older records without it). `iteration_path` and
+`included_via` are kept for compatibility and are projections of the same
+trail. Match on `code`, never on `message` text. A `--deny` or `--allow`
+changes whether a run fails, not a record's `severity` (except that a
+`style` key `--deny` made blocking on `md render` is reported as `error`).
 
 | Exit | Meaning |
 |---|---|
@@ -205,7 +223,14 @@ and they can change which schema trigger matches.
 
 Before composing, `md compose FILE` checks references automatically. If any
 reference is broken, it prints the reference report and exits 1, unless an
-`--allow` recovery covers the problem.
+`--allow` recovery covers the problem. When the call check, the frontmatter's
+schema, or a provably empty body also finds a problem, it prints one combined
+report for the document instead, every finding in it, closing with
+`Checked <file>: N errors, N warnings`; `--output json` puts all of them in
+`diagnostics` (a check that could not be decided is a `dm.check.not_checked`
+record). A body that composes empty warns `dm.compose.empty_body`. The `missing-*` recoveries cover an
+absent target only: an invalid (`[x](@)`), unreadable (`failure: io`), or
+malformed target always fails.
 
 ### Policy verbs
 

@@ -14,7 +14,9 @@ $schema:
       implemented: boolean -> boolean flag indicating whether this review's suggestions has been implemented
       next: string -> the _next_ feature review that was conducted
       previous: string -> the _prior- feature review that was conducted
-      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; any finding makes `ready` false"
+      findings: "(finding@./review-fix-cycle.yaml | string)[] -> every finding, high, medium, and low; any finding makes `ready` false. A review written before the structured form holds each as the text `<ID> (<priority>): <title>`"
+      repaired-on: datetime -> when the repair of this review last finished, whatever its outcome
+      deferred-perf-measurement: boolean -> whether the repair deferred a required performance measurement because of host load
       human-in-the-loop: string[] -> the decisions the author must make before blocked findings can be repaired (plain language, options with pros and cons, a recommendation), set only when an item passes the review prompt's "Stopping for a human" test; `null` otherwise; while non-empty and unresolved, `just fix` pauses for an interactive rulings session
       human-resolved: boolean -> `true` once every `human-in-the-loop` item has a ruling under `## Human rulings` (set by the rulings session); neither the repair nor the next review starts while a non-empty `human-in-the-loop` is unresolved
       human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)
@@ -34,7 +36,9 @@ $schema:
       implemented: boolean
       next: string
       previous: string
-      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; any finding makes `ready` false"
+      findings: "(finding@./review-fix-cycle.yaml | string)[] -> every finding, high, medium, and low; any finding makes `ready` false. A review written before the structured form holds each as the text `<ID> (<priority>): <title>`"
+      repaired-on: datetime -> when the repair of this review last finished, whatever its outcome
+      deferred-perf-measurement: boolean -> whether the repair deferred a required performance measurement because of host load
       human-in-the-loop: string[] -> the decisions the author must make before blocked findings can be repaired (plain language, options with pros and cons, a recommendation), set only when an item passes the review prompt's "Stopping for a human" test; `null` otherwise; while non-empty and unresolved, `just fix` pauses for an interactive rulings session
       human-resolved: boolean -> `true` once every `human-in-the-loop` item has a ruling under `## Human rulings` (set by the rulings session); neither the repair nor the next review starts while a non-empty `human-in-the-loop` is unresolved
       human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)

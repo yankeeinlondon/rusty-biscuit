@@ -193,8 +193,9 @@ pub(crate) fn owner_resolution(
     match invocation.derive_source(&path) {
         Ok(context) => Ok(context.file_resolution_context().clone()),
         Err(InvocationContextError::ResolutionContext(error)) => Err(CompositionError::ResolutionContext(error)),
-        Err(InvocationContextError::SourceWithoutParent(path)) => Err(CompositionError::SequenceInvalid(
+        Err(InvocationContextError::SourceWithoutParent(path)) => Err(CompositionError::sequence_invalid(
             format!("referenced sequence document '{}' has no parent directory", path.display()),
+            crate::composition::SequenceSite::file(&path),
         )),
     }
 }

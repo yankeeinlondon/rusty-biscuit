@@ -1249,7 +1249,10 @@ execute_seconds}`; on a build status it is `ci-build produce`'s own
 millisecond stages, and `stage_seconds` is the pair the owner *job* observed
 (`{queue_seconds, upload_seconds}`). All are optional and all are reporting
 only — see [What each stage cost](#what-each-stage-cost). A job that measured
-nothing omits the object rather than publishing zeros.
+nothing omits the object rather than publishing zeros, and a job that measured
+some stages omits each stage it did not: a whole-second stage that finished
+quickly is a measured `0`, so `{"download_seconds": 0}` means "under a
+second" and a missing `verify_seconds` means "not measured".
 
 The completion record is the executing cell's proof, and the audit requires
 one for every cell the plan executed — check and lint included. Its fields and
@@ -1282,7 +1285,11 @@ and its command `duration_s`.
 A gate with no JUnit report to carry its duration records it here instead:
 `lint` times the `just _lint` invocation itself, not the job, which also
 includes checkout, toolchain setup, cache restore, and provisioning (R14). An
-unmeasured duration is **absent**, never `0`.
+unmeasured duration is **absent**, never `0`. A measured one is never `0`
+either: the step reads a monotonic nanosecond clock and publishes seconds
+with nine decimals, and a run shorter than one clock tick is published as one
+nanosecond (`0.000000001`). A 0.4 ms lint, for example, is `0.000400000`,
+not the `0.0` that rounding to milliseconds once produced.
 
 ### `job` is read as a tier
 

@@ -309,7 +309,7 @@ mod tests {
         // Wire sample from the signals corpus (qwen.md record
         // `stream-model_resolved-system-init`, since 0.19.6).
         const QWEN_SYSTEM_INIT: &str = include_str!(
-            "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
+            "../../../../docs/research/providers/signals/fixtures/qwen/system-init-model-version.jsonl"
         );
         let event = parse(QWEN_SYSTEM_INIT.trim());
         let QwenEvent::System(sys) = event else {

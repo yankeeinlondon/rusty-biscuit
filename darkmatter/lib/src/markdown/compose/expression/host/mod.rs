@@ -3,9 +3,9 @@
 //! the built-ins use and checked, narrowed, and dispatched exactly like them.
 //!
 //! A host declares each function's signatures in its own function catalog
-//! (a tagged `kind: schema` document with `categories:` and `function(...)`
-//! `types:`, loaded by [`HostFunctionCatalog::load`] with the built-in
-//! catalog's strict loader) and registers, per function, the behavior facts a
+//! (a `kind: expression-schema` document with `categories:` and
+//! `function(...)` `types:`, loaded by [`HostFunctionCatalog::load`] with the
+//! built-in catalog's strict reader) and registers, per function, the behavior facts a
 //! signature cannot express and a pure handler ([`HostFunctionsBuilder`]).
 //! [`HostFunctionsBuilder::build`] validates the whole set before anything is
 //! evaluated.
@@ -14,8 +14,8 @@
 //!
 //! - [`install_host_functions`]: process-wide, for a runtime host.
 //! - [`HostFunctions::enter`]: for the current thread only, while the
-//!   returned guard lives. The editor (DMLS) enters the analysis-only set
-//!   built from each document's own schema roots around its diagnostics.
+//!   returned guard lives. The editor (DMLS) enters the analysis-only sets
+//!   of the document's selected registered host around its diagnostics.
 //!
 //! Lookup order everywhere is: thread-local test functions, the current
 //! thread's entered sets, installed sets, then the built-ins.
@@ -36,7 +36,7 @@
 //! use darkmatter::markdown::compose::expression::host::{HostFunctionCatalog, HostFunctions};
 //!
 //! let catalog = HostFunctionCatalog::load(
-//!     "kind: schema\ncategories:\n  - Project\ntypes:\n  twice: |-\n    function(parameters(x: number); returns(number); category(Project))\n",
+//!     "kind: expression-schema\ncategories:\n  - Project\ntypes:\n  twice: |-\n    function(parameters(x: number); returns(number); category(Project))\n",
 //!     "host/functions.yaml",
 //! )
 //! .unwrap();
@@ -65,8 +65,9 @@ pub use artifact::{FACTS_ARTIFACT_FORMAT_VERSION, FactsArtifact, NON_NULL_FACT_T
 
 use simplified_schema::expression::ast::{SpannedExpr, SpannedExprKind};
 use super::call_binding::{BoundCall, EvaluationMode, FunctionRegistration, RegistrationBuilder, RegistrationError};
-use super::catalog::{CatalogError, FunctionCatalog, load_catalog};
-use simplified_schema::{LocatedRelated, locate_standalone_definition_failure};
+use super::catalog::{CatalogError, FunctionCatalog, load_authored_catalog};
+use simplified_schema::errors::CatalogRelated;
+use simplified_schema::simplified::StandaloneSchemaEnvelope;
 use crate::markdown::span::SourceSpan;
 
 /// The diagnostic code for a call to a host function whose analysis
@@ -104,36 +105,57 @@ impl fmt::Debug for HostFunctionCatalog {
 
 /// Why a host function catalog does not load.
 ///
-/// A signature the schema grammar rejects is located in the catalog source,
-/// through the same projection editors use: [`Self::span`] is the rejected
-/// token and [`Self::related`] the earlier declarations it conflicts with,
-/// all byte ranges in the loaded `source`.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+/// The same judgment `md schema validate` and the editor report for the
+/// catalog: [`Self::span`] is the failing declaration or field and
+/// [`Self::related`] the other locations a conflict involves (an earlier
+/// declaration, or the built-in function a name reuses), as byte ranges in
+/// the loaded `source` unless a related location names another file.
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct HostCatalogError {
     message: String,
     span: Option<SourceSpan>,
-    related: Vec<LocatedRelated>,
+    related: Vec<CatalogRelated>,
+    error: Arc<simplified_schema::SchemaError>,
 }
 
+/// Equal when the message and locations are; the shared error is their
+/// source.
+impl PartialEq for HostCatalogError {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.message, &self.span, &self.related) == (&other.message, &other.span, &other.related)
+    }
+}
+
+impl Eq for HostCatalogError {}
+
 impl HostCatalogError {
-    /// The rejected token's byte range in the catalog source, when the
-    /// failure is a located signature failure.
+    /// The failing declaration's byte range in the catalog source, when the
+    /// failure is located.
     pub fn span(&self) -> Option<&SourceSpan> {
         self.span.as_ref()
     }
 
-    /// The failure's secondary locations in the catalog source.
-    pub fn related(&self) -> &[LocatedRelated] {
+    /// The failure's secondary locations.
+    pub fn related(&self) -> &[CatalogRelated] {
         &self.related
+    }
+
+    /// The failure as the shared schema error: the reader's refusal of the
+    /// document, or [`simplified_schema::SchemaError::CallableCatalog`].
+    pub fn schema_error(&self) -> &simplified_schema::SchemaError {
+        &self.error
     }
 }
 
 impl HostFunctionCatalog {
-    /// Loads a function catalog with the built-in catalog's strict loader.
-    /// `path` names the file in errors and locates its facts artifact
-    /// ([`facts_artifact_path`]). File-form examples (`example(./x.yaml)`)
-    /// are not available to a host catalog and fail the load.
+    /// Loads a host's `kind: expression-schema` catalog with the strict
+    /// callable reader. `path` names the file in errors and locates its
+    /// facts artifact ([`facts_artifact_path`]). A host catalog may not reuse
+    /// a built-in function's canonical name or alias. Every callable must
+    /// have a name accepted by the expression parser and must
+    /// compile for eager evaluation with the catalog's local types, and
+    /// file-form examples (`example(./x.yaml)`) are not available to it.
     ///
     /// The catalog owns everything it loads and borrows nothing from
     /// `source`; it is freed with the last clone of this value and of any
@@ -141,25 +163,11 @@ impl HostFunctionCatalog {
     ///
     /// ## Errors
     ///
-    /// The loader's message, naming `path`, for a document that is not a
-    /// tagged catalog or whose entries do not load.
+    /// The reader's located failure, naming `path`.
     pub fn load(source: &str, path: impl AsRef<Path>) -> Result<Self, HostCatalogError> {
         let path = path.as_ref().to_path_buf();
-        let display = path.display().to_string();
-        let catalog = load_catalog(source, &display, &[]).map_err(|error| {
-            // The loader parses the whole document first, so its schema
-            // error reports (wrapped in the document's) the failure the
-            // locator finds.
-            let located = match &error {
-                CatalogError::Schema(schema) => locate_standalone_definition_failure(source)
-                    .filter(|failure| schema.to_string().contains(&failure.error.to_string())),
-                CatalogError::Invalid { .. } => None,
-            };
-            let (span, related) = located
-                .map(|failure| (failure.authored_span.or(failure.value_span), failure.related))
-                .unwrap_or_default();
-            HostCatalogError { message: error.to_string(), span, related }
-        })?;
+        let catalog = load_authored_catalog(source, &path, StandaloneSchemaEnvelope::ExpressionSchema)
+            .map_err(host_catalog_error)?;
         Ok(Self {
             inner: Arc::new(CatalogData {
                 path,
@@ -208,31 +216,28 @@ impl HostFunctionCatalog {
     fn build(&self, builder: RegistrationBuilder) -> Result<FunctionRegistration, RegistrationError> {
         builder.build_with(&self.inner.catalog.type_resolver())
     }
-
-    /// Test-only: observes whether this catalog's owner is still alive.
-    #[cfg(test)]
-    pub(crate) fn owner_probe(&self) -> CatalogOwnerProbe {
-        CatalogOwnerProbe(Arc::downgrade(&self.inner))
-    }
 }
 
-/// Test-only weak view of a loaded catalog's owner; it holds nothing alive.
-#[cfg(test)]
-pub(crate) struct CatalogOwnerProbe(std::sync::Weak<CatalogData>);
-
-#[cfg(test)]
-impl CatalogOwnerProbe {
-    /// Whether any catalog clone, function set, or scope guard still holds
-    /// the owner.
-    pub(crate) fn is_alive(&self) -> bool {
-        self.0.upgrade().is_some()
-    }
+/// Keeps the shared reader's authored locations on a host catalog refusal.
+fn host_catalog_error(error: CatalogError) -> HostCatalogError {
+    let message = error.to_string();
+    let (span, related) = match &error {
+        CatalogError::Invalid { span, related, .. }
+        | CatalogError::Schema(simplified_schema::SchemaError::CallableCatalog { span, related, .. }) => {
+            (span.clone(), related.clone())
+        }
+        CatalogError::Schema(simplified_schema::SchemaError::SchemaDocument { span, .. }) => (span.clone(), Vec::new()),
+        CatalogError::Schema(_) => (None, Vec::new()),
+    };
+    HostCatalogError { message, span, related, error: Arc::new(error.into_schema_error()) }
 }
 
 /// Why a set of host functions cannot be registered or installed. Every
 /// variant is reported before any evaluation.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum HostFunctionError {
+    #[error("host function name `{name}` cannot be used as an expression call name")]
+    InvalidCallName { name: String },
     #[error("host function name `{name}` is registered twice (as a canonical name or alias)")]
     DuplicateName { name: String },
     #[error("host function name `{name}` collides with a built-in function's canonical name or alias")]
@@ -291,14 +296,21 @@ impl HostFunctionsBuilder {
     ///
     /// ## Errors
     ///
-    /// A [`HostFunctionError`]: a name or alias used twice in the set or
-    /// colliding with a built-in, a catalog function without a registration
-    /// or a registration without a catalog function, a lazy registration, or
-    /// any [`RegistrationError`] (a fact on a parameter no overload declares,
-    /// a narrowing fact on a function that does not return `boolean`, …).
+    /// A [`HostFunctionError`] when a name or alias cannot be used in a call,
+    /// repeats in the set, or collides with a built-in. The builder also
+    /// refuses missing or extra registrations, lazy evaluation, and invalid
+    /// registration facts ([`RegistrationError`]).
     pub fn build(self) -> Result<HostFunctions, HostFunctionError> {
         let catalog_names = self.catalog.function_names();
-        validate_names(self.pending.iter().map(|pending| (pending.canonical.as_str(), pending.aliases.as_slice())))?;
+        for pending in &self.pending {
+            for name in std::iter::once(&pending.canonical).chain(&pending.aliases) {
+                if !super::is_callable_name(name) {
+                    return Err(HostFunctionError::InvalidCallName { name: name.clone() });
+                }
+            }
+        }
+        validate_names(self.pending.iter().map(|pending| (pending.canonical.as_str(), pending.aliases.as_slice())))
+            .map_err(NameConflict::into_error)?;
         for name in &catalog_names {
             if !self.pending.iter().any(|pending| pending.canonical == *name) {
                 return Err(HostFunctionError::MissingRegistration {
@@ -332,20 +344,56 @@ impl HostFunctionsBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+struct NameClaim<'a> {
+    canonical: &'a str,
+    alias: Option<(usize, &'a str)>,
+}
+
+impl<'a> NameClaim<'a> {
+    fn spelling(self) -> &'a str {
+        self.alias.map_or(self.canonical, |(_, alias)| alias)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EarlierName<'a> {
+    BuiltIn(&'static str),
+    Host(NameClaim<'a>),
+}
+
+struct NameConflict<'a> {
+    earlier: EarlierName<'a>,
+    later: NameClaim<'a>,
+}
+
+impl NameConflict<'_> {
+    fn into_error(self) -> HostFunctionError {
+        let name = self.later.spelling().to_string();
+        match self.earlier {
+            EarlierName::BuiltIn(_) => HostFunctionError::BuiltinCollision { name },
+            EarlierName::Host(_) => HostFunctionError::DuplicateName { name },
+        }
+    }
+}
+
 /// Rejects a canonical name or alias used twice in the set, or used by a
-/// built-in. Names compare lowercased, as dispatch resolves them.
+/// built-in. The first conflicting claim in function and alias order wins.
 fn validate_names<'a>(
     functions: impl IntoIterator<Item = (&'a str, &'a [String])>,
-) -> Result<(), HostFunctionError> {
-    let mut seen = std::collections::HashSet::new();
+) -> Result<(), NameConflict<'a>> {
+    let mut seen = std::collections::HashMap::new();
     for (canonical, aliases) in functions {
-        for name in std::iter::once(canonical).chain(aliases.iter().map(String::as_str)) {
-            let lower = name.to_ascii_lowercase();
-            if super::functions::is_builtin_name(&lower) {
-                return Err(HostFunctionError::BuiltinCollision { name: name.to_string() });
+        let claims = std::iter::once(NameClaim { canonical, alias: None }).chain(
+            aliases.iter().enumerate().map(|(index, alias)| NameClaim { canonical, alias: Some((index, alias)) }),
+        );
+        for later in claims {
+            let lower = later.spelling().to_ascii_lowercase();
+            if let Some(builtin) = super::functions::reserved_builtin_name(&lower) {
+                return Err(NameConflict { earlier: EarlierName::BuiltIn(builtin), later });
             }
-            if !seen.insert(lower) {
-                return Err(HostFunctionError::DuplicateName { name: name.to_string() });
+            if let Some(earlier) = seen.insert(lower, later) {
+                return Err(NameConflict { earlier: EarlierName::Host(earlier), later });
             }
         }
     }
@@ -425,6 +473,13 @@ impl HostFunctions {
         self.inner.functions.iter().map(|function| function.canonical.as_str()).collect()
     }
 
+    /// The aliases of the function whose canonical name is exactly
+    /// `canonical`, as registered (or as the facts artifact records them);
+    /// `None` when the set has no such function.
+    pub fn aliases(&self, canonical: &str) -> Option<&[String]> {
+        self.inner.functions.iter().find(|function| function.canonical == canonical).map(|function| function.aliases.as_slice())
+    }
+
     /// The incomplete functions and why each is incomplete.
     pub fn incomplete_functions(&self) -> Vec<(&str, &str)> {
         self.inner
@@ -480,6 +535,42 @@ impl Drop for HostFunctionScope {
 
 thread_local! {
     static SCOPED: RefCell<Vec<Arc<HostSet>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The sets entered on the thread that captured it, for a worker thread
+/// doing part of the same request (a transcluded child resolved on a rayon
+/// worker), so a child sees exactly its parent's host functions.
+pub(crate) struct ScopedSets(Vec<Arc<HostSet>>);
+
+impl ScopedSets {
+    pub(crate) fn capture() -> Self {
+        Self(SCOPED.with(|scoped| scoped.borrow().clone()))
+    }
+
+    /// Replaces the current thread's entered sets with the captured ones
+    /// until the guard drops. Replacing, not pushing: a pool worker that
+    /// steals another request's task while it waits must not lend it the
+    /// sets of the task it was running.
+    pub(crate) fn install(&self) -> ScopedSetsGuard {
+        let previous = SCOPED.with(|scoped| scoped.replace(self.0.clone()));
+        ScopedSetsGuard {
+            previous,
+            _thread: PhantomData,
+        }
+    }
+}
+
+/// Restores the thread's own entered sets when dropped.
+pub(crate) struct ScopedSetsGuard {
+    previous: Vec<Arc<HostSet>>,
+    _thread: PhantomData<*const ()>,
+}
+
+impl Drop for ScopedSetsGuard {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.previous);
+        SCOPED.with(|scoped| *scoped.borrow_mut() = previous);
+    }
 }
 
 static INSTALLED: RwLock<Vec<Arc<HostSet>>> = RwLock::new(Vec::new());

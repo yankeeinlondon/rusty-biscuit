@@ -43,6 +43,9 @@ pub enum PortabilityPreference {
     /// repository root inside a repository. Accepted only when lookup in the
     /// authoring context reaches the same target; a local shadow rejects it.
     TreeRootRelative,
+    /// An implicit path below the launch repository root. A nearer launch
+    /// candidate that would select or plan a different target rules it out.
+    LaunchRelative,
     /// A target whose parent is `cwd` (`./x.md`); a target equal to `cwd` is
     /// written `./`.
     SameDirRelative,
@@ -92,6 +95,15 @@ pub enum PortabilityPreference {
 }
 
 impl PortabilityPreference {
+    /// The strategy for values read by launch-relative resolution.
+    pub const VALUE_STRATEGY: &'static [Self] = &[
+        Self::LaunchRelative,
+        Self::EnvRootedPath,
+        Self::HomeDir,
+        Self::AbsolutePath,
+    ];
+
+
     /// The default strategy.
     ///
     /// A verified bare tree-root spelling precedes nearby relative routes;
@@ -125,6 +137,7 @@ impl fmt::Display for PortabilityPreference {
         match self {
             Self::AuthoredIntent(_) => f.write_str("AuthoredIntent"),
             Self::TreeRootRelative => f.write_str("TreeRootRelative"),
+            Self::LaunchRelative => f.write_str("LaunchRelative"),
             Self::SameDirRelative => f.write_str("SameDirRelative"),
             Self::ChildDir => f.write_str("ChildDir"),
             Self::ImmediateParentDir => f.write_str("ImmediateParentDir"),

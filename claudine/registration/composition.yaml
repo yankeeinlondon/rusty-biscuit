@@ -1,8 +1,95 @@
+# Claudine's catalog for a Markdown document it runs that is not an inline
+# composition: a `compose` prompt, a sequence document, or a document whose
+# frontmatter sets one of Claudine's own controls. Hand-maintained; see
+# claudine/docs/topics/schemas.md.
+#
+# It selects a document that writes `kind: sequence` or sets `sequence`,
+# `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or
+# `model` to a non-null value, unless inline-composition.yaml selects it. The
+# exclusion repeats inline-composition.yaml's whole condition, so exactly one
+# of the two applies to a Claudine document. Each key is matched once per
+# non-null YAML type, so a value of the wrong type still selects this schema
+# and the payload then rejects it. The shared Darkmatter events
+# `initialize`, `cancelled`, and `finalize` never select it on their own.
+#
+# The payload declares no required property and leaves the document open, so
+# application data beside Claudine's controls is kept. `prompt` is optional
+# here: a sequence document may carry one. `sequence` is declared only by
+# sequence-document.yaml, which every document this selects through
+# `sequence` or `kind: sequence` also selects.
 kind: schema-trigger
-description: a schema that is triggered for composable claudine documents that are _not_ "inline" composable documents.
+name: composition
+description: Claudine's controls for a document that is not an inline composition
 match:
-
+    all:
+        - none:
+              - all:
+                    - group:
+                          - kind: literal(inline-compose; required)
+                          - sections: string(required)
+                          - sections: number(required)
+                          - sections: boolean(required)
+                          - sections: object(required)
+                          - sections: "unknown[](required)"
+                          - prompt: string(required)
+                          - prompt: number(required)
+                          - prompt: boolean(required)
+                          - prompt: object(required)
+                          - prompt: "unknown[](required)"
+                    - none:
+                          - sequence: string(required)
+                          - sequence: number(required)
+                          - sequence: boolean(required)
+                          - sequence: object(required)
+                          - sequence: "unknown[](required)"
+                          - kind: literal(sequence; required)
+        - group:
+              - kind: literal(sequence; required)
+              - sequence: string(required)
+              - sequence: number(required)
+              - sequence: boolean(required)
+              - sequence: object(required)
+              - sequence: "unknown[](required)"
+              - start: string(required)
+              - start: number(required)
+              - start: boolean(required)
+              - start: object(required)
+              - start: "unknown[](required)"
+              - blocked: string(required)
+              - blocked: number(required)
+              - blocked: boolean(required)
+              - blocked: object(required)
+              - blocked: "unknown[](required)"
+              - success: string(required)
+              - success: number(required)
+              - success: boolean(required)
+              - success: object(required)
+              - success: "unknown[](required)"
+              - failure: string(required)
+              - failure: number(required)
+              - failure: boolean(required)
+              - failure: object(required)
+              - failure: "unknown[](required)"
+              - loop: string(required)
+              - loop: number(required)
+              - loop: boolean(required)
+              - loop: object(required)
+              - loop: "unknown[](required)"
+              - prompt: string(required)
+              - prompt: number(required)
+              - prompt: boolean(required)
+              - prompt: object(required)
+              - prompt: "unknown[](required)"
+              - agent: string(required)
+              - agent: number(required)
+              - agent: boolean(required)
+              - agent: object(required)
+              - agent: "unknown[](required)"
+              - model: string(required)
+              - model: number(required)
+              - model: boolean(required)
+              - model: object(required)
+              - model: "unknown[](required)"
 $schema:
     $extends: common-attributes@./shared.yaml
-    prompt: null
-    sections: null
+    prompt: prompt@./document.yaml

@@ -4,9 +4,9 @@
 //! and never sees the repo-root `schemas/` directory that ships
 //! `feature-review.yaml` / `suggestion-review.yaml` — the schemas that this
 //! repo's own review files declare via `$schema: feature-review.yaml`. These
-//! tests pin that directory: every plain schema file must classify through the
-//! standalone-schema recognizer, and a bare-name reference to
-//! `feature-review.yaml` must resolve and actively validate review frontmatter.
+//! tests classify the plain schemas present there. The shipped corpus checks
+//! which artifacts must be present. A bare-name reference to
+//! `feature-review.yaml` must also resolve and actively validate review frontmatter.
 
 use std::fs;
 
@@ -73,7 +73,7 @@ fn repo_root_schemas_all_classify_as_standalone_schemas() {
         assert_eq!(document.envelope, expected, "{} has the wrong envelope", path.display());
         classified += 1;
     }
-    assert!(classified >= 2, "expected both shipped review schemas, saw {classified}");
+    assert!(classified >= 2, "expected at least two repository-root standalone schemas, saw {classified}");
 }
 
 #[test]

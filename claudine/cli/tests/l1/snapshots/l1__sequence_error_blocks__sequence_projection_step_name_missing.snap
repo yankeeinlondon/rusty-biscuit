@@ -1,0 +1,16 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: projection(&err)
+---
+{
+  "code": "composition.failed",
+  "category": "Composition",
+  "disposition": "Correctable",
+  "origin": "Author",
+  "detail": {
+    "source_path": null
+  },
+  "snapshot_cause": null,
+  "message": "step 1 is missing its required `name` property",
+  "hint": "Add a `name:` to the step."
+}

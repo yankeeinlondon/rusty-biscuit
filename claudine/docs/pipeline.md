@@ -83,7 +83,7 @@ output is emitted before B-end.
 | B2.3.a | **Shared `sniff::detect_with_plan` scan** [M] | `compose_prep.shared_sniff`. Single rooted scan at launch CWD covering git summary + repo structure (no os/hw/net). Replaces what used to be two redundant scans (`LaunchContext::from_cwd` and `detect_environment_fast`). Yields a cached `LaunchContext` and a cached `EnvironmentContext`. |
 | B2.3.b | **Resolve source repo root** [M] | `compose_prep.source_repo_root`. Fast path when source's parent dir is inside the launch repo (reuse launch root). Slow path: `detect_git` probe on the source's parent dir. |
 | B2.3.c | **Load selection config** [M] | `compose_prep.selection_config`. Reads `~/.claudine/config.yaml` and (when present) `<repo>/.claudine/config.yaml` for `preferred_agent` (alias `favorite_agent`) and the `models` overrides (`model_overrides`). |
-| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the supported provider CLIs, filtered by `--exclude`. Supports automatic selection and the dry-run resolution breakdown; a dry-run never treats the selected executable's absence as an error. Also populates `binary_paths` used by live execution at C1.4 (W2). |
+| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the supported provider CLIs, filtered by `--exclude`. Supports automatic selection. (A `--dry-run` never reaches this step; its passive check reports a provider that is not on `PATH` as an error.) Also populates `binary_paths` used by live execution at C1.4 (W2). |
 
 ### B3. Eager target resolution
 
@@ -182,8 +182,9 @@ flowchart TD
     G -->|done| E[loop ends]
 ```
 
-`--dry-run` retains the eager discovery path without initialization effects or
-dynamic proxy traversal, so generated includes can still be missing. Sequences
+`--dry-run` is the passive check, which never enters this pipeline: it fires
+no `initialize` and follows no dynamic proxy, so an include only
+initialization would create is reported missing. Sequences
 retain static preflight over the complete graph: create includes before
 starting the sequence, not in an earlier sequence task. See
 [composition](topics/composition.md#documents-that-declare-initialize) and
@@ -230,7 +231,7 @@ the `composition_prepare` span.
 
 | # | Step | Notes |
 |---|------|-------|
-| C0.1 | **`--dry-run`** [O-flag] | Emit the composed body/frontmatter and return before every launch-wiring step below. Provider/model identity was resolved in B3; selected-executable availability/path resolution, MCP, argv, system-prompt delivery, lifecycle runtime, and spawn do not run. The selected provider need not be installed. |
+| C0.1 | **`--dry-run`** [O-flag] | Never reaches this step: `main.rs` dispatches a composition `--dry-run` to the passive check (`commands/document_check/`) before configuration setup, so no step of this pipeline runs. See [Composition — Dry Run](topics/composition.md#dry-run). |
 
 ### C1. Provider/target re-use or re-resolve
 
@@ -505,7 +506,7 @@ all.
 For quick scanning, the steps that are **never run** under common flag
 combos:
 
-- `--dry-run`: returns at C0 and skips C1 onward, including selected-executable validation/path resolution, MCP/argv/CWD setup, lifecycle, spawn, and closure.
+- `--dry-run`: runs none of this pipeline; it is the passive check (see C0).
 - `--silent`: skips B2.2, all status banners (C2.2, D1, D7, D9-D11), warnings.
 - `--quiet`: skips C2.2's verbose details, D9, optional warnings.
 - No `loop:` frontmatter: skips F5 entirely; B6 runs once.

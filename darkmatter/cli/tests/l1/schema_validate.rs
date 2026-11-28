@@ -1489,20 +1489,25 @@ fn schema_validate_grouped_match_is_passive_in_a_single_schema() {
     assert_eq!(report["valid"], true, "{report}");
 }
 
-/// Claudine's complete schema bundle.
-const CLAUDINE_BUNDLE: [(&str, &str); 6] = [
-    ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-    ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-    ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-    ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-    ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-    ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+/// Claudine's schema bundle, without the sequence and inline-composition
+/// triggers (a schema-root trigger cannot carry `inline-composition.yaml`'s
+/// root-union payload) and the sequence types: every document here is judged
+/// by `composition.yaml`.
+const CLAUDINE_BUNDLE: [(&str, &str); 7] = [
+    ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+    ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+    ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+    ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+    ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+    ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+    ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
 ];
 
 /// Makes the fixture `cwd` a repository whose `schemas/` root holds Claudine's
 /// bundle, and writes `doc.md` there holding `values` with no `$schema`, so
-/// the `claudine.yaml` trigger (whose payload reuses `lifecycle.yaml` and
-/// `action.yaml` types through relative imports) is the schema that judges it.
+/// the `composition.yaml` trigger (whose payload reuses `shared.yaml`,
+/// `lifecycle-events.yaml`, and `action.yaml` types through relative imports)
+/// is the schema that judges it.
 fn shipped_claudine_document(process: &CliProcessFixture, values: &str) -> PathBuf {
     assert!(process.initialize_repository(), "git init");
     let schemas = process.cwd().join("schemas");
@@ -1539,7 +1544,8 @@ fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_typ
 }
 
 /// Every arm of an `initialize` stack item is a closed object or a bare verb,
-/// so an item naming an unknown verb matches no arm of the item union.
+/// so an item naming an unknown verb matches no arm of the item union, and
+/// the verb is reported by name as a key no arm declares.
 #[test]
 fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let process = CliProcessFixture::new();
@@ -1553,7 +1559,7 @@ fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let found = problems(&report);
     assert_eq!(found.len(), 1, "{report}");
     assert_eq!(found[0].0, "/initialize/0", "{report}");
-    assert!(found[0].1.contains("anyOf"), "{report}");
+    assert!(found[0].1.contains("'bogus' was unexpected"), "{report}");
 }
 
 #[test]
@@ -1631,9 +1637,9 @@ fn schema_validate_grammar_error_in_one_shipped_definition_names_its_location() 
     let process = CliProcessFixture::new();
     let doc = edited_claudine_document(
         &process,
-        "$schema:\n  loop: loop@./schemas/lifecycle.yaml\nloop:\n  max: 3\n",
+        "$schema:\n  loop: loop@./schemas/lifecycle-events.yaml\nloop:\n  max: 3\n",
         (
-            "lifecycle.yaml",
+            "lifecycle-events.yaml",
             "\"number(integer; min(1)) -> the most iterations to run\"",
             "\"number(integer; min(one)) -> the most iterations to run\"",
         ),
@@ -1644,7 +1650,7 @@ fn schema_validate_grammar_error_in_one_shipped_definition_names_its_location() 
     assert_eq!(code, Some(1), "{rendered}");
     for fragment in [
         "has a schema definition error",
-        "lifecycle.yaml as a standalone SimplifiedSchema",
+        "lifecycle-events.yaml as a standalone SimplifiedSchema",
         "for property `max`: `min` requires a numeric argument, got `one`",
     ] {
         assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
@@ -1657,8 +1663,8 @@ fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_
     let process = CliProcessFixture::new();
     let doc = edited_claudine_document(
         &process,
-        "$schema:\n  tag: slug(max(5))@./schemas/lifecycle.yaml\ntag: abc\n",
-        ("lifecycle.yaml", "types:\n", "types:\n    slug: string(min(10))\n"),
+        "$schema:\n  tag: slug(max(5))@./schemas/lifecycle-events.yaml\ntag: abc\n",
+        ("lifecycle-events.yaml", "types:\n", "types:\n    slug: string(min(10))\n"),
     );
 
     let (code, rendered) = validate_rendered(&process, &doc);
@@ -1668,7 +1674,7 @@ fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_
         "has a schema definition error",
         "tag reuses slug with contradictory bounds",
         "`min(10)` at slug in",
-        "lifecycle.yaml`",
+        "lifecycle-events.yaml`",
         "`max(5)` at tag in the inline `$schema`",
     ] {
         assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");

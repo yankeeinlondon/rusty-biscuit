@@ -47,7 +47,11 @@ Tests: `tests/l1/required_presence.rs` (presence, no defaults) and
   non-null is no choice, since a described value exists). `$ref`, `allOf`,
   selectors and array items keep the arm.
   `DefaultPlan::for_identity` memoizes per `SchemaIdentity` (capacity 64,
-  cleared by `reset_process_caches`).
+  cleared by `reset_process_caches`). `Prepared::new` takes its plan from
+  it (keyed by the shared cache's canonical digest), so a large schema
+  prepared once per file compiles its defaults once per process;
+  `Prepared::compiled_through` (private caches, the envelopes) compiles
+  its own.
 - Key selection follows JSON Schema, and every schema selecting one key is
   that key's one property definition (`Entry`: child location + one
   `Declared`): its `properties` entries, every matching `patternProperties`
@@ -71,9 +75,12 @@ Tests: `tests/l1/required_presence.rs` (presence, no defaults) and
   the lowered literal-exclusion lookahead). `if`/`then`/`else`,
   `dependentSchemas`, `not`, and `unevaluated*` are deliberately not followed.
   Tests: `tests/l1/pattern_defaults.rs`. `check_declarations` remembers
-  accepted documents by canonical content hash (`CHECKED`, capacity 256),
+  accepted documents by the XXH64 of their JSON text in written key order
+  (`written_digest`, streamed, no sorted copy; `CHECKED`, capacity 256),
   because hosts lower the same baseline repeatedly and the pattern subtrees
-  more than doubled its locations. It also compiles without arms
+  more than doubled its locations. The key is not a canonical identity:
+  every lowering pays it, a registered trigger payload of half a megabyte
+  included, so do not switch it to `xx_hash_json`. It also compiles without arms
   (`Compiler::new(schema, false)`: one location per node set instead of one
   per arm, about 13x fewer on the lifecycle baseline), since arms only
   matter to `Fill::check`; a refusal or an expansion loop

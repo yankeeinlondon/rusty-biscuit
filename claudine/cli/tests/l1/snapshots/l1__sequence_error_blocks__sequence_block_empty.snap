@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: empty sequence
+┃ 
+┃ sequence list is empty; at least one step is required
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Add at least one step to the list.

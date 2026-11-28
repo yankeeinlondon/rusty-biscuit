@@ -23,6 +23,7 @@ use claudine::provider::Provider;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use sniff::programs::InstalledAiClients;
 
+use super::super::selection_trace::{LinkState, SelectionTrace, classified, hints_agent_value};
 use super::super::wrap_terminal;
 use super::{CompositionPrepContext, load_selection_config};
 use crate::log;
@@ -45,7 +46,7 @@ pub(crate) fn composition_dispatch_context(
     );
     context.insert(
         "composition_source_path".into(),
-        serde_json::Value::String(biscuit_file::to_portable_string(
+        serde_json::Value::String(biscuit_file::to_forward_slash_string(
             &request.prepared.resolved_path,
         )),
     );
@@ -209,18 +210,13 @@ pub(crate) fn resolve_execution_target(
 /// rendered, so `{{env.AGENT}}` in the body or inline `prompt` resolves
 /// to the chosen provider.
 ///
-/// This is the Phase 3 live-path entry point: explicit flag wins, then
-/// the frontmatter `agent` hint is classified and acted on according to
-/// the TTY-only gate. In `--dry-run` mode the function returns
-/// `Ok(None)` for any unresolved state so the dry-run renderer can
-/// report it without prompting; for auto-selectable states it still
-/// returns the selected target so `AGENT` interpolation works.
+/// The explicit flag wins, then the frontmatter `agent` hint is classified
+/// and acted on according to the TTY-only gate ([`decide_target`]).
 pub(crate) fn eagerly_resolve_target(
     ctx: &CompositionPrepContext,
     hints: &claudine::composition::EffectiveSelectionHints,
     explicit_provider: Option<Provider>,
     cli_model: Option<&str>,
-    dry_run: bool,
     silent: bool,
     source_path: &std::path::Path,
 ) -> Result<Option<ResolvedExecutionTarget>> {
@@ -228,7 +224,6 @@ pub(crate) fn eagerly_resolve_target(
     // selection config are pre-built on the shared `CompositionPrepContext`
     // so this function no longer rediscovers the source repo root, reloads
     // the claudine config, or re-runs host detection.
-    let snapshot = &ctx.installed_snapshot;
     let selection_config = ctx.selection_config.as_ref();
     let catalog = match selection_config {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
@@ -240,100 +235,129 @@ pub(crate) fn eagerly_resolve_target(
     // Catalog refresh is deferred until *after* a provider is selected and
     // is scoped to that provider only. Provider selection itself never
     // touches the catalog.
-    let favorite = selection_config.and_then(|c| c.favorite);
-    let environment = ctx.invocation.document_environment();
-    // Dry-run resolves against the same compiled baseline the live run uses
-    // (so its `Model` row is the launch model) but never warms the listing.
-    let mode = if dry_run {
-        ModelResolveMode::dry_run(silent)
-    } else {
-        ModelResolveMode::live(silent)
+    let inputs = TargetInputs {
+        hints,
+        snapshot: &ctx.installed_snapshot,
+        explicit_provider,
+        favorite: selection_config.and_then(|c| c.favorite),
+        cli_model,
+        catalog: &catalog,
+        source_path,
+        is_tty: std::io::stderr().is_terminal(),
+        mode: ModelResolveMode::live(silent),
+        environment: ctx.invocation.document_environment(),
     };
+    let decision = decide_target(&inputs, &mut SelectionTrace::default());
+    resolve_decided(decision, &inputs).map(Some)
+}
 
-    if let Some(provider) = explicit_provider {
-        let (model, model_reason) =
-            resolve_document_model(&catalog, provider, hints, cli_model, mode, environment);
-        return Ok(Some(ResolvedExecutionTarget {
+/// What a direct or inline composition's target resolver reads.
+pub(crate) struct TargetInputs<'a> {
+    pub(crate) hints: &'a EffectiveSelectionHints,
+    pub(crate) snapshot: &'a claudine::composition::InstalledProviderSnapshot,
+    pub(crate) explicit_provider: Option<Provider>,
+    /// The configured `preferred_agent`, which a picker defaults to.
+    pub(crate) favorite: Option<Provider>,
+    pub(crate) cli_model: Option<&'a str>,
+    pub(crate) catalog: &'a ModelCatalogService,
+    pub(crate) source_path: &'a std::path::Path,
+    /// Whether stderr is a terminal, which decides whether a run asks.
+    pub(crate) is_tty: bool,
+    pub(crate) mode: ModelResolveMode,
+    pub(crate) environment: &'a DocumentEnvironment,
+}
+
+/// What the resolver decides before any picker shows.
+#[derive(Debug)]
+pub(crate) enum TargetDecision {
+    Chosen(ResolvedExecutionTarget),
+    /// A run on a terminal shows the picker scoped to this state.
+    Picker(AgentResolutionState),
+    /// A run without a terminal refuses with this error.
+    Refused(CompositionError),
+}
+
+/// Decide a document's target: the provider flag, else its `agent` hint as
+/// [`classify_agent_resolution`] reads it, recording each source consulted
+/// in `trace`. Pure: it shows no picker and refreshes no catalog when
+/// `inputs.mode` says not to.
+pub(crate) fn decide_target(inputs: &TargetInputs<'_>, trace: &mut SelectionTrace) -> TargetDecision {
+    if let Some(provider) = inputs.explicit_provider {
+        trace.push("--provider flag", LinkState::Chose(provider.as_slug().to_string()));
+        let (model, model_reason) = resolve_document_model(
+            inputs.catalog, provider, inputs.hints, inputs.cli_model, inputs.mode, inputs.environment,
+        );
+        return TargetDecision::Chosen(ResolvedExecutionTarget {
             provider,
             provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
             model,
             model_reason,
-        }));
+        });
     }
+    trace.push("--provider flag", LinkState::NotGiven);
+    decide_classified(classify_agent_resolution(inputs.hints, inputs.snapshot), inputs, trace)
+}
 
-    let state = classify_agent_resolution(hints, snapshot);
+/// [`decide_target`] for an already classified `agent` hint.
+fn decide_classified(state: AgentResolutionState, inputs: &TargetInputs<'_>, trace: &mut SelectionTrace) -> TargetDecision {
+    use claudine::composition::ProviderResolutionReason;
 
-    if dry_run {
-        // Dry-run only needs a concrete target when the state auto-selects.
-        // Otherwise the renderer reports the unresolved state.
-        let (provider, provider_reason) = match state {
-            AgentResolutionState::Selected { provider } => (
+    let source = format!(
+        "{} agent",
+        inputs.source_path.file_name().map_or_else(
+            || biscuit_file::to_forward_slash_string(inputs.source_path),
+            |name| name.to_string_lossy().into_owned(),
+        )
+    );
+    trace.push(source, match state {
+        AgentResolutionState::NoAgent => LinkState::NotSet,
+        _ => classified(&hints_agent_value(inputs.hints), &state),
+    });
+    // The non-TTY gate is the shared authority for both branches: its `Ok` is the
+    // auto-selectable state, and its `Err` is exactly what a no-operator session
+    // aborts with. Deriving both from one call is what keeps the picker-less
+    // rebuild in `target_launch` from drifting away from this route.
+    match provider_for_state_non_tty(&state, inputs.snapshot, inputs.source_path) {
+        Ok(provider) => {
+            let (model, model_reason) = resolve_document_model(
+                inputs.catalog, provider, inputs.hints, inputs.cli_model, inputs.mode, inputs.environment,
+            );
+            let provider_reason = match state {
+                AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
+                _ => ProviderResolutionReason::FrontmatterList,
+            };
+            TargetDecision::Chosen(ResolvedExecutionTarget { provider, provider_reason, model, model_reason })
+        }
+        Err(_) if inputs.is_tty => TargetDecision::Picker(state),
+        Err(error) => TargetDecision::Refused(error),
+    }
+}
+
+/// Act on a decision: a chosen target as is, a refusal as the error, and a
+/// picker by asking.
+fn resolve_decided(decision: TargetDecision, inputs: &TargetInputs<'_>) -> Result<ResolvedExecutionTarget> {
+    match decision {
+        TargetDecision::Chosen(target) => Ok(target),
+        TargetDecision::Refused(error) => Err(error.into()),
+        TargetDecision::Picker(state) => {
+            let provider =
+                prompt_for_agent_state(&state, inputs.hints, inputs.snapshot, inputs.favorite, inputs.source_path)?;
+            let (model, model_reason) = resolve_document_model(
+                inputs.catalog, provider, inputs.hints, inputs.cli_model, inputs.mode, inputs.environment,
+            );
+            Ok(ResolvedExecutionTarget {
                 provider,
-                claudine::composition::ProviderResolutionReason::FrontmatterSingle,
-            ),
-            AgentResolutionState::ListOneInstalled { selected, .. } => (
-                selected,
-                claudine::composition::ProviderResolutionReason::FrontmatterList,
-            ),
-            _ => return Ok(None),
-        };
-        let (model, model_reason) =
-            resolve_document_model(&catalog, provider, hints, cli_model, mode, environment);
-        return Ok(Some(ResolvedExecutionTarget {
-            provider,
-            provider_reason,
-            model,
-            model_reason,
-        }));
+                provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+                model,
+                model_reason,
+            })
+        }
     }
-
-    resolve_live_target(
-        state,
-        hints,
-        snapshot,
-        favorite,
-        cli_model,
-        &catalog,
-        source_path,
-        mode,
-        environment,
-    )
-    .map(Some)
 }
 
-/// Resolve a classified agent state for a live (non-dry-run) run.
-///
-/// Applies the TTY-only gate per the Phase 3 spec:
-/// - auto-selectable states return the target directly,
-/// - TTY prompting states show the scoped picker (and any required
-///   pre-prompt message),
-/// - no-TTY prompting states abort with a structured error.
-#[allow(clippy::too_many_arguments)]
-fn resolve_live_target(
-    state: AgentResolutionState,
-    hints: &claudine::composition::EffectiveSelectionHints,
-    snapshot: &claudine::composition::InstalledProviderSnapshot,
-    favorite: Option<Provider>,
-    cli_model: Option<&str>,
-    catalog: &claudine::model_catalog::ModelCatalogService,
-    source_path: &std::path::Path,
-    mode: ModelResolveMode,
-    environment: &DocumentEnvironment,
-) -> Result<ResolvedExecutionTarget> {
-    resolve_live_target_with_tty(
-        state,
-        hints,
-        snapshot,
-        favorite,
-        cli_model,
-        catalog,
-        source_path,
-        std::io::stderr().is_terminal(),
-        mode,
-        environment,
-    )
-}
-
+/// [`decide_target`] and its resolution for an already-classified state, so
+/// unit tests drive each state without building hints that classify to it.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_live_target_with_tty(
     state: AgentResolutionState,
@@ -347,44 +371,11 @@ pub(crate) fn resolve_live_target_with_tty(
     mode: ModelResolveMode,
     environment: &DocumentEnvironment,
 ) -> Result<ResolvedExecutionTarget> {
-    use claudine::composition::ProviderResolutionReason;
-
-    // The non-TTY gate is the shared authority for both branches: its `Ok` is the
-    // auto-selectable state, and its `Err` is exactly what a no-operator session
-    // aborts with. Deriving both from one call is what keeps the picker-less
-    // rebuild in `target_launch` from drifting away from this route.
-    let selected_provider = provider_for_state_non_tty(&state, snapshot, source_path);
-
-    if let Ok(&provider) = selected_provider.as_ref() {
-        let (model, model_reason) =
-            resolve_document_model(catalog, provider, hints, cli_model, mode, environment);
-        let provider_reason = match state {
-            AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
-            _ => ProviderResolutionReason::FrontmatterList,
-        };
-        return Ok(ResolvedExecutionTarget {
-            provider,
-            provider_reason,
-            model,
-            model_reason,
-        });
-    }
-
-    if is_tty {
-        let provider = prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
-        let (model, model_reason) =
-            resolve_document_model(catalog, provider, hints, cli_model, mode, environment);
-        Ok(ResolvedExecutionTarget {
-            provider,
-            provider_reason: ProviderResolutionReason::InteractivePicker,
-            model,
-            model_reason,
-        })
-    } else {
-        Err(selected_provider
-            .expect_err("the Ok arm returned above")
-            .into())
-    }
+    let inputs = TargetInputs {
+        hints, snapshot, explicit_provider: None, favorite, cli_model, catalog, source_path, is_tty, mode, environment,
+    };
+    let decision = decide_classified(state, &inputs, &mut SelectionTrace::default());
+    resolve_decided(decision, &inputs)
 }
 
 /// The provider a classified agent state resolves to with no operator present.
@@ -421,21 +412,20 @@ pub(crate) fn provider_for_state_non_tty(
 /// The styled pre-prompt message a TTY run shows before the `choose_one`
 /// picker, or `None` for states that go straight to the picker.
 ///
-/// The text is the single source of truth shared with the dry-run table cell
-/// and the no-TTY abort body (via [`agent_state_breakdown`] /
+/// The text is the single source of truth shared with the no-TTY abort body (via [`agent_state_breakdown`] /
 /// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
 /// Prose **markup**; callers render it with their own terminal.
 ///
 /// The `sequence` orchestrator reuses this before its review screen so an
 /// invalid-scalar or zero-installed-list sequence shows the same pre-prompt
-/// message direct compose shows and the dry-run table predicts.
+/// message direct compose shows.
 pub(crate) fn agent_prompt_message(
     state: &AgentResolutionState,
     source_path: &std::path::Path,
 ) -> Option<String> {
     match state {
         AgentResolutionState::SingleInvalid { hint } => {
-            let file_label = biscuit_file::to_portable_string(source_path);
+            let file_label = biscuit_file::to_forward_slash_string(source_path);
             let file_link = crate::cli_utils::file_url(source_path).map_or_else(
                 || file_label.clone(),
                 |file_href| format!("<a href=\"{file_href}\">{file_label}</a>"),
@@ -524,8 +514,8 @@ fn build_scoped_picker_plan(
 /// [`resolve_document_model`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ModelResolveMode {
-    /// Warm the provider's listing cache as drift-channel input. Off under
-    /// `--dry-run`, which must start no subprocess.
+    /// Warm the provider's listing cache as drift-channel input. Off for a
+    /// dry run, which must start no subprocess.
     pub(crate) refresh: bool,
     /// Emit the `[model]` warning for a frontmatter model the catalog does
     /// not recognize. Off under `--silent`, and off for the per-attempt
@@ -541,12 +531,12 @@ impl ModelResolveMode {
         }
     }
 
-    pub(crate) fn dry_run(silent: bool) -> Self {
-        Self {
-            refresh: false,
-            warn: !silent,
-        }
-    }
+    /// A dry run's resolution: no listing refresh, no warning (the report
+    /// carries what it found).
+    pub(crate) const PASSIVE: Self = Self {
+        refresh: false,
+        warn: false,
+    };
 
     /// Retry/resume re-entry: the invocation already refreshed and warned.
     pub(crate) const REBUILD: Self = Self {
@@ -558,8 +548,8 @@ impl ModelResolveMode {
 /// The one place the CLI turns (provider, frontmatter hints, `--model`,
 /// catalog) into the model a document launches with.
 ///
-/// Every route — compose, inline-compose, dry-run, sequence review, sequence
-/// dry-run, and the retry/resume rebuild — resolves here, so the library
+/// Every route — compose, inline-compose, sequence review, the dry-run
+/// check, and the retry/resume rebuild — resolves here, so the library
 /// chain in `composition::select` is the only model precedence rule and the
 /// catalog's role (order list hints, warn on a miss, never demote) cannot
 /// drift between routes.

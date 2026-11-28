@@ -932,6 +932,22 @@ fn strict_source_aware_parsing_follows_block_scalars() {
     assert_eq!(&source[constraint], "min(1)");
 }
 
+#[test]
+fn standard_string_tags_preserve_type_meaning_and_source_ranges() {
+    let property = SchemaSourcePath::root().property("t");
+    for (source, path) in [
+        ("$schema:\n  t: !!str string\n  next: boolean\n", property.clone()),
+        ("$schema:\n  t:\n  - !!str string\n  - number\n  next: boolean\n", property.union_arm(0)),
+        ("$schema:\n  t: !!str string -> a\n    b\n  next: boolean\n", property.clone()),
+    ] {
+        let control = source.replace("!!str ", "");
+        let expected = parse_standalone_schema_document(&control, "/w/schema.yaml").unwrap().unwrap();
+        let actual = parse_standalone_schema_document(source, "/w/schema.yaml").unwrap().unwrap();
+        assert_eq!(actual.declaration, expected.declaration, "{source}");
+        assert_eq!(span_texts(source, &actual, &path, SchemaSpanKind::TypeKeyword), ["string"], "{source}");
+    }
+}
+
 /// Every presentation outside those this grammar accepts still fails at the
 /// projection boundary through the standalone loader, wrapped in
 /// `SchemaDocument`, including when it hides behind a continuation or an
@@ -940,9 +956,6 @@ fn strict_source_aware_parsing_follows_block_scalars() {
 #[test]
 fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
     let cases: &[(&str, &str)] = &[
-        ("tag", "$schema:\n  t: !!str string\n  next: boolean\n"),
-        ("tag on an indentless arm", "$schema:\n  t:\n  - !!str string\n  - number\n  next: boolean\n"),
-        ("tag before a continuation", "$schema:\n  t: !!str string -> a\n    b\n  next: boolean\n"),
         ("complex key", "$schema:\n  ? [a, b]\n  : string\n"),
         ("explicit flow-mapping key", "$schema:\n  t: {? a: string}\n"),
         ("directive", "%YAML 1.2\n---\n$schema:\n  t: string\n"),

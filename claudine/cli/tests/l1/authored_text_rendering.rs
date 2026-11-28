@@ -1,6 +1,6 @@
 //! Authored text reaches the agent and the terminal as written: an
-//! interpolation literal converts in every composed file, and author text in
-//! the dry-run header or a diagnostic keeps every character.
+//! interpolation literal converts in every composed file, and a file name in
+//! the dry-run report, a run's header, or a diagnostic keeps every character.
 
 use std::path::Path;
 
@@ -8,18 +8,15 @@ use crate::common;
 
 use common::{CliProcessFixture, strip_ansi, write, write_dry_run_provider_stub};
 
-/// `claudine compose --dry-run <document>`; returns (stdout, stderr), both
-/// ANSI-stripped.
+/// `claudine compose --dry-run --claude <document>` with a `claude` on `PATH`
+/// (the check only looks it up), so a clean document exits 0; returns
+/// (stdout, stderr), both ANSI-stripped.
 fn dry_run(fixture: &CliProcessFixture, document: &Path, columns: &str) -> (String, String) {
-    dry_run_with(fixture, document, columns, &[])
-}
-
-fn dry_run_with(fixture: &CliProcessFixture, document: &Path, columns: &str, args: &[&str]) -> (String, String) {
+    write_dry_run_provider_stub(fixture.bin_dir(), "claude");
     let output = fixture
         .command()
         .env("COLUMNS", columns)
-        .args(["compose", "--dry-run"])
-        .args(args)
+        .args(["compose", "--dry-run", "--claude"])
         .arg(document)
         .assert()
         .success()
@@ -65,81 +62,6 @@ fn literal_beside_a_real_span_converts() {
     assert_eq!(stdout.trim(), "real 1 and {{ expr }}");
 }
 
-const DESCRIPTION: &str =
-    "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.\n\nSee `_pr/_report.md`.";
-
-fn description_document(fixture: &CliProcessFixture) -> std::path::PathBuf {
-    let indented: String = DESCRIPTION
-        .lines()
-        .map(|line| {
-            if line.is_empty() {
-                "\n".to_string()
-            } else {
-                format!("    {line}\n")
-            }
-        })
-        .collect();
-    let document = fixture.cwd().join("described.md");
-    write(
-        &document,
-        &format!("---\ndescription: |-\n{indented}---\nhello\n"),
-    );
-    document
-}
-
-/// The value-column text of the header table's `field` row, one entry per
-/// rendered line, trimmed.
-fn field_cell(stderr: &str, field: &str) -> Vec<String> {
-    let mut cell = Vec::new();
-    let mut inside = false;
-    for line in stderr.lines() {
-        let cells: Vec<&str> = line.split('│').collect();
-        if cells.len() < 4 {
-            continue;
-        }
-        let label = cells[1].trim();
-        if label == field {
-            inside = true;
-        } else if !label.is_empty() {
-            inside = false;
-        }
-        if inside {
-            cell.push(cells[2].trim().to_string());
-        }
-    }
-    cell
-}
-
-#[test]
-fn header_description_renders_exactly_as_authored() {
-    let fixture = CliProcessFixture::named("header-description-exact");
-    let document = description_document(&fixture);
-
-    let (_, stderr) = dry_run(&fixture, &document, "200");
-    assert_eq!(
-        field_cell(&stderr, "Description").join("\n"),
-        DESCRIPTION,
-        "{stderr}"
-    );
-    assert!(!stderr.contains("</i>"), "{stderr}");
-}
-
-#[test]
-fn header_description_keeps_every_character_at_a_narrow_width() {
-    let fixture = CliProcessFixture::named("header-description-narrow");
-    let document = description_document(&fixture);
-
-    let (_, stderr) = dry_run(&fixture, &document, "40");
-    let rendered = field_cell(&stderr, "Description").join(" ");
-    let words = |text: &str| {
-        text.split_whitespace()
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(words(&rendered), words(DESCRIPTION), "{stderr}");
-    assert!(!stderr.contains("</i>"), "{stderr}");
-}
-
 #[test]
 fn diagnostic_quotes_an_underscored_root_exactly() {
     let fixture = CliProcessFixture::named("diagnostic-underscored-root");
@@ -163,44 +85,30 @@ fn diagnostic_quotes_an_underscored_root_exactly() {
 
 /// A file name that opens and closes `_` emphasis if it is read as markup.
 const UNDERSCORED_FILE: &str = "_pr_open_.md";
-/// A `model` value carrying emphasis delimiters, a tag, and a code span.
-const MARKUP_MODEL: &str = "_opus_ </i> `claude_x` *y*";
-/// A frontmatter `name`, which replaces the file name as the document label.
-const MARKUP_NAME: &str = "`_pr/open.md` </i> _draft_";
-
-fn header_document(fixture: &CliProcessFixture, file: &str, name: Option<&str>) -> std::path::PathBuf {
-    let document = fixture.cwd().join(file);
-    let name = name.map_or(String::new(), |name| format!("name: '{name}'\n"));
-    write(&document, &format!("---\n{name}model: '{MARKUP_MODEL}'\n---\nhello\n"));
-    document
-}
-
-mod header_document_label_and_model_render_exactly_as_authored {
+/// The dry-run report names the document by its file name exactly, at a
+/// width that would wrap it and one that would not.
+mod check_report_names_an_underscored_file_exactly {
     use super::*;
 
     #[test]
     fn at_200_columns() {
-        assert_label_and_model_render_as_authored("200");
+        assert_report_names_the_file("200");
     }
 
     #[test]
     fn at_40_columns() {
-        assert_label_and_model_render_as_authored("40");
+        assert_report_names_the_file("40");
     }
 
-    fn assert_label_and_model_render_as_authored(columns: &str) {
-        let fixture = CliProcessFixture::named("header-label-model");
-        // The `Model` row shows a model only once a provider is resolved.
-        write_dry_run_provider_stub(fixture.bin_dir(), "claude");
-        let from_file = header_document(&fixture, UNDERSCORED_FILE, None);
-        let named = header_document(&fixture, "named.md", Some(MARKUP_NAME));
+    fn assert_report_names_the_file(columns: &str) {
+        let fixture = CliProcessFixture::named("check-report-file-name");
+        let document = fixture.cwd().join(UNDERSCORED_FILE);
+        write(&document, "hello\n");
 
-        for (document, label) in [(&from_file, UNDERSCORED_FILE), (&named, MARKUP_NAME)] {
-            let (_, stderr) = dry_run_with(&fixture, document, columns, &["--claude"]);
-            let words = |cell: Vec<String>| cell.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
-            assert_eq!(words(field_cell(&stderr, "Document")), label, "{columns} columns:\n{stderr}");
-            assert_eq!(words(field_cell(&stderr, "Model")), MARKUP_MODEL, "{columns} columns:\n{stderr}");
-        }
+        let (stdout, stderr) = dry_run(&fixture, &document, columns);
+        let flat = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains(&format!("Dry run of {UNDERSCORED_FILE} (no commands run)")), "{columns} columns:\n{stderr}");
+        assert_eq!(stdout.trim(), "hello");
     }
 }
 
@@ -230,16 +138,4 @@ fn run_header_and_source_status_keep_an_underscored_file_name() {
         flat.contains(&format!("the file reference was resolved to {UNDERSCORED_FILE} file")),
         "{stderr}"
     );
-}
-
-#[test]
-fn header_agent_breakdown_keeps_one_row_per_bullet() {
-    let fixture = CliProcessFixture::named("header-agent-rows");
-    let document = description_document(&fixture);
-
-    let (_, stderr) = dry_run(&fixture, &document, "200");
-    let cell = field_cell(&stderr, "Agent");
-    let bullets: Vec<&String> = cell.iter().filter(|row| row.starts_with("- ")).collect();
-    assert_eq!(bullets.len(), 3, "one row per bullet: {cell:#?}\n{stderr}");
-    assert!(bullets[0].starts_with("- CLI caller didn't specify the Agent"), "{cell:#?}");
 }

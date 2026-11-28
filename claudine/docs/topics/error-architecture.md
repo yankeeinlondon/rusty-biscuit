@@ -4,9 +4,9 @@ How a typed error travels from the place it is raised to the place a human reads
 it or a `when:` clause matches it — and the rules that keep those two answers the
 same.
 
-The **taxonomy** (the facet enums and the locked code catalog) is ratified in
-[`error-catalog.md`](../../features/_completed/2026-06-28-real-errors/error-catalog.md);
-its data model is [`error-structure.md`](../../features/_completed/2026-06-28-real-errors/error-structure.md).
+The **taxonomy** (the facet enums and the locked code catalog) lives in code:
+the facets in `claudine::diagnostics` and every registered code, with its
+detail keys, in `claudine/lib/src/diagnostics/registry.rs`.
 This document is the **transport**: the seams, the selection rule, and what an
 author of a new error must do. For the `err.*` surface those facets reach, see
 [lifecycle.md](flow-control/lifecycle.md#err-fields).
@@ -31,8 +31,7 @@ a human, it is worth exposing to a handler — one struct, both jobs.
 
 ### Where diagnostic identity lives
 
-Claudine owns the facets; lower layers do not have any (**Option A**, ratified in
-the feature's [decisions.md §D-1](../../features/2026-07-13-error-propogation/decisions.md)).
+Claudine owns the facets; lower layers do not have any.
 Every Darkmatter, biscuit-file, or `std::io` error that crosses into Claudine is
 retained as a `#[source]` by a Claudine diagnostic wrapper. The cost is that
 every ingress must be wrapped; what it buys is a dependency direction that does
@@ -103,6 +102,144 @@ Both guards **keep the best candidate already selected**: a malformed third-part
 is the whole wide pointer (address *and* vtable), because a `#[from]` payload can
 share its parent's address and treating that as a revisit would truncate a healthy
 chain.
+
+## Findings: one record for a report
+
+An error is one failure that stops something. A **finding** is one row of a
+report that collects many problems without stopping: the `--dry-run` check
+and the report a sequence prints when preflight stops it. Claudine does not
+have its own type for findings. It pushes Darkmatter's
+`darkmatter::findings::Diagnostic` into a `FindingSink`, grouped under a
+subject (the root document, or a task by its place in the graph), and
+renders the finished `FindingReport`. The same record reaches
+`md --output json`, DMLS, and Claudine's `--json` envelope; its fields are
+documented in [Darkmatter's data contracts](darkmatter/docs/cli/data-contracts.md).
+
+Who supplies a finding's code follows who owns the fact:
+
+| Fact | Code namespace | Examples |
+|------|----------------|----------|
+| true of a document whatever agent runs it | `dm.*`, from Darkmatter's catalog | `dm.reference.missing_document`, `dm.schema.removed_key`, `dm.compose.empty_body`, `dm.check.not_checked` |
+| needs the task tree, a provider, or the lifecycle | `composition.*`, from Claudine's registry | `composition.provider_unresolved`, `composition.selection_key_as_data`, `composition.no_executable`, `composition.model_required`, `composition.missing_properties` |
+| an error no projector classifies | `internal.bug` | a defect in Claudine, never in the document |
+
+A finding's code is a **report code**, not an `err.code`. A lifecycle
+`when:` clause never sees findings; it sees the one typed error the run
+returns, described next. Each finding follows the
+[message standard](darkmatter/docs/errors/message-standard.md): what failed in
+the author's terms, where, the cause that actually applies, and a hint.
+Context such as the task travels as a trail frame
+(`{ "kind": "host", "host": "task", "label": "find", "property": "sequence[0].agent" }`),
+never as text glued onto the message.
+
+## A preflight report around a typed error
+
+When a real `claudine sequence` run stops before its first task, the error it
+returns is the one the run has always returned at that point: the first
+failure in preflight order. On top of that, the run reports every other
+problem it can prove at the same point, so you can fix them all in one edit.
+`CompositionError::CheckFailed { report, cause }` carries both:
+
+- `cause` is the typed error, chosen exactly as before. Every `err.*` field a
+  lifecycle `when:` clause or a persisted record reads (`code`, `category`,
+  `disposition`, `origin`, `detail`, `msg`, `severity`, `variant`, and the
+  one-level `err.cause`) comes from the diagnostic the selector would pick for
+  `cause` alone. The wrapper adds no code, and `diagnostic_source` continues
+  *below* that diagnostic, so it never appears a second time as its own
+  `err.cause`.
+- `report` is a `darkmatter::findings::FindingReport`: the passive check of
+  `--dry-run`, taken in the state the run stopped in (the caller's values plus
+  every runtime write, the root's `initialize` included), with only its errors
+  and warnings kept.
+
+The wrapper is `Semantic`, so it wins selection, and its identity is its
+cause's. Only the CLI's top-level renderer looks at the report: it prints the
+report once, in place of the cause's error block, and names the failure that
+stopped the run on the last line, unless a row already states it (the
+cause's own message, alone or after a wrapper's `…: ` prefix). Any other
+surface renders the cause's block.
+
+```text
+Sequence preflight found 2 errors and 0 warnings; no task ran
+
+task one (sequence[0])
+  ✗ `topic` (string) is required and has no value; a non-interactive run fails
+    here
+      in needs.md
+      hint: add `topic` to the task's `with:`, or pass `topic=<value>`
+            after the file
+
+task two (sequence[1])
+  ✗ the prompt file does not exist
+      prompt: ./missing.md
+      resolved to missing.md (relative to seq.md)
+      at seq.md:7:13
+      hint: create missing.md before a real run, or correct the reference
+
+The run stopped at: <the message of the error the run returned>
+```
+
+The first row need not be the failure: here a dry run groups task one's
+missing input first, but a real run meets task two's missing file in graph
+loading, before it collects inputs, and `err.code` is the file's.
+
+A run whose passive check finds nothing, or whose error is not a typed
+`CompositionError`, returns its error unwrapped and renders as before.
+
+## Sequence errors: a site and a block of their own
+
+Every `CompositionError::Sequence…` variant says where the author wrote the
+problem. It carries a `site: Box<SequenceSite>` (`lib/src/composition/error/site.rs`),
+unless it already has `source_path` and `property` fields:
+
+| Field | Holds | Example |
+|-------|-------|---------|
+| `file` | the file that wrote the construct | `prompts/seq.md` |
+| `property` | the authored property path, zero-based as written | `sequence[1].prompt` |
+| `task` | the task's `name`, else its generated label | `review` |
+
+A part nobody knows stays `None` and is not rendered; a site never guesses a
+file or a line. A layer deep in loading often raises the error before it knows
+its file, so it raises an unlocated site and the first caller that knows the
+location fills it in with `CompositionError::locate_sequence`. The innermost
+location wins: a caller never overwrites what a lower layer proved.
+
+Each variant renders through its own arm of `render/sequence.rs`, in the
+four-part shape the message standard asks for (what, where, why, fix):
+
+```text
+⤫ CompositionError: prompt file not found
+┃
+┃ prompt file ./missing.md could not be resolved: file not found
+┃
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃
+┃ Correct the reference ./missing.md.
+```
+
+- **What** names the construct the author wrote (`prompt file`, `task file`,
+  `sequence file`), taken from `ExecutableField::noun`, never "external
+  sequence file".
+- **Why** is the cause the code established. Loading a referenced file has
+  three variants, so a message never lists causes it has not proven:
+  `SequenceReferenceResolution` (the reference matched no file; an unresolved
+  reference also lists the candidates it tried), `SequenceSourceRead` (the file
+  exists but could not be read), and `SequenceSourceParse` (it was read but
+  did not parse, with the stage that failed: frontmatter, YAML, YAML
+  conversion, JSON5, a repeated key, or a JSON line).
+- **Fix** is one hint for that cause; an unknown task field gets the near
+  miss (`Did you mean when? Rename whem.`) or, near nothing, the field list.
+- Prose counts steps from one ("step 2", "sequence item 5 is null"); the
+  property path keeps the zero-based index the file uses.
+
+The facets do not change with the wording: these variants keep the code,
+category, disposition, and origin they had, so an author who matches
+`err.code` sees the same failure (`cli/tests/l1/sequence_error_blocks.rs`
+pins each block, its JSON projection, and its identity). A sequence that stops
+at preflight shows the passive check's rows instead of the block, so a row
+carries the same hint as the block and the site's file as its source.
 
 ## The snapshot boundary
 
@@ -283,7 +420,7 @@ original five fields keep their names, order, and values:
 | Field | Supplied today | Notes |
 |-------|----------------|-------|
 | `reference` | ✅ | the raw, unresolved reference |
-| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled`, `remote_denied` (a remote host the fetch policy does not allow) |
+| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled`, `remote_denied` (a remote host the fetch policy does not allow), `remote_needs_approval` (a remote host `permissions.network: ask` would have to approve) |
 | `base_dir` | ✅ | **compatibility projection** — see below |
 | `suggestions` | ✅ | the same did-you-mean list the human block shows |
 | `fallback_dir` | ✅ | **compatibility projection** — see below |
@@ -337,6 +474,18 @@ The guards live in `cli/tests/l1/error_guards.rs`, backed by a `syn` reader over
 | `detail_projections_write_only_declared_keys` | a `detail` projection writes a key its codes do not declare |
 | `from_code_projects_a_catalog_shaped_detail_for_every_registered_code` | a registered code projects a top-level `null` detail |
 | `every_diagnostic_in_the_corpus_projects_its_catalog_key_set` | a constructed diagnostic's detail keys ≠ its catalog key set |
+| `sequence_scope::every_sequence_variant_carries_its_site` | a `CompositionError` variant named `Sequence…` has neither a `site` field nor both `source_path` and `property` |
+| `sequence_scope::no_message_hard_codes_a_construct_noun` | an `#[error]` text or a `render/` block spells a construct noun such as "external sequence file" instead of taking it from `ExecutableField::noun` |
+| `sequence_scope::only_listed_variants_reach_the_catch_all_block` | a variant no renderer names, so it falls through to the generic "composition failed" block of `render/provider.rs` |
+| `sequence_scope::every_routed_sequence_variant_has_its_own_arm` | a variant the renderer routes to `render/sequence.rs` has no arm of its own there, or an arm names a variant that no longer exists |
+
+Three more guards live beside the tests of what they guard:
+
+| Guard | Where | Fails when |
+|-------|-------|-----------|
+| boundary mapping | `cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*`) | a preflight boundary (sequence resolution, prompt load, transclusion, graph, provider, inputs) loses the typed cause, its `err.*` facets, or its `finalize` routing once the report wraps it; each boundary is one explicit case, and a guard keeps the list of boundaries complete |
+| catalog snapshots | `cli/tests/l1/dry_run_check.rs` (`codes::*`) | a code the registry marks `dry_run_report: true` (`lib/src/diagnostics/registry.rs`) has no fixture, no control, or no plain and JSON report snapshot, or a fixture or code snapshot names no such code |
+| wrapper identity | `lib/src/composition/error/tests.rs` (`check_failed::*`) | a `CheckFailed` differs from its cause in any `err.*` field or snapshot |
 
 ### Why a scan and not a grep
 
@@ -354,7 +503,14 @@ knows two things a grep cannot:
 
 ### Adding an exception
 
-Both allowlists (`error_guards/transport-allow.toml`,
+The sequence scope guards read `error_guards/sequence-scope-allow.toml`: one
+entry per variant and guard, tagged `outside-scope`. Only variants outside the
+sequence error standard may be listed (today, other variants that still reach
+the generic block); an entry naming a `Sequence…` variant or a `render/` file
+is refused, because every sequence error has its site and its own block. An
+unlisted variant and an entry matching no variant both fail.
+
+Both D8 allowlists (`error_guards/transport-allow.toml`,
 `error_guards/boxed-diagnostic-allow.toml`) key an entry to an **enclosing
 symbol** — not a source line, which would match by text across files — and
 require a `tag` and a written `reason`. `tag = "retained"` is permanent (no typed

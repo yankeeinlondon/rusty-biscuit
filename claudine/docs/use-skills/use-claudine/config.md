@@ -4,7 +4,7 @@
 
 - **Locations.** `~/.claudine/config.yaml` (user) and `<repo>/.claudine/config.yaml`
   (repo). Both are YAML, validated against the shipped schema
-  `claudine/schemas/claudine-config.yaml`. A legacy JSON5 `config.json` beside
+  `claudine/registration/claudine-config.yaml`. A legacy JSON5 `config.json` beside
   either is converted on the next load and renamed `config.json.bak` (its
   comments are not carried over). The conversion writes actions and routes
   in the keyed form below; if the schema refuses the converted value, nothing
@@ -195,19 +195,54 @@ catalog, and `export` pushes the catalog into a provider's config.
 
 ## Making Claudine's schemas visible to `md` and DMLS
 
-The `claudine` binary has its trigger schemas built in. `md` and DMLS read
-them **from disk only**.
+The `claudine` binary has its schemas built in: the files of
+`claudine/registration/` (the trigger files, the libraries they import, the
+`kind: sequence` YAML definition, and the namespace files of the globals
+`seq`, `loop`, and `group`). `md` and DMLS read them from Claudine's host
+registration, which Claudine's setup publishes and registers in
+`~/.darkmatter.yaml`, so a Claudine document is typed in any folder. The
+editor's lifecycle checks come from the generated lifecycle artifact the
+registration carries.
 
-- **Under `claudine/`** in the repo, documents find them automatically.
-- **Elsewhere**, copy the bundle as regular files (symlinks are ignored)
-  into `~/schemas/`, an absolute `$SCHEMAS_DIR`, or `<repo>/schemas/`:
-
-```bash
-cd claudine/schemas
-cp action.yaml lifecycle.yaml sequence-types.yaml linking.yaml document.yaml \
-   claudine.yaml inline-compose.yaml sequence.yaml \
-   globals.yaml globals.lifecycle.json ~/schemas/
+```text
+~/.claudine/registrations/darkmatter/
+├── manifest.yaml           lists every file below with its digest
+├── globals.lifecycle.json
+└── schemas/…               the files of claudine/registration/
+~/.darkmatter.yaml:
+  register:
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
 ```
 
-The first eight files are the trigger bundle; they import each other. The
-last two give the editor Claudine's globals and lifecycle checks.
+- **Setup order and upgrades.** Setup publishes the format 3 bundle first
+  (upgrading an older format 1 or format 2 installation in place, writing
+  `manifest.yaml` last; a failed publish stops setup before anything else is
+  written), then writes Claudine's config and the `permissions` handshake,
+  then adds the `register` entry (replacing the old
+  `~/.claudine/darkmatter-host.yaml` entry if there is one, while keeping
+  unrelated entries and comments), then deletes the old
+  `~/.claudine/darkmatter-host*` files. It never edits a repository's
+  `.darkmatter.yaml`.
+- **Don't edit the published files.** `md` and DMLS check each member (and
+  any derived `.facts.json` companion) against the format 3 manifest's
+  digest; one edited, missing, or half-written file makes them refuse the
+  whole registration with a `dm.host.registration` warning. `claudine doctor`
+  reports a missing file or companion (or an unsupported manifest format
+  version) as an `error` and a modified file or companion as a `warn`;
+  `claudine doctor --fix` restores them in place. `claudine` runs are
+  unaffected, since they use the built-in copy.
+- **Inspect or republish** with `claudine registrations` (hidden from
+  `--help`). With no argument it lists every inventory entry as JSON
+  (`kind`, `filepath`, 16-digit XXH64 `hash`, and optional `name`), covering
+  `manifest`, `lifecycle`, `schema-trigger`, `schema`, `yaml-schema`,
+  `namespace-schema`, `expression-schema`, `mutation-schema`, and
+  `expression-facts`. `claudine registrations publish` rewrites only the
+  files that differ, writes `manifest.yaml` last, prints the file list as
+  JSON, and never edits `~/.darkmatter.yaml`. `just install` runs it for
+  you. If the `register` entry itself is gone, run `claudine doctor --fix`
+  or add it back by hand.
+- **Change a Claudine key's type** with a `kind: schema-trigger` file in a
+  schema location (`SCHEMAS_DIR`, a `schemas/` folder, or `~/schemas`) or
+  with the document's own `$schema`. Both apply above Claudine's schemas. A
+  same-named copy of a Claudine file there is just another trigger: it
+  doesn't replace Claudine's.

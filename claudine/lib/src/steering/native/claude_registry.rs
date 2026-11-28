@@ -21,7 +21,7 @@
 //! print-mode session (`entrypoint: sdk-*`) is one-shot or retained, so those
 //! are listed with no profile rather than guessed.
 //!
-//! Research: `docs/research/steering/claude.md` (discovery
+//! Research: `docs/research/providers/steering/claude.md` (discovery
 //! `registry-<os>-native-*`).
 
 use std::path::{Path, PathBuf};

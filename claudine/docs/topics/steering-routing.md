@@ -177,7 +177,7 @@ Nothing fails the wrapped agent task:
   unavailable, or not an operation name) is reported as a discovery error,
   never listed with a guessed operation.
 - **Native** — provider-specific discoverers for researched discovery methods
-  (`discovery` records in `docs/research/steering/<slug>.md`, projected into the
+  (`discovery` records in `docs/research/providers/steering/<slug>.md`, projected into the
   generated catalog), under `claudine::steering::native`. Every researched
   native method this build does not run is reported as a coverage gap rather
   than an error.

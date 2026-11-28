@@ -18,7 +18,7 @@
 use crate::config::migration_receipt::{self, MigrationSource};
 use crate::markdown::hash::node_edit::Layout;
 use crate::yaml_edit::{YamlEdit, YamlEditError, edit_yaml_paths_in_layout};
-use biscuit_file::{Indentation, PathIdentity, YamlError, canonicalize_simplified, to_portable_string};
+use biscuit_file::{Indentation, PathIdentity, YamlError, canonicalize_simplified, to_forward_slash_string};
 use std::cell::{OnceCell, RefCell};
 use simplified_schema::PropertyPath;
 use std::fmt;
@@ -289,6 +289,30 @@ impl TargetChange {
         self.publish_last = true;
         self
     }
+
+    /// The editor's refusal of this change's edits applied to the text it
+    /// expects: the bytes of [`SourceExpectation::Bytes`] or the initial text
+    /// of [`Self::create`]. A dry run with the editor staging uses, so a
+    /// caller can learn before committing (or before any earlier step of its
+    /// own) that an edit cannot be made in place, for example one that walks
+    /// into a flow collection. Nothing is read or written. `None` when the
+    /// edits apply, or when the expected text is not known without reading
+    /// the file (another expectation, or bytes that are not UTF-8, which
+    /// staging refuses on its own).
+    ///
+    /// A commit still stages against the file as re-read under the lock.
+    #[must_use]
+    pub fn edit_refusal(&self) -> Option<YamlEditError> {
+        let text = match &self.base {
+            Base::Existing(SourceExpectation::Bytes(bytes)) => std::str::from_utf8(bytes).ok()?,
+            Base::Create { initial } => initial.as_str(),
+            Base::Existing(_) | Base::Generated { .. } => return None,
+        };
+        if self.edits.is_empty() {
+            return None;
+        }
+        crate::yaml_edit::edit_yaml_paths(text, &self.edits).err()
+    }
 }
 
 #[derive(Debug)]
@@ -450,7 +474,7 @@ impl ConfigTransaction {
             }
             return Ok(self);
         }
-        let order_key = to_portable_string(&resolved);
+        let order_key = to_forward_slash_string(&resolved);
         let position = self.targets.partition_point(|target| target.order_key <= order_key);
         self.targets.insert(
             position,

@@ -94,6 +94,13 @@ pub enum Work {
     /// resolved into a schema by preflight: once per owner revision, not per
     /// row and not per reread of an unchanged owner.
     SequenceSchemaPrepare,
+    /// A local source file opened through
+    /// `composition::read_local_source`: a sequence walk's `prompt:`
+    /// document or a referenced data document, a reference resolved with
+    /// `resolve_composition_source_in_context`, or a dry-run check's read of
+    /// one. Counted at the open, so a read a check's shared observation of
+    /// local files serves is not one.
+    CompositionSourceRead,
 }
 
 impl Work {
@@ -122,6 +129,7 @@ impl Work {
         Work::ReferencedDocumentNodes,
         Work::FreshnessSourceReads,
         Work::SequenceSchemaPrepare,
+        Work::CompositionSourceRead,
     ];
 }
 

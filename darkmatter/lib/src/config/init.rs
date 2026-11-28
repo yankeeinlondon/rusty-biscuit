@@ -11,7 +11,9 @@
 //! defaults (with an [`InitNotice`]) when that block cannot be read.
 //!
 //! Every write goes through one [`ConfigTransaction`]: each target is locked,
-//! re-read, edited in place, and validated before it is replaced. Nothing is
+//! re-read, edited in place, and validated, as the file of the scope it was
+//! observed as (never a scope inferred from its path, so a user file a
+//! repository links to stays a user file), before it is replaced. Nothing is
 //! written unless every scope asked for can be written: a missing home or a
 //! context that names no repository fails before any file is touched.
 //!
@@ -27,6 +29,7 @@ use simplified_schema::yaml_documents::load_yaml_document;
 
 use super::load::{
     CONFIG_NOT_SAVED_CODE, ConfigError, ConfigRevision, check_permissions_text, follow_on_disk, observe_file,
+    read_working_bytes, working_path, working_revision,
 };
 use super::schema::{CONFIG_FILE_NAME, ConfigScope, contract, permissions_contract};
 use super::write::{
@@ -185,13 +188,10 @@ pub struct ConfigObservation {
 ///
 /// [`InitError::NoHome`] or [`InitError::NotARepository`].
 pub fn config_path(context: &FileResolutionContext, scope: ConfigScope) -> Result<PathBuf, InitError> {
-    match scope {
-        ConfigScope::User => context.home_dir().map(|home| home.join(CONFIG_FILE_NAME)).ok_or(InitError::NoHome),
-        ConfigScope::Repository => context
-            .repository_root()
-            .map(|root| root.join(CONFIG_FILE_NAME))
-            .ok_or_else(|| InitError::NotARepository { dir: context.cwd().to_path_buf() }),
-    }
+    working_path(context, scope).ok_or_else(|| match scope {
+        ConfigScope::User => InitError::NoHome,
+        ConfigScope::Repository => InitError::NotARepository { dir: context.cwd().to_path_buf() },
+    })
 }
 
 /// The `user` scope alone; see [`init`].
@@ -261,7 +261,8 @@ pub fn init(context: &FileResolutionContext, scopes: &[ConfigScope], options: In
         report.files.push(InitFile { path: observation.path, scope: *scope, action });
         report.notices.extend(notices);
     }
-    commit_checked(transaction, context, &|_| None)?;
+    let targets: Vec<(&Path, ConfigScope)> = report.files.iter().map(|file| (file.path.as_path(), file.scope)).collect();
+    commit_checked(transaction, context, &targets, &|_| None)?;
     Ok(report)
 }
 
@@ -275,15 +276,13 @@ pub fn init(context: &FileResolutionContext, scopes: &[ConfigScope], options: In
 /// a mapping, an unknown key).
 pub fn observe(context: &FileResolutionContext, scope: ConfigScope) -> Result<ConfigObservation, InitError> {
     let path = config_path(context, scope)?;
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    // The same reader and judge as `load::inspect_working_file`, with the
+    // I/O error kept as setup's own read failure.
+    let bytes = match read_working_bytes(&path) {
+        Ok(bytes) => bytes,
         Err(source) => return Err(InitError::Read { path, source }),
     };
-    let revision = match scope {
-        ConfigScope::User => ConfigRevision::User,
-        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
-    };
+    let revision = working_revision(scope);
     let file = observe_file(context, bytes.as_deref(), &path, revision, scope).map_err(InitError::Invalid)?;
     let authored = match file.authored() {
         Some(Value::Object(map)) => Some(map.clone()),
@@ -363,10 +362,15 @@ pub fn setup_change(observation: &ConfigObservation, permissions: Option<Value>)
 }
 
 /// Commits `transaction`, judging each candidate with `other` when it
-/// returns a verdict for the target (a host's own file), and otherwise as a
-/// Darkmatter configuration file with [`check_config_text`]: of the
-/// repository scope when it is the repository file `context` names, of the
-/// user scope otherwise.
+/// returns a verdict for the target (a host's own file), and otherwise as
+/// the Darkmatter configuration file of the scope `scopes` gives its path,
+/// with [`check_config_text`].
+///
+/// The scope is the caller's, never inferred from where the target lies: a
+/// user file the repository's `.darkmatter.yaml` links to, or that sits at
+/// a repository root, is still judged as the user file. A target listed
+/// under both scopes (one file observed as each) is judged as the user
+/// file. A candidate neither `other` nor `scopes` names is refused.
 ///
 /// ## Errors
 ///
@@ -374,17 +378,24 @@ pub fn setup_change(observation: &ConfigObservation, permissions: Option<Value>)
 pub fn commit_checked(
     transaction: ConfigTransaction,
     context: &FileResolutionContext,
+    scopes: &[(&Path, ConfigScope)],
     other: &dyn Fn(&ValidationCandidate<'_>) -> Option<Result<(), ValidationRefusal>>,
 ) -> Result<CommitOutcome, InitError> {
-    let repository = context.repository_root().map(|root| root.join(CONFIG_FILE_NAME));
     transaction
         .commit(&|candidate| {
             if let Some(verdict) = other(candidate) {
                 return verdict;
             }
-            let scope = match &repository {
-                Some(path) if same_file(path, candidate.target) => ConfigScope::Repository,
-                _ => ConfigScope::User,
+            let mut named = scopes.iter().filter(|(path, _)| same_file(path, candidate.target)).map(|(_, scope)| *scope);
+            let scope = match named.next() {
+                None => {
+                    return Err(ValidationRefusal::new(format!(
+                        "{} is not a configuration file this write names",
+                        candidate.target.display()
+                    )));
+                }
+                Some(_) if named.any(|scope| scope == ConfigScope::User) => ConfigScope::User,
+                Some(first) => first,
             };
             check_config_text(candidate.candidate, candidate.target, scope, context)
         })
@@ -464,6 +475,9 @@ pub struct RegisterReport {
     pub path: PathBuf,
     /// [`InitAction::Unchanged`] when an entry already named the manifest.
     pub action: InitAction,
+    /// The entries [`replace_manifest_registration`] rewrote or removed, as
+    /// they were written; always empty for [`register_manifest`].
+    pub replaced: Vec<String>,
 }
 
 /// Adds `reference` (a manifest reference, as it should be written) to the
@@ -522,7 +536,7 @@ pub fn register_manifest(
                             .is_ok_and(|identity| identity == wanted)
                     });
                     if registered {
-                        return Ok(RegisterReport { path: observation.path, action: InitAction::Unchanged });
+                        return Ok(RegisterReport { path: observation.path, action: InitAction::Unchanged, replaced: Vec::new() });
                     }
                     YamlEdit::Set { path: register_path(Some(entries.len()))?, value: Value::from(reference) }
                 }
@@ -543,8 +557,236 @@ pub fn register_manifest(
     let action = if observation.bytes.is_some() { InitAction::Updated } else { InitAction::Created };
     let mut transaction = ConfigTransaction::new();
     transaction.add(change).map_err(InitError::Write)?;
-    commit_checked(transaction, context, &|_| None)?;
-    Ok(RegisterReport { path: observation.path, action })
+    commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
+    Ok(RegisterReport { path: observation.path, action, replaced: Vec::new() })
+}
+
+/// [`register_manifest`] for a host whose manifest moved: `reference` takes
+/// the place of every `register` entry that names `old_path` (the host's
+/// previous default manifest, which may no longer exist) or the same
+/// manifest as `reference`, however each is spelled. The first such entry is
+/// rewritten to `reference` as given, keeping the comment on its line, and
+/// the others are removed together with the comment on each one's line; with
+/// none, `reference` is appended. Every other entry, value, and comment
+/// (including a comment on its own line above a removed entry) is kept, and
+/// a file that already lists `reference` once and `old_path` nowhere is not
+/// written.
+///
+/// Entries are compared by the file they name, resolved from the
+/// configuration file's folder: [`manifest_identity`](super::registration::manifest_identity)
+/// for an existing file, and the location the reference would open for a
+/// missing one, so `~/.acme/old.yaml`, its absolute path, and `.acme/old.yaml`
+/// in `~/.darkmatter.yaml` all match a missing `~/.acme/old.yaml`.
+///
+/// ## Errors
+///
+/// As [`register_manifest`]; nothing was changed.
+pub fn replace_manifest_registration(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+    reference: &str,
+    old_path: &Path,
+) -> Result<RegisterReport, InitError> {
+    let observation = observe(context, scope)?;
+    let (change, report) = replace_manifest_change(&observation, context, reference, old_path)?;
+    if let Some(change) = change {
+        let mut transaction = ConfigTransaction::new();
+        transaction.add(change).map_err(InitError::Write)?;
+        commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
+    }
+    Ok(report)
+}
+
+/// [`replace_manifest_registration`] for an explicit repair that never
+/// creates a configuration file: the file of `scope` must already exist and
+/// be valid, and the edit is made only while it still holds the bytes
+/// observed here (a concurrent edit is [`ConfigWriteError::Changed`], never
+/// overwritten). Setup, which may create the file, uses
+/// [`replace_manifest_registration`].
+///
+/// ## Errors
+///
+/// As [`replace_manifest_registration`], plus [`InitError::Read`] with
+/// [`std::io::ErrorKind::NotFound`] when the file does not exist; nothing was
+/// changed.
+pub fn replace_manifest_registration_existing(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+    reference: &str,
+    old_path: &Path,
+) -> Result<RegisterReport, InitError> {
+    let observation = observe(context, scope)?;
+    if observation.bytes.is_none() {
+        return Err(InitError::Read {
+            path: observation.path,
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "the configuration file does not exist"),
+        });
+    }
+    let (change, report) = replace_manifest_change(&observation, context, reference, old_path)?;
+    if let Some(change) = change {
+        let mut transaction = ConfigTransaction::new();
+        transaction.add(change).map_err(InitError::Write)?;
+        commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
+    }
+    Ok(report)
+}
+
+/// Judges the `permissions` mapping of another program's configuration text
+/// (`text`, the file at `path`) as the target of a `scope` reference would be
+/// judged when the policy loads: the mapping must exist and pass the
+/// loader's own checks for `scope`. Nothing is read or written.
+///
+/// ## Errors
+///
+/// The first problem, as a message naming its pointer. The message can
+/// quote authored values.
+pub fn check_referenced_permissions(
+    text: &str,
+    path: &Path,
+    scope: ConfigScope,
+    context: &FileResolutionContext,
+) -> Result<(), String> {
+    referenced_block_text(context, path, text, scope).map(|_| ())
+}
+
+/// The change [`replace_manifest_registration`] makes to `observation`'s
+/// file (`None` when nothing would change) and the report it returns once
+/// that change is committed. An existing file is edited in place and must
+/// still hold the bytes observed.
+///
+/// ## Errors
+///
+/// As [`register_manifest`].
+pub fn replace_manifest_change(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    old_path: &Path,
+) -> Result<(Option<TargetChange>, RegisterReport), InitError> {
+    if let BlockState::Invalid(error) = &observation.permissions {
+        return Err(InitError::Invalid(error.clone()));
+    }
+    let wanted = super::registration::manifest_identity(reference, &observation.path, context)
+        .map_err(|why| invalid_setting(observation, format!("cannot register `{reference}`: {why}")))?;
+    plan_replacement(observation, context, reference, &wanted, old_path)
+}
+
+/// The editor's refusal of the change [`replace_manifest_change`] plans for
+/// `observation`'s file ([`TargetChange::edit_refusal`]), judged before the
+/// host publishes its manifest: a missing manifest is identified by the
+/// location `reference` would open, as a missing old manifest is. `None`
+/// when the change can be made in place or nothing would change.
+///
+/// A host that publishes before it registers asks this first, so a file
+/// whose layout the editor cannot change (an inline `register: [...]` list
+/// that needs an entry added, replaced, or removed, or an inline root
+/// mapping) is reported before anything is published.
+///
+/// ## Errors
+///
+/// As [`replace_manifest_change`], except that a missing manifest is not an
+/// error.
+pub fn replace_manifest_refusal(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    old_path: &Path,
+) -> Result<Option<crate::yaml_edit::YamlEditError>, InitError> {
+    if let BlockState::Invalid(error) = &observation.permissions {
+        return Err(InitError::Invalid(error.clone()));
+    }
+    let wanted = match super::registration::manifest_identity(reference, &observation.path, context) {
+        Ok(identity) => identity,
+        Err(why) => super::registration::manifest_location_identity(reference, &observation.path, context)
+            .ok_or_else(|| invalid_setting(observation, format!("cannot register `{reference}`: {why}")))?,
+    };
+    let (change, _) = plan_replacement(observation, context, reference, &wanted, old_path)?;
+    Ok(change.and_then(|change| change.edit_refusal()))
+}
+
+fn invalid_setting(observation: &ConfigObservation, message: String) -> InitError {
+    let revision = match observation.scope {
+        ConfigScope::User => ConfigRevision::User,
+        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
+    };
+    InitError::Invalid(ConfigError::unlocated(
+        super::load::ConfigErrorKind::InvalidSetting,
+        &observation.path,
+        revision,
+        message,
+    ))
+}
+
+/// [`replace_manifest_change`] once the manifest's identity is `wanted`.
+fn plan_replacement(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    wanted: &biscuit_file::PathIdentity,
+    old_path: &Path,
+) -> Result<(Option<TargetChange>, RegisterReport), InitError> {
+    let invalid = |message: String| invalid_setting(observation, message);
+    let register_path = |index: Option<usize>| {
+        let mut segments = vec![String::from("register")];
+        segments.extend(index.map(|index| index.to_string()));
+        PropertyPath::from_segments(segments).map_err(|error| invalid(error.to_string()))
+    };
+    let report = |action: InitAction, replaced: Vec<String>| RegisterReport {
+        path: observation.path.clone(),
+        action,
+        replaced,
+    };
+
+    let (Some(bytes), Some(authored)) = (&observation.bytes, &observation.authored) else {
+        let mut edits = Vec::new();
+        for (key, default) in top_level_defaults(observation.scope) {
+            let value = if key == "register" { Value::Array(vec![Value::from(reference)]) } else { default };
+            let path = PropertyPath::from_segments([key]).map_err(|error| invalid(error.to_string()))?;
+            edits.push(YamlEdit::Set { path, value });
+        }
+        let change = TargetChange::create(&observation.path, String::new(), edits);
+        return Ok((Some(change), report(InitAction::Created, Vec::new())));
+    };
+    let entries = match authored.get("register") {
+        None | Some(Value::Null) => {
+            let edit = YamlEdit::Set { path: register_path(None)?, value: Value::Array(vec![Value::from(reference)]) };
+            let change = TargetChange::edit(&observation.path, SourceExpectation::Bytes(bytes.clone()), vec![edit]);
+            return Ok((Some(change), report(InitAction::Updated, Vec::new())));
+        }
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(invalid(String::from("`register` is not a list, so no host can be registered"))),
+    };
+    let affected: Vec<(usize, &str)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| Some((index, entry.as_str()?)))
+        .filter(|(_, entry)| {
+            super::registration::manifest_location_identity(entry, &observation.path, context)
+                .is_some_and(|identity| identity == *wanted)
+                || super::registration::entry_names_location(entry, &observation.path, context, old_path)
+        })
+        .collect();
+
+    let mut edits = Vec::new();
+    let mut replaced = Vec::new();
+    match affected.split_first() {
+        None => edits.push(YamlEdit::Set { path: register_path(Some(entries.len()))?, value: Value::from(reference) }),
+        Some((&(first, written), rest)) => {
+            if written != reference {
+                edits.push(YamlEdit::Set { path: register_path(Some(first))?, value: Value::from(reference) });
+                replaced.push(written.to_string());
+            }
+            for &(index, written) in rest.iter().rev() {
+                edits.push(YamlEdit::Remove { path: register_path(Some(index))? });
+                replaced.push(written.to_string());
+            }
+        }
+    }
+    if edits.is_empty() {
+        return Ok((None, report(InitAction::Unchanged, Vec::new())));
+    }
+    let change = TargetChange::edit(&observation.path, SourceExpectation::Bytes(bytes.clone()), edits);
+    Ok((Some(change), report(InitAction::Updated, replaced)))
 }
 
 /// Every top-level setting of `scope` with its schema default, in schema
@@ -568,6 +810,10 @@ fn top_level_defaults(scope: ConfigScope) -> Vec<(String, Value)> {
 /// passes the same checks the policy applies.
 fn referenced_block(context: &FileResolutionContext, target: &Path, bytes: &[u8], scope: ConfigScope) -> Result<Value, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "which is not valid UTF-8".to_string())?;
+    referenced_block_text(context, target, text, scope)
+}
+
+fn referenced_block_text(context: &FileResolutionContext, target: &Path, text: &str, scope: ConfigScope) -> Result<Value, String> {
     check_permissions_text(text, target, scope, false, context)?;
     let loaded = load_yaml_document(text, target).map_err(|error| error.to_string())?;
     loaded.json.get("permissions").cloned().ok_or_else(|| "which has no `permissions` mapping".to_string())
@@ -580,4 +826,5 @@ fn reference_error(declared_in: &Path, revision: ConfigRevision, reference: &str
         revision,
         format!("the `permissions` reference `{reference}` names `{}`, {what}", target.display()),
     )
+    .with_reference_target(target)
 }

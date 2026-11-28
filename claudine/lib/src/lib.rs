@@ -13,6 +13,7 @@ pub mod composition;
 pub mod config;
 pub mod diagnostics;
 pub mod dispatch;
+pub mod doctor;
 pub mod error;
 pub mod events;
 pub mod harness;

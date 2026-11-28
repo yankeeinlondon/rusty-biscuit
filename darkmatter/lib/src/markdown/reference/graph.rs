@@ -12,9 +12,10 @@ use super::snapshot::{PreparedHeading, PreparedHeadingSnapshot, heading_at, prep
 use super::types::{
     AuthoredReferenceLocation, NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord,
-    ReferenceReportDocument, ReferenceSet, ReferenceSyntax, ReferenceTrailStep, classify_target, make_reference_id,
+    ReferenceReportDocument, ReferenceSet, ReferenceSyntax, ReferenceTarget, ReferenceTrailStep, classify_target,
+    make_reference_id,
 };
-use crate::markdown::Markdown;
+use crate::markdown::{Markdown, MarkdownError};
 use crate::markdown::compose::body_origin::BodyOrigin;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
@@ -24,12 +25,11 @@ use crate::markdown::compose::toc_linking;
 use biscuit_terminal::errors::SourceContext;
 
 use crate::markdown::compose::transclusion::{
-    DirectiveKind, TransclusionRuntime, parse_frontmatter_refs,
+    DirectiveKind, InclusionSite, TransclusionRuntime, frontmatter_value_is_inline, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{
     ComposeOperation, ComposeSource, ComposeWarning, EffectiveStateBuilder, ResolvingLookup,
 };
-use crate::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves, locate_frontmatter_value_range};
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
@@ -52,12 +52,15 @@ struct ReferenceAnalysisRuntime {
     /// id, in build order: what [`prepared_copy_id`](Self::prepared_copy_id)
     /// compares a new copy with.
     prepared_copies: std::collections::HashMap<NodeId, Vec<PreparedCopy>>,
+    /// The copies that tolerate an invalid inclusion they write.
+    tolerant: std::collections::HashSet<NodeId>,
 }
 
 /// What a node's consumers read of one prepared copy of a document.
 struct PreparedCopy {
     references: ReferenceSet,
     insertions: Vec<ReferenceInsertion>,
+    tolerant: bool,
 }
 
 fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
@@ -69,9 +72,56 @@ fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
 }
 
 impl ReferenceAnalysisRuntime {
-    /// Load a markdown document, using the shared cache.
-    fn load_markdown(&self, path: &std::path::Path) -> Option<Markdown> {
-        self.cache.load_markdown(path).ok()
+    /// Loads the document an inclusion resolved to, through the shared cache.
+    ///
+    /// `None` when the file vanished after it resolved (validation then
+    /// reports the target missing) or when a reference check running ahead of
+    /// composition defers the failure to composition, which tolerates it with
+    /// a notice. Any other failure (the target cannot be read, or its
+    /// frontmatter does not parse) fails the graph, so no reader reports a
+    /// document whose inclusion it could not inspect as clean.
+    ///
+    /// `site` is the inclusion that named `path`: a file that cannot be read
+    /// is reported there, as composition reports it.
+    fn load_inclusion(
+        &self,
+        path: &std::path::Path,
+        options: &ReferenceGraphOptions,
+        site: Option<InclusionSite>,
+    ) -> MarkdownResult<Option<Markdown>> {
+        // A dry run's file the run's initializer appends to holds other
+        // references by then; composition leaves what reads it unchecked.
+        if options.compose.passive_session().is_some_and(|session| session.initializer_changes(path).is_some()) {
+            return Ok(None);
+        }
+        match self.cache.load_markdown(path) {
+            Ok(markdown) => Ok(Some(markdown)),
+            Err(MarkdownError::FileLoad(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) if options.compose.defer_inclusion_parse_failures => Ok(None),
+            Err(error) => Err(read_failure(error, path, site)),
+        }
+    }
+
+    /// Enters a local inclusion on the transclusion stack, `false` when the
+    /// graph must not descend into it.
+    ///
+    /// A cycle is not a failure here: every document on it is already a node,
+    /// so the graph inspects all of them. A depth refusal leaves a subtree
+    /// unread, so it fails the graph as composition fails, unless the request
+    /// leaves inclusion failures to composition.
+    fn enter_inclusion(
+        &mut self,
+        id: String,
+        path: std::path::PathBuf,
+        line: usize,
+        options: &ReferenceGraphOptions,
+    ) -> MarkdownResult<bool> {
+        match self.transclusion.enter(id, path, line) {
+            Ok(()) => Ok(true),
+            Err(crate::markdown::compose::transclusion::TransclusionError::CycleDetected { .. }) => Ok(false),
+            Err(_) if options.compose.defer_inclusion_parse_failures => Ok(false),
+            Err(error) => Err(MarkdownError::from(error)),
+        }
     }
 
     /// The node id of a prepared copy of the source `source_id` names.
@@ -86,22 +136,47 @@ impl ReferenceAnalysisRuntime {
         source_id: NodeId,
         references: &ReferenceSet,
         insertions: &[ReferenceInsertion],
+        tolerant: bool,
     ) -> NodeId {
         let copies = self.prepared_copies.entry(source_id.clone()).or_default();
-        let ordinal = match copies
-            .iter()
-            .position(|copy| copy.references == *references && copy.insertions == insertions)
-        {
+        let ordinal = match copies.iter().position(|copy| {
+            copy.references == *references && copy.insertions == insertions && copy.tolerant == tolerant
+        }) {
             Some(index) => index,
             None => {
-                copies.push(PreparedCopy { references: references.clone(), insertions: insertions.to_vec() });
+                copies.push(PreparedCopy { references: references.clone(), insertions: insertions.to_vec(), tolerant });
                 copies.len() - 1
             }
         };
-        match ordinal {
+        let id = match ordinal {
             0 => source_id,
             later => NodeId(format!("{source_id} ({})", later + 1)),
+        };
+        if tolerant {
+            self.tolerant.insert(id.clone());
         }
+        id
+    }
+}
+
+/// `error`, raised reading `path`, the target the inclusion `site` selected:
+/// placed at `site` as composition places it, or, with no site, naming
+/// `path`.
+fn read_failure(error: MarkdownError, path: &std::path::Path, site: Option<InclusionSite>) -> MarkdownError {
+    match site {
+        Some(_) => crate::markdown::compose::transclusion::target_failure_at(error, path, site),
+        None => named_read_failure(error, path),
+    }
+}
+
+/// `error` with `path` named when it is a bare I/O error, which names no file.
+fn named_read_failure(error: MarkdownError, path: &std::path::Path) -> MarkdownError {
+    match error {
+        MarkdownError::FileLoad(error) => MarkdownError::FileLoad(std::io::Error::new(
+            error.kind(),
+            format!("cannot read {}: {error}", path.display()),
+        )),
+        other => other,
     }
 }
 
@@ -110,8 +185,16 @@ impl ReferenceAnalysisRuntime {
 /// Memory-only: `cache_root` reaches only the remote transport cache, so
 /// graph construction, like the compose pipeline, persists no semantic-result
 /// artifact (R18).
+///
+/// A dry run's graph reads each local source through the run's one
+/// observation of local files, which its composition shares.
 fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
-    RunLocalCache::new(options.compose.cache_access_mode)
+    RunLocalCache::new(options.compose.cache_access_mode).with_shared_reads(shared_reads(options))
+}
+
+/// The dry run's observation of local files, when the graph is part of one.
+fn shared_reads(options: &ReferenceGraphOptions) -> Option<simplified_schema::resolve::buffers::SharedReads> {
+    options.compose.options().passive_session().map(|session| session.observations().local_reads().clone())
 }
 
 /// Shared graph construction. The build [`ReferenceGraphMode`] is the sole
@@ -124,21 +207,27 @@ fn build_graph_inner(
     // Graph mode is the single source of truth for reference extraction.
     let extract_references = matches!(mode, ReferenceGraphMode::Full);
 
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let compose = options.compose.clone();
-    let compose = match &source {
-        ComposeSource::File(path) => compose.with_source_file(path),
-        ComposeSource::Url(url) => compose.with_source_url(url.clone()),
-        ComposeSource::Unknown => compose,
+    // The root as the request admits it: the document's own path (a
+    // relative one is the file under the request directory), or the
+    // request's file when the document names none.
+    let admitted = options.compose.admitted_document(md);
+    let md = admitted.as_ref();
+    let compose = options.compose.clone().with_root_source(&md.source().clone().unwrap_or(ComposeSource::Unknown));
+    let source = match md.source() {
+        Some(ComposeSource::File(_)) => compose.source.clone(),
+        other => other.clone().unwrap_or(ComposeSource::Unknown),
     };
     let options = ReferenceGraphOptions::from_compose_options(compose);
     let options = &options;
+    // Every schema file and document the build reads on this thread.
+    let _shared_reads = shared_reads(options).map(simplified_schema::resolve::buffers::enter_shared_reads);
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
         trigger_warnings: Vec::new(),
         earlier_warnings: Vec::new(),
         prepared_copies: std::collections::HashMap::new(),
+        tolerant: std::collections::HashSet::new(),
     };
 
     // Seed the runtime with the root node so child documents that
@@ -177,6 +266,7 @@ fn build_graph_inner(
         prepared_headings,
     )
     .with_trigger_warnings(runtime.trigger_warnings)
+    .with_tolerant_nodes(runtime.tolerant)
     .with_earlier_warnings(runtime.earlier_warnings))
 }
 
@@ -244,6 +334,7 @@ fn flatten_node(
     out.documents.push(ReferenceReportDocument {
         source: node.source.clone(),
         included_via: trail.clone(),
+        tolerates_invalid_references: graph.tolerates_invalid(&node.node_id),
     });
 
     // Build an index of child insertions by directive line for interleaving.
@@ -425,14 +516,7 @@ impl<'a> AuthoredLocator<'a> {
     /// The location of a `prologue:` or `epilogue:` value reading `expected`
     /// (`index` for one item of a list); `None` when it cannot be proven.
     fn frontmatter_location(&self, key: &str, index: Option<usize>, expected: &str) -> Option<AuthoredReferenceLocation> {
-        let mut path = vec![FrontmatterPathSegment::Key(key.to_string())];
-        path.extend(index.map(FrontmatterPathSegment::Index));
-        // A leaf is located within its own property, so a construct elsewhere
-        // the whole-frontmatter locator cannot read does not cost it its place.
-        let range = match locate_frontmatter_leaves(self.loaded, std::slice::from_ref(&path)) {
-            Ok(mut leaves) => leaves.pop()?.range,
-            Err(_) => locate_frontmatter_value_range(self.loaded, key, index, expected)?,
-        };
+        let range = crate::markdown::compose::transclusion::frontmatter_value_range(self.loaded, key, index, expected)?;
         Some(self.location(range, false))
     }
 }
@@ -502,6 +586,21 @@ fn inclusion_child_options(
         path,
         opening,
     ))
+}
+
+/// The inclusions one parser found in a document. A parser failure (a body
+/// directive with no target, an invalid `::toc-linking` level or
+/// `::file-links` depth, a `prologue`/`epilogue` that is not a string or list
+/// of strings) fails the graph in both build modes, so no reference reader
+/// reports a document it could not read as clean. Only a reference check
+/// running ahead of composition
+/// ([`ComposeOptions::for_reference_check`](crate::markdown::compose::ComposeOptions::for_reference_check))
+/// leaves the failure to composition and lists nothing.
+fn parsed_inclusions<T: Default>(options: &ReferenceGraphOptions, parsed: MarkdownResult<T>) -> MarkdownResult<T> {
+    match parsed {
+        Err(_) if options.compose.defer_inclusion_parse_failures => Ok(T::default()),
+        parsed => parsed,
+    }
 }
 
 /// Build a single graph node for a document.
@@ -620,523 +719,154 @@ fn build_node(
     // Validation evaluates the same `when=` conditions compose will, against
     // the request's one repository observation: fixed at request creation, or
     // by the root pipeline entry `prepare_content` already ran above.
+    // With the run's remote-fetch runtime, as composition evaluates them, so
+    // a condition reading an allowed URL decides here as it does there.
     let when_options = options.compose.clone();
+    let remote_fetch = when_options.remote_fetch_runtime();
     let document_lookup = ResolvingLookup::new(
         &effective_state,
-        when_options.local_expression_resolution_context(),
+        when_options.expression_resolution_context(&remote_fetch),
     );
     // A directive in a repeated body reads the frame of its copy.
     let when_lookup = SiteLookup::new(&document_lookup, &scopes, None);
+    let when_origin = body_origin.as_ref().filter(|origin| origin.describes(&prepared_content));
 
     // Block directives
-    if let Ok(directives) = crate::markdown::compose::transclusion::parse_directives_in(
-        &prepared_content,
-        body_data,
-        ctx.clone(),
-        0,
-    ) {
-        for directive in &directives {
-            // Evaluate `when=` condition — skip directive entirely if false.
-            if let Some(ref when_expr) = directive.options.when_expr {
-                when_lookup.enter(directive.span.start);
-                let condition_met = conditions::evaluate_condition(
-                    when_expr,
-                    &when_lookup,
-                    directive.line,
-                    ctx.clone(),
-                )
-                .unwrap_or(false);
-                if !condition_met {
-                    continue;
-                }
-            }
-
-            // Emit transclusion reference records (rec #4)
-            if extract_references {
-                let syntax = match directive.kind {
-                    DirectiveKind::File => ReferenceSyntax::DirectiveFile,
-                    DirectiveKind::Code => ReferenceSyntax::DirectiveCode,
-                    DirectiveKind::Url => ReferenceSyntax::DirectiveUrl,
-                };
-                local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, directive.line, directive.span.start),
-                    kind: ReferenceKind::Transclusion,
-                    target: classify_target(&directive.raw_target),
-                    origin: placed_in_body(
-                        ReferenceOrigin {
-                            source: source.clone(),
-                            line: directive.line,
-                            span: directive.span.clone(),
-                            syntax,
-                            authored: None,
-                            section: None,
-                        },
-                        locator,
-                        &headings,
-                    ),
-                    attributes: serde_json::Map::new(),
-                });
-            }
-
-            if directive.kind == DirectiveKind::File {
-                // Try to resolve and recurse into the child
-                if let Some(child_path) = resolve_local_target(
-                    &directive.raw_target,
-                    source,
-                    &options.compose,
-                )? {
-                    let child_source = ComposeSource::File(child_path.clone());
-                    let child_id = source_to_id(&child_source);
-
-                    // Cycle/depth check
-                    if runtime
-                        .transclusion
-                        .enter(child_id.to_string(), child_path.clone(), directive.line)
-                        .is_ok()
-                    {
-                        if let Some(child_md) = runtime.load_markdown(&child_path) {
-                            // Record this visited local child from the value we
-                            // just loaded (deduped per unique resolved source).
-                            dependencies.record(
-                                child_source.clone(),
-                                ReferenceDocumentIdentity::capture(&child_md),
-                            );
-                            // The child is prepared with the directive's `set`
-                            // values, as composition runs it, so its branches
-                            // select the references composition keeps.
-                            let mut child_md = child_md;
-                            crate::markdown::compose::transclusion::apply_directive_set_overlay(
-                                &mut child_md,
-                                &directive.options,
-                            );
-                            let child_options = inclusion_child_options(
-                                options,
-                                &child_data,
-                                &directive.options,
-                                &child_path,
-                                crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
-                            );
-                            let (child_node, mut descendants) = build_node(
-                                &child_md,
-                                &child_source,
-                                &child_options,
-                                runtime,
-                                extract_references,
-                                dependencies,
-                                prepared_headings,
-                            )?;
-
-                            let (sec_text, sec_level) =
-                                section_at_line(&heading_index, directive.line)
-                                    .map(|(t, l)| (Some(t.to_string()), Some(l)))
-                                    .unwrap_or((None, None));
-                            let ref_id =
-                                make_reference_id(source, directive.line, directive.span.start);
-                            child_insertions.push(ReferenceInsertion {
-                                child_node_id: child_node.node_id.clone(),
-                                directive_line: directive.line,
-                                authored_directive_line: authored_directive_line(locator, &directive.span),
-                                insertion_order,
-                                reference_id: Some(ref_id),
-                                context: ReferenceInsertionContext {
-                                    directive_kind: Some(ReferenceSyntax::DirectiveFile),
-                                    section_heading_text: sec_text,
-                                    section_heading_level: sec_level,
-                                },
-                            });
-                            all_descendant_nodes.push(child_node);
-                            all_descendant_nodes.append(&mut descendants);
-                            insertion_order += 1;
-                        }
-                        runtime.transclusion.exit();
-                    }
+    let directives = parsed_inclusions(
+        options,
+        // A dry run's directive whose line holds a value it left as written
+        // names no target, as composition leaves it unresolved.
+        crate::markdown::compose::transclusion::parse_directives_deferring(
+            &prepared_content,
+            body_data,
+            ctx.clone(),
+            0,
+            &|line| options.compose.passive_session().and_then(|session| session.deferred_span_in(line)),
+        )
+        .map(|(directives, _)| directives)
+        .map_err(|error| error.at_authored_directive(&prepared_document, body_origin.as_ref(), 0).into()),
+    )?;
+    for directive in &directives {
+        // A false `when=` leaves the directive out, as composition does. A
+        // condition that fails is composition's error, located as composition
+        // locates it, unless this is the reference check running ahead of
+        // composition, which leaves the verdict to it and skips the directive.
+        if let Some(ref when_expr) = directive.options.when_expr {
+            when_lookup.enter(directive.span.start);
+            let site = conditions::ConditionSite {
+                span: &directive.span,
+                body_line: directive.line,
+                opener: &|span| crate::markdown::compose::site_scope::authored_opener(&prepared_document, when_origin, span),
+                current: &|| ctx.clone(),
+            };
+            match site.evaluate(when_expr, &when_lookup, &mut ()) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(_) if options.compose.defer_expression_failures => continue,
+                Err(error) => {
+                    return Err(crate::markdown::compose::TransclusionError::from(error).into());
                 }
             }
         }
-    }
 
-    // ::toc-linking directives generate synthesized TOC hyperlinks AND
-    // create child graph nodes for follow-mode expansion.
-    if let Ok(toc_directives) =
-        crate::markdown::compose::toc_linking::parse_directives_in(&prepared_content, body_data)
-    {
-        let transclusion_options = options.compose.transclusion_options();
+        // Emit transclusion reference records (rec #4)
+        if extract_references {
+            let syntax = match directive.kind {
+                DirectiveKind::File => ReferenceSyntax::DirectiveFile,
+                DirectiveKind::Code => ReferenceSyntax::DirectiveCode,
+                DirectiveKind::Url => ReferenceSyntax::DirectiveUrl,
+            };
+            local_references.records.push(ReferenceRecord {
+                id: make_reference_id(source, directive.line, directive.span.start),
+                kind: ReferenceKind::Transclusion,
+                target: match directive.kind {
+                    // `::url` opens nothing but a URL; validation applies its
+                    // admission rule before any hyperlink or remote check.
+                    DirectiveKind::Url => ReferenceTarget::RemoteUrl { raw: directive.raw_target.clone() },
+                    DirectiveKind::File | DirectiveKind::Code => opened_target(&directive.raw_target),
+                },
+                origin: placed_in_body(
+                    ReferenceOrigin {
+                        source: source.clone(),
+                        line: directive.line,
+                        span: directive.span.clone(),
+                        syntax,
+                        authored: None,
+                        section: None,
+                    },
+                    locator,
+                    &headings,
+                ),
+                attributes: serde_json::Map::new(),
+            });
+        }
 
-        for directive in &toc_directives {
-            let ref_id = make_reference_id(source, directive.line, directive.span.start);
-
-            // Section context is always available from the parent document's
-            // heading index, regardless of whether the target can be loaded.
-            let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
-                .map(|(t, l)| (Some(t.to_string()), Some(l)))
-                .unwrap_or((None, None));
-
-            if let Some((display_target, path)) =
-                resolve_toc_linking_target(directive, source, &transclusion_options, ctx.clone())
+        if directive.kind == DirectiveKind::File {
+            // A target failure names the directive's opener in its file.
+            let inclusion = || {
+                let site = crate::markdown::compose::site_scope::DirectiveSite::of_span(
+                    &prepared_document,
+                    body_origin.as_ref(),
+                    &directive.span,
+                );
+                InclusionSite::of_directive(&prepared_document, &site)
+            };
+            // Try to resolve and recurse into the child
+            if let Some(child_path) = resolve_local_target(&directive.raw_target, source, &options.compose)
+                .map_err(|error| super::at_inclusion(error, inclusion()))?
+                && admits_markdown_child(&child_path, options, inclusion())?
             {
-                if extract_references {
-                    local_references.records.push(ReferenceRecord {
-                        id: ref_id.clone(),
-                        kind: ReferenceKind::Transclusion,
-                        target: classify_target(&display_target),
-                        origin: placed_in_body(
-                            ReferenceOrigin {
-                                source: source.clone(),
-                                line: directive.line,
-                                span: directive.span.clone(),
-                                syntax: ReferenceSyntax::DirectiveTocLinking,
-                                authored: None,
-                                section: None,
-                            },
-                            locator,
-                            &headings,
-                        ),
-                        attributes: serde_json::Map::new(),
-                    });
-                }
-
-                // Create a child graph node so follow mode can expand the
-                // target document as a nested FileTree subtree.
-                let child_source = ComposeSource::File(path.clone());
+                let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                // Generate synthesized TOC link references on the parent
-                // node (composed view). Tagged so the model builder only
-                // includes them when follow=true.
-                if extract_references {
-                    let (records, raw_slugs) =
-                        generate_toc_link_references(&display_target, &path, directive, source, runtime);
-                    for mut record in records {
-                        record
-                            .attributes
-                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
-                        record.origin = placed_in_body(record.origin, locator, &headings);
-                        prepared_headings.record_toc_reference(&record, std::sync::Arc::clone(&raw_slugs));
-                        local_references.records.push(record);
-                    }
-                }
-
-                if runtime
-                    .transclusion
-                    .enter(child_id.to_string(), path.clone(), directive.line)
-                    .is_ok()
-                {
-                    if let Some(child_md) = runtime.load_markdown(&path) {
+                // Cycle/depth check
+                if runtime.enter_inclusion(child_id.to_string(), child_path.clone(), directive.line, options)? {
+                    if let Some(child_md) = runtime.load_inclusion(&child_path, options, inclusion())? {
+                        // Record this visited local child from the value we
+                        // just loaded (deduped per unique resolved source).
                         dependencies.record(
                             child_source.clone(),
                             ReferenceDocumentIdentity::capture(&child_md),
                         );
+                        // The child is prepared with the directive's `set`
+                        // values, as composition runs it, so its branches
+                        // select the references composition keeps.
+                        let mut child_md = child_md;
+                        crate::markdown::compose::transclusion::apply_directive_set_overlay(
+                            &mut child_md,
+                            &directive.options,
+                        );
+                        let child_options = inclusion_child_options(
+                            options,
+                            &child_data,
+                            &directive.options,
+                            &child_path,
+                            crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
+                        );
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(options, &path, None, options.compose.prose_interpolation),
+                            &child_options,
                             runtime,
                             extract_references,
                             dependencies,
                             prepared_headings,
                         )?;
 
+                        let (sec_text, sec_level) =
+                            section_at_line(&heading_index, directive.line)
+                                .map(|(t, l)| (Some(t.to_string()), Some(l)))
+                                .unwrap_or((None, None));
+                        let ref_id =
+                            make_reference_id(source, directive.line, directive.span.start);
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: directive.line,
                             authored_directive_line: authored_directive_line(locator, &directive.span),
                             insertion_order,
-                            reference_id: Some(ref_id.clone()),
-                            context: ReferenceInsertionContext {
-                                directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
-                                section_heading_text: sec_text.clone(),
-                                section_heading_level: sec_level,
-                            },
-                        });
-                        all_descendant_nodes.push(child_node);
-                        all_descendant_nodes.append(&mut descendants);
-                        insertion_order += 1;
-                    }
-                    runtime.transclusion.exit();
-                }
-
-                // If no child insertion was created (target couldn't load),
-                // still create a context-only insertion so the caption has
-                // section information.
-                if !child_insertions
-                    .iter()
-                    .any(|ins| ins.reference_id.as_deref() == Some(&ref_id))
-                {
-                    child_insertions.push(ReferenceInsertion {
-                        child_node_id: NodeId::from(""),
-                        directive_line: directive.line,
-                        authored_directive_line: authored_directive_line(locator, &directive.span),
-                        insertion_order,
-                        reference_id: Some(ref_id),
-                        context: ReferenceInsertionContext {
-                            directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
-                            section_heading_text: sec_text,
-                            section_heading_level: sec_level,
-                        },
-                    });
-                    insertion_order += 1;
-                }
-            } else {
-                // Target didn't resolve — still emit reference record and
-                // a context-only insertion for the caption.
-                if extract_references && let Some(raw_target) = directive.targets.first() {
-                    local_references.records.push(ReferenceRecord {
-                        id: ref_id.clone(),
-                        kind: ReferenceKind::Transclusion,
-                        target: classify_target(raw_target),
-                        origin: placed_in_body(
-                            ReferenceOrigin {
-                                source: source.clone(),
-                                line: directive.line,
-                                span: directive.span.clone(),
-                                syntax: ReferenceSyntax::DirectiveTocLinking,
-                                authored: None,
-                                section: None,
-                            },
-                            locator,
-                            &headings,
-                        ),
-                        attributes: serde_json::Map::new(),
-                    });
-                }
-
-                child_insertions.push(ReferenceInsertion {
-                    child_node_id: NodeId::from(""),
-                    directive_line: directive.line,
-                    authored_directive_line: authored_directive_line(locator, &directive.span),
-                    insertion_order,
-                    reference_id: Some(ref_id),
-                    context: ReferenceInsertionContext {
-                        directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
-                        section_heading_text: sec_text,
-                        section_heading_level: sec_level,
-                    },
-                });
-                insertion_order += 1;
-            }
-        }
-    }
-
-    // ::file-links directives emit reference records but do not create
-    // child insertions (they are not followable transclusions).
-    if let Ok(file_links_directives) =
-        crate::markdown::compose::file_links::parse_file_links_directives_in(
-            &prepared_content,
-            body_data,
-        )
-    {
-        for directive in &file_links_directives {
-            if extract_references {
-                let raw_target = match &directive.mode {
-                    crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
-                    crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
-                        format!("{} --depth {}", path, depth)
-                    }
-                };
-                local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, directive.line, directive.span.start),
-                    kind: ReferenceKind::Transclusion,
-                    target: classify_target(&raw_target),
-                    origin: placed_in_body(
-                        ReferenceOrigin {
-                            source: source.clone(),
-                            line: directive.line,
-                            span: directive.span.clone(),
-                            syntax: ReferenceSyntax::DirectiveFileLinks,
-                            authored: None,
-                            section: None,
-                        },
-                        locator,
-                        &headings,
-                    ),
-                    attributes: serde_json::Map::new(),
-                });
-            }
-        }
-    }
-
-    // Frontmatter prologue/epilogue, read from the prepared frontmatter as
-    // composition reads them.
-    if let Ok(fm_refs) = parse_frontmatter_refs(prepared_document.frontmatter().as_map(), ctx.clone()) {
-        let value_location = |key: &str, idx: usize, expected: &str| {
-            let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
-            locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
-        };
-        for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
-            let is_literal = is_literal_content(prologue);
-            let location = value_location("prologue", idx, prologue);
-
-            if extract_references {
-                let mut attrs = serde_json::Map::new();
-                if is_literal {
-                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
-                    // Extract links from literal content for follow mode
-                    let links = super::local::extract_markdown_links(prologue, source);
-                    for mut link in links {
-                        link.attributes
-                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
-                        link.origin.authored.clone_from(&location);
-                        local_references.records.push(link);
-                    }
-                }
-                local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, 0, idx),
-                    kind: ReferenceKind::Transclusion,
-                    target: if is_literal {
-                        classify_target("")
-                    } else {
-                        classify_target(prologue)
-                    },
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: 0,
-                        span: 0..0,
-                        syntax: ReferenceSyntax::FrontmatterPrologue,
-                        authored: location.clone(),
-                        section: None,
-                    },
-                    attributes: attrs,
-                });
-            }
-
-            if !is_literal
-                && let Some(child_path) =
-                    resolve_local_target(prologue, source, &options.compose)?
-            {
-                let child_source = ComposeSource::File(child_path.clone());
-                let child_id = source_to_id(&child_source);
-
-                if runtime
-                    .transclusion
-                    .enter(child_id.to_string(), child_path.clone(), 0)
-                    .is_ok()
-                {
-                    if let Some(child_md) = runtime.load_markdown(&child_path) {
-                        dependencies.record(
-                            child_source.clone(),
-                            ReferenceDocumentIdentity::capture(&child_md),
-                        );
-                        let (child_node, mut descendants) = build_node(
-                            &child_md,
-                            &child_source,
-                            &inclusion_child_options(
-                                options,
-                                &child_data,
-                                &crate::markdown::compose::transclusion::BlockOptions::default(),
-                                &child_path,
-                                crate::markdown::compose::transclusion::source_opening(prologue, &child_path),
-                            ),
-                            runtime,
-                            extract_references,
-                            dependencies,
-                            prepared_headings,
-                        )?;
-
-                        let ref_id = make_reference_id(source, 0, idx);
-                        child_insertions.push(ReferenceInsertion {
-                            child_node_id: child_node.node_id.clone(),
-                            directive_line: 0, // prologue goes at the start
-                            authored_directive_line: location.as_ref().map(|location| location.line),
-                            insertion_order,
                             reference_id: Some(ref_id),
                             context: ReferenceInsertionContext {
-                                directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
-                                section_heading_text: None,
-                                section_heading_level: None,
-                            },
-                        });
-                        all_descendant_nodes.push(child_node);
-                        all_descendant_nodes.append(&mut descendants);
-                        insertion_order += 1;
-                    }
-                    runtime.transclusion.exit();
-                }
-            }
-        }
-
-        for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
-            let is_literal = is_literal_content(epilogue);
-            let location = value_location("epilogue", idx, epilogue);
-
-            if extract_references {
-                let mut attrs = serde_json::Map::new();
-                if is_literal {
-                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
-                    // Extract links from literal content for follow mode
-                    let links = super::local::extract_markdown_links(epilogue, source);
-                    for mut link in links {
-                        link.attributes
-                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
-                        link.origin.authored.clone_from(&location);
-                        local_references.records.push(link);
-                    }
-                }
-                local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, usize::MAX, idx),
-                    kind: ReferenceKind::Transclusion,
-                    target: if is_literal {
-                        classify_target("")
-                    } else {
-                        classify_target(epilogue)
-                    },
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: usize::MAX,
-                        span: 0..0,
-                        syntax: ReferenceSyntax::FrontmatterEpilogue,
-                        authored: location.clone(),
-                        section: None,
-                    },
-                    attributes: attrs,
-                });
-            }
-
-            if !is_literal
-                && let Some(child_path) =
-                    resolve_local_target(epilogue, source, &options.compose)?
-            {
-                let child_source = ComposeSource::File(child_path.clone());
-                let child_id = source_to_id(&child_source);
-
-                if runtime
-                    .transclusion
-                    .enter(child_id.to_string(), child_path.clone(), 0)
-                    .is_ok()
-                {
-                    if let Some(child_md) = runtime.load_markdown(&child_path) {
-                        dependencies.record(
-                            child_source.clone(),
-                            ReferenceDocumentIdentity::capture(&child_md),
-                        );
-                        let (child_node, mut descendants) = build_node(
-                            &child_md,
-                            &child_source,
-                            &inclusion_child_options(
-                                options,
-                                &child_data,
-                                &crate::markdown::compose::transclusion::BlockOptions::default(),
-                                &child_path,
-                                crate::markdown::compose::transclusion::source_opening(epilogue, &child_path),
-                            ),
-                            runtime,
-                            extract_references,
-                            dependencies,
-                            prepared_headings,
-                        )?;
-
-                        let (sec_text, sec_level) = heading_index
-                            .last()
-                            .map(|(_, t, l)| (Some(t.clone()), Some(*l)))
-                            .unwrap_or((None, None));
-                        let ref_id = make_reference_id(source, usize::MAX, idx);
-                        child_insertions.push(ReferenceInsertion {
-                            child_node_id: child_node.node_id.clone(),
-                            directive_line: usize::MAX, // epilogue goes at the end
-                            authored_directive_line: location.as_ref().map(|location| location.line),
-                            insertion_order,
-                            reference_id: Some(ref_id),
-                            context: ReferenceInsertionContext {
-                                directive_kind: Some(ReferenceSyntax::FrontmatterEpilogue),
+                                directive_kind: Some(ReferenceSyntax::DirectiveFile),
                                 section_heading_text: sec_text,
                                 section_heading_level: sec_level,
                             },
@@ -1151,6 +881,471 @@ fn build_node(
         }
     }
 
+    // ::toc-linking directives generate synthesized TOC hyperlinks AND
+    // create child graph nodes for follow-mode expansion.
+    let toc_directives = parsed_inclusions(
+        options,
+        crate::markdown::compose::toc_linking::parse_directives_in(&prepared_content, body_data).map_err(|error| {
+            error.with_document(md.error_document()).at_authored_line(&prepared_document, body_origin.as_ref()).into()
+        }),
+    )?;
+    let transclusion_options = options.compose.transclusion_options();
+
+    for directive in &toc_directives {
+        // A dry run's target the run's initializer creates or changes first
+        // is selected, and its headings read, only by the run.
+        if let Some(session) = options.compose.passive_session()
+            && toc_linking::changed_at_launch(directive, source, &transclusion_options, ctx.clone(), session).is_some()
+        {
+            continue;
+        }
+        let ref_id = make_reference_id(source, directive.line, directive.span.start);
+
+        // Section context is always available from the parent document's
+        // heading index, regardless of whether the target can be loaded.
+        let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
+            .map(|(t, l)| (Some(t.to_string()), Some(l)))
+            .unwrap_or((None, None));
+
+        // Composition's selection: the first existing alternative, a
+        // suppressed chain (trailing `false`), or a required failure.
+        let selection =
+            toc_linking::resolve_target_chain(directive, source, &transclusion_options, ctx.clone());
+        let suppressed = matches!(selection, Ok(None));
+        if let Ok(Some((display_target, path))) = selection {
+            if extract_references {
+                local_references.records.push(ReferenceRecord {
+                    id: ref_id.clone(),
+                    kind: ReferenceKind::Transclusion,
+                    // The selector chose this alternative as a local file.
+                    target: ReferenceTarget::LocalPath { raw: display_target.clone().into() },
+                    origin: placed_in_body(
+                        ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveTocLinking,
+                            authored: None,
+                            section: None,
+                        },
+                        locator,
+                        &headings,
+                    ),
+                    attributes: serde_json::Map::new(),
+                });
+            }
+
+            // Create a child graph node so follow mode can expand the
+            // target document as a nested FileTree subtree.
+            let child_source = ComposeSource::File(path.clone());
+            let child_id = source_to_id(&child_source);
+
+            // Generate synthesized TOC link references on the parent
+            // node (composed view). Tagged so the model builder only
+            // includes them when follow=true.
+            // The directive that selected the target: where a target that
+            // cannot be read is reported, both reading its headings and
+            // loading it as a child.
+            let inclusion = InclusionSite::of_directive(
+                &prepared_document,
+                &crate::markdown::compose::site_scope::DirectiveSite::of_span(
+                    &prepared_document,
+                    body_origin.as_ref(),
+                    &directive.span,
+                ),
+            );
+            if extract_references {
+                let (records, raw_slugs) = generate_toc_link_references(
+                    &display_target,
+                    &path,
+                    directive,
+                    source,
+                    runtime,
+                    options,
+                    inclusion.clone(),
+                )?;
+                for mut record in records {
+                    record
+                        .attributes
+                        .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                    record.origin = placed_in_body(record.origin, locator, &headings);
+                    prepared_headings.record_toc_reference(&record, std::sync::Arc::clone(&raw_slugs));
+                    local_references.records.push(record);
+                }
+            }
+
+            if runtime.enter_inclusion(child_id.to_string(), path.clone(), directive.line, options)? {
+                if let Some(child_md) = runtime.load_inclusion(&path, options, inclusion)? {
+                    dependencies.record(
+                        child_source.clone(),
+                        ReferenceDocumentIdentity::capture(&child_md),
+                    );
+                    let (child_node, mut descendants) = build_node(
+                        &child_md,
+                        &child_source,
+                        &accepted_child_options(options, &path, None, options.compose.prose_interpolation),
+                        runtime,
+                        extract_references,
+                        dependencies,
+                        prepared_headings,
+                    )?;
+
+                    child_insertions.push(ReferenceInsertion {
+                        child_node_id: child_node.node_id.clone(),
+                        directive_line: directive.line,
+                        authored_directive_line: authored_directive_line(locator, &directive.span),
+                        insertion_order,
+                        reference_id: Some(ref_id.clone()),
+                        context: ReferenceInsertionContext {
+                            directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                            section_heading_text: sec_text.clone(),
+                            section_heading_level: sec_level,
+                        },
+                    });
+                    all_descendant_nodes.push(child_node);
+                    all_descendant_nodes.append(&mut descendants);
+                    insertion_order += 1;
+                }
+                runtime.transclusion.exit();
+            }
+
+            // If no child insertion was created (target couldn't load),
+            // still create a context-only insertion so the caption has
+            // section information.
+            if !child_insertions
+                .iter()
+                .any(|ins| ins.reference_id.as_deref() == Some(&ref_id))
+            {
+                child_insertions.push(ReferenceInsertion {
+                    child_node_id: NodeId::from(""),
+                    directive_line: directive.line,
+                    authored_directive_line: authored_directive_line(locator, &directive.span),
+                    insertion_order,
+                    reference_id: Some(ref_id),
+                    context: ReferenceInsertionContext {
+                        directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                        section_heading_text: sec_text,
+                        section_heading_level: sec_level,
+                    },
+                });
+                insertion_order += 1;
+            }
+        } else {
+            // Target didn't resolve — still emit reference record and
+            // a context-only insertion for the caption. The record carries
+            // the selector's outcome, suppressed or a required failure, so
+            // validation reports exactly that and never re-reads the first
+            // alternative as a link, a URL, or a file.
+            if extract_references && let Some(raw_target) = directive.targets.first() {
+                let mut attributes = serde_json::Map::new();
+                let outcome = if suppressed { TOC_SUPPRESSED_ATTRIBUTE } else { TOC_UNRESOLVED_ATTRIBUTE };
+                attributes.insert(outcome.to_string(), serde_json::Value::Bool(true));
+                local_references.records.push(ReferenceRecord {
+                    id: ref_id.clone(),
+                    kind: ReferenceKind::Transclusion,
+                    // The selector reads every alternative as a local file,
+                    // so a URL, `#…`, or scheme-like alternative it rejected
+                    // is a missing file, never a hyperlink to check.
+                    target: ReferenceTarget::LocalPath { raw: raw_target.into() },
+                    origin: placed_in_body(
+                        ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveTocLinking,
+                            authored: None,
+                            section: None,
+                        },
+                        locator,
+                        &headings,
+                    ),
+                    attributes,
+                });
+            }
+
+            child_insertions.push(ReferenceInsertion {
+                child_node_id: NodeId::from(""),
+                directive_line: directive.line,
+                authored_directive_line: authored_directive_line(locator, &directive.span),
+                insertion_order,
+                reference_id: Some(ref_id),
+                context: ReferenceInsertionContext {
+                    directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                    section_heading_text: sec_text,
+                    section_heading_level: sec_level,
+                },
+            });
+            insertion_order += 1;
+        }
+    }
+
+    // ::file-links directives emit reference records but do not create
+    // child insertions (they are not followable transclusions).
+    let file_links_directives = parsed_inclusions(
+        options,
+        crate::markdown::compose::file_links::parse_file_links_directives_in(&prepared_content, body_data).map_err(|error| {
+            error.with_document(md.error_document()).at_authored_line(&prepared_document, body_origin.as_ref()).into()
+        }),
+    )?;
+    for directive in &file_links_directives {
+        if extract_references {
+            let raw_target = match &directive.mode {
+                crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
+                crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
+                    format!("{} --depth {}", path, depth)
+                }
+            };
+            local_references.records.push(ReferenceRecord {
+                id: make_reference_id(source, directive.line, directive.span.start),
+                kind: ReferenceKind::Transclusion,
+                target: classify_target(&raw_target),
+                origin: placed_in_body(
+                    ReferenceOrigin {
+                        source: source.clone(),
+                        line: directive.line,
+                        span: directive.span.clone(),
+                        syntax: ReferenceSyntax::DirectiveFileLinks,
+                        authored: None,
+                        section: None,
+                    },
+                    locator,
+                    &headings,
+                ),
+                attributes: serde_json::Map::new(),
+            });
+        }
+    }
+
+    // Frontmatter prologue/epilogue, read from the prepared frontmatter as
+    // composition reads them. An omitted field or `[]` lists nothing.
+    let fm_refs = parsed_inclusions(
+        options,
+        parse_frontmatter_refs(prepared_document.frontmatter().as_map(), md.frontmatter_error_context())
+            .map_err(MarkdownError::from),
+    )?;
+    // A dry run's value it could not produce names no target, as composition
+    // leaves it unread.
+    let deferred_reference =
+        |value: &str| options.compose.passive_session().is_some_and(|session| session.deferred_reference(value).is_some());
+    let value_location = |key: &str, idx: usize, expected: &str| {
+        let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
+        let index = in_list.then_some(idx);
+        match locator {
+            Some(locator) => locator.frontmatter_location(key, index, expected),
+            // A generated body beneath a file's frontmatter has no body map,
+            // but its frontmatter values are still the file's.
+            None => md
+                .frontmatter_origin()
+                .filter(|origin| matches!(source, ComposeSource::File(file) if *file == origin.file))
+                .and_then(|origin| {
+                    let range =
+                        crate::markdown::compose::transclusion::frontmatter_value_range(&origin.text, key, index, expected)?;
+                    let span = crate::markdown::types::AuthoredSpan::locate(&origin.text, range)?;
+                    Some(AuthoredReferenceLocation {
+                        line: span.line(),
+                        column: span.column(),
+                        span: span.range(),
+                        inserted: false,
+                    })
+                }),
+        }
+    };
+    for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+        if deferred_reference(prologue) {
+            continue;
+        }
+        let is_literal = frontmatter_value_is_inline(prologue);
+        let location = value_location("prologue", idx, prologue);
+
+        if extract_references {
+            let mut attrs = serde_json::Map::new();
+            if is_literal {
+                attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                // Inline text is inserted as body Markdown, so every
+                // reference kind the body reads is read from it too.
+                let links = extract_all_references(prologue, source).records;
+                for mut link in links {
+                    link.attributes
+                        .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                    link.origin.authored.clone_from(&location);
+                    local_references.records.push(link);
+                }
+            }
+            local_references.records.push(ReferenceRecord {
+                id: make_reference_id(source, 0, idx),
+                kind: ReferenceKind::Transclusion,
+                // Inline text has no target of its own; its links are the
+                // records extracted above.
+                target: if is_literal {
+                    ReferenceTarget::Inline
+                } else {
+                    opened_target(prologue)
+                },
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: 0,
+                    span: 0..0,
+                    syntax: ReferenceSyntax::FrontmatterPrologue,
+                    authored: location.clone(),
+                    section: None,
+                },
+                attributes: attrs,
+            });
+        }
+
+        let inclusion = || InclusionSite::of_frontmatter_value(md, "prologue", idx, prologue);
+        if !is_literal
+            && let Some(child_path) = resolve_local_target(prologue, source, &options.compose)
+                .map_err(|error| super::at_inclusion(error, inclusion()))?
+            && admits_markdown_child(&child_path, options, inclusion())?
+        {
+            let child_source = ComposeSource::File(child_path.clone());
+            let child_id = source_to_id(&child_source);
+
+            if runtime.enter_inclusion(child_id.to_string(), child_path.clone(), 0, options)? {
+                if let Some(child_md) = runtime.load_inclusion(&child_path, options, inclusion())? {
+                    dependencies.record(
+                        child_source.clone(),
+                        ReferenceDocumentIdentity::capture(&child_md),
+                    );
+                    let (child_node, mut descendants) = build_node(
+                        &child_md,
+                        &child_source,
+                        &inclusion_child_options(
+                            options,
+                            &child_data,
+                            &crate::markdown::compose::transclusion::BlockOptions::default(),
+                            &child_path,
+                            crate::markdown::compose::transclusion::source_opening(prologue, &child_path),
+                        ),
+                        runtime,
+                        extract_references,
+                        dependencies,
+                        prepared_headings,
+                    )?;
+
+                    let ref_id = make_reference_id(source, 0, idx);
+                    child_insertions.push(ReferenceInsertion {
+                        child_node_id: child_node.node_id.clone(),
+                        directive_line: 0, // prologue goes at the start
+                        authored_directive_line: location.as_ref().map(|location| location.line),
+                        insertion_order,
+                        reference_id: Some(ref_id),
+                        context: ReferenceInsertionContext {
+                            directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
+                            section_heading_text: None,
+                            section_heading_level: None,
+                        },
+                    });
+                    all_descendant_nodes.push(child_node);
+                    all_descendant_nodes.append(&mut descendants);
+                    insertion_order += 1;
+                }
+                runtime.transclusion.exit();
+            }
+        }
+    }
+
+    for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
+        if deferred_reference(epilogue) {
+            continue;
+        }
+        let is_literal = frontmatter_value_is_inline(epilogue);
+        let location = value_location("epilogue", idx, epilogue);
+
+        if extract_references {
+            let mut attrs = serde_json::Map::new();
+            if is_literal {
+                attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                // Inline text is inserted as body Markdown, so every
+                // reference kind the body reads is read from it too.
+                let links = extract_all_references(epilogue, source).records;
+                for mut link in links {
+                    link.attributes
+                        .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                    link.origin.authored.clone_from(&location);
+                    local_references.records.push(link);
+                }
+            }
+            local_references.records.push(ReferenceRecord {
+                id: make_reference_id(source, usize::MAX, idx),
+                kind: ReferenceKind::Transclusion,
+                // Inline text has no target of its own; its links are the
+                // records extracted above.
+                target: if is_literal {
+                    ReferenceTarget::Inline
+                } else {
+                    opened_target(epilogue)
+                },
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: usize::MAX,
+                    span: 0..0,
+                    syntax: ReferenceSyntax::FrontmatterEpilogue,
+                    authored: location.clone(),
+                    section: None,
+                },
+                attributes: attrs,
+            });
+        }
+
+        let inclusion = || InclusionSite::of_frontmatter_value(md, "epilogue", idx, epilogue);
+        if !is_literal
+            && let Some(child_path) = resolve_local_target(epilogue, source, &options.compose)
+                .map_err(|error| super::at_inclusion(error, inclusion()))?
+            && admits_markdown_child(&child_path, options, inclusion())?
+        {
+            let child_source = ComposeSource::File(child_path.clone());
+            let child_id = source_to_id(&child_source);
+
+            if runtime.enter_inclusion(child_id.to_string(), child_path.clone(), 0, options)? {
+                if let Some(child_md) = runtime.load_inclusion(&child_path, options, inclusion())? {
+                    dependencies.record(
+                        child_source.clone(),
+                        ReferenceDocumentIdentity::capture(&child_md),
+                    );
+                    let (child_node, mut descendants) = build_node(
+                        &child_md,
+                        &child_source,
+                        &inclusion_child_options(
+                            options,
+                            &child_data,
+                            &crate::markdown::compose::transclusion::BlockOptions::default(),
+                            &child_path,
+                            crate::markdown::compose::transclusion::source_opening(epilogue, &child_path),
+                        ),
+                        runtime,
+                        extract_references,
+                        dependencies,
+                        prepared_headings,
+                    )?;
+
+                    let (sec_text, sec_level) = heading_index
+                        .last()
+                        .map(|(_, t, l)| (Some(t.clone()), Some(*l)))
+                        .unwrap_or((None, None));
+                    let ref_id = make_reference_id(source, usize::MAX, idx);
+                    child_insertions.push(ReferenceInsertion {
+                        child_node_id: child_node.node_id.clone(),
+                        directive_line: usize::MAX, // epilogue goes at the end
+                        authored_directive_line: location.as_ref().map(|location| location.line),
+                        insertion_order,
+                        reference_id: Some(ref_id),
+                        context: ReferenceInsertionContext {
+                            directive_kind: Some(ReferenceSyntax::FrontmatterEpilogue),
+                            section_heading_text: sec_text,
+                            section_heading_level: sec_level,
+                        },
+                    });
+                    all_descendant_nodes.push(child_node);
+                    all_descendant_nodes.append(&mut descendants);
+                    insertion_order += 1;
+                }
+                runtime.transclusion.exit();
+            }
+        }
+    }
+
     // Re-sort after adding transclusion records
     if extract_references {
         local_references
@@ -1158,7 +1353,10 @@ fn build_node(
             .sort_by_key(|r| (r.origin.line, r.origin.span.start));
     }
 
-    let node_id = runtime.prepared_copy_id(source_to_id(source), &local_references, &child_insertions);
+    // Composition asks the document that writes an inclusion, as prepared
+    // (its parent's state passed down), whether a failing target is removed.
+    let tolerant = crate::markdown::compose::transclusion::ignores_invalid(&options.compose, &prepared_document);
+    let node_id = runtime.prepared_copy_id(source_to_id(source), &local_references, &child_insertions, tolerant);
     let main_node = ReferenceGraphNode {
         node_id,
         source: source.clone(),
@@ -1314,13 +1512,55 @@ fn prepare_content(
 /// or shell command inserted) rather than in authored text.
 pub(crate) const DATA_ORIGIN_ATTRIBUTE: &str = "darkmatter-origin";
 
-/// Detect literal content in frontmatter prologue/epilogue values.
-///
-/// Returns `true` when the value is inline markdown content rather than
-/// a file path reference. Literal content contains newlines or starts
-/// with markdown syntax that cannot be a valid file path.
-fn is_literal_content(value: &str) -> bool {
-    value.contains('\n') || value.starts_with("---")
+/// The attribute that marks a `::toc-linking` record whose fallback chain
+/// ends in `false` and found no existing alternative: composition omits the
+/// directive, so the record names no required file.
+pub(crate) const TOC_SUPPRESSED_ATTRIBUTE: &str = "toc_suppressed";
+
+/// The attribute that marks a `::toc-linking` record whose fallback chain
+/// has no `false` and found no alternative composition's selector accepts: a
+/// required inclusion failure, whatever its first alternative looks like.
+pub(crate) const TOC_UNRESOLVED_ATTRIBUTE: &str = "toc_unresolved";
+
+/// The target a `::file`, `::code`, `prologue`, or `epilogue` value opens,
+/// read as composition's resolver reads it: an `http(s)` file reference is a
+/// remote URL, and anything else is one local filename. A `#` and what
+/// follows it are part of that filename (`./side.md#side` opens the file
+/// `side.md#side`), so validation never treats it as a fragment.
+fn opened_target(raw: &str) -> ReferenceTarget {
+    match biscuit_file::FileReference::new(raw) {
+        Ok(reference) if reference.class().kind == biscuit_file::FileReferenceKind::Url => {
+            ReferenceTarget::RemoteUrl { raw: raw.into() }
+        }
+        // A target that does not parse is resolved, and refused, where the
+        // graph follows it.
+        _ => ReferenceTarget::LocalPath { raw: raw.into() },
+    }
+}
+
+/// Whether the graph follows `path`, the file a `::file`, `prologue`, or
+/// `epilogue` resolved to, as a Markdown child: composition's own admission
+/// rule ([`admit_local_target`](crate::markdown::compose::transclusion::admit_local_target)),
+/// applied to the canonical path before anything is read, so a plain-text
+/// target is composition's unsupported-file-type error at `site`. A
+/// reference check running ahead of composition leaves the refusal to it
+/// (`false`, no child).
+fn admits_markdown_child(
+    path: &std::path::Path,
+    options: &ReferenceGraphOptions,
+    site: Option<InclusionSite>,
+) -> MarkdownResult<bool> {
+    let canonical = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    let admitted = crate::markdown::compose::transclusion::admit_local_target(
+        DirectiveKind::File,
+        &canonical,
+        &options.compose.transclusion_options(),
+    );
+    match admitted {
+        Ok(()) => Ok(true),
+        Err(_) if options.compose.defer_inclusion_parse_failures => Ok(false),
+        Err(error) => Err(error.at_inclusion(site).into()),
+    }
 }
 
 /// Resolve a local path target through the request-scoped detailed resolver.
@@ -1352,17 +1592,6 @@ fn source_to_id(source: &ComposeSource) -> NodeId {
     }
 }
 
-fn resolve_toc_linking_target(
-    directive: &toc_linking::TocLinkingDirective,
-    source: &ComposeSource,
-    transclusion_options: &crate::markdown::compose::TransclusionOptions,
-    ctx: SourceContext,
-) -> Option<(String, std::path::PathBuf)> {
-    toc_linking::resolve_target_chain(directive, source, transclusion_options, ctx)
-        .ok()
-        .flatten()
-}
-
 /// The hyperlinks a `::toc-linking` directive generates, one per raw
 /// heading of `path` its levels select, and every raw heading slug of
 /// `path`.
@@ -1377,18 +1606,21 @@ fn generate_toc_link_references(
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
     runtime: &ReferenceAnalysisRuntime,
-) -> (Vec<ReferenceRecord>, std::sync::Arc<[String]>) {
-    // 35.4: route the TOC-heading read through the run's shared cache instead
-    // of a second `Markdown::try_from` on the same file. The target is also
-    // loaded (cached) by the follow-mode traversal below, so a single owner
-    // serves both graph-discovery and composition reads. A load failure
-    // reproduces the previous empty-result behavior.
-    let Some(target_md) = runtime.load_markdown(path) else {
-        return (Vec::new(), std::sync::Arc::from([]));
+    options: &ReferenceGraphOptions,
+    site: Option<InclusionSite>,
+) -> MarkdownResult<(Vec<ReferenceRecord>, std::sync::Arc<[String]>)> {
+    // The headings composition reads (the run's shared TOC-heading cache):
+    // the raw text, so a target whose frontmatter does not parse still lists
+    // its headings. A target that cannot be read is composition's read
+    // failure at `site`, the directive that selected it, unless it vanished
+    // after resolving (validation reports it missing) or the reference check
+    // defers it to composition.
+    let headings = match runtime.cache.load_toc_headings(path) {
+        Ok(headings) => headings,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(_) if options.compose.defer_inclusion_parse_failures => Vec::new(),
+        Err(error) => return Err(read_failure(MarkdownError::FileLoad(error), path, site)),
     };
-
-    let toc = target_md.toc();
-    let headings = toc.all_headings();
     let raw_slugs: std::sync::Arc<[String]> = headings.iter().map(|h| h.slug.to_lowercase()).collect();
 
     let records = headings
@@ -1413,7 +1645,7 @@ fn generate_toc_link_references(
             }
         })
         .collect();
-    (records, raw_slugs)
+    Ok((records, raw_slugs))
 }
 
 #[cfg(test)]
@@ -1682,9 +1914,15 @@ mod tests {
             .unwrap();
         assert!(validation.is_valid(), "issues: {:?}", validation.issues);
 
+        // Queried as a root of its own, the child is admitted the way a
+        // request admits its own source, so its sibling resolves there.
         let child_md = Markdown::try_from(child_path.as_path()).unwrap();
-        let ordinary_external = compose.with_source_file(&child_path);
-        assert!(child_md.transclusions_with_options(&ordinary_external).is_err());
+        let refs = child_md.transclusions_with_options(&compose).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(
+            refs[0].resolved_target.as_deref().map(std::path::Path::new),
+            Some(grandchild_path.as_path()),
+        );
     }
 
     #[test]

@@ -865,13 +865,30 @@ fn list_themes_markdown_lists_every_theme_with_the_setter_guidance() {
 
 #[test]
 fn every_schema_file_shares_one_diagnostic_type() {
+    // One Rust `Diagnostic` serializes into every command's output, so each
+    // file declares the record, and every named type it reaches, word for
+    // word as `compose.yaml` does.
+    const SHARED: &[&str] = &[
+        "diagnostic",
+        "related-diagnostic",
+        "source",
+        "span",
+        "iteration-step",
+        "trail-step",
+        "trail-frame",
+        "data-location",
+        "grant-needed",
+        "schema-default",
+    ];
+    // The named type's lines: its header and every property line under it.
+    fn declaration(text: &str, name: &str) -> Option<String> {
+        let header = format!("    {name}:");
+        let mut lines = text.lines().skip_while(|line| *line != "types:").skip_while(|line| *line != header);
+        let first = lines.next()?;
+        let body = lines.take_while(|line| line.starts_with("        "));
+        Some(std::iter::once(first).chain(body).collect::<Vec<_>>().join("\n"))
+    }
     let compose = include_str!("../../schemas/output/compose.yaml");
-    // A diagnostic's `data_location` is a named type of its own, shared too.
-    let block = |text: &'static str| -> serde_json::Value {
-        let document: serde_json::Value = serde_yaml_ng::from_str(text).expect("YAML");
-        serde_json::json!({ "diagnostic": document["types"]["diagnostic"], "data-location": document["types"]["data-location"] })
-    };
-    let expected = block(compose);
     for (name, text) in [
         ("clean", include_str!("../../schemas/output/clean.yaml")),
         ("code-block", include_str!("../../schemas/output/code-block.yaml")),
@@ -880,7 +897,9 @@ fn every_schema_file_shares_one_diagnostic_type() {
         ("get", include_str!("../../schemas/output/get.yaml")),
         ("graph", include_str!("../../schemas/output/graph.yaml")),
         ("hash", include_str!("../../schemas/output/hash.yaml")),
+        ("init", include_str!("../../schemas/output/init.yaml")),
         ("list-themes", include_str!("../../schemas/output/list-themes.yaml")),
+        ("render", include_str!("../../schemas/output/render.yaml")),
         ("rm", include_str!("../../schemas/output/rm.yaml")),
         ("schema-about", include_str!("../../schemas/output/schema-about.yaml")),
         ("schema-detect", include_str!("../../schemas/output/schema-detect.yaml")),
@@ -890,12 +909,10 @@ fn every_schema_file_shares_one_diagnostic_type() {
         ("toc", include_str!("../../schemas/output/toc.yaml")),
         ("validate-refs", include_str!("../../schemas/output/validate-refs.yaml")),
     ] {
-        let mut actual = block(text);
-        let mut wanted = expected.clone();
-        // Only the example in `code`'s description differs between files.
-        actual["diagnostic"]["code"] = Value::Null;
-        wanted["diagnostic"]["code"] = Value::Null;
-        assert_eq!(actual, wanted, "{name}");
+        for shared in SHARED {
+            let expected = declaration(compose, shared).unwrap_or_else(|| panic!("compose.yaml declares `{shared}`"));
+            assert_eq!(declaration(text, shared), Some(expected), "{name}.yaml `{shared}`");
+        }
     }
 }
 

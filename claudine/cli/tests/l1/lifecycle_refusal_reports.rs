@@ -223,7 +223,7 @@ fn a_foreign_referenced_group_initialize_refusal_is_reported_by_its_step() {
 
     assert_eq!(output.status.code(), Some(1), "output was:\n{text}");
     assert!(prose(&text).contains("step1/1failed:"), "output was:\n{text}");
-    staged.assert_refusal_reported(&text, &library.join("groups/e.md"));
+    staged.assert_refusal_reported(&text, &library.join("groups").join("e.md"));
     assert!(!library.join("groups/leg.md").exists(), "the leg never ran");
 }
 

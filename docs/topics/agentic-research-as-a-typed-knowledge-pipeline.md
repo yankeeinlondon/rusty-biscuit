@@ -6,7 +6,7 @@ prompt: |-
     - This is necessary because the providers which are supported change frequently and over time the providers we already support change so we need to re-establish their "facts" through a re-application of the research process
     - We start this process by leveraging Claudine's `sequence` operation:
         - we decompose the information we need to know about an Agentic CLI provider:
-            - Deep research on each supported provider on how and what they support regarding **Agent Skills** can be found in @claudine/docs/research/skills
+            - Deep research on each supported provider on how and what they support regarding **Agent Skills** can be found in @claudine/docs/research/providers/skills
             - Similarly research into how provider's CLI behaves and what it exposes can be found @claudine/docs/research
             - each provider get's their own research document
         - the @claudine/docs/providers.yaml defines the enumerated list of providers we support (or want to support)
@@ -87,9 +87,9 @@ The important architectural choice is that the per-subject research document is 
 In Claudine, for example:
 
 - [`docs/providers.yaml`](../providers.yaml) is the research roster.
-- [`docs/research/skills/_fleet.md`](../research/skills/_fleet.md) defines the Agent Skills research task.
-- [`docs/research/skills/_schema.yaml`](../research/skills/_schema.yaml) defines the topic's metadata contract.
-- Each provider receives its own document, such as [`docs/research/skills/codex.md`](../research/skills/codex.md).
+- [`docs/research/providers/skills/_fleet.md`](../research/skills/_fleet.md) defines the Agent Skills research task.
+- [`docs/research/providers/skills/_schema.yaml`](../research/skills/_schema.yaml) defines the topic's metadata contract.
+- Each provider receives its own document, such as [`docs/research/providers/skills/codex.md`](../research/skills/codex.md).
 - [`docs/research/summary/agent-skills.md`](../research/summary/agent-skills.md) synthesizes the provider documents.
 - `just publish-skills` (in `claudine/`) publishes the composed summaries into the Claudine Agent Skill, along with Claudine's caller skill.
 

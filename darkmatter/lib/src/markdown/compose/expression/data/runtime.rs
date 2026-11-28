@@ -71,7 +71,7 @@ impl DataSourceIdentity {
     /// path text, or [`url::Url::to_string`].
     pub fn read_set_entry(&self) -> String {
         match self {
-            Self::Local(path) => biscuit_file::to_portable_string(path),
+            Self::Local(path) => biscuit_file::to_forward_slash_string(path),
             Self::Remote(url) => url.to_string(),
         }
     }
@@ -1231,8 +1231,8 @@ mod tests {
         assert_eq!(
             read_set,
             vec![
-                biscuit_file::to_portable_string(&canonical.join("a-missing.md")),
-                biscuit_file::to_portable_string(&canonical.join("b.md")),
+                biscuit_file::to_forward_slash_string(&canonical.join("a-missing.md")),
+                biscuit_file::to_forward_slash_string(&canonical.join("b.md")),
                 "https://example.com/x.json?v=1#frag".to_string(),
             ]
         );
@@ -1262,6 +1262,6 @@ mod tests {
         let stats = runtime.stats();
         assert_eq!((stats.contract_preparations, stats.contract_hits), (1, 1));
         let canonical = biscuit_file::canonicalize_simplified(&dir.path().join("types.yaml")).unwrap();
-        assert_eq!(runtime.read_set(), vec![biscuit_file::to_portable_string(&canonical)]);
+        assert_eq!(runtime.read_set(), vec![biscuit_file::to_forward_slash_string(&canonical)]);
     }
 }

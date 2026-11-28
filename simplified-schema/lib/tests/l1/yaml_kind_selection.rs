@@ -109,7 +109,8 @@ fn source(host: &str, path: &str) -> RegisteredSource {
 /// A registered definition from `host` at `path` claiming `kind`.
 fn registered(dir: &Path, host: &str, path: &str, kind: &str, sameness: &str) -> RegisteredDefinition {
     let declaration = format!("kind: literal({kind}; required)\nteam: string(required)\n");
-    RegisteredDefinition::new(source(host, path), resolved(dir, &declaration), sameness).expect("registered definition")
+    let text = format!("kind: yaml-schema\n$schema:\n    kind: literal({kind}; required)\n    team: string(required)\n");
+    RegisteredDefinition::new(source(host, path), &text, resolved(dir, &declaration), sameness).expect("registered definition")
 }
 
 /// The definition source a `kind` selection chose.
@@ -328,14 +329,17 @@ fn select_without_registered_definitions_is_unchanged() {
 fn registered_definition_claiming_no_kind_fails_like_a_local_one() {
     let tree = Tree::new();
     let export = resolved(&tree.root(), "kind: string(required)\nteam: string\n");
+    let text = "kind: yaml-schema\n$schema:\n    kind: string(required)\n    team: string\n";
 
-    let error = RegisteredDefinition::new(source("claudine", "schemas/open.yaml"), export, "c1")
+    let error = RegisteredDefinition::new(source("claudine", "schemas/open.yaml"), text, export, "c1")
         .expect_err("an open `kind` claims no finite set");
 
     match error {
-        SchemaError::SchemaDocument { path, message, .. } => {
+        SchemaError::SchemaDocument { path, message, span, .. } => {
             assert_eq!(path, PathBuf::from("claudine/schemas/open.yaml"));
             assert!(message.contains("claims no document kind"), "{message}");
+            let at = text.find("string(required)").unwrap();
+            assert_eq!(span.map(|span| span.start), Some(at), "the claim's declaration in the authored text");
         }
         other => panic!("expected a schema document error, got {other}"),
     }

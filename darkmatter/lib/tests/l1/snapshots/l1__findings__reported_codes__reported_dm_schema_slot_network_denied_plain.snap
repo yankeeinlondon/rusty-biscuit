@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ load_data() may not read http://127.0.0.1:9/os.yaml: `permissions.network`
+    is `deny`; allow the host for this run (`--allow host=HOST`), or set
+    `permissions.network` to `ask` or `allow`
+      at schema.yaml:3:15

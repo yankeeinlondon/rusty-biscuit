@@ -175,7 +175,7 @@ pub fn enter_call(call: &PrepCall<'_>, target: &Path) -> Result<CallFrame, Compo
                 source_path: call.caller.to_path_buf(),
                 property: call.property.to_string(),
                 target: call.target.to_string(),
-                chain: chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+                chain: chain.iter().map(|path| biscuit_file::to_forward_slash_string(path)).collect(),
                 limit: MAX_PROXY_HOPS,
             };
             chain.truncate(depth);

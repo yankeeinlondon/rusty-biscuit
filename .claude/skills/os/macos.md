@@ -28,6 +28,17 @@ repository defects.
   L1 subprocess launched from the fixture `$HOME` can. Compare with
   `fs::canonicalize` where two such spellings meet, as Claudine's
   `with_prompt_magic_roots` does.
+- **Composition meets both spellings inside one request.** A transcluded
+  child's path arrives canonical (`/private/var/…`) while its opening record,
+  `$HOME`, and the request's repository root keep `/var/…`. Every lexical
+  `starts_with`/`strip_prefix` between them then fails: a child loses its
+  checkout's root (bare `$schema` names stop resolving), a schema's base dir
+  falls outside its tree (`CwdOutsideBaseDir`), and a report shows an absolute
+  path where `notes.md` was expected. Show a path relative to the launch
+  directory through `darkmatter::findings::launch_relative`, and keep a
+  context and the path judged against it in one spelling
+  (`SourceRepositories::own_repository_derivation`, `schemas::base_dir_for`).
+  Linux CI never sees this; reproduce on `BUILD_MACOS`.
 - **macOS sweeps old files under `/tmp` but leaves populated directories.** A
   git worktree there loses its small `.git` pointer file first, and
   `git worktree list` then shows it as `prunable`. That is not corruption: run
@@ -295,6 +306,15 @@ no longer watches files, so its user docs no longer describe fseventsd.
 
 ## Host conditions that look like repo failures
 
+- **A GUI backend over SSH has no window server.** A process started over
+  SSH (a push or `just test-l2` on `BUILD_MACOS`) runs in launchd's
+  `Background` session (`launchctl managername`); only the desktop login's
+  `Aqua` session can open a window. `KittyInstance::can_launch()` checks for
+  `Aqua`, so the private-Kitty tests skip there instead of failing with "the
+  private kitty instance never answered on its socket". A `gh` login on
+  that host is in the login keychain, which is locked to SSH sessions ("User
+  interaction is not allowed"): a push from there needs `GH_TOKEN` in the
+  push process's environment, passed on stdin, never written to the host.
 - **`ld: library 'git2' not found` after `brew upgrade libgit2`.**
   `libgit2-sys` links Homebrew's library and records its versioned Cellar path
   in its build-script output. Builds made before the upgrade fail to link, and
@@ -537,3 +557,11 @@ socket directory also means first-run state, so Zellij shows its "About
 Zellij" tips popup over the pane; start it with a `--config` file holding
 `show_startup_tips false` and `show_release_notes false`. See
 `biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs`.
+
+## Sweep reports and shared APFS capacity
+
+`diskutil info -plist DEVICE` exposes `APFSContainerReference`. Use `df -P PATH`
+to resolve a checkout directory to its device before calling `diskutil`. Volumes such as
+`/` and `/Volumes/coding` on the macOS build host can have different device
+IDs while reporting the same capacity and availability from one APFS
+container. Count that capacity once when projecting post-sweep free space.

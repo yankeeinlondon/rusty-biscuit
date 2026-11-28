@@ -1,0 +1,22 @@
+exit: 1
+--- stdout
+**Broken references in [root.md](<WS>/cwd/docs/root.md)**
+
+**[docs/root.md](<WS>/cwd/docs/root.md)**
+
+|  |  |  |
+| :-- | :-- | :-- |
+| file not found _in hyperlink_ | `./gone.md` | [root.md:3:1](<WS>/cwd/docs/root.md#root '{ qp: { line: 3, column: 1 } }') |
+| file not found _in image_ | `./image.png` | [root.md:7:1](<WS>/cwd/docs/root.md#root '{ qp: { line: 7, column: 1 } }') |
+| unsupported scheme _in hyperlink_ | `mailto:a@example.com` | [root.md:8:1](<WS>/cwd/docs/root.md#root '{ qp: { line: 8, column: 1 } }') |
+
+**[docs/child.md](<WS>/cwd/docs/child.md)** (transcluded at root.md:5)
+
+|  |  |  |
+| :-- | :-- | :-- |
+| file not found _in hyperlink_ | `./child-gone.md` | [child.md:3:1](<WS>/cwd/docs/child.md#child '{ qp: { line: 3, column: 1 } }') |
+
+Checked 5 references across 2 documents: 2 ok, **3 broken**
+
+1 info
+--- stderr

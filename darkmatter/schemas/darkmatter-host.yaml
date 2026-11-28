@@ -1,33 +1,32 @@
-# A host registration manifest (`darkmatter-host`, format version 2): the one
+# A host registration manifest (`darkmatter-host`, format version 3): the one
 # file a host program publishes that lists every file of its registration
 # bundle and the BLAKE3 digest of each. A `register` entry of
 # `.darkmatter.yaml` points at it.
 #
 # The envelope is closed and every field is required, including explicit
-# `files: []` and `functions: []` when a host has none. Members are local
-# references written `./…` or `../…` and resolved from the manifest's
-# directory, which is the bundle root; a remote member is refused without
-# being fetched. `digests` has exactly one entry per member entry (each
-# `files` item, `lifecycle`, and each function `catalog` and `facts`), keyed
-# by the reference as written. Darkmatter validates a manifest against
-# `darkmatter-host` before it reads any member, and refuses a format 1
-# manifest with a request to rerun the host's setup.
+# `files: []` when a host has no schema files. Members are local references
+# written `./…` or `../…` and resolved from the manifest's directory, which
+# is the bundle root; a remote member is refused without being fetched.
+# `digests` has exactly one entry per member: each `files` item, `lifecycle`,
+# and the facts companion of each `files` item that is a
+# `kind: expression-schema` catalog. A companion is never listed in `files`:
+# its reference is the catalog's with the last extension (`.yaml` or `.yml`)
+# replaced by `.facts.json` (`./schemas/project.yaml` →
+# `./schemas/project.facts.json`). Darkmatter checks `format_version` first
+# and refuses any other integer version with a request to update and
+# republish; it then validates the manifest against `darkmatter-host` before
+# it reads any member.
 kind: schema
 description: Darkmatter's host registration manifest.
 types:
     member-reference: "string(not-empty) -> A bundle member, written from the manifest's directory with forward slashes (`./schemas/composition.yaml`)."
     digest: "string(pattern(^[0-9a-f]{64}$)) -> The BLAKE3 hash of a member's exact bytes: 64 lowercase hexadecimal digits."
-    function-pair:
-        catalog: "member-reference(required) -> The host function catalog: the signatures."
-        facts: "member-reference(required) -> The facts artifact generated from the host's registrations for that catalog."
-        $constraints: { closed: true }
     darkmatter-host:
         kind: "literal(darkmatter-host; required) -> The manifest envelope."
-        format_version: "literal(2; required) -> The manifest format; this reader understands 2."
+        format_version: "literal(3; required) -> The manifest format; this reader understands 3."
         host: "string(not-empty; required) -> The host's identifier; its lifecycle artifact must record the same host."
         version: "string(not-empty; required) -> The host release that wrote the manifest (not the format)."
-        files: "member-reference[](required) -> The bundle's schema files; their order has no effect."
+        files: "member-reference[](required) -> The bundle's schema files and expression catalogs; their order has no effect."
         lifecycle: "member-reference(required) -> The host's lifecycle artifact."
-        functions: "function-pair[](required) -> Host function catalogs, each with its facts artifact."
-        digests: "{ <string>: digest }(required) -> Each member reference, as written above, mapped to its digest."
+        digests: "{ <string>: digest }(required) -> Each member reference as written above, and each expression catalog's derived `.facts.json` companion, mapped to its digest."
         $constraints: { closed: true }

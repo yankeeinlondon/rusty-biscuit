@@ -1522,7 +1522,8 @@ enum ContractVerdict {
     /// The contract is wrong whatever the data.
     Problem(DataProblem),
     /// The contract is valid; its rows are judged against a tabular format.
-    Rows { written: String, property: PropertyDef, definitions: std::sync::Arc<DefinitionTable> },
+    /// The property is boxed so this verdict stays as small as the others.
+    Rows { written: String, property: Box<PropertyDef>, definitions: std::sync::Arc<DefinitionTable> },
     /// Nothing is provable (malformed syntax the binder reports, or an
     /// unknown shipped type execution reports).
     Open,
@@ -1540,12 +1541,12 @@ fn judge_literal_contract(carrier: &Value) -> ContractVerdict {
         Ok(parsed) => match super::data::contract::expand_embedded_contract(&parsed, &written) {
             None => ContractVerdict::Rows {
                 written: written.to_string(),
-                property: parsed,
+                property: Box::new(parsed),
                 definitions: std::sync::Arc::new(DefinitionTable::default()),
             },
             Some(Ok(expanded)) => ContractVerdict::Rows {
                 written: written.to_string(),
-                property: expanded.property,
+                property: Box::new(expanded.property),
                 definitions: expanded.definitions,
             },
             Some(Err(error)) if matches!(*error, DataError::NotAContainer { .. }) => {

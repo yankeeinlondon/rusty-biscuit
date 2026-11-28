@@ -11,6 +11,7 @@ $schema:
     pass-icon: string
     commit-message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
+    stop-before-phase: number -> read from the plan; the first phase that must not start (a hold placed on the plan)
 yolo: true
 commit-message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
@@ -31,6 +32,7 @@ spec: |-
                 :  null
             : null
     }}
+stop-before-phase: "{{ file_exists(plan) ? frontmatter(plan, 'stop-before-phase') : null }}"
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 # `depends-on` entries are `{date}-{name}` directories beside the spec or under
@@ -82,6 +84,12 @@ initialize:
           - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total-phases}})"
 
 start:
+    # Checked in `start` so every loop pass, not only the first, honors the
+    # hold before an agent launches.
+    - when: "stop-before-phase && phase >= stop-before-phase"
+      then:
+          - message: "⛔  `{{parent_dir(plan)}}` is on hold before phase **#{{stop-before-phase}}**; see the hold in {{link(plan)}}"
+          - error: "the plan {{plan}} sets `stop-before-phase: {{stop-before-phase}}`; phase {{phase}} must not start until the hold is lifted"
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**repo**: {{ctx.repo}},{{area}} **agent:** {{ctx.agent}}/{{ctx.model}}, **branch:** {{ctx.branch}}, **host:** {{ctx.hostname}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
     # body renders the same message for the agent itself.
@@ -182,7 +190,7 @@ You will log your implementation progress to: {{log}}
 - the log file already has content from earlier work; keep it and append to it
 - you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
 ::block when="phase > 1"
-- since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
+- do not read the entries of earlier phases: the plan is your guide, and anything an earlier phase needed you to know is in its message below. The log is a record you append to; the one part you may read is a `## Phase {{phase}}` section an earlier, unfinished attempt at this phase left
 ::end-block
 ::end-block
 

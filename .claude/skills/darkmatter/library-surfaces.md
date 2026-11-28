@@ -27,7 +27,9 @@ behavior.
   `YamlEdit`, `YamlEditError`) edits plain YAML files in place with the
   frontmatter path editor's engine and never serializes the whole file; see
   [frontmatter.md](frontmatter.md#plain-yaml-files).
-- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`)
+- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`;
+  `TargetChange::edit_refusal` dry-runs a change's edits on its expected bytes
+  with the staging editor, writing nothing)
   is the one configuration writer: sibling `<name>.darkmatter-lock` (kept,
   `File::try_lock`, 2 s/20 ms), locks in portable-path order, re-read,
   the layout-aware edit (`edit_yaml_paths_in_layout`; `TargetChange::create_yaml`
@@ -77,8 +79,8 @@ behavior.
 - Expression descriptors are typed catalogs used by both library callers and
   CLI documentation. Add a function once in the registry and keep parsing,
   evaluation, descriptors, and completion aligned.
-- Author functions in `schemas/partials/functions.yaml` (a tagged SimplifiedSchema
-  file: `categories:` plus one `function(...)` type, or a list of them for
+- Author functions in `schemas/partials/functions.yaml` (a `kind: expression-schema`
+  callable catalog: `categories:` plus one `function(...)` type, or a list of them for
   overloads, per `types:` entry) and `ctx.*` in the `context` type of
   `schemas/partials/context-variables.yaml`. The loader in
   `expression/catalog/mod.rs` embeds the file and its
@@ -92,7 +94,7 @@ behavior.
   regen-lifecycle-schema` (verb types in `schemas/partials/lifecycle.yaml`,
   plus the verb count in `lifecycle_schema_generation.rs`), the two verb
   pattern lists in `schemas/partials/md-lifecycle.yaml`, Claudine's mirrored
-  `expression` category in `claudine/schemas/{action,lifecycle}.yaml`, a row
+  `expression` category in `claudine/registration/{action,lifecycle-events}.yaml`, a row
   in `tests/l1/function_binding_registry.rs`, an alias row in
   `function_catalog_parity.rs`, the recursive-schema goldens
   (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), DMLS's
@@ -142,18 +144,36 @@ behavior.
   (built-ins, host catalogs, `FunctionRegistration::builder`/
   `builder_from_types`). Do not reintroduce a Rust-side fact setter.
 - Host function catalogs (`HostFunctionCatalog`, `HostFunctions`) share one
-  `Arc` freed with the last holder. `host_function_catalogs` caches one result
-  per discovery path, replaced on any catalog/artifact byte change and never
-  evicted; see `expressions.md` and `docs/topics/host-functions.md`.
+  `Arc` freed with the last holder. There is no process-wide catalog cache:
+  the registration loader (`config::registration::load_functions`) builds an
+  analysis-only set from a `kind: expression-schema` member's verified bytes
+  and its derived `.facts.json` companion once per installed revision, and
+  the profile owners (the CLI's `MdRequest::registered_hosts`, DMLS
+  `HostRegistrations`) keep it; schema roots are never searched for
+  catalogs; see `docs/topics/host-functions.md` and
+  `docs/topics/host-registration.md`.
+- One catalog reader (`expression/catalog/mod.rs::read_catalog`, located checks
+  in `catalog/checks.rs`) serves the built-ins (`load_catalog`/
+  `load_catalog_with_mode`, `CatalogOrigin::BuiltIn`), host catalogs
+  (`load_authored_catalog`, `Authored`: no file-form examples, canonical names
+  checked against `functions::reserved_builtin_name` over the static
+  `bindings()` rows, never the joined registry, which loads the catalog, and an
+  eager compile of each callable), `md schema validate`, and DMLS
+  (`DarkmatterSchemas::validate_callable_catalog`, called from
+  `prepare_yaml_contract`; the built-ins are recognized by path identity
+  only). Semantic failures are `CatalogError::Invalid` → `SchemaError::CallableCatalog`
+  (byte span plus `CatalogRelated` locations), code `CALLABLE_CATALOG_CODE`
+  (`dm.schema.callable_catalog`); shape and grammar stay kind-contract problems.
 - Non-function `types:` entries are named helper types that signatures use:
   `ip-address` (IPv4, IPv6, or a scoped `fe80::1%en0` literal; no DNS),
   `agentic-cli` (an `enum(...)` that a test pins to
   `expression/functions/agentic_cli_generated.rs`), and `recent-commits` (the
-  return of `recent_commits(count)` and, through
-  `recent-commits@darkmatter:functions`, the type of `ctx.recent_commits`; the
-  two descriptions name each other). `functions.yaml` is in `SHIPPED` for that
-  import, so on-disk copies of the partials need no copy of it. Typed signatures
-  show the helper's name, not its expansion.
+  return of `recent_commits(count)`; `context-variables.yaml` declares an
+  equal local `recent-commits` for `ctx.recent_commits`, pinned equal by
+  `tests/l1/recent_commits_shared_type.rs`, because a callable catalog is never
+  an import source). `functions.yaml` is not in `SHIPPED`; `shipped.rs::sources()`
+  carries it for the prepared catalog. Typed signatures show the helper's name,
+  not its expansion.
 - `agentic_cli_generated.rs` is written by `claudine-gen generate` from
   `claudine/docs/providers.yaml`. Never hand-edit it; `claudine-gen check` and
   its nextest drift test fail on a stale table. It stores `AiCli` variant

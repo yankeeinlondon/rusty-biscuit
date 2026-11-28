@@ -587,15 +587,37 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Markdown document with frontmatter whose configuration is stale, and
   `prepare_workspace_probe` prepares every workspace scope's (so a
   frontmatter-less document, which never waits, finds them). An install
-  whose profiles (manifest + revision), warnings, and load error equal the
-  previous one keeps its `version`; `generation()` advances with each new
-  version and the router refreshes every open document when it moves
-  (`publish_trigger_transitions`). Deps are BLAKE3 hashes (`content_hash`,
+  whose profiles (manifest + revision) and load error equal the previous
+  one keeps its `version` (`same_effect`; warnings alone differing replace
+  the `RegisteredHosts` under the same version); `generation()` advances
+  with each new version and the router refreshes every open document when
+  it moves (`publish_trigger_transitions`). Reloads are debounced per
+  `HostsKey`: `invalidate_paths(paths, now)` matches by path only
+  (`HostDependencies::touches`, no I/O on the router thread) and sets the
+  scope's `due = now + settle` and bumps its `generation`; `schedule_all`
+  does the same for the save fallback (`invalidate_unwatched_inputs`);
+  `invalidate_all` is immediate (`stale`). `expire(now)` turns a passed
+  deadline into `stale`; `needs_load` (cold or stale) gates `begin` and
+  `registry_need`, so a dirty scope serves its installed view and queues
+  nothing. `install(prepared, now)` drops a result whose generation (or
+  seq) is older than the scope's, and a warm result a concurrent change
+  touched re-arms the deadline instead; a touched cold result installs
+  nothing (`Scope::installed` is `None`, so `lookup` is `None`: `md`
+  selection and a hosts-version-0 YAML contract key) and keeps only its
+  deps to watch and re-arm from. The router arms
+  `crossbeam_channel::after` on `next_host_reload()` and calls
+  `start_due_host_reloads` (`take_due_host_reloads`, then a workspace
+  pass and `refresh_all_diagnostics`) before every message, so a test's
+  `ManualClock` advance takes effect on its next round trip. The window is
+  `hosts::REGISTRATION_SETTLE` (300 ms, from the measured publish);
+  `HostRegistrations::default()`/`OverlayState` use zero, the server sets
+  `StartupHooks::registration_settle` or the constant, and `LspFixture`
+  defaults to zero except `start_with_registration_settle`.
+  `work_counters::host_loads()` counts loads. Deps are BLAKE3 hashes (`content_hash`,
   taken from `ConfigSnapshot::dependencies` except the `RepositoryHead`
   revision, read otherwise) of the config files present or absent, every
   `profile.dependencies()` path, a refused entry's probed manifest
-  candidates and their members' candidates
-  (`config::registration::manifest_member_candidates`), and the repository's
+  locations (`LoadedRegistrations::watches`), and the repository's
   `HEAD` plus the branch ref it names (`slot_jobs::head_files`, watched by
   path through the slot registration, never by folder);
   `invalidate_trigger_inputs`/`invalidate_all_trigger_registries` also
@@ -612,42 +634,45 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `DocumentContext::host`, which the router fills from
   `OverlayState::unframed_host` (the same `HostView::select` over an empty
   frontmatter under the installed hosts, cached per path; `md` while none
-  are installed and for YAML). `HostView::unregistered` is only the fallback
-  of a `DocumentContext` built outside a server (`host: None`). Selection
+  are installed and for YAML). A `DocumentContext` built outside a server
+  (`host: None`) gets the `md` view. Selection
   warnings and `dm.lifecycle.unknown_host` are published on the document by
   `diagnostics/frontmatter.rs::host_diagnostics`; configuration-level ones
   (`HostRegistrations::diagnostics`) on the file each names by
   `router.rs::publish_registration_files` (merged into an open file's
-  refresh and `closed_file_diagnostics`). The router shows
+  refresh and `closed_file_diagnostics`). A `RegistrationDiagnostic`'s
+  `column` counts characters; `registration_range` encodes its kept
+  `line_prefix` (`config::load::SourcePosition`, filled wherever the loader
+  locates a problem in text it read) with `PositionEncoding::units`, never
+  `column - 1`, and nothing is read at publication. The router shows
   `host_config_notices` (`dm.config.missing` once per session,
   `dm.config.migration` once per file) as `window/showMessage`
   (`Router::show_config_notices`). Tests:
   `tests/l1/registered_host_views.rs` (host fixtures by `#[path]`),
-  `tests/l1/host_registration_watches.rs`.
+  `tests/l1/host_registration_watches.rs`,
+  `tests/l1/registration_reload_scheduling.rs` (the settle window on a
+  `ManualClock`).
 - Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
-  reads the selected view's lifecycle: a registered profile's, a legacy
-  catalog's first usable `<stem>.lifecycle.json`
-  (`lifecycle::host_profile::HostLifecycleProfile`; Claudine's
-  `claudine/schemas/globals.lifecycle.json`), else `md_host`. Its registry's
+  reads the selected view's lifecycle: the registered profile's
+  (`lifecycle::host_profile::HostLifecycleProfile`), else `md_host`; no
+  schema-root catalog or artifact is ever read. Its registry's
   `resolve_key` (never a hand list) maps a root key to a `StackEvent`
   (event plus registry) and gives every `{{ … }}` span, `when` condition, and
   expression-typed value inside that stack the event's registry
   `BindingView`; `diagnostics/frontmatter.rs::GuardedStackCalls` parses with
   the host's parse options and calls the library's one walk,
   `lifecycle_call_checks`, with the host's registry, for stack spans and
-  expression-typed stack values alike. Without a usable artifact the stacks
-  are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
-  reason. A combined diagnostics pass (`ProviderRegistry::diagnostics`)
-  reads the host once, in its own panic boundary, and hands it to providers
-  whose `reads_lifecycle_host()` is true via `diagnostics_with_host`; a panic
-  there is logged as each such provider's panic and drops their diagnostics.
+  expression-typed stack values alike. An unusable artifact refuses the
+  registration, so the stacks are md's. A combined diagnostics pass
+  (`ProviderRegistry::diagnostics`) reads the host once, in its own panic
+  boundary, for the frontmatter provider (the DSL provider no longer reads
+  it); a panic there drops only that provider's diagnostics.
   Standalone `diagnostics(ctx)`, hover, and completion read the same view. DMLS never depends on a host crate; `md_host::` appears only in
   `event_views.rs` (the fallback and its tests). Completion offers only the
   globals the event may read; `err` where the event has none is
   `dm.expression.unavailable_global` (the view's reason, never `fm.err`).
-  Host-catalog globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
-  every view (`validation_view`), and a host catalog that fails to load is the
-  warning `dm.schema.host_catalog`. A schema problem's diagnostic carries the
+  Registered host globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
+  every view (`validation_view`). A schema problem's diagnostic carries the
   library's message without the declared description; guidance such as
   "use `start`" on Claudine's `composed` shows in hover only.
 - Matching trigger payloads feed completion and hover as well as
@@ -960,14 +985,25 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   route, the root `$schema`'s `NamedTypeCatalog::build_tolerant`
   (`PreparedYaml::named_types`, served by `yaml_only`). `YamlContracts` keys
   an entry on `declaration_key()` + context identity + generation + kinds
-  version (+ text hash only when `kind_checks_read_files()`),
-  never on data; begin/run/install mirror the registry's (epoch, seq,
+  version (+ text hash only when `kind_checks_read_files()`, and always the
+  full text for a callable catalog, `expression-schema`/`mutation-schema`, whose
+  whole text is its contract), never on data; begin/run/install mirror the registry's (epoch, seq,
   in-flight changes), and staleness is event-driven (`invalidate_paths`,
   `set_buffer`, `invalidate_all` from the trigger hooks; deps compared by
   buffer-aware hash, probes by presence, a failed entry stale on any change).
   `registry_demand` reports a YAML need when the registry is stale or the
   contract is not fresh for the current key, inside a workspace folder or
   not; its folders join `trigger_watch_folders`.
+- Callable catalogs: `prepare_yaml_contract` returns
+  `SchemaError::CallableCatalog` for a failed catalog; the worker resolves each
+  related file (relative → captured repository root) and captures its text
+  (open buffer first) so the dispatch thread reads nothing, and the overlay
+  keeps the kind claim (no root `$schema` fallback, no import resolution).
+  `diagnostics/yaml_document.rs` publishes one `dm.schema.callable_catalog`
+  per failure with `relatedInformation`; `overlay/mod.rs` suppresses the
+  envelope's coarser `document_malformed` beside it; `overlay/registry.rs`
+  never classifies a catalog in a schema root as a named schema. Tests:
+  `tests/l1/yaml_document_catalog_editor.rs`.
 - `overlay/yaml_document.rs` (dispatch thread) reads no file: it looks the
   entry up by key (`Pending` when none matches: never an earlier
   declaration's), runs the passive `YamlContract::validate` (or takes the

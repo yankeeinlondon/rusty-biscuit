@@ -195,6 +195,26 @@ fn compile_canonical_action_mapper(
         .transpose()
 }
 
+/// The actions whose mapper [`compile_canonical_runtime`] refuses, by event
+/// and position in that event's list, without building the rest of the
+/// runtime. A matcher that fails to compile is tolerated there, so it is
+/// not reported here either.
+pub(crate) fn refused_action_mappers(config: &ClaudineConfig) -> Vec<(AgenticEvent, usize)> {
+    let mut refused: Vec<(AgenticEvent, usize)> = config
+        .actions
+        .iter()
+        .flat_map(|(event, actions)| {
+            actions
+                .iter()
+                .enumerate()
+                .filter(|(_, action)| compile_canonical_action_mapper(action, *event).is_err())
+                .map(|(index, _)| (*event, index))
+        })
+        .collect();
+    refused.sort_by_key(|(event, index)| (event.to_string(), *index));
+    refused
+}
+
 /// Compile a single mapper without provider context.
 fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<CompiledMapper> {
     match mapper {
@@ -467,6 +487,92 @@ pub fn load_claudine_config_with_notices(
 
     config.validate()?;
     Ok(LoadedClaudineConfig { config, notices })
+}
+
+/// A configuration read passively, and what the reading noted.
+#[derive(Debug, Clone)]
+pub struct PassiveClaudineConfig {
+    /// The merged, validated configuration.
+    pub config: ClaudineConfig,
+    /// Facts a reader should know: an absent user file read as its schema
+    /// defaults, a legacy file read as its conversion would write it, or a
+    /// retired one ignored.
+    pub notes: Vec<String>,
+}
+
+/// Load the configuration as [`load_claudine_config_with_notices`] reads it,
+/// writing nothing: no legacy conversion, backup, or interrupted-conversion
+/// cleanup. A missing user file reads as its schema defaults and a missing
+/// repo file as no override. At a canonical location with no `config.yaml`,
+/// a legacy `config.json` reads as the values its conversion would write,
+/// or, in the pre-2026 per-provider format, as absent; a legacy file beside
+/// an existing `config.yaml` is ignored, as the real load ignores it.
+///
+/// ## Errors
+///
+/// [`ClaudineError::ConfigInvalid`] and [`ClaudineError::ConfigConversion`]
+/// for the selected file, located as the real load locates them, the
+/// semantic errors of [`ClaudineConfig::validate`], and I/O errors.
+pub fn load_claudine_config_passive(user_path: Option<&Path>, repo_root: Option<&Path>) -> Result<PassiveClaudineConfig> {
+    let path = user_path.map(PathBuf::from).unwrap_or_else(user_config_path);
+    let mut notes = Vec::new();
+    let mut config = if path.is_file() {
+        ClaudineConfig::from_effective(read_document(&path, ConfigScope::User)?.effective, Some(&path))?
+    } else {
+        match passive_legacy(&path, ConfigScope::User, &mut notes)? {
+            Some(effective) => ClaudineConfig::from_effective(effective, Some(&path))?,
+            None => {
+                notes.push(format!("{} does not exist; its defaults apply", path.display()));
+                ClaudineConfig::default()
+            }
+        }
+    };
+    if let Some(root) = repo_root {
+        let repo_path = repo_config_path(root);
+        let same_file = repo_path
+            .canonicalize()
+            .ok()
+            .zip(path.canonicalize().ok())
+            .is_some_and(|(r, u)| r == u);
+        if !same_file {
+            let effective = if repo_path.is_file() {
+                Some(read_document(&repo_path, ConfigScope::Repository)?.effective)
+            } else {
+                passive_legacy(&repo_path, ConfigScope::Repository, &mut notes)?
+            };
+            if let Some(effective) = effective {
+                merge_repo_override(&mut config, &RepoOverrideConfig::from_effective(effective, Some(&repo_path))?);
+            }
+        }
+    }
+    config.validate()?;
+    Ok(PassiveClaudineConfig { config, notes })
+}
+
+/// The effective values a legacy file beside the missing canonical
+/// `yaml_path` reads as ([`json_conversion::project_legacy`]).
+fn passive_legacy(yaml_path: &Path, scope: ConfigScope, notes: &mut Vec<String>) -> Result<Option<serde_json::Value>> {
+    let Some(dir) = yaml_path.parent().filter(|dir| is_canonical(yaml_path) && dir.is_dir()) else {
+        return Ok(None);
+    };
+    Ok(match json_conversion::project_legacy(dir, scope)? {
+        json_conversion::LegacyProjection::Absent => None,
+        json_conversion::LegacyProjection::Values(effective) => {
+            notes.push(format!(
+                "{} is read as its conversion to {} would write it; a real run converts it",
+                dir.join(json_conversion::LEGACY_FILE_NAME).display(),
+                yaml_path.display(),
+            ));
+            Some(effective)
+        }
+        json_conversion::LegacyProjection::Retired => {
+            notes.push(format!(
+                "{} is in the retired per-provider format and is ignored; a real run backs it up",
+                dir.join(json_conversion::LEGACY_FILE_NAME).display(),
+            ));
+            None
+        }
+    })
 }
 
 /// Load a repo-scoped [`RepoOverrideConfig`] from the given path, read as

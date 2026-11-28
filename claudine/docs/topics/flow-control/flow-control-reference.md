@@ -283,4 +283,4 @@ These guarantees hold regardless:
 
 ## `--dry-run`
 
-`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs, no dynamic `proxy` is followed, and no `prep` target runs. Composition shell expansions still execute and may change the filesystem or perform other real work. Sequence `shell:` tasks are rendered, not run, unless `--dry-run-shell` is also given; `side_effect:` tasks never run. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run) and [Sequences — Dry run](sequences.md#dry-run).
+`--dry-run` fires no lifecycle events: it is a passive check that never builds a lifecycle runtime, so no event runs, no dynamic `proxy` is followed, and no `prep` target runs. It runs no command either: `$( … )` expansions, `::shell` lines, and `shell:`/`side_effect:` tasks are withheld and reported as not checked. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run) and [Sequences — Dry run](sequences.md#dry-run).

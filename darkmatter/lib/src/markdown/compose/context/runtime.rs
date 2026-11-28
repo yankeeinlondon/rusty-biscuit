@@ -155,8 +155,11 @@ impl ComposeContext {
     /// compose cache key (see `cache::hashing::context_hash`).
     ///
     /// The snapshot is anchored nowhere (an empty path): it reads no process
-    /// directory. A [`ComposeRequest`](super::request::ComposeRequest)
-    /// re-anchors it on the request directory.
+    /// directory. [`ComposeRequest::prepare`](super::request::ComposeRequest::prepare)
+    /// re-anchors it on the request directory;
+    /// [`ComposeRequest::with_context`](super::request::ComposeRequest::with_context)
+    /// keeps the options' context as given, so its empty anchor is the
+    /// process directory there.
     pub fn capture_minimal() -> Self {
         Self::capture_for_content(std::path::Path::new(""), "")
     }

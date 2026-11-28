@@ -31,16 +31,28 @@ const OBSERVED_GROUPS: [ContextGroup; 3] = [ContextGroup::Repo, ContextGroup::Ne
 enum Source {
     /// Nowhere: what was supplied is all there is.
     Supplied,
-    /// A composition request: its repository observation for `Repo`, and its
-    /// context, grown as its authority permits, for the other groups. A
-    /// frozen (caller-supplied) context grows nothing, so the slot fails as
-    /// any read of an uncaptured group does.
-    Request { context: ComposeContext, authority: ContextAuthority, repository: Option<Arc<RepositoryObservation>> },
+    /// A composition request: `Repo` from `repository`, and its context,
+    /// grown as its authority permits, for the other groups. A frozen
+    /// (caller-supplied) context grows nothing, so the slot fails as any
+    /// read of an uncaptured group does.
+    Request { context: ComposeContext, authority: ContextAuthority, repository: RequestRepository },
     /// A command that validates without composing: captured with the
     /// context's own environment, the repository at the context's
     /// repository root (none when the context found none, never a discovery
     /// elsewhere).
     Context { base_dir: PathBuf, environment: HashMap<String, String>, repository_root: Option<PathBuf> },
+}
+
+/// Where a composition request's session captures `Repo`.
+#[derive(Debug, Clone)]
+enum RequestRepository {
+    /// The request's own observation; with none, the context authority
+    /// captures it as for any other group.
+    Observed(Option<Arc<RepositoryObservation>>),
+    /// The checkout the request resolves in, which its observation does not
+    /// describe: captured as a validating command's is (a
+    /// [`Source::Context`]), when the request's authority permits growth.
+    Checkout(Box<Source>),
 }
 
 /// A session's observations; see the module documentation.
@@ -65,7 +77,31 @@ impl SessionObservations {
     ) -> Self {
         Self {
             observed: Mutex::new(context.observations().clone()),
-            source: Source::Request { context: context.clone(), authority: authority.clone(), repository },
+            source: Source::Request {
+                context: context.clone(),
+                authority: authority.clone(),
+                repository: RequestRepository::Observed(repository),
+            },
+        }
+    }
+
+    /// A composition request's whose repository observation does not
+    /// describe `checkout`, the context the request resolves in: as
+    /// [`Self::for_request`], except that `Repo` comes from `checkout`'s own
+    /// repository (none when it names none), never from the observation or
+    /// `context`'s capture of the other checkout.
+    pub(crate) fn for_request_in_checkout(
+        context: &ComposeContext,
+        authority: &ContextAuthority,
+        checkout: &FileResolutionContext,
+    ) -> Self {
+        Self {
+            observed: Mutex::new(context.observations().clone().without_repository()),
+            source: Source::Request {
+                context: context.clone(),
+                authority: authority.clone(),
+                repository: RequestRepository::Checkout(Box::new(Self::for_context(checkout).source)),
+            },
         }
     }
 
@@ -110,11 +146,20 @@ impl Source {
             Self::Request { context, authority, repository } => {
                 let mut captured = CapturedObservations::default();
                 let mut rest: Vec<ContextGroup> = missing.to_vec();
-                if let Some(repository) = repository
-                    && missing.contains(&ContextGroup::Repo)
-                {
-                    captured = captured.with_repository(repository);
-                    rest.retain(|group| *group != ContextGroup::Repo);
+                if missing.contains(&ContextGroup::Repo) {
+                    match repository {
+                        RequestRepository::Observed(Some(repository)) => {
+                            captured = captured.with_repository(repository);
+                            rest.retain(|group| *group != ContextGroup::Repo);
+                        }
+                        RequestRepository::Checkout(checkout) => {
+                            if authority.is_extendable() {
+                                captured = checkout.capture(&[ContextGroup::Repo]);
+                            }
+                            rest.retain(|group| *group != ContextGroup::Repo);
+                        }
+                        RequestRepository::Observed(None) => {}
+                    }
                 }
                 if !rest.is_empty() {
                     let required = ContextRequirements::from_groups(rest);

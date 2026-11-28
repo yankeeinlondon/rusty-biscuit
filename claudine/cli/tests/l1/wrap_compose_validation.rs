@@ -79,6 +79,8 @@ fn compose_second_bare_word_is_a_positional_not_a_file() {
     let b = fixture.cwd().join("b.md");
     fs::write(&a, "---\ntitle: a\n---\nArgs: {{ argv }}\n").unwrap();
     fs::write(&b, "---\n---\nbody\n").unwrap();
+    // A clean check needs the chosen provider on `PATH`; it never runs it.
+    write_dry_run_provider_stub(fixture.bin_dir(), "claude");
 
     let output = fixture
         .command()
@@ -233,8 +235,8 @@ fn retired_prompt_file_flag_rejected_in_wrapper() {
 }
 
 /// Data/status discipline: under `compose --dry-run` the composed body is the
-/// *only* thing on **stdout**; the finalized frontmatter and the metadata
-/// table land on **stderr**. Verifies the two streams never cross.
+/// *only* thing on **stdout**; the check's report lands on **stderr**.
+/// Verifies the two streams never cross.
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
@@ -256,50 +258,19 @@ fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
     let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-
-    // stdout: body only — the composed body, none of the metadata-table
-    // labels or frontmatter that belong on stderr.
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    assert_eq!(stdout.trim(), "BODY_MARKER_QQQ", "stdout carries the composed body alone");
     assert!(
-        stdout.contains("BODY_MARKER_QQQ"),
-        "stdout should carry the composed body; stdout was:\n{stdout}"
+        stderr.contains("Dry run of doc.md (no commands run)") && stderr.contains("Previewed 1 of 1 task."),
+        "stderr should carry the report; stderr was:\n{stderr}"
     );
-    for leak in ["YOLO", "Document", "Field", "Agent", "name:"] {
-        assert!(
-            !stdout.contains(leak),
-            "stdout must not contain the `{leak}` metadata leaked from stderr; stdout was:\n{stdout}"
-        );
-    }
-
-    // stderr: horizontal rule, heading, frontmatter (YAML) + metadata table.
-    let hr_lines: Vec<&str> = stderr
-        .lines()
-        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
-        .collect();
-    assert!(
-        !hr_lines.is_empty(),
-        "stderr should contain a horizontal rule; stderr was:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("Frontmatter") && stderr.contains("resolved"),
-        "stderr should carry the 'Frontmatter (resolved):' heading; stderr was:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("name:") && stderr.contains("description:"),
-        "stderr should carry the highlighted frontmatter; stderr was:\n{stderr}"
-    );
-    for label in ["Document", "Agent", "Model", "YOLO"] {
-        assert!(
-            stderr.contains(label),
-            "stderr should carry the `{label}` metadata-table row; stderr was:\n{stderr}"
-        );
-    }
+    assert!(!stderr.contains("BODY_MARKER_QQQ"), "the body never reaches stderr:\n{stderr}");
 }
 
 /// `--quiet` and `--silent` have no effect on `compose --dry-run` output:
-/// the body still lands on stdout and the full metadata block on stderr.
+/// the body still lands on stdout and the report on stderr.
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_quiet_and_silent_are_no_op() {
@@ -328,25 +299,16 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
             .output()
             .unwrap();
 
-        assert!(
-            output.status.success(),
-            "compose dry-run {flag} should succeed; stderr was:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
         let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-
+        assert_eq!(output.status.code(), Some(0), "compose dry-run {flag} should succeed; stderr:\n{stderr}");
         assert!(
             stdout.contains("BODY_MARKER_QQQ"),
             "{flag} must not suppress the composed body on stdout; stdout was:\n{stdout}"
         );
         assert!(
-            stderr.contains("YOLO") && stderr.contains("name:"),
-            "{flag} must not suppress the dry-run metadata on stderr; stderr was:\n{stderr}"
-        );
-        assert!(
-            stderr.contains("Frontmatter") && stderr.contains("resolved"),
-            "{flag} must not suppress the dry-run heading on stderr; stderr was:\n{stderr}"
+            stderr.contains("Dry run of doc.md") && stderr.contains("Previewed 1 of 1 task."),
+            "{flag} must not suppress the report on stderr; stderr was:\n{stderr}"
         );
     }
 }
@@ -539,12 +501,10 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     );
 }
 
-/// Error surface (compose): a missing source file under `--dry-run` renders
-/// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
-///
-/// In non-TTY sessions the ENTER-path autocomplete fallback is unavailable,
-/// so the error surfaces as `AutocompleteNotInteractive` rather than the
-/// original `FileNotFound`.
+/// Error surface (compose): a missing source file under `--dry-run` is a
+/// finding on **stderr** (`dm.reference.missing_document` in the JSON
+/// report), exits 2, and leaves stdout clean. The check never falls back to
+/// the interactive autocomplete a real run offers on a TTY.
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
@@ -559,10 +519,7 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
         .output()
         .unwrap();
 
-    assert!(
-        !output.status.success(),
-        "missing-file dry-run must exit non-zero"
-    );
+    assert_eq!(output.status.code(), Some(2), "missing-file dry-run must exit 2");
     assert!(
         output.stdout.is_empty(),
         "stdout must stay clean on error; stdout was:\n{}",
@@ -570,10 +527,17 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
-        stderr.contains("autocomplete not available")
-            || stderr.contains("Autocomplete requires"),
-        "non-TTY missing file must report autocomplete unavailable; stderr was:\n{stderr}"
+        stderr.contains("the document does not exist") && stderr.contains("does-not-exist.md"),
+        "the report names the missing document; stderr was:\n{stderr}"
     );
+
+    let json = fixture
+        .command()
+        .args(["compose", "--goose", "--dry-run", "--json", "does-not-exist.md"])
+        .output()
+        .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(envelope["diagnostics"][0]["code"], "dm.reference.missing_document", "{envelope}");
 }
 
 /// The nested-span regression fixtures are byte-identical copies of
@@ -663,8 +627,11 @@ fn run_with_marker(
 }
 
 fn assert_nested_span_rejection(stderr: &str, property: &str) {
+    // A sequence that stops at preflight shows the report's row instead of
+    // the error block's title.
     assert!(
-        stderr.contains("nested interpolation inside a string literal"),
+        stderr.contains("nested interpolation inside a string literal")
+            || (stderr.contains(" nests ") && stderr.contains("inside the string literal")),
         "stderr must carry the nested-span error; stderr was:\n{stderr}"
     );
     assert!(stderr.contains(property), "stderr must name `{property}`:\n{stderr}");
@@ -678,8 +645,8 @@ fn write_incident(fixture: &CliProcessFixture) -> std::path::PathBuf {
 }
 
 /// Acceptance 1: the pre-fix incident is refused at prepare time with the
-/// property, the literal, and the `+` rewrite, and no provider starts — for a
-/// real run and for `--dry-run` alike.
+/// property, the literal, and the `+` rewrite, and no provider starts. The
+/// dry run reports the same property and literal and starts nothing either.
 #[test]
 fn compose_rejects_the_pre_fix_incident_before_any_provider_starts() {
     let fixture = CliProcessFixture::named("nested-span-compose");
@@ -688,26 +655,36 @@ fn compose_rejects_the_pre_fix_incident_before_any_provider_starts() {
     let incident = write_incident(&fixture);
     let incident = incident.to_str().unwrap();
 
-    for dry_run in [false, true] {
-        let mut args = vec!["compose", "--goose"];
-        if dry_run {
-            args.push("--dry-run");
-        }
-        args.extend([incident, "spec=draft-spec.md"]);
-        let (success, stderr) = run_with_marker(&fixture, &marker, &args);
-        assert!(!success, "dry_run={dry_run}: the incident must be refused:\n{stderr}");
-        assert_nested_span_rejection(&stderr, "success.say");
-        assert!(
-            stderr.contains("The review of the draft specification file in {{ctx.area}} has completed"),
-            "dry_run={dry_run}: stderr must quote the literal:\n{stderr}"
-        );
-        assert!(
-            stderr.contains(r#"" + ctx.area + ""#),
-            "dry_run={dry_run}: stderr must print the `+` rewrite:\n{stderr}"
-        );
-        assert!(!stderr.contains("resolve the missing"), "{stderr}");
-        assert_eq!(provider_runs(&marker), 0, "dry_run={dry_run}: no provider may start");
-    }
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", incident, "spec=draft-spec.md"]);
+    assert!(!success, "the incident must be refused:\n{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert!(
+        stderr.contains("The review of the draft specification file in {{ctx.area}} has completed"),
+        "stderr must quote the literal:\n{stderr}"
+    );
+    assert!(stderr.contains(r#"" + ctx.area + ""#), "stderr must print the `+` rewrite:\n{stderr}");
+    assert!(!stderr.contains("resolve the missing"), "{stderr}");
+    assert_eq!(provider_runs(&marker), 0, "no provider may start");
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", "--dry-run", incident, "spec=draft-spec.md"]);
+    assert!(!success, "the dry run reports the incident:\n{stderr}");
+    assert_dry_run_nested_span(&stderr, "success.say", "{{ctx.area}}");
+    assert!(
+        stderr.contains("The review of the draft specification file in {{ctx.area}} has completed"),
+        "the dry run quotes the literal:\n{stderr}"
+    );
+    assert_eq!(provider_runs(&marker), 0, "the dry run starts no provider");
+}
+
+/// The dry run's nested-span finding: it names the property and the nested
+/// span rather than the run's error text.
+fn assert_dry_run_nested_span(stderr: &str, property: &str, span: &str) {
+    assert!(
+        stderr.contains(&format!("lifecycle property `{property}")) && stderr.contains(&format!("nests `{span}` inside the string literal")),
+        "stderr must carry the nested-span finding; stderr was:\n{stderr}"
+    );
 }
 
 #[test]
@@ -772,18 +749,22 @@ fn sequence_referencing_the_incident_in_step_two_starts_no_step() {
     )
     .unwrap();
 
-    for dry_run in [false, true] {
-        let mut args = vec!["sequence", "--goose"];
-        if dry_run {
-            args.push("--dry-run");
-        }
-        args.push(sequence.to_str().unwrap());
-        let (success, stderr) = run_with_marker(&fixture, &marker, &args);
-        assert!(!success, "dry_run={dry_run}: {stderr}");
-        assert_nested_span_rejection(&stderr, "success.say");
-        assert!(stderr.contains("second.md"), "the referenced document is named:\n{stderr}");
-        assert_eq!(provider_runs(&marker), 0, "dry_run={dry_run}: no step may start");
-    }
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["sequence", "--goose", sequence.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert!(stderr.contains("second.md"), "the referenced document is named:\n{stderr}");
+    assert_eq!(provider_runs(&marker), 0, "no step may start");
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["sequence", "--goose", "--dry-run", sequence.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert_dry_run_nested_span(&stderr, "success.say", "{{area}}");
+    assert!(
+        stderr.contains("task second (sequence[1])") && stderr.contains("second.md"),
+        "the finding is the second task's, naming its document:\n{stderr}"
+    );
+    assert_eq!(provider_runs(&marker), 0, "the dry run starts no step");
 }
 
 /// Phase 1c prepares every step of the sequence document through the shared

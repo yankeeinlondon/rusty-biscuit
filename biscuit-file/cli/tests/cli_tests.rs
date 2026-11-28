@@ -642,7 +642,7 @@ fn home_reference_follows_the_platform_home_variable() {
     let expected = if cfg!(windows) { &windows_home } else { &posix_home };
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim_end(),
-        biscuit_file::to_portable_string(&expected.path().join("cfg.toml")),
+        biscuit_file::to_forward_slash_string(&expected.path().join("cfg.toml")),
     );
 }
 

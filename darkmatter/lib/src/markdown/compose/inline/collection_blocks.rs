@@ -64,7 +64,10 @@ pub(crate) fn run_stage(
     }
     let source = markdown.source_context_for_errors();
     let pages = if options.is_enabled(ComposeOperation::PageBlocks) {
-        page_blocks::parser::parse_page_blocks_in(content, Some(&body.data), source.clone())?
+        page_blocks::parser::parse_page_blocks_in(content, Some(&body.data), source.clone()).map_err(|error| {
+            let origin = body.origin.as_ref().filter(|origin| origin.describes(content));
+            error.at_authored_lines(markdown, origin, Some(&body.data))
+        })?
     } else {
         Vec::new()
     };
@@ -99,17 +102,29 @@ pub(crate) fn run_stage(
         Ok(expansion) => expansion,
         Err(Halt::Blocked) => return Err(stopped.expect("the stop recorded its error")),
         Err(Halt::Failed(error)) => return Err(anchor(markdown, body, *error)),
+        // The page block or collection that met it keeps its text; one
+        // reaching here is a traversal defect.
+        Err(Halt::Unavailable(reason)) => {
+            return Err(MarkdownError::Transform(format!(
+                "internal error: a dry-run deferral ({}) escaped the collection traversal",
+                reason.describe()
+            )));
+        }
     };
     report.unknown_root_candidates.relocate_from(recorded, |locus| match locus {
         CandidateLocus::BodyLine(line) => super::super::unknown_identifiers::directive_locus(markdown, *line),
         other => other.clone(),
     });
     body.expand(markdown.content(), &expansion.splices, &expansion.output, expansion.scopes)?;
+    if !expansion.inert.is_empty() {
+        body.data = body.data.with_data(&expansion.output, &expansion.inert);
+    }
     *markdown.content_mut() = expansion.output;
     Ok(())
 }
 
 fn rejection(markdown: &Markdown, body: &BodyProvenance, error: CollectionError) -> MarkdownError {
+    let error = error.with_file_note(markdown, body.origin.as_ref(), Some(&body.data));
     anchor(markdown, body, error.into())
 }
 

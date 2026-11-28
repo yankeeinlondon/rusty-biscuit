@@ -83,6 +83,14 @@ impl CapturedObservations {
         self.with_packages(repository.root.as_deref(), repository.info.as_ref(), repository.committed.clone())
     }
 
+    /// These observations with the `Repo` part removed, so a reader captures
+    /// it again from a repository of its choosing.
+    pub(crate) fn without_repository(mut self) -> Self {
+        self.packages = None;
+        self.repository = None;
+        self
+    }
+
     /// Whether the part `group` owns was captured; `false` for a group that
     /// owns no part (only `Repo`, `Network`, and `Agent` do, besides the
     /// clock every set has).

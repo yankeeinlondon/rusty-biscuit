@@ -34,6 +34,46 @@ let (composed, report) = md.compose_with(&request)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+A relative source path names the file under the snapshot's request
+directory, so `docs/guide.md` above and its absolute spelling are the same
+source: same repository, schema roots, triggers, and `&` root. The source can
+be given on the request, on the `Markdown` (`Markdown::try_from(path)` or
+`with_source`), or both. A request with no source of its own takes the
+document's when it composes, pre-flights, builds a reference graph,
+validates references, lists transclusions, or prepares the effective schema
+(`effective_schema_for`); the reference graph, the validators, and the
+transclusion query always root at the document's own source when it has one.
+
+The reverse holds too: a `Markdown` with no source, given a request that
+names a file, is that file's text. This is how an editor composes an unsaved
+buffer:
+
+```rust
+# use darkmatter::markdown::Markdown;
+# use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+# let snapshot = RequestSnapshot::new(std::env::temp_dir());
+# let buffer = String::new();
+let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file("vendor/review.md"), &snapshot)?;
+let md = Markdown::from(buffer); // the editor's text, never re-read from disk
+let (composed, _report) = md.compose_with(&request)?; // composed.source() names vendor/review.md
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Every entry point above then decides the file's identity exactly as if the
+path were on the `Markdown`: its checkout's schema roots, bare `$schema`
+names and triggers, the `&` root, the reference graph's root and the origin
+of each of its own references, the base of its relative links and of every
+inclusion (body `::file` and `::code`, `prologue`, `epilogue`), and the file
+its errors name. Only the path is attached; the text judged is always the
+buffer. Text a host generated from a file and marked with
+`Markdown::with_context_identity` is not that file's text, so it keeps no
+source and its errors keep naming the identity. When that text sits beneath
+the file's own frontmatter (an inline prompt), name the file and its text with
+`Markdown::with_frontmatter_authored_in(path, text)`: a missing `prologue` or
+`epilogue` target is then reported as that key's, at the value the file
+wrote (`file not found in prologue:` at `notes.md:4:11`), while the body's own
+failures keep naming the identity.
+
 `from_process` takes the home directory from `biscuit_file::home_dir()`:
 `HOME` on macOS and Linux, `USERPROFILE` on native Windows (`HOME` alone does
 not move it there), with the platform's profile lookup as the fallback when
@@ -130,16 +170,19 @@ uses `ComposeRequest::with_context(options, context)`, which validates it.
 
 A context built at another repository's directory carries that directory's
 launch `@` scope. To keep `@` searching the tree the request was launched in,
-copy the launch scope onto it, as `md` does:
+derive the document with `derive_in_own_repository`, as `md` does:
 
 ```rust
-let source = build_resolution_context(&snapshot.at_request_dir(document_dir))?
-    .for_trusted_external_source(&document)
-    .with_launch_magic_scope(launch.launch_magic_scope().clone());
+use darkmatter::markdown::compose::{build_resolution_context, derive_in_own_repository};
+
+let own = build_resolution_context(&snapshot.at_request_dir(document_dir))?;
+let source = derive_in_own_repository(&own, &launch, &document, None);
 ```
 
 The document's own repository then anchors its `./`, bare, `&`, and `^`
-references, and `@` keeps the launch tree.
+references and its [schema roots](schemas/definition.md#schema-roots), and
+`@` keeps the launch tree. Pass the opening reference instead of `None` when
+the document was opened as `~/…` or `{{VAR}}/…`, so that anchor is kept.
 
 Passive readers that take a context and never discover a repository need
 that prepared context as well. Schema detection is one: given the launch
@@ -148,7 +191,51 @@ fails to resolve and is detected as `string` rather than `file`. Pass each
 document its own context with `detect_schema_with_contexts`, as `md schema
 detect` does.
 
-A source document outside the request's repository is admitted the way a
+A request applies the same rule to every source it admits across a file
+boundary: the root document, a `::file`, `prologue:`, or `epilogue:` child, a
+`::toc-linking` target, and a fragment link's target. Which repository a
+source belongs to is decided by Git, not by folder nesting: it is the
+checkout whose root is the nearest folder above the source holding a `.git`
+folder or a `.git` file (the file a submodule or `git init
+--separate-git-dir` leaves). A source whose nearest checkout is not the
+repository the request's context names gets a context derived in its own
+repository with `derive_in_own_repository`, keeping the request's launch `@`
+scope and its configuration snapshot. That covers a note in a second checkout
+(requested from `~/app`, the note `~/notes/review.md`) and a component
+checked out inside the launch tree (`~/app/vendor/review.md`, where
+`~/app/vendor` has its own `.git`): each uses its own `schemas/` root and
+root triggers, never `~/app`'s.
+
+The request directory follows the same rule. Options that already hold a
+repository observation (captured by `ComposeOptions::for_document` in
+`~/app`, say) lend it to a request only when it describes the request
+directory's own nearest checkout: a request prepared in `~/app/vendor`
+discovers `~/app/vendor` instead, and its `&marker.md` is
+`~/app/vendor/marker.md`. The options' captured `ctx.*` values stay as the
+caller captured them.
+
+The request looks up the nearest checkout once per source folder and
+discovers each other repository once, when its first source is admitted, and
+composition, command discovery, reference checks, and schema preparation all
+read that one context. The order sources are visited in never matters:
+including `~/notes/seed.md` before `~/notes/vendor/review.md` gives the
+nested note the same repository as including it alone.
+
+```mermaid
+flowchart TD
+    A["source admitted
+(root, ::file, prologue/epilogue,
+::toc-linking, fragment target)"] --> G{"nearest .git folder or file
+above the source"}
+    G -- "the request's repository" --> O["derived from the request's context"]
+    G -- "another checkout
+(nested or not)" --> W["derived in its own repository
+(launch @ scope, same configuration)"]
+    G -- none --> T["derived from the request's context
+(trusted external outside its tree)"]
+```
+
+A source document outside every repository is admitted the way a
 transcluded file outside it is: as a trusted external source. Requested from
 `/work/repo`, the document `/home/me/notes/doc.md` resolves `./beside.md`
 beside itself and `../../outside.md` to `/home/outside.md`; its own folder,
@@ -251,6 +338,14 @@ their reference check, pre-flight, lifecycle expressions, and composition
 read through one memo. A root composition run from a library with none
 attached builds its own for that run, so two separate compositions never
 share a memo or a read set.
+
+`md compose` attaches its remote-fetch runtime before the reference check
+too (`ComposeOptions::with_shared_remote_fetch_under`, built under the
+command's `--allow host=HOST` values, cache root, and `network` setting
+without handing the reference check the configuration's other grants), so a
+URL that the frontmatter reads and the body shows is requested once, by the
+reference check, and reused by composition and by the passive composition of
+a combined failure report.
 
 ### Reading the read set
 

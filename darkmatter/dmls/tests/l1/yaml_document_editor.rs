@@ -45,7 +45,7 @@ const ROSTER: &str = "kind: roster\nroster_version: 1\nplatforms:\n    - name: s
 /// One workspace (a repository whose `schemas/` folder is its tree schema
 /// root) and one overlay cache, so the texts a test opens as one document
 /// replace each other's state.
-struct Probe {
+pub(crate) struct Probe {
     workspace: LspWorkspace,
     contexts: RepositoryContexts,
     config: DmlsConfig,
@@ -53,20 +53,26 @@ struct Probe {
 }
 
 impl Probe {
-    fn new() -> Self {
-        Self::with_config(DmlsConfig::default())
+    pub(crate) fn new() -> Self {
+        Self::with_config(DmlsConfig::default(), true)
+    }
+
+    pub(crate) fn without_repository() -> Self {
+        Self::with_config(DmlsConfig::default(), false)
     }
 
     fn strict() -> Self {
         let mut config = DmlsConfig::default();
         config.schema.strict = true;
-        Self::with_config(config)
+        Self::with_config(config, true)
     }
 
-    fn with_config(config: DmlsConfig) -> Self {
+    fn with_config(config: DmlsConfig, repository: bool) -> Self {
         let workspace = LspWorkspace::new();
-        init_repository(workspace.path());
-        write(&workspace.path().join("schemas/roster.yaml"), ROSTER_DEFINITION);
+        if repository {
+            init_repository(workspace.path());
+            write(&workspace.path().join("schemas/roster.yaml"), ROSTER_DEFINITION);
+        }
         let contexts = RepositoryContexts::new(LspFixture::fixture_snapshot(&workspace));
         Self { workspace, contexts, config, state: OverlayState::default() }
     }
@@ -85,13 +91,17 @@ impl Probe {
         Self { workspace, contexts, config: DmlsConfig::default(), state: OverlayState::default() }
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.workspace.path().join(name)
+    }
+
+    pub(crate) fn change_schema_buffer(&self, name: &str, text: Option<&str>) {
+        self.state.set_schema_buffer(&self.path(name), text);
     }
 
     /// Runs `inspect` over the context of `text` opened as `name` (the file
     /// is written too, as a saved buffer would be).
-    fn with<T>(&self, name: &str, text: &str, inspect: impl FnOnce(&DocumentContext) -> T) -> T {
+    pub(crate) fn with<T>(&self, name: &str, text: &str, inspect: impl FnOnce(&DocumentContext) -> T) -> T {
         let path = self.path(name);
         write(&path, text);
         let uri: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
@@ -118,12 +128,12 @@ impl Probe {
         inspect(&ctx)
     }
 
-    fn diagnostics(&self, name: &str, text: &str) -> Vec<Diagnostic> {
+    pub(crate) fn diagnostics(&self, name: &str, text: &str) -> Vec<Diagnostic> {
         self.with(name, text, |ctx| ProviderRegistry::with_substrate().diagnostics(ctx))
     }
 
     /// The `darkmatter.schema` and `darkmatter.frontmatter` diagnostics.
-    fn schema_diagnostics(&self, name: &str, text: &str) -> Vec<Diagnostic> {
+    pub(crate) fn schema_diagnostics(&self, name: &str, text: &str) -> Vec<Diagnostic> {
         self.diagnostics(name, text)
             .into_iter()
             .filter(|diagnostic| {
@@ -132,7 +142,7 @@ impl Probe {
             .collect()
     }
 
-    fn outcome(&self, name: &str, text: &str) -> &'static str {
+    pub(crate) fn outcome(&self, name: &str, text: &str) -> &'static str {
         self.with(name, text, |ctx| {
             let yaml = ctx.overlay.and_then(|overlay| overlay.yaml_document.as_deref()).expect("a YAML overlay");
             match &yaml.outcome {
@@ -146,13 +156,13 @@ impl Probe {
         })
     }
 
-    fn completion_labels(&self, name: &str, text: &str, offset: usize) -> Vec<String> {
+    pub(crate) fn completion_labels(&self, name: &str, text: &str, offset: usize) -> Vec<String> {
         self.with(name, text, |ctx| {
             ProviderRegistry::with_substrate().completion(ctx, offset).into_iter().map(|item| item.label).collect()
         })
     }
 
-    fn hover(&self, name: &str, text: &str, offset: usize) -> Option<String> {
+    pub(crate) fn hover(&self, name: &str, text: &str, offset: usize) -> Option<String> {
         self.with(name, text, |ctx| {
             ProviderRegistry::with_substrate().hover(ctx, offset).map(|hover| match hover.contents {
                 lsp_types::HoverContents::Markup(markup) => markup.value,
@@ -162,7 +172,7 @@ impl Probe {
     }
 }
 
-fn write(path: &std::path::Path, text: &str) {
+pub(crate) fn write(path: &std::path::Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
 }
@@ -175,14 +185,14 @@ fn init_repository(root: &std::path::Path) {
     write(&root.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
 }
 
-fn code_of(diagnostic: &Diagnostic) -> &str {
+pub(crate) fn code_of(diagnostic: &Diagnostic) -> &str {
     match &diagnostic.code {
         Some(NumberOrString::String(code)) => code,
         _ => "",
     }
 }
 
-fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
+pub(crate) fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
     diagnostics.iter().map(code_of).collect()
 }
 
@@ -191,7 +201,7 @@ fn start(diagnostic: &Diagnostic) -> (u32, u32) {
 }
 
 /// The zero-based `(line, UTF-16 character)` of the first `needle` in `text`.
-fn position_of(text: &str, needle: &str) -> (u32, u32) {
+pub(crate) fn position_of(text: &str, needle: &str) -> (u32, u32) {
     let offset = text.find(needle).expect("needle present");
     let line = text[..offset].matches('\n').count() as u32;
     let line_start = text[..offset].rfind('\n').map_or(0, |newline| newline + 1);
@@ -295,6 +305,55 @@ fn a_kind_check_is_published_once_on_the_node_it_judges() {
     let diagnostic = only(&diagnostics);
     assert_eq!(code_of(diagnostic), "dm.schema.kind_check", "{diagnostic:#?}");
     assert_eq!(diagnostic.range.start.line, 2, "{diagnostic:#?}");
+}
+
+/// A namespace file gets the check a host's registration runs: the
+/// unedited published namespace is clean, and a `description:` its
+/// definition reads as absent is the registration's refusal, on the field.
+#[test]
+fn a_namespace_file_is_judged_as_registration_prepares_it() {
+    let probe = Probe::new();
+    let published = include_str!("../../../../claudine/registration/loop.yaml");
+    assert!(probe.schema_diagnostics("loop.yaml", published).is_empty());
+
+    let text = "kind: namespace-schema\nnamespace: thing\ndescription:\n$schema: {}\n";
+    let diagnostics = probe.schema_diagnostics("thing.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.kind_check", "{diagnostic:#?}");
+    assert_eq!(diagnostic.range.start.line, 2, "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("must not be null"), "{diagnostic:#?}");
+}
+
+/// The editor publishes a declaration failing inside a union arm at that
+/// arm, as `md schema validate` reports it: an unresolved type in a
+/// namespace's second property arm, never the carrier or a valid sibling.
+#[test]
+fn a_failure_inside_a_union_arm_is_published_at_that_arm() {
+    let probe = Probe::new();
+    let text = "kind: namespace-schema\nnamespace: thing\n$schema:\n    count:\n        - number\n        - Missing\n    label: string\n";
+    let diagnostics = probe.schema_diagnostics("thing.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.kind_check", "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(text, "Missing\n"), "{diagnostic:#?}");
+}
+
+/// A trigger file whose `kind` cannot select a definition (a schema root
+/// also claims `schema-trigger`) is judged by the trigger parser alone; its
+/// failing `match` condition is published at that condition, never across
+/// the whole document.
+#[test]
+fn a_trigger_error_without_a_selected_definition_is_published_at_its_condition() {
+    let probe = Probe::new();
+    write(&probe.path("schemas/claims-triggers.yaml"), "kind: yaml-schema\n$schema:\n    kind: literal(schema-trigger; required)\n");
+    let text = "kind: schema-trigger\nmatch:\n    all:\n        - group:\n              - gadget: string(requird)\n$schema:\n    gadget: string\n";
+    assert_eq!(probe.outcome("schemas/gadget.yaml", text), "failed", "kind selection fails for the trigger");
+    let diagnostics = probe.schema_diagnostics("schemas/gadget.yaml", text);
+    let trigger = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("requird"))
+        .unwrap_or_else(|| panic!("the trigger error is published: {diagnostics:#?}"));
+    assert_eq!(start(trigger), position_of(text, "string(requird)"), "{trigger:#?}");
+    assert_ne!(trigger.range.end.line, text.lines().count() as u32, "not the whole document: {trigger:#?}");
 }
 
 #[test]

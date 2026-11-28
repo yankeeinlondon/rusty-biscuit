@@ -1,0 +1,11 @@
+notes.md
+  ✗ file not found in `::file`
+      ::file ./missing.md
+      resolved to missing.md
+      at notes.md:6:1
+      hint: create missing.md, or correct the reference
+  ⚠ the body would be empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)
+      at notes.md:5:1
+      hint: pass the values those conditions read, or add body content outside the conditional blocks
+
+Checked notes.md: 1 error, 1 warning

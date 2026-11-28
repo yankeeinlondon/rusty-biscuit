@@ -1,0 +1,31 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/doc.md",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.missing_properties",
+      "severity": "error",
+      "message": "`topic` (string) is required and has no value; a non-interactive run fails here",
+      "source": {
+        "file": "/work/doc.md",
+        "line": null,
+        "column": null,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "pass `topic=<value>` after the file, or give it a default"
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

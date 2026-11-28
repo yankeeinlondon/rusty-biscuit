@@ -142,15 +142,15 @@ fn complete_paths_from(
 /// ## Notes
 ///
 /// A candidate never mixes spelling conventions. When
-/// [`biscuit_file::try_portable_string`] declines — a UNC, device-namespace, or
+/// [`biscuit_file::try_forward_slash_string`] declines — a UNC, device-namespace, or
 /// irreducible verbatim path has no faithful `/`-separated spelling — the value
 /// keeps its native `\` separators, so the directory marker must be native too.
 /// A `\\server\share\docs/` candidate reads back as neither convention, and the
 /// shell would offer it as a literal completion value.
 fn candidate_value(selected: &Path, is_dir: bool) -> String {
-    let portable = biscuit_file::try_portable_string(selected);
+    let portable = biscuit_file::try_forward_slash_string(selected);
     let is_portable = portable.is_some();
-    let mut value = portable.unwrap_or_else(|| biscuit_file::to_portable_string(selected));
+    let mut value = portable.unwrap_or_else(|| biscuit_file::to_forward_slash_string(selected));
 
     if is_portable && value.starts_with("./") {
         value = value.trim_start_matches("./").to_string();
@@ -330,7 +330,7 @@ mod tests {
         std::fs::create_dir(declined_dir.join("nested")).unwrap();
         std::fs::write(declined_dir.join("guide.md"), "# Guide").unwrap();
         assert!(
-            biscuit_file::try_portable_string(&declined_dir).is_none(),
+            biscuit_file::try_forward_slash_string(&declined_dir).is_none(),
             "fixture must be a path with no faithful portable spelling"
         );
 

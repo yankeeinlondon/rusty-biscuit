@@ -187,6 +187,20 @@ pub struct PrepareOptions {
     /// caller leaves this `false`, because an empty prompt reaching a provider
     /// is otherwise a bug the provider would report far less usefully.
     pub allow_empty_body: bool,
+    /// Prepare as a passive dry run recording into this session: no command
+    /// runs, no approval is asked for, no cache or guardrails file is
+    /// written, and work that needs an effect keeps its authored text (see
+    /// [`darkmatter::markdown::compose::passive`]). `None` for a real
+    /// preparation.
+    pub passive: Option<darkmatter::markdown::compose::passive::PassiveSession>,
+    /// Remove a transclusion whose target does not exist, with a warning,
+    /// instead of failing (Darkmatter's
+    /// `ComposeOptions::with_allow_missing_transclusions`).
+    ///
+    /// Set only by a dry-run preview that already reported the missing
+    /// target, so the content beside it is still previewed; a real
+    /// preparation never sets it, since a real run refuses the target.
+    pub allow_missing_transclusions: bool,
     /// Compose without reaching this document's schema verdict.
     ///
     /// Set by the stages that read a document they do not judge: the
@@ -204,6 +218,12 @@ pub struct PrepareOptions {
     /// frontmatter values read it, while `fm.loop` reads the `loop:`
     /// configuration. `None` outside an iteration.
     pub loop_values: Option<super::looping::LoopAmbient>,
+    /// The schema-slot session this preparation resolves `$schema` templates
+    /// through: the one the launch's pre-validation resolved with
+    /// ([`super::launch_slot_session`]), so the composition judges by the
+    /// snapshot (and the approvals) that check pinned instead of fetching
+    /// again. `None` builds one for this preparation's request.
+    pub slot_session: Option<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 }
 
 impl PrepareOptions {
@@ -301,8 +321,11 @@ impl PrepareOptions {
             config_snapshot: None,
             name_coercion_keys: Vec::new(),
             allow_empty_body: false,
+            passive: None,
+            allow_missing_transclusions: false,
             defer_schema_verdict: false,
             loop_values: None,
+            slot_session: None,
         }
     }
 
@@ -518,6 +541,14 @@ fn canonical_compose_options(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
+    // A sequence check's owner preparations set no session of their own
+    // and run under the check's (`passive_scope`).
+    if let Some(session) = options.passive.clone().or_else(super::passive_scope::current) {
+        compose_opts = compose_opts.with_passive_session(session);
+    }
+    if options.allow_missing_transclusions {
+        compose_opts = compose_opts.with_allow_missing_transclusions(true);
+    }
     compose_opts
         .with_deferred_shell_roots(options.deferred_shell_roots.clone())
         .with_deferred_shell_value_validation(options.validate_deferred_shell_values)
@@ -547,6 +578,10 @@ fn prepared_request(
     let request = super::compose_request(compose_opts, options.file_resolution_context.clone())?;
     if request.options().slot_session().is_some() {
         return Ok(request);
+    }
+    if let Some(session) = &options.slot_session {
+        let session = std::sync::Arc::clone(session);
+        return Ok(request.map_options(|compose_opts| compose_opts.with_slot_session(session)));
     }
     // One schema-slot session for the composition and the launch schema
     // after it, so a template resolved (and approved) while composing is the
@@ -590,8 +625,21 @@ fn resolve_launch_schema(
             report: None,
         })),
         Err(_) if options.defer_schema_verdict => Ok(None),
+        // A dry run left a template it could not resolve without asking
+        // unchecked, and its session says so; judging it again here would
+        // report the same deferral as an unresolved-schema error.
+        Err(_) if dry_run_deferred_schema(request) => Ok(None),
         Err(err) => Err(err),
     }
+}
+
+/// Whether `request` is a dry run whose composition left its `$schema`
+/// template unchecked (a slot read it would have had to ask for).
+fn dry_run_deferred_schema(request: &ComposeRequest) -> bool {
+    use darkmatter::markdown::compose::passive::DeferredConstruct;
+    request.options().passive_session().is_some_and(|session| {
+        session.deferrals().iter().any(|deferral| deferral.construct == DeferredConstruct::SchemaTemplate)
+    })
 }
 
 /// The `prompt` an inline run delivers.
@@ -706,6 +754,116 @@ pub fn approve_document_shell(
     )
 }
 
+/// The approval discovery [`approve_document_shell`] makes of the document a
+/// preparation in `mode` composes, without approving anything: the same
+/// request and text, walked condition-blind. What it refuses (a command or
+/// directive target whose shape depends on a value discovery does not
+/// evaluate, for one) stops a real run before it composes, whatever the
+/// value. A dry run makes the walk under a passive request. The schema
+/// verdict is deferred: a real route judges it, and drops an invalid
+/// optional, before this walk, and the preparation reports it.
+///
+/// ## Errors
+///
+/// As [`approve_document_shell`], less the approval failures.
+pub fn discover_document_shell(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: CompositionMode,
+) -> Result<(), CompositionError> {
+    let Ok(document) = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref()) else {
+        return Ok(());
+    };
+    let ctx = derive_compose_context(source, options);
+    let request = prepared_request(
+        canonical_compose_options(source, &ctx, options, schema_phase_for(mode)).with_deferred_schema_verdict(true),
+        options,
+    )?;
+    super::preflight::discover_document_surface(
+        &document,
+        &request,
+        Some(&source.resolved_path),
+        PromptOrigin::for_mode(mode, &source.resolved_path, &source.original_text).as_ref(),
+    )
+    .map(drop)
+}
+
+/// The inclusion references of the document a preparation in `mode` composes
+/// (body `::file`/`::code`, `prologue:`/`epilogue:`, and every child they
+/// reach) that fail to resolve, found condition-blind as the pre-flight walk
+/// a real run makes finds them: a reference inside a `::block` whose
+/// condition is false is still reported.
+///
+/// The walk never runs a command and never judges what the preparation
+/// judges (calls, the schema verdict, an expression it cannot finish), so
+/// its findings stand whether or not the preparation itself succeeds. An
+/// inclusion is left out when the document that writes it tolerates invalid
+/// references (its own `ignore_invalid`, its parent's passed down, or
+/// `IGNORE_INVALID` in its environment), as composition decides for that
+/// document.
+///
+/// ## Errors
+///
+/// The walk's own failure (a graph that could not be built), which the
+/// preparation reports in its own terms.
+pub fn unresolved_inclusions(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: CompositionMode,
+) -> Result<Vec<darkmatter::markdown::reference::validate::ReferenceIssue>, CompositionError> {
+    use darkmatter::markdown::compose::ComposeOperation;
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    use darkmatter::markdown::reference::validate::{ReferenceSeverity, ReferenceValidationOptions};
+
+    let Ok(document) = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref()) else {
+        return Ok(Vec::new());
+    };
+    // An inline run's generated body has no file; its references resolve
+    // from the source's folder, as its composition resolves them, and carry
+    // no line, since no line of the file is proven to be theirs.
+    let document = match mode {
+        CompositionMode::ChainedDocument => document,
+        CompositionMode::InlineFrontmatterPrompt => std::borrow::Cow::Owned(
+            document
+                .into_owned()
+                .with_source(darkmatter::markdown::compose::ComposeSource::File(source.resolved_path.clone())),
+        ),
+    };
+    let ctx = derive_compose_context(source, options);
+    let request = prepared_request(canonical_compose_options(source, &ctx, options, schema_phase_for(mode)), options)?
+        .map_options(|compose_opts| {
+            compose_opts
+                .for_reference_check()
+                .without_call_check()
+                .with_deferred_schema_verdict(true)
+                // Page blocks stay in place, so an inclusion is found
+                // whatever its block's condition.
+                .disable(ComposeOperation::PageBlocks)
+        });
+    let report = document
+        .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&request)))
+        .map_err(CompositionError::ComposeFailed)?;
+    // Composition asks the document that writes an inclusion whether a
+    // failing target is removed, so a child's own `ignore_invalid` decides
+    // for its inclusions as the prompt's decides for the prompt's.
+    let tolerated = |issue: &darkmatter::markdown::reference::validate::ReferenceIssue| {
+        report.documents.iter().any(|written_in| {
+            written_in.tolerates_invalid_references
+                && written_in.included_via == issue.included_via
+                && written_in.source == issue.origin.source
+        })
+    };
+    Ok(report
+        .issues
+        .iter()
+        .filter(|issue| {
+            issue.kind == ReferenceKind::Transclusion && issue.severity == ReferenceSeverity::Error && !tolerated(issue)
+        })
+        .cloned()
+        .collect())
+}
+
 /// The document a preparation in `mode` composes, and so the only text its
 /// pre-flight discovery may walk: the source itself for a chained run; for an
 /// inline run, the source's frontmatter with the delivered `prompt` (see
@@ -714,7 +872,9 @@ pub fn approve_document_shell(
 /// misses the ones that do.
 ///
 /// The generated document carries the context identity [`PromptOrigin`]
-/// recognizes, so its failures can be reported at `path`'s `prompt`.
+/// recognizes, so its body's failures can be reported at `path`'s `prompt`,
+/// and names `path`'s text as its frontmatter's, so a `prologue:`/`epilogue:`
+/// failure is the section's, at its authored value.
 ///
 /// ## Errors
 ///
@@ -731,10 +891,14 @@ pub(super) fn document_for_mode<'a>(
         CompositionMode::InlineFrontmatterPrompt => {
             let frontmatter = markdown.frontmatter();
             let prompt = inline_prompt_text(frontmatter, set_overrides)?;
-            Ok(std::borrow::Cow::Owned(
-                Markdown::with_frontmatter(frontmatter.clone(), prompt)
-                    .with_context_identity(PromptOrigin::context_identity(path)),
-            ))
+            let generated = Markdown::with_frontmatter(frontmatter.clone(), prompt)
+                .with_context_identity(PromptOrigin::context_identity(path));
+            // The frontmatter is still the file's: a `prologue:`/`epilogue:`
+            // failure names its key at the value the file wrote.
+            Ok(std::borrow::Cow::Owned(match markdown.source_text() {
+                Some(text) => generated.with_frontmatter_authored_in(path, text),
+                None => generated,
+            }))
         }
     }
 }
@@ -785,7 +949,7 @@ impl<'a> PromptOrigin<'a> {
 
     /// The context identity of the body generated from `path`'s `prompt`.
     fn context_identity(path: &Path) -> PathBuf {
-        PathBuf::from(format!("<prompt of {}>", biscuit_file::to_portable_string(path)))
+        PathBuf::from(format!("<prompt of {}>", biscuit_file::to_forward_slash_string(path)))
     }
 
     const PROPERTY: &'static str = "prompt";
@@ -818,8 +982,7 @@ impl<'a> PromptOrigin<'a> {
 
     /// Move a discovered site of the generated body to the `prompt` property.
     pub(crate) fn site(&self, source_file: &Path, origin: &mut darkmatter::markdown::compose::ShellCommandOrigin) {
-        use darkmatter::markdown::compose::ShellCommandOrigin;
-        if self.is_source(source_file) && matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+        if self.is_source(source_file) && origin.is_body() {
             *origin = Self::origin();
         }
     }
@@ -828,7 +991,6 @@ impl<'a> PromptOrigin<'a> {
     /// file, and one of its generated body against the `prompt` property.
     /// Whether it moved.
     fn shell_error(&self, error: &mut darkmatter::markdown::compose::ShellExpansionError) -> bool {
-        use darkmatter::markdown::compose::ShellCommandOrigin;
         let Some((ctx, origin)) = error.location_mut() else {
             return false;
         };
@@ -837,7 +999,7 @@ impl<'a> PromptOrigin<'a> {
         }
         let absolute = biscuit_file::canonicalize_simplified(self.path).unwrap_or_else(|_| self.path.to_path_buf());
         *ctx = biscuit_terminal::errors::SourceContext::new(absolute, self.path.to_path_buf(), self.text);
-        if matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+        if origin.is_body() {
             *origin = Self::origin();
         }
         true
@@ -1055,6 +1217,32 @@ use super::types::{
     LaunchSchema, PreparedComposition, ResolvedCompositionSource,
 };
 use simplified_schema::SchemaPhase;
+
+/// Whether a dry run left a `prologue:` or `epilogue:` unread because its
+/// target reads a value it could not produce. The section adds nothing to
+/// the passive composition, though the real run includes whatever it
+/// names, so an empty result there proves no empty prompt.
+fn section_deferred(options: &PrepareOptions) -> bool {
+    use darkmatter::markdown::compose::passive::DeferredConstruct;
+    options.passive.as_ref().is_some_and(|session| {
+        session.deferrals().iter().any(|deferral| {
+            deferral.construct == DeferredConstruct::Transclusion
+                && matches!(deferral.key.as_deref(), Some("prologue" | "epilogue"))
+        })
+    })
+}
+
+/// Why a composed prompt is empty, from its `authored` text, the `rendered`
+/// result, and the blocks the composition left out.
+fn empty_body_cause(
+    authored: &str,
+    rendered: &str,
+    report: &darkmatter::markdown::compose::ComposeReport,
+) -> darkmatter::findings::EmptyBodyCause {
+    darkmatter::findings::EmptyBodyCause::classify_composed(authored, rendered, &report.excluded_blocks)
+        .unwrap_or(darkmatter::findings::EmptyBodyCause::EmptyRendered)
+}
+
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -1367,7 +1555,6 @@ pub(super) fn prepare_values_on(
         closure: CompositionClosurePlan::Direct,
         launch_schema,
         lifecycle: super::lifecycle::LifecycleConfig::default(),
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
@@ -1475,11 +1662,12 @@ fn prepare_direct_on(
             let prompt = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
                 composed.content(),
             );
-            if prompt.trim().is_empty() && !options.allow_empty_body {
+            if prompt.trim().is_empty() && !options.allow_empty_body && !section_deferred(&options) {
                 return Err(CompositionError::ComposedBodyEmpty {
                     source_path: source.resolved_path.clone(),
                     mode: CompositionMode::ChainedDocument,
                     provided_overrides: override_keys,
+                    cause: empty_body_cause(source.markdown.content(), &prompt, &report),
                 });
             }
             prompt
@@ -1517,7 +1705,6 @@ fn prepare_direct_on(
         closure: CompositionClosurePlan::Direct,
         launch_schema,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: lifecycle_warnings.into_iter().chain(report.warnings.iter().cloned()).collect(),
@@ -1582,7 +1769,7 @@ fn prepare_inline_on(
     // write: a baseline the closure could never stamp must not reach a launch
     // or a preview. Passing says nothing about the document after the agent
     // edits it; the closure still validates and rolls back.
-    super::closure::rehearse_inline_baseline(baseline_text, chrono::Utc::now()).map_err(
+    super::closure::rehearse_inline_baseline(&source.resolved_path, baseline_text, chrono::Utc::now()).map_err(
         |source_error| CompositionError::InlineBaselineUnstampable {
             path: source.resolved_path.clone(),
             source: Box::new(source_error),
@@ -1638,11 +1825,13 @@ fn prepare_inline_on(
     let body = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
         composed.content(),
     );
-    if body.trim().is_empty() && !options.allow_empty_body {
+    if body.trim().is_empty() && !options.allow_empty_body && !section_deferred(&options) {
+        // The prompt is the body here: its own text is what was authored.
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::InlineFrontmatterPrompt,
             provided_overrides: override_keys,
+            cause: empty_body_cause(temp_md.content(), &body, &report),
         });
     }
 
@@ -1664,7 +1853,12 @@ fn prepare_inline_on(
         launch_schema.as_ref(),
         &effective_frontmatter,
     );
-    let guardrails_template = load_or_create_guardrails(source_repo_root.as_deref());
+    // A dry run reads the guardrails but never creates or migrates the file.
+    let guardrails_template = if options.passive.is_some() {
+        super::guardrails::load_guardrails_passively(source_repo_root.as_deref())
+    } else {
+        load_or_create_guardrails(source_repo_root.as_deref())
+    };
     let retired_guardrails =
         retired_custom_guardrails_path(source_repo_root.as_deref(), &guardrails_template);
     let guardrails = render_guardrails(&guardrails_template, &source.resolved_path);
@@ -1683,13 +1877,17 @@ fn prepare_inline_on(
         warning
     }));
     if let Some(path) = retired_guardrails {
-        warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
-            "inline_guardrails",
+        let mut warning = darkmatter::markdown::compose::ComposeWarning::new(
+            super::guardrails::RETIRED_GUARDRAILS_STAGE,
             format!(
                 "{} still contains retired response-harvesting instructions. Migrate it to tell the agent to edit {{document_path}} directly; Claudine preserved the customization and continued this run.",
-                biscuit_file::to_portable_string(&path)
+                biscuit_file::to_forward_slash_string(&path)
             ),
-        ));
+        );
+        // The repository's guardrails file, not the prompt, is what the
+        // warning is about: every inline prompt there meets it.
+        warning.path = Some(path);
+        warnings.push(warning);
     }
 
     Ok(PreparedComposition {
@@ -1708,7 +1906,6 @@ fn prepare_inline_on(
         }),
         launch_schema,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings,
@@ -1920,7 +2117,7 @@ pub(super) fn compose_bootstrap(
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) =
+    let (composed, _report) =
         recording_triggers(source.markdown.compose_with_warnings(&compose_request), &source.resolved_path, &options)?;
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
@@ -1935,7 +2132,6 @@ pub(super) fn compose_bootstrap(
         effective_frontmatter,
         selection_hints,
         lifecycle,
-        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_context: ctx,
         document_epoch: options.document_epoch,
     })
@@ -2009,17 +2205,6 @@ pub(super) fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> se
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
-}
-
-/// Collect Darkmatter's intentionally-deferred (DM1) lifecycle keys from a
-/// compose report into a stable, sorted list for dry-run labeling (C5).
-///
-/// The report already limits the set to keys present in the source
-/// frontmatter; sorting makes the dry-run output deterministic.
-fn sorted_deferred_keys(report: &darkmatter::markdown::compose::ComposeReport) -> Vec<String> {
-    let mut keys: Vec<String> = report.deferred_frontmatter_keys.iter().cloned().collect();
-    keys.sort();
-    keys
 }
 
 /// Extract the top-level keys from a `set_overrides` JSON object, in the

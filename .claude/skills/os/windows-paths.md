@@ -10,7 +10,7 @@ the path APIs themselves in the `biscuit-file` skill.
 
 Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings with no
-verbatim prefix on every OS (`biscuit_file::to_portable_string`). Compare
+verbatim prefix on every OS (`biscuit_file::to_forward_slash_string`). Compare
 against that, never against `to_string_lossy()`.
 
 ## Path spelling
@@ -53,7 +53,7 @@ against that, never against `to_string_lossy()`.
      or `:` (`link_normalization::split_suffix`).
    - `{{VAR}}` interpolation concatenates text, so `{{ROOT}}/x.md` with a
      verbatim `ROOT` is one bogus component. A test that sets a variable from
-     `canonicalize` stores `to_portable_string(&path)`.
+     `canonicalize` stores `to_forward_slash_string(&path)`.
    - A `\\?\` path built from `root.join("a/b")` fails every probe with OS
      error 123, and `cmd /C mklink /J` refuses it. Join name by name
      (`rel.split('/').fold(root, |p, n| p.join(n))`).
@@ -115,7 +115,7 @@ against that, never against `to_string_lossy()`.
    `package_root()` arrive this way (`C:\…\cwd\area/pkg`).
 9. **A user-typed fragment never matches walker output by raw text.**
    `ignore::Walk` yields `\`; the user typed `/`. Compare both sides through
-   `to_portable_string` (`path_matches_query` in
+   `to_forward_slash_string` (`path_matches_query` in
    `claudine/cli/src/completion/scopes.rs`). Non-interactive tests can miss
    it when "zero candidates" and "interaction denied" print the same
    diagnostic.
@@ -144,7 +144,7 @@ against that, never against `to_string_lossy()`.
     (`context::test_support::abs` in `darkmatter/dmls/src/context.rs` maps
     `/w/x` to `C:/w/x`) or use a real temp dir. When a test passes only on
     Unix, assert the exact path, not a loose `ends_with`.
-14. **On Unix `\` is a filename character, and `to_portable_string` turns it
+14. **On Unix `\` is a filename character, and `to_forward_slash_string` turns it
     into `/`** (`back\slash.rs` becomes a different file). Expected paths for
     such files keep native spelling on Unix; a `PathIdentity` route
     (`portable_relative` in `tree-hugger/lib/src/file/naming.rs`) keeps the

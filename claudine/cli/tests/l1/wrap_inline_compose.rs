@@ -557,7 +557,7 @@ exit 1
 }
 
 /// `--quiet` and `--silent` have no effect on `inline-compose --dry-run`
-/// output: the composed prompt still lands on stdout, the metadata on stderr,
+/// output: the composed prompt still lands on stdout, the report on stderr,
 /// and the source file is left byte-identical.
 #[cfg(unix)]
 #[test]
@@ -604,11 +604,12 @@ fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
 }
 
 /// Error surface (inline-compose): an unsatisfied `$schema` required property
-/// under `--dry-run` renders to **stderr**, exits **non-zero**, leaves stdout
-/// clean, and never mutates the source file.
+/// under `--dry-run` is a finding on **stderr** (`composition.missing_properties`
+/// in the JSON report), exits 2, previews the prompt on stdout with the
+/// placeholder marked, and never mutates the source file.
 #[cfg(unix)]
 #[test]
-fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
+fn inline_compose_dry_run_missing_input_reports_on_stderr_and_marks_the_preview() {
     let fixture = CliProcessFixture::named("inline-compose-dry-run-schema-error");
     fixture.seed_user_config();
 
@@ -632,20 +633,27 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
         .output()
         .unwrap();
 
+    assert_eq!(output.status.code(), Some(2), "a missing eager input must exit 2");
+    // The preview stays on stdout with the unavailable placeholder marked; the
+    // finding itself goes to the report on stderr.
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !output.status.success(),
-        "schema-error dry-run must exit non-zero"
-    );
-    assert!(
-        output.stdout.is_empty(),
-        "stdout must stay clean on error; stdout was:\n{}",
-        String::from_utf8_lossy(&output.stdout)
+        stdout.contains("Plan {{topic}} [missing input]"),
+        "stdout must preview the prompt with its placeholder marked; stdout was:\n{stdout}"
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
-        stderr.to_lowercase().contains("missing properties") && stderr.contains("topic"),
-        "missing-properties error naming `topic` must appear on stderr; stderr was:\n{stderr}"
+        stderr.contains("topic") && !stdout.contains("composition.missing_properties"),
+        "the finding naming `topic` must appear on stderr only; stderr was:\n{stderr}"
     );
+
+    let json = fixture
+        .command()
+        .args(["inline-compose", "--goose", "--dry-run", "--json", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(envelope["diagnostics"][0]["code"], "composition.missing_properties", "{envelope}");
     assert_eq!(
         fs::read_to_string(&md_file).unwrap(),
         original,

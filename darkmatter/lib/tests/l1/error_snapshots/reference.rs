@@ -15,6 +15,7 @@ fn parse_directive_shows_line_and_syntax_hint() {
         message: "unexpected end".into(),
         directive_text: "::file ./broken.md when=".into(),
         caret_col: Some(27),
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(

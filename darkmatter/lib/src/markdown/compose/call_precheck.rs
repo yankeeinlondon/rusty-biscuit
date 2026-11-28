@@ -963,6 +963,7 @@ fn collection_offset(error: &CollectionError) -> usize {
 /// the body text it was given. A document with no loaded file keeps that
 /// location, named by its context identity when it has one.
 fn collection_rejection(markdown: &Markdown, error: CollectionError) -> MarkdownError {
+    let error = error.with_file_note(markdown, BodyOrigin::capture(markdown).as_ref(), None);
     let span = match error.site().map(|site| site.source.as_ref()) {
         Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
         _ => None,

@@ -47,7 +47,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         CompositionError::SequenceMissingProperties { failures, .. } => {
             render_sequence_missing_properties_block(failures)
         }
-        CompositionError::SequenceInteractiveRejected(source_path) => {
+        CompositionError::SequenceInteractiveRejected { path: source_path, .. } => {
             let file_link = render_file_link(source_path);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

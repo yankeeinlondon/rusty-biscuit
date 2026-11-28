@@ -39,12 +39,12 @@ fn a_shipped_sidecar_judges_its_document_alike_in_darkmatter_and_the_library() {
     let root = canonicalize_simplified(dir.path()).expect("canonical temp dir");
     let research = root.join("research");
     write(&research.join("_types.yaml"), include_str!("../../../../claudine/docs/research/_types.yaml"));
-    write(&research.join("agent-cli/_types.yaml"), include_str!("../../../../claudine/docs/research/agent-cli/_types.yaml"));
-    write(&research.join("agent-cli/_schema.yaml"), include_str!("../../../../claudine/docs/research/agent-cli/_schema.yaml"));
-    let authored = include_str!("../../../../claudine/docs/research/agent-cli/kimi.md");
+    write(&research.join("providers/agent-cli/_types.yaml"), include_str!("../../../../claudine/docs/research/providers/agent-cli/_types.yaml"));
+    write(&research.join("providers/agent-cli/_schema.yaml"), include_str!("../../../../claudine/docs/research/providers/agent-cli/_schema.yaml"));
+    let authored = include_str!("../../../../claudine/docs/research/providers/agent-cli/kimi.md");
     assert!(authored.contains("\nschema_revision: 2\n"), "the control document is revision 2");
-    let page = research.join("agent-cli/kimi.md");
-    let broken_page = research.join("agent-cli/broken.md");
+    let page = research.join("providers/agent-cli/kimi.md");
+    let broken_page = research.join("providers/agent-cli/broken.md");
     write(&page, authored);
     write(&broken_page, &authored.replacen("\nschema_revision: 2\n", "\nschema_revision: 3\n", 1));
 
@@ -52,7 +52,7 @@ fn a_shipped_sidecar_judges_its_document_alike_in_darkmatter_and_the_library() {
     let snapshot = RequestSnapshot::new(&root).with_home(Some(root.join("home"))).with_env(HashMap::new());
     let context = build_resolution_context(&snapshot).expect("fixture context");
     let api = DarkmatterSchemas::new(context.clone());
-    let library = SimplifiedSchema::try_from_yaml(SchemaSource::from(research.join("agent-cli/_schema.yaml")).bound(context))
+    let library = SimplifiedSchema::try_from_yaml(SchemaSource::from(research.join("providers/agent-cli/_schema.yaml")).bound(context))
         .expect("the sidecar loads through the library");
 
     let markdown = Markdown::try_from(page.as_path()).expect("the document loads");

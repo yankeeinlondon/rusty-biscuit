@@ -1,14 +1,15 @@
 //! Admission of standalone schema envelopes against the library's own
 //! definitions.
 //!
-//! The `kind: schema`, `kind: yaml-schema`, and `kind: namespace-schema`
-//! envelopes are part of the SimplifiedSchema language, so their definitions
-//! — `schema.yaml`, `yaml-schema.yaml`, and `namespace-schema.yaml` in
-//! `simplified-schema/schemas/` — are compiled into the library
-//! ([`ENVELOPE_DEFINITIONS`]). Every recognized envelope, on every
+//! The `kind: schema`, `kind: yaml-schema`, `kind: namespace-schema`,
+//! `kind: expression-schema`, and `kind: mutation-schema` envelopes are part
+//! of the SimplifiedSchema language, so their definitions — `schema.yaml`,
+//! `yaml-schema.yaml`, `namespace-schema.yaml`, `expression-schema.yaml`, and
+//! `mutation-schema.yaml` in `simplified-schema/schemas/` — are compiled into
+//! the library ([`ENVELOPE_DEFINITIONS`]). Every recognized envelope, on every
 //! load path (the [`SimplifiedSchema`](crate::SimplifiedSchema) factories,
 //! `$schema` targets, `Name@file` imports, embedded documents), is admitted
-//! by soft validation against its definition before its payload is read
+//! against its definition before its payload is read
 //! (only a host that already judged a file against a definition it selected
 //! reads it unadmitted, through
 //! [`parse_selected_standalone_schema_document`](crate::parse_selected_standalone_schema_document)):
@@ -19,10 +20,17 @@
 //! | informal (`$schema` without `kind`) | `schema.yaml`, judged as if it declared `kind: schema` |
 //! | `kind: yaml-schema` | `yaml-schema.yaml` |
 //! | `kind: namespace-schema` | `namespace-schema.yaml` |
+//! | `kind: expression-schema` | `expression-schema.yaml` (strict) |
+//! | `kind: mutation-schema` | `mutation-schema.yaml` (strict) |
+//!
+//! Admission is soft (a `description: 123` reads as `"123"`) except for the
+//! two callable catalogs, whose authored shape is admitted strictly: their
+//! metadata is never converted, so a scalar of the wrong type is refused as
+//! written.
 //!
 //! ## Bootstrap
 //!
-//! The three definitions are themselves `kind: yaml-schema` documents. Their
+//! The five definitions are themselves `kind: yaml-schema` documents. Their
 //! lowered form is loaded from the library's shipped artifact
 //! ([`crate::shipped::registry`]) the first time any envelope is admitted.
 //! When that artifact is refused, or when an artifact is generated, they are
@@ -64,9 +72,15 @@ pub const SCHEMA_TRIGGER_DEFINITION_PATH: &str = "simplified-schema/schemas/sche
 /// Virtual path of the definition of `kind: namespace-schema` documents.
 pub const NAMESPACE_SCHEMA_DEFINITION_PATH: &str = "simplified-schema/schemas/namespace-schema.yaml";
 
+/// Virtual path of the definition of `kind: expression-schema` documents.
+pub const EXPRESSION_SCHEMA_DEFINITION_PATH: &str = "simplified-schema/schemas/expression-schema.yaml";
+
+/// Virtual path of the definition of `kind: mutation-schema` documents.
+pub const MUTATION_SCHEMA_DEFINITION_PATH: &str = "simplified-schema/schemas/mutation-schema.yaml";
+
 /// The library's shipped `kind: yaml-schema` definitions, keyed by
 /// repository-relative path, the keying a host's own embedded table uses:
-/// the three envelope definitions and the trigger definition. They seed every
+/// the five envelope definitions and the trigger definition. They seed every
 /// YAML document-kind registry ([`crate::yaml_documents::KindRegistry`]),
 /// and the key is the path a checkout copy must have to replace one. They
 /// reference each other by relative path only, so the slice is also the
@@ -78,6 +92,8 @@ pub const ENVELOPE_DEFINITIONS: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument { path: YAML_SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/yaml-schema.yaml") },
     EmbeddedDocument { path: SCHEMA_TRIGGER_DEFINITION_PATH, text: include_str!("../../schemas/schema-trigger.yaml") },
     EmbeddedDocument { path: NAMESPACE_SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/namespace-schema.yaml") },
+    EmbeddedDocument { path: EXPRESSION_SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/expression-schema.yaml") },
+    EmbeddedDocument { path: MUTATION_SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/mutation-schema.yaml") },
 ];
 
 /// The outcome of judging one envelope against its definition.
@@ -88,7 +104,8 @@ pub struct EnvelopeAdmission {
     /// Virtual path of the definition the envelope was judged against.
     pub definition: &'static str,
     /// The admitted document after soft conversion when admitted (a
-    /// `description: 123` reads as `"123"`), the document as written
+    /// `description: 123` reads as `"123"`; a callable catalog is admitted
+    /// strictly, so its value is always as written), the document as written
     /// otherwise. Schema declarations (`$schema`, `types`) are never
     /// converted. An informal envelope's value carries no `kind`.
     pub value: Value,
@@ -155,7 +172,7 @@ impl EnvelopeAdmission {
             path: path.to_path_buf(),
             message: format!(
                 "the {} envelope does not satisfy its definition `{}`: {location}{}",
-                envelope_label(self.envelope),
+                self.envelope.label(),
                 self.definition,
                 problem.message
             ),
@@ -236,7 +253,13 @@ fn admit_with(
     if informal && let Value::Object(map) = &mut document {
         map.shift_insert(0, "kind".into(), Value::String("schema".into()));
     }
-    let (mut value, mut problems) = match prepared.validate_soft(&document) {
+    // A callable catalog's authored shape is its contract: nothing converts.
+    let judged = if recognized.envelope.is_callable_catalog() {
+        prepared.validate_strict(&document)
+    } else {
+        prepared.validate_soft(&document)
+    };
+    let (mut value, mut problems) = match judged {
         Ok(success) => (success.value.into_owned(), Vec::new()),
         Err(ValidationFailure::Unprepared { error }) => {
             return Err(document_error(path, format!("`{definition}` could not be prepared: {error}")));
@@ -275,13 +298,29 @@ fn slot_key_error(source: &str, path: &Path) -> Option<SchemaError> {
     })
 }
 
-/// The three compiled envelope definitions, lowered. Each compiles its
+/// The five compiled envelope definitions, lowered. Each compiles its
 /// validator on first admission.
 pub struct EnvelopeDefinitions {
     schema: LoweredDefinition,
     yaml_schema: LoweredDefinition,
     namespace_schema: LoweredDefinition,
+    expression_schema: LoweredDefinition,
+    mutation_schema: LoweredDefinition,
 }
+
+/// The lowered JSON Schema of each envelope definition, in
+/// [`ENVELOPE_DEFINITION_PATHS`] order.
+pub(crate) type LoweredEnvelopes = [Arc<Value>; 5];
+
+/// The virtual paths of the envelope definitions, in the order their
+/// lowered forms are recorded.
+pub(crate) const ENVELOPE_DEFINITION_PATHS: [&str; 5] = [
+    SCHEMA_DEFINITION_PATH,
+    YAML_SCHEMA_DEFINITION_PATH,
+    NAMESPACE_SCHEMA_DEFINITION_PATH,
+    EXPRESSION_SCHEMA_DEFINITION_PATH,
+    MUTATION_SCHEMA_DEFINITION_PATH,
+];
 
 impl std::fmt::Debug for EnvelopeDefinitions {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -324,11 +363,14 @@ impl LoweredDefinition {
 impl EnvelopeDefinitions {
     /// Definitions whose lowered schemas were already prepared (an accepted
     /// artifact's records).
-    pub(crate) fn from_lowered(schema: Arc<Value>, yaml_schema: Arc<Value>, namespace_schema: Arc<Value>) -> Self {
+    pub(crate) fn from_lowered(lowered: LoweredEnvelopes) -> Self {
+        let [schema, yaml_schema, namespace_schema, expression_schema, mutation_schema] = lowered;
         Self {
             schema: LoweredDefinition::new(schema),
             yaml_schema: LoweredDefinition::new(yaml_schema),
             namespace_schema: LoweredDefinition::new(namespace_schema),
+            expression_schema: LoweredDefinition::new(expression_schema),
+            mutation_schema: LoweredDefinition::new(mutation_schema),
         }
     }
 
@@ -341,11 +383,13 @@ impl EnvelopeDefinitions {
     /// The parser's or lowering's error for a definition that does not
     /// prepare.
     pub(crate) fn prepare_uncached() -> Result<Self, SchemaError> {
-        Ok(Self::from_lowered(
+        Ok(Self::from_lowered([
             Arc::new(lower_definition(SCHEMA_DEFINITION_PATH)?),
             Arc::new(lower_definition(YAML_SCHEMA_DEFINITION_PATH)?),
             Arc::new(lower_definition(NAMESPACE_SCHEMA_DEFINITION_PATH)?),
-        ))
+            Arc::new(lower_definition(EXPRESSION_SCHEMA_DEFINITION_PATH)?),
+            Arc::new(lower_definition(MUTATION_SCHEMA_DEFINITION_PATH)?),
+        ]))
     }
 
     /// [`admit_envelope_text`] against these definitions.
@@ -361,16 +405,23 @@ impl EnvelopeDefinitions {
         admit_with(self, &recognized, text, path).map(Some)
     }
 
-    /// The lowered `schema.yaml`, `yaml-schema.yaml`, and
-    /// `namespace-schema.yaml`.
-    pub(crate) fn json_schemas(&self) -> (&Value, &Value, &Value) {
-        (&self.schema.json_schema, &self.yaml_schema.json_schema, &self.namespace_schema.json_schema)
+    /// The lowered definitions, in [`ENVELOPE_DEFINITION_PATHS`] order.
+    pub(crate) fn json_schemas(&self) -> [&Value; 5] {
+        [
+            &self.schema.json_schema,
+            &self.yaml_schema.json_schema,
+            &self.namespace_schema.json_schema,
+            &self.expression_schema.json_schema,
+            &self.mutation_schema.json_schema,
+        ]
     }
 
     fn for_envelope(&self, envelope: StandaloneSchemaEnvelope) -> (&LoweredDefinition, &'static str) {
         match envelope {
             StandaloneSchemaEnvelope::YamlSchema => (&self.yaml_schema, YAML_SCHEMA_DEFINITION_PATH),
             StandaloneSchemaEnvelope::NamespaceSchema => (&self.namespace_schema, NAMESPACE_SCHEMA_DEFINITION_PATH),
+            StandaloneSchemaEnvelope::ExpressionSchema => (&self.expression_schema, EXPRESSION_SCHEMA_DEFINITION_PATH),
+            StandaloneSchemaEnvelope::MutationSchema => (&self.mutation_schema, MUTATION_SCHEMA_DEFINITION_PATH),
             StandaloneSchemaEnvelope::Tagged | StandaloneSchemaEnvelope::Pure => (&self.schema, SCHEMA_DEFINITION_PATH),
         }
     }
@@ -412,15 +463,6 @@ fn lower_definition(path: &'static str) -> Result<Value, SchemaError> {
     let resolved =
         crate::resolve::lower_embedded_definition(schema, document.local_types.as_ref(), path, &[], ShippedSources::NONE)?;
     Ok(resolved.json_schema)
-}
-
-fn envelope_label(envelope: StandaloneSchemaEnvelope) -> &'static str {
-    match envelope {
-        StandaloneSchemaEnvelope::Pure => "informal schema",
-        StandaloneSchemaEnvelope::Tagged => "`kind: schema`",
-        StandaloneSchemaEnvelope::YamlSchema => "`kind: yaml-schema`",
-        StandaloneSchemaEnvelope::NamespaceSchema => "`kind: namespace-schema`",
-    }
 }
 
 /// Whether `problem` is with the envelope rather than inside a `$schema` or

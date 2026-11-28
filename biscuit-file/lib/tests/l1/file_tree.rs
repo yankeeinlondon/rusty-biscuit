@@ -545,7 +545,7 @@ fn normal_derivation_keeps_the_tree_its_origin_and_the_launch_scope() {
         assert_eq!(child.cwd(), notes.as_path());
         assert_eq!(child.base_dir(), docs.as_path());
         assert_eq!(child.base_dir_origin(), &BaseDirOrigin::Explicit);
-        assert_eq!(child.launch_magic_scope(), ctx.launch_magic_scope());
+        assert_eq!(child.launch_scope(), ctx.launch_scope());
     }
 
     // Re-deriving at its own cwd is a no-op on the tree.
@@ -608,7 +608,7 @@ fn trusted_external_derivation_drops_source_anchors_but_keeps_the_launch_scope()
     assert_eq!(external.package_area(), None);
     assert_eq!(external.base_dir(), home.as_path());
     assert_eq!(external.base_dir_origin(), &BaseDirOrigin::Home);
-    assert_eq!(external.launch_magic_scope(), request.launch_magic_scope());
+    assert_eq!(external.launch_scope(), request.launch_scope());
     assert!(matches!(
         reference("&x.md").resolve_in_context(&external),
         Err(FileReferenceError::OutsideRepository { .. })

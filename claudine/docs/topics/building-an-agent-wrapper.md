@@ -223,7 +223,7 @@ After the centralized-providers refactor, adding a ninth provider has a much sma
 
 - [ ] `just test` (claudine area), with focus on `events::matrix`, `provider::tests`, `linking::capabilities::tests`, `stream::protocol::*::tests`, and `argv::tests`.
 - [ ] `just lint` and `just doctest`.
-- [ ] Smoke-test `claudine providers`, `claudine hooks --support`, `claudine hooks --mapping`, `claudine hooks --describe`, `claudine hooks --capture-method`, and `claudine init --quick` to confirm the new provider appears in matrix output.
+- [ ] Smoke-test `claudine providers`, `claudine hooks --support`, `claudine hooks --mapping`, `claudine hooks --describe`, and `claudine hooks --capture-method` to confirm the new provider appears in matrix output.
 - [ ] If the binary is installed, run `claudine <provider>` against a trivial prompt to validate the wrapper end-to-end.
 
 ## Things to Look Out For

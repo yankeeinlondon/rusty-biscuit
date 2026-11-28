@@ -1,5 +1,5 @@
 //! Recursive container schemas (spec criterion 10): `task` and `group` in
-//! `claudine/schemas/sequence-types.yaml` reference themselves, so every
+//! `claudine/registration/sequence.yaml` reference themselves, so every
 //! container event is typed at every container depth.
 //!
 //! Each container path (sequence → sequence, sequence → group,
@@ -18,7 +18,6 @@ use biscuit_file::serde_yaml_ng;
 use claudine::composition::{CompositionError, resolve_composition_source_in_context, resolve_sequence_plan};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::DarkmatterSchemas;
 use simplified_schema::SchemaPhase;
 use serde_json::{Map, Value, json};
 
@@ -159,8 +158,8 @@ impl Judge {
             .discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged")
             .report;
@@ -390,7 +389,7 @@ fn the_tests_cover_the_four_container_paths() {
 #[test]
 fn deep_container_deferral_does_not_hide_literal_or_shape_errors_in_either_phase() {
     let repo = SchemaRepo::new(&shipped_bundle!());
-    let schemas = DarkmatterSchemas::new(repo.context()).with_trigger_discovery().expect("discovered schemas");
+    let schemas = repo.discover().expect("the shipped bundle registers").schemas;
     for path in PATHS {
         let source = repo.write_document("deferred.md", &control(*path));
         let control = Markdown::try_from(source.as_path()).expect("control loads")

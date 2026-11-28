@@ -73,8 +73,8 @@ impl Fixture {
         copy("docs/providers.yaml");
         copy(&format!("docs/providers/facts/{slug}.yaml"));
         for topic in TOPICS {
-            copy(&format!("docs/research/{topic}/_schema.yaml"));
-            copy(&format!("docs/research/{topic}/{slug}.md"));
+            copy(&format!("docs/research/providers/{topic}/_schema.yaml"));
+            copy(&format!("docs/research/providers/{topic}/{slug}.md"));
         }
         // The agent-cli contract names its records in its own types file and
         // shares identifier/evidence types. Joined onto the manifest
@@ -82,7 +82,7 @@ impl Fixture {
         let manifest = biscuit_test_harness::manifest_dir!();
         for (rel, from) in [
             ("docs/research/_types.yaml", manifest.join("../docs/research/_types.yaml")),
-            ("docs/research/agent-cli/_types.yaml", manifest.join("../docs/research/agent-cli/_types.yaml")),
+            ("docs/research/providers/agent-cli/_types.yaml", manifest.join("../docs/research/providers/agent-cli/_types.yaml")),
         ] {
             fs::copy(&from, dir.path().join("claudine").join(rel))
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
@@ -278,12 +278,12 @@ fn doctored_sidecar_enum_not_subset_fails_before_value_mapping() {
     // the research doc valid against it (`available: none`) so the ONLY
     // possible failure is the schema-compatibility gate.
     fixture.replace(
-        "docs/research/agent-models/_schema.yaml",
+        "docs/research/providers/agent-models/_schema.yaml",
         "dynamic_listing: \"{ available: boolean(required)",
         "dynamic_listing: \"{ available: enum(none, dynamic, telepathic; required)",
     );
     fixture.replace(
-        "docs/research/agent-models/claude.md",
+        "docs/research/providers/agent-models/claude.md",
         "  available: false",
         "  available: none",
     );
@@ -499,7 +499,7 @@ fn research_frontmatter_violating_its_sidecar_fails_loudly() {
     // `requires_claudine_update` is a required boolean in every topic
     // sidecar; dropping it must fail validation before any mapping.
     fixture.replace(
-        "docs/research/agent-models/claude.md",
+        "docs/research/providers/agent-models/claude.md",
         "requires_claudine_update:",
         "requires_claudine_update_renamed:",
     );
@@ -514,7 +514,7 @@ fn research_frontmatter_violating_its_sidecar_fails_loudly() {
 fn dynamic_listing_true_without_override_fails_loudly() {
     let fixture = Fixture::new();
     fixture.replace(
-        "docs/research/agent-models/claude.md",
+        "docs/research/providers/agent-models/claude.md",
         "  available: false",
         "  available: true",
     );

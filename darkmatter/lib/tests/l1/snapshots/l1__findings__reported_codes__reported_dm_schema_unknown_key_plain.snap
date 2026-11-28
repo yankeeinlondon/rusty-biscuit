@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ Additional properties are not allowed ('nmae' was unexpected)
+      at doc.md:5:1
+      hint: did you mean `name`?

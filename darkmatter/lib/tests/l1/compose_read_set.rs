@@ -25,7 +25,7 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
 /// The read-set spelling of `name` in `dir`.
 fn entry(dir: &Path, name: &str) -> String {
     let canonical = biscuit_file::canonicalize_simplified(dir).unwrap();
-    biscuit_file::to_portable_string(&canonical.join(name))
+    biscuit_file::to_forward_slash_string(&canonical.join(name))
 }
 
 fn options_for(path: &Path) -> ComposeOptions {

@@ -49,8 +49,8 @@ pi: steering research has 2 error(s)
 
 | Input | Owner | What it says |
 | --- | --- | --- |
-| `docs/research/steering/<slug>.md` | research fleet | Discovery methods, mechanisms, capability cases, access, receipts, and live verification records with typed assertions |
-| `docs/research/non-interactive-sessions/<slug>.md` | research fleet | Execution interfaces and the preferred/fallback selection |
+| `docs/research/providers/steering/<slug>.md` | research fleet | Discovery methods, mechanisms, capability cases, access, receipts, and live verification records with typed assertions |
+| `docs/research/providers/non-interactive-sessions/<slug>.md` | research fleet | Execution interfaces and the preferred/fallback selection |
 | `docs/providers/steering-activation.yaml` | human review | Reviewed adapter revisions, exact activation grants, and blocked launch profiles |
 
 Research describes what a provider does. The policy file records what Claudine

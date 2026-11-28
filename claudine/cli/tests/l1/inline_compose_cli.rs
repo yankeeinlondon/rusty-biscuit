@@ -133,7 +133,7 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     assert!(
         stdout.contains(&format!(
             "CWD={}",
-            biscuit_file::to_portable_string(
+            biscuit_file::to_forward_slash_string(
                 &launch_root.canonicalize().expect("canonical launch directory")
             )
         )),

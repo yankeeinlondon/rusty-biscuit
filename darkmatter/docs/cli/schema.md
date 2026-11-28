@@ -58,6 +58,20 @@ schema, and a `schema_file` is added when a schema file declares the default: a
 referenced schema file, a trigger file, or the file a `Name@file` import read the
 type from); the key is absent when there are none. The file itself is never changed.
 
+A problem whose fix the schema proves also carries a `hint` (absent
+otherwise), and the formatted output shows it on a `hint:` line under the
+problem. A key the schema declares `removed(<replacement>)` is a removed-key
+problem (`kind` `invalid`) whose hint is the replacement; an unknown key near one declared key
+gets `` did you mean `name`? ``, and one near none gets
+``remove `zzz`, or use one of `name`, `tags` `` (the object's declared keys in
+declaration order, at most eight, then `…`):
+
+```json
+{ "kind": "invalid", "property": "fail_fast", "path": "", "line": 3, "column": 1,
+  "message": "key `fail_fast` has been removed",
+  "hint": "set fail_fast on a group object", "arm_index": null, "description": null }
+```
+
 A default is still checked with the rest of the value. When it fails a check that
 needs the file system, such as `doc: file(required; eager; default(./note.md))` with
 no `note.md`, the problem is the default's, not the document's: its record carries
@@ -248,6 +262,33 @@ Registered host:
   - condition 1 — defeated: `gadget` is required but absent
 ```
 
+When two matched triggers of the host
+[cannot be layered as one](../topics/host-registration.md#when-two-triggers-declare-one-property),
+the section lists both matches and then the conflict, naming both trigger files,
+and the run fails with status 1: the same `dm.host.trigger_conflict` that
+`md schema validate` and `md compose` refuse the document with. Matching
+triggers whose declarations agree report success.
+
+```text
+Registered host:
+- acme 1.2.0 (manifest /Users/me/.acme/darkmatter-host.yaml, revision 5b1c…)
+- /Users/me/.acme/schemas/a.yaml — matched
+  - condition 1 — matched
+- /Users/me/.acme/schemas/b.yaml — matched
+  - condition 1 — matched
+- conflict [dm.host.trigger_conflict]: /Users/me/.acme/schemas/a.yaml and /Users/me/.acme/schemas/b.yaml conflict on agent: their types are incomparable
+```
+
+A trigger that declares a `name` is written `name (path)` in the conflict line
+(`` `team-agent (/Users/me/.acme/schemas/a.yaml)` ``).
+
+In a data output, `registered.conflict` holds `first`, `second`, their `name`
+labels `first_name` and `second_name` (`null` for a trigger without one),
+`subject` (the property, `null` for the root rules), and `reason`, and
+`diagnostics` holds the
+`dm.host.trigger_conflict` error; `outcome` is `failure`. A matched trigger whose
+payload is a template is left out of this check, since listing it reads nothing.
+
 A trigger whose payload holds `{{ … }}` slots is listed with
 `(payload pending: holds schema slots)`, and its data record has `pending: true`:
 it is valid, nothing is read to list or match it, and its slots resolve only when
@@ -261,8 +302,8 @@ Triggers:
 
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
-run, and `registered` (`host`, `version`, `manifest`, `revision`, and the host's
-`triggers`), which is `null` when no single registered host identifies the
+run, and `registered` (`host`, `version`, `manifest`, `revision`, the host's
+`triggers`, and `conflict`), which is `null` when no single registered host identifies the
 document; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
 
 ## `md schema about`

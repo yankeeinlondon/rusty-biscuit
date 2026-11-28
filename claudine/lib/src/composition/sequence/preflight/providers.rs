@@ -150,7 +150,7 @@ pub(crate) struct DependencyScope {
 }
 
 impl DependencyScope {
-    fn reaches(&self, marked: &HashSet<String>) -> bool {
+    pub(crate) fn reaches(&self, marked: &HashSet<String>) -> bool {
         let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
         marked.contains(&self.entry)
             || derived_deferred_keys(self.values.iter().map(|(key, value)| (key, value)), &no_roots, marked)
@@ -458,12 +458,24 @@ fn predict_key(
 /// a prepared value is followed through its authored value, so every link
 /// of a derived chain is kept.
 fn with_scope(key: &str, value: &Value, layers: &HintLayers<'_>, feeds: Option<String>) -> DependencyScope {
+    with_value_scope(key, value, layers.step_authored, layers.step_frontmatter, feeds)
+}
+
+/// [`with_scope`] over the step view `step_frontmatter` and the authored
+/// values `step_authored` of the keys it holds prepared.
+pub(crate) fn with_value_scope(
+    key: &str,
+    value: &Value,
+    step_authored: &Map<String, Value>,
+    step_frontmatter: &SharedFrontmatter,
+    feeds: Option<String>,
+) -> DependencyScope {
     let entry = format!("\u{0}with.{key}");
     let lookup = |name: &str| {
         if name == entry {
             Some(value)
         } else {
-            layers.step_authored.get(name).or_else(|| layers.step_frontmatter.get(name))
+            step_authored.get(name).or_else(|| step_frontmatter.get(name))
         }
     };
     DependencyScope { values: read_closure(&entry, &lookup).into_iter().collect(), entry, feeds }
@@ -631,7 +643,7 @@ fn value_text(value: &Value) -> Option<String> {
 
 /// Whether `value` holds a `{{ … }}` span or a `$( … )` substitution: the
 /// only forms that read another value. Anything else is a literal.
-fn reads_expression(value: &Value) -> bool {
+pub(crate) fn reads_expression(value: &Value) -> bool {
     value_text(value).is_some_and(|text| text.contains("{{") || text.contains("$("))
 }
 
@@ -642,7 +654,7 @@ fn contains_expression(value: &Value) -> bool {
 /// Every key a lifecycle `set` (or a `side_effect`'s `set`) in `value` writes,
 /// at any depth, with an `fm.` prefix removed. Over-collects on purpose: a
 /// mapping named `set` that is plain data only moves a hint to the launch.
-pub(crate) fn collect_written_keys(value: &Value, written: &mut HashSet<String>) {
+pub fn collect_written_keys(value: &Value, written: &mut HashSet<String>) {
     match value {
         Value::Object(map) => {
             if let Some(Value::Object(set)) = map.get("set") {

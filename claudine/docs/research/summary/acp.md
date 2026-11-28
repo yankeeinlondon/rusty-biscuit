@@ -4,7 +4,7 @@ sequence:
 - name: iterate
 - name: finalize
 prompt: |-
-  The files found in @claudine/docs/research/acp/*.md all represent research done on how the ACP protocol is supported on the Agentic CLI providers that Claudine supports.
+  The files found in @claudine/docs/research/providers/acp/*.md all represent research done on how the ACP protocol is supported on the Agentic CLI providers that Claudine supports.
 
   Your task is to create a summary document that describes:
 

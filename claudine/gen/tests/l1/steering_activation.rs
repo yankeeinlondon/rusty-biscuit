@@ -18,8 +18,8 @@ fn area() -> PathBuf {
     let root = biscuit_test_harness::manifest_dir!();
     // The repository inputs these tests read, spelled so CI schedules them.
     let _inputs = [
-        root.join("../docs/research/steering"),
-        root.join("../docs/research/non-interactive-sessions"),
+        root.join("../docs/research/providers/steering"),
+        root.join("../docs/research/providers/non-interactive-sessions"),
         root.join("../docs/providers/steering-activation.yaml"),
         root.join("../docs/providers.yaml"),
     ];
@@ -194,9 +194,9 @@ fn a_blocked_profile_cannot_be_granted_and_blocks_are_validated() {
 
 #[test]
 fn malformed_research_references_refuse_projection() {
-    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md"), &context_at(&area()))
+    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/providers/steering/pi.md"), &context_at(&area()))
     .unwrap();
-    let execution = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md"), &context_at(&area()))
+    let execution = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/providers/non-interactive-sessions/pi.md"), &context_at(&area()))
     .unwrap();
     assert!(project_research("pi", &steering, &execution).is_ok(), "control projects");
 
@@ -236,9 +236,9 @@ fn malformed_research_references_refuse_projection() {
 #[test]
 fn discovery_projection_walks_the_input_robustness_matrix() {
     use serde_json::{Value, json};
-    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md"), &context_at(&area())).unwrap();
+    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/providers/steering/pi.md"), &context_at(&area())).unwrap();
     let execution =
-        claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md"), &context_at(&area())).unwrap();
+        claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/providers/non-interactive-sessions/pi.md"), &context_at(&area())).unwrap();
 
     // Control: every researched record projects with its typed method.
     let control = project_research("pi", &steering, &execution).expect("control projects");

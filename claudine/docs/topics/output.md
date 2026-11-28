@@ -32,8 +32,10 @@ text.
 
 Three things change what reaches stdout, each one because you asked for it:
 
-- `--dry-run` launches no provider, so stdout carries the composed prompt
-  instead of an answer (`claudine compose --dry-run task.md > prompt.md`).
+- `--dry-run` on `compose`, `inline-compose`, or `sequence` runs nothing, so
+  stdout carries each composed prompt instead of an answer
+  (`claudine compose --dry-run task.md > prompt.md`). See
+  [A dry run's report](#a-dry-runs-report).
 - `inline-compose` has the provider rewrite the document itself; the
   rewritten document, not stdout, is its result.
 - A lifecycle action that writes to the `stdout` channel adds its line to
@@ -88,17 +90,50 @@ wc -c answer.txt  # 0 answer.txt
 A script can therefore treat a nonempty stdout together with exit status `0` as
 an answer, and anything else as a run that produced none.
 
+A `sequence` that stops at preflight, before its first task, puts a report
+on stderr in place of the single error block: every error and warning its
+preflight could prove, grouped by task, then a closing
+`The run stopped at: …` line naming the error the run returned (left out
+when a row already says it). See
+[`claudine sequence` → Failures and exit codes](../cli/sequence.md#failures-and-exit-codes).
+
 ## Exit status
 
 | Status | Meaning |
 |---|---|
 | 0 | the run succeeded |
 | 1 | the run failed, including a failure before the provider started, and a provider that exited 0 without completing its work |
-| 2 | a usage error: Claudine refused the command line and ran nothing |
+| 2 | a usage error: Claudine refused the command line and ran nothing; or a `--dry-run` that found an error or warning (see [A dry run's report](#a-dry-runs-report)) |
 | 130 | interrupted with Ctrl-C |
 
 Exit 0 from the provider alone is not success; see
 [Non-Interactive Sessions → Exit Code 0 Is Not Success](non-interactive-sessions.md#exit-code-0-is-not-success).
+
+## A dry run's report
+
+`--dry-run` on `compose`, `inline-compose`, or `sequence` checks the document
+without running anything (see
+[Composition → Dry Run](composition.md#dry-run)). Its streams follow the same
+split:
+
+- **stderr** carries the report: each problem found, each check that could
+  not run, and a closing summary line.
+- **stdout** carries each composed preview.
+- With `--json` (accepted only beside `--dry-run`), stdout carries one JSON
+  report and stderr stays empty:
+
+  ```sh
+  claudine compose task.md --dry-run --json | jq -r '.diagnostics[].code'
+  # composition.provider_unresolved
+  ```
+
+The exit status is `2` when the report holds any error or warning, and `0`
+when it holds none; a dry run never exits `1`. A script can therefore treat
+any non-zero status as "fix the document first".
+
+Every finding carries a specific `code` that a script can match. A problem
+the check cannot classify is reported as `internal.bug`: that is a defect in
+Claudine to report, not something the document can fix.
 
 ## `--output` is refused
 
@@ -130,7 +165,8 @@ never receive text with exit status `0`. The option is not shown in `--help`.
 ## For comparison: `md --output`
 
 Darkmatter's `md` CLI, which Claudine uses to compose Markdown, does have a
-working `--output`. Claudine has no equivalent today, and whether it will adopt
+working `--output`. Claudine has no equivalent today beyond a dry run's
+`--json`, and whether it will adopt
 the same design is not decided. The `md` contract, in short:
 
 - **One selector, two families.** _Formatted_ targets (`terminal`, `plain`,

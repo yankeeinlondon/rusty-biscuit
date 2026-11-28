@@ -1,0 +1,16 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: projection(&err)
+---
+{
+  "code": "composition.failed",
+  "category": "Composition",
+  "disposition": "Correctable",
+  "origin": "Author",
+  "detail": {
+    "source_path": null
+  },
+  "snapshot_cause": null,
+  "message": "sequence item 4 is null; every item must be a scalar or an object",
+  "hint": "Replace the `null` item with a name or an object, or remove it."
+}

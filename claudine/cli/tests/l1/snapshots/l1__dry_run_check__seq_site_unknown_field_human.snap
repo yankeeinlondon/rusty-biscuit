@@ -1,0 +1,12 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: "portable_text(&fixture, &human.stderr)"
+---
+Dry run of seq.md (no commands run)
+
+task t (sequence[0])
+  ✗ Additional properties are not allowed ('whem' was unexpected)
+      at t.yaml:3:1
+      hint: did you mean `when`?
+
+Dry run found 1 error and 0 warnings; 0 checks not run. Previewed 0 of 1 task.

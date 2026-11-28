@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use claudine::composition::schema::TriggerFindings;
-use claudine::composition::schema::bundle::claudine_schema_bundle;
+use claudine::composition::schema::bundle::with_claudine_registration;
 use claudine::composition::{
     LoopAmbient, LoopCondition, LoopExpressionLookup, build_preflight_graph,
     capture_file_resolution_context, evaluate_condition, pre_validate_schema,
@@ -353,9 +353,8 @@ fn d3_scrub_and_check() {
         // pays once.
         let document_context = context.for_source(&source.resolved_path);
         let discovery = measure(9, || {
-            DarkmatterSchemas::new(document_context.clone())
-                .with_embedded_trigger_bundle(claudine_schema_bundle())
-                .and_then(DarkmatterSchemas::with_trigger_discovery)
+            with_claudine_registration(DarkmatterSchemas::new(document_context.clone()))
+                .with_trigger_discovery()
                 .expect("discovers")
         });
         report(

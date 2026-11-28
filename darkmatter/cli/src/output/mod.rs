@@ -16,7 +16,7 @@ use biscuit_terminal::output::{
 };
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
-use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+use darkmatter::markdown::compose::expression::{Diagnostic, DiagnosticSource, Severity};
 use renderable::{CommandOutput, OutputOptions, TerminalProfile};
 
 /// The code of the warning a fractional `--width` produces.
@@ -160,11 +160,14 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         expected_type: None,
         actual_type: None,
         span: None,
-        iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
         grants_needed: None,
         schema_default: None,
+        related: Vec::new(),
+        hint: None,
+        notes: Vec::new(),
+        trail: darkmatter::findings::Trail::default(),
     }
 }
 
@@ -181,20 +184,44 @@ static RUN_NOTICES: std::sync::Mutex<Vec<Diagnostic>> = std::sync::Mutex::new(Ve
 
 /// Reports run-level `notices` once for the invocation: on stderr as status
 /// rows for a formatted output (an `info` notice as an info row, every other
-/// one as a warning row), or held for the data output's `diagnostics`
-/// (the first [`command::CommandRun`] or [`report::ReportSink`] to begin takes
-/// them), keeping stderr empty.
+/// one as a warning row), each led by its `file:line:column` when the notice
+/// has a position ([`notice_text`]), or held for the data output's
+/// `diagnostics` (the first [`command::CommandRun`] or [`report::ReportSink`]
+/// to begin takes them), keeping stderr empty.
 pub fn report_run_notices(notices: Vec<Diagnostic>, data_output: bool) {
     if data_output {
         RUN_NOTICES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(notices);
     } else {
         for notice in &notices {
+            let text = notice_text(notice);
             match notice.severity {
-                Severity::Info => stderr_status(&notice.message, biscuit_terminal::prelude::StatusState::Info),
-                _ => stderr_warning(&notice.message),
+                Severity::Info => stderr_status(&text, biscuit_terminal::prelude::StatusState::Info),
+                _ => stderr_warning(&text),
             }
         }
     }
+}
+
+/// A run notice and its related declarations, with their authored positions
+/// when available.
+#[must_use]
+pub fn notice_text(notice: &Diagnostic) -> String {
+    let located = |source: &DiagnosticSource| {
+        let file = biscuit_file::to_forward_slash_string(source.file.as_ref()?);
+        Some(match (source.line, source.column) {
+            (Some(line), Some(column)) => format!("{file}:{line}:{column}"),
+            _ => file,
+        })
+    };
+    let mut text = match notice.source.as_ref().filter(|source| source.line.is_some() && source.column.is_some()).and_then(located) {
+        Some(at) => format!("{at}: {}", notice.message),
+        None => notice.message.clone(),
+    };
+    for related in &notice.related {
+        let prefix = located(&related.source).map(|at| format!("{at}: ")).unwrap_or_default();
+        text.push_str(&format!("\nrelated: {prefix}{}", related.message));
+    }
+    text
 }
 
 /// The held run-level notices; empty for every later caller.

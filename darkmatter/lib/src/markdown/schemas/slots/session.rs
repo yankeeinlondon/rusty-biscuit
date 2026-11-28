@@ -55,6 +55,7 @@ use crate::markdown::compose::DataRuntime;
 use super::observations::SessionObservations;
 use crate::markdown::compose::context::capture::CapturedObservations;
 use crate::markdown::compose::expression::iteration::IterationLimits;
+use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 use crate::markdown::compose::shell_expansion::ShellApprovalHandler;
@@ -91,6 +92,9 @@ pub struct SlotSession {
     data: DataRuntime,
     observations: Arc<SessionObservations>,
     remote: Option<RemoteFetchRuntime>,
+    /// A dry run's shared observations: the slots' remote runtime for a
+    /// fetch policy is the one every pass of the invocation reads through.
+    shared: Option<crate::markdown::compose::passive::PassiveObservations>,
     hosts: Vec<String>,
     network: Option<NetworkPermission>,
     repository_root: Option<PathBuf>,
@@ -104,6 +108,9 @@ pub struct SlotSession {
     limits: Option<IterationLimits>,
     grants: OnceLock<Arc<SlotGrants>>,
     pinned: Mutex<HashMap<ResolutionKey, Pin>>,
+    /// URLs a reference check left unread because they needed an approval
+    /// it never asks for, not yet taken by [`Self::take_unapproved_urls`].
+    unapproved_urls: Mutex<Vec<String>>,
 }
 
 /// Where a session's permissions come from.
@@ -209,6 +216,7 @@ impl SlotSession {
             data,
             observations: Arc::new(SessionObservations::supplied(CapturedObservations::default())),
             remote: None,
+            shared: None,
             hosts: Vec::new(),
             network: None,
             repository_root: None,
@@ -222,6 +230,7 @@ impl SlotSession {
             limits: None,
             grants: OnceLock::new(),
             pinned: Mutex::new(HashMap::new()),
+            unapproved_urls: Mutex::new(Vec::new()),
         }
     }
 
@@ -234,31 +243,54 @@ impl SlotSession {
     /// the document never names) has it captured when it first runs: the
     /// `Repo` group from the request's repository observation, the others
     /// through the request's context authority, so a frozen context still
-    /// fails that slot. A command that composes more than once
+    /// fails that slot. The repository is always the checkout the request
+    /// resolves in: options whose observation describes another checkout
+    /// (captured in a parent of the request's nested one) have `Repo`
+    /// captured from the request's own repository instead, and slot
+    /// resolutions keyed by its root. A command that composes more than once
     /// builds it once from its first request and attaches it to every pass
     /// with [`ComposeOptions::with_slot_session`](crate::markdown::compose::ComposeOptions::with_slot_session).
     /// Attach the command's data runtime to the request first
     /// (`ComposeOptions::with_data_runtime`): a request without one gives the
     /// session a runtime of its own, whose reads never reach the command's
     /// read set.
+    ///
+    /// A dry run's session ([`ComposeOptions::with_dry_run`](crate::markdown::compose::ComposeOptions::with_dry_run))
+    /// is a [`SessionMode::ReferenceCheck`] one: it never asks.
     pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
+        let checkout = request.resolution_context();
+        let own_repository = options.slot_repository_describes(checkout);
+        let repository_root = if own_repository {
+            options.slot_repository_root()
+        } else {
+            checkout.repository_root().map(Path::to_path_buf)
+        };
         let mut session = Self::new(options.data_runtime())
-            .with_repository_root(options.slot_repository_root())
+            .with_repository_root(repository_root)
             .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect())
             .with_network(options.network_permission());
-        session.observations = Arc::new(SessionObservations::for_request(
-            options.context(),
-            options.context_authority(),
-            options.slot_repository(),
-        ));
+        session.observations = Arc::new(if own_repository {
+            SessionObservations::for_request(options.context(), options.context_authority(), options.slot_repository())
+        } else {
+            // Options captured in another checkout (a parent of the
+            // request's nested one) keep their `ctx.*` values, but a slot's
+            // `package()` describes the request's own repository.
+            SessionObservations::for_request_in_checkout(options.context(), options.context_authority(), checkout)
+        });
         session.remote = options.remote_fetch.clone();
+        session.shared = options.passive_session().map(|passive| passive.observations().clone());
         session.configuration = Configuration::CapturedFor(
             Arc::clone(request.config_snapshot()),
             Box::new(request.resolution_context().clone()),
         );
         if let Some(handler) = &options.shell_approval_handler {
             session = session.with_handler(Arc::clone(handler));
+        }
+        // A dry run asks nothing: a slot whose read no grant allows leaves
+        // its template unresolved, as a reference check does.
+        if options.is_dry_run() {
+            session = session.with_mode(SessionMode::ReferenceCheck);
         }
         session
     }
@@ -279,6 +311,18 @@ impl SlotSession {
         session.configuration = Configuration::LoadFor(Box::new(context.clone()));
         session.observations = Arc::new(SessionObservations::for_context(context));
         session
+    }
+
+    /// Fetches the slots' URLs through a dry run's shared runtime for the
+    /// slots' fetch policy, so a URL the run's other passes fetched under
+    /// the same decision is not requested again. Each read is still judged
+    /// by this session's gate first. A session built
+    /// [`for_request`](Self::for_request) of a dry run shares its
+    /// observations already.
+    #[must_use]
+    pub fn with_passive_observations(mut self, observations: crate::markdown::compose::passive::PassiveObservations) -> Self {
+        self.shared = Some(observations);
+        self
     }
 
     /// Resolves no further than `mode`.
@@ -406,6 +450,13 @@ impl SlotSession {
         self
     }
 
+    /// The URLs a [`SessionMode::ReferenceCheck`] resolution left unread
+    /// since the last call because they needed an approval it never asks
+    /// for (`permissions.network: ask`), each once, in the order met.
+    pub(crate) fn take_unapproved_urls(&self) -> Vec<String> {
+        std::mem::take(&mut *self.unapproved_urls.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
     /// How far this session resolves.
     pub fn mode(&self) -> SessionMode {
         self.mode
@@ -512,6 +563,12 @@ impl SlotSession {
             Err(SchemaError::SlotResolution(failure))
                 if self.mode == SessionMode::ReferenceCheck && needs_grant(&failure.error) =>
             {
+                let mut unapproved = self.unapproved_urls.lock().unwrap_or_else(PoisonError::into_inner);
+                for url in unapproved_urls(&failure.error) {
+                    if !unapproved.contains(&url) {
+                        unapproved.push(url);
+                    }
+                }
                 Err(unresolved())
             }
             other => other,
@@ -602,10 +659,22 @@ impl SlotSession {
         outcome
     }
 
+    /// The runtime slots fetch through: the grants' own policy, and in a
+    /// dry run the invocation's runtime for that policy, so a URL another
+    /// pass fetched under the same decision is not requested again. The
+    /// slot gate still judges each read before the fetch.
+    fn slot_remote(&self, grants: &SlotGrants) -> RemoteFetchRuntime {
+        let runtime = grants.remote_runtime(self.remote.as_ref());
+        match &self.shared {
+            Some(shared) => shared.remote(runtime),
+            None => runtime,
+        }
+    }
+
     fn evaluator(&self, grants: &Arc<SlotGrants>, gates: Arc<dyn SlotGates>) -> SlotEvaluator {
         let evaluator = SlotEvaluator::new(self.data.clone())
             .with_gates(gates)
-            .with_remote(grants.remote_runtime(self.remote.as_ref()))
+            .with_remote(self.slot_remote(grants))
             .with_session_observations(Arc::clone(&self.observations));
         match self.limits {
             Some(limits) => evaluator.with_limits(limits),
@@ -712,11 +781,35 @@ fn needs_grant(error: &SlotResolutionError) -> bool {
     }
 }
 
+/// The URLs whose reads `error`'s slots needed an approval for.
+fn unapproved_urls(error: &SlotResolutionError) -> Vec<String> {
+    use crate::markdown::compose::expression::read_gate::ReadLocation;
+    let SlotResolutionError::Failed(failed) = error else {
+        return Vec::new();
+    };
+    failed
+        .iter()
+        .filter_map(|(_, failure)| {
+            let mut current: Option<&(dyn std::error::Error + 'static)> = Some(failure.error());
+            while let Some(error) = current {
+                if let Some(ExpressionError::SlotReadRefused { target, refusal: GateRefusal::ApprovalRequired { .. } }) =
+                    error.downcast_ref::<ExpressionError>().map(ExpressionError::without_callbacks)
+                    && let ReadLocation::Remote(url) = &target.location
+                {
+                    return Some(url.to_string());
+                }
+                current = error.source();
+            }
+            None
+        })
+        .collect()
+}
+
 /// The key a template is known by on the resolution stack: the schema file
 /// that holds it (the first file the resolution read), else its identity.
 fn template_key(pending: &PendingSchema, template: &str) -> String {
     match pending.read_sources().first() {
-        Some((path, _)) => biscuit_file::to_portable_string(path),
+        Some((path, _)) => biscuit_file::to_forward_slash_string(path),
         None => template.to_string(),
     }
 }
@@ -825,7 +918,7 @@ pub(crate) fn resolve_contract_slots(
     }
     let template = slots
         .iter()
-        .find_map(|slot| slot.origin.as_deref().map(biscuit_file::to_portable_string))
+        .find_map(|slot| slot.origin.as_deref().map(biscuit_file::to_forward_slash_string))
         .unwrap_or_else(|| "load_data contract".to_string());
     if in_progress(session.id, &template) {
         return Some(Err(cycle_error(&slots, &template, None)));

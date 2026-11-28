@@ -58,6 +58,7 @@ static WIKI_UNIVERSES: AtomicUsize = AtomicUsize::new(0);
 static WIKI_PATH_FACTS: AtomicUsize = AtomicUsize::new(0);
 static WIKI_PORTABILITY_KEYS: AtomicUsize = AtomicUsize::new(0);
 static DOCUMENT_TABLES: AtomicUsize = AtomicUsize::new(0);
+static HOST_LOADS: AtomicUsize = AtomicUsize::new(0);
 /// Distinct threads, so the set stays as small as the thread count.
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
@@ -293,6 +294,17 @@ pub(crate) fn record_registry_scan() -> RegistryScan {
     let in_flight = REGISTRY_SCANS_IN_FLIGHT.fetch_add(1, Ordering::SeqCst) + 1;
     REGISTRY_SCANS_PEAK.fetch_max(in_flight, Ordering::SeqCst);
     RegistryScan(())
+}
+
+/// Counts one host-registration load of a configuration.
+pub(crate) fn record_host_load() {
+    HOST_LOADS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Host-registration loads run so far, each one configuration's passive
+/// load and the hashing of what it read.
+pub fn host_loads() -> usize {
+    HOST_LOADS.load(Ordering::SeqCst)
 }
 
 /// The most trigger-registry scans ever in progress at once.

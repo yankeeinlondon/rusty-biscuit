@@ -132,15 +132,20 @@ fn validated(result: Result<YamlOutcome, SchemaError>) -> darkmatter::markdown::
 // ── Shipped definitions ────────────────────────────────────────────────────
 
 #[test]
-fn the_shipped_registry_claims_the_four_envelope_kinds() {
+fn the_shipped_registry_claims_every_shipped_envelope_kind() {
     let registry = darkmatter::markdown::schemas::shipped_kind_registry();
     let claimed: Vec<&str> = registry.claims().map(|(kind, _)| kind).collect();
-    assert_eq!(claimed, ["namespace-schema", "schema", "schema-trigger", "yaml-schema"]);
+    assert_eq!(
+        claimed,
+        ["expression-schema", "mutation-schema", "namespace-schema", "schema", "schema-trigger", "yaml-schema"]
+    );
     for (kind, path) in [
         ("schema", "simplified-schema/schemas/schema.yaml"),
         ("yaml-schema", "simplified-schema/schemas/yaml-schema.yaml"),
         ("schema-trigger", "simplified-schema/schemas/schema-trigger.yaml"),
         ("namespace-schema", "simplified-schema/schemas/namespace-schema.yaml"),
+        ("expression-schema", "simplified-schema/schemas/expression-schema.yaml"),
+        ("mutation-schema", "simplified-schema/schemas/mutation-schema.yaml"),
     ] {
         assert_eq!(healthy_source(&registry, kind), DefinitionSource::Shipped(path));
     }
@@ -152,12 +157,49 @@ fn the_shipped_registry_claims_the_four_envelope_kinds() {
             PathBuf::from("simplified-schema/schemas/yaml-schema.yaml"),
             PathBuf::from("simplified-schema/schemas/schema-trigger.yaml"),
             PathBuf::from("simplified-schema/schemas/namespace-schema.yaml"),
+            PathBuf::from("simplified-schema/schemas/expression-schema.yaml"),
+            PathBuf::from("simplified-schema/schemas/mutation-schema.yaml"),
         ]
     );
 }
 
+/// A callable catalog opened as a whole YAML document is judged by its
+/// shipped kind definition, strictly, then by the syntax-only kind check;
+/// the definition's refusal and the check's finding are both located.
+#[test]
+fn a_callable_catalog_validates_against_its_shipped_kind_definition() {
+    const CATALOG: &str = "kind: expression-schema\ncategories: [Text]\ntypes:\n  pad: \"function(parameters(x: string); returns(string); category(Text))\"\n";
+    let schemas = DarkmatterSchemas::new(Fixture::new().context(&std::env::temp_dir().join("x.yaml"), &[]))
+        .with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
+    let valid = validated(schemas.validate_yaml_document(CATALOG, Path::new("text.yaml")));
+    assert_eq!(valid.route, Route::Kind("expression-schema".into()));
+    assert_eq!(valid.definition, "built-in simplified-schema/schemas/expression-schema.yaml");
+    assert!(valid.report.valid, "{:?}", valid.report.problems);
+
+    let mutation = CATALOG.replace("expression-schema", "mutation-schema");
+    let valid = validated(schemas.validate_yaml_document(&mutation, Path::new("actions.yaml")));
+    assert_eq!(valid.route, Route::Kind("mutation-schema".into()));
+    assert!(valid.report.valid, "{:?}", valid.report.problems);
+
+    // Strict shape: a number description is refused, never converted.
+    let numbered = CATALOG.replace("categories:", "description: 5\ncategories:");
+    let refused = validated(schemas.validate_yaml_document(&numbered, Path::new("text.yaml")));
+    assert!(!refused.report.valid);
+    assert!(refused.report.problems.iter().any(|problem| problem.path == "/description"), "{:?}", refused.report.problems);
+
+    let undeclared = CATALOG.replace("category(Text)", "category(Math)");
+    let result = schemas.validate_yaml_document(&undeclared, Path::new("text.yaml"));
+    let Err(SchemaError::CallableCatalog { path, message, span: Some(span), related }) = result else {
+        panic!("expected a located catalog error, got {result:?}");
+    };
+    assert_eq!(path, Path::new("text.yaml"));
+    assert!(message.contains("category `Math` is not declared"), "{message}");
+    assert_eq!(&undeclared[span], "function(parameters(x: string); returns(string); category(Math))");
+    assert!(related.is_empty(), "{related:?}");
+}
+
 /// Each shipped file, as compiled in, validates against the shipped
-/// registry: all four through `yaml-schema.yaml`, which therefore validates
+/// registry: all six through `yaml-schema.yaml`, which therefore validates
 /// itself.
 #[test]
 fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition() {
@@ -173,6 +215,14 @@ fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition(
         (
             "simplified-schema/schemas/namespace-schema.yaml",
             include_str!("../../../../simplified-schema/schemas/namespace-schema.yaml"),
+        ),
+        (
+            "simplified-schema/schemas/expression-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/expression-schema.yaml"),
+        ),
+        (
+            "simplified-schema/schemas/mutation-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/mutation-schema.yaml"),
         ),
     ] {
         let validation = validated(schemas.validate_yaml_document(text, Path::new(path)));
@@ -203,6 +253,46 @@ fn a_types_table_entry_named_extends_is_an_ordinary_declaration() {
         let validation = validated(schemas.validate_yaml_document(text, &path));
         assert_eq!(validation.route, Route::Kind(kind.into()), "{text}");
         assert!(validation.report.valid, "{text}: {:?}", validation.report.problems);
+    }
+}
+
+/// A local definition's optional `types` table, by shape, as the direct
+/// check of the definition and the local kind lookup judge it: absent,
+/// blank or `null` (no named types), and populated are a valid definition
+/// claiming its kind; numeric and empty are invalid at `/types` and claim
+/// it broken.
+#[test]
+fn a_local_definition_s_optional_types_table_keeps_one_rule_in_both_tiers() {
+    const ROSTER: &str = "kind: yaml-schema\n$schema:\n    kind: literal(roster; required)\n    platforms: string[](required)\n";
+    for (types, valid) in [
+        ("", true),
+        ("types:\n", true),
+        ("types: null\n", true),
+        ("types:\n    platform: string\n", true),
+        ("types: 7\n", false),
+        ("types: {}\n", false),
+    ] {
+        let text = format!("{ROSTER}{types}");
+        let fixture = Fixture::new();
+        let definition = fixture.package().join("schemas/roster.yaml");
+        write(&definition, &text);
+        let document = fixture.package().join("docs/roster.yaml");
+        let context = fixture.context(&document, &[]);
+
+        let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
+        let direct = validated(schemas.validate_yaml_document(&text, &definition));
+        assert_eq!(direct.route, Route::Kind("yaml-schema".into()), "{types:?}");
+        let paths: Vec<&str> = direct.report.problems.iter().map(|problem| problem.path.as_str()).collect();
+        if valid {
+            assert!(paths.is_empty(), "{types:?}: {:?}", direct.report.problems);
+            assert_eq!(healthy_source(&registry(&context), "roster"), DefinitionSource::File(definition.clone()), "{types:?}");
+            let selected = validated(fixture.validate(&document, "kind: roster\nplatforms: [linux]\n"));
+            assert_eq!(selected.route, Route::Kind("roster".into()), "{types:?}");
+            assert!(selected.report.valid, "{types:?}: {:?}", selected.report.problems);
+        } else {
+            assert!(!paths.is_empty() && paths.iter().all(|path| *path == "/types"), "{types:?}: {:?}", direct.report.problems);
+            assert!(!matches!(registry(&context).claim("roster"), Some(Claim::Healthy(_))), "{types:?}: no healthy claim");
+        }
     }
 }
 
@@ -554,6 +644,29 @@ fn a_kind_definition_holding_a_slot_is_a_broken_claim_with_the_slot_code() {
         assert_eq!(own.report.problems[0].code, ValidationProblemCode::KindCheck, "{case}");
         assert!(own.report.problems[0].message.contains("a kind definition cannot hold"), "{case}: {:?}", own.report.problems);
     }
+}
+
+/// A local definition whose `kind` claim goes through a named type too
+/// broad to claim a finite set is incomplete, its failure spanning the
+/// `kind` declaration in `$schema`; its own check reports that declaration
+/// at the same position, the path a registered copy is refused at.
+#[test]
+fn a_named_kind_claim_that_claims_nothing_is_incomplete_and_located_at_its_declaration() {
+    let fixture = Fixture::new();
+    let definition = fixture.repo().join("schemas/token.yaml");
+    let text = "kind: yaml-schema\n$schema:\n    kind: kind-token(required)\n    name: string\ntypes:\n    kind-token: string\n";
+    write(&definition, text);
+    let registry = registry(&fixture.context(&fixture.package().join("a.yaml"), &[]));
+    let [incomplete] = registry.incomplete() else { panic!("{:#?}", registry.incomplete()) };
+    assert_eq!(incomplete.file, definition);
+    let declaration = text.find("kind-token(required)").unwrap();
+    let SchemaError::SchemaDocument { span, .. } = incomplete.problem.as_ref() else { panic!("{:?}", incomplete.problem) };
+    assert_eq!(span.as_ref().map(|span| span.start), Some(declaration), "{:?}", incomplete.problem);
+
+    let own = validated(fixture.validate(&definition, text));
+    let [problem] = own.report.problems.as_slice() else { panic!("{:?}", own.report.problems) };
+    assert_eq!(problem.path, "/$schema/kind");
+    assert_eq!(problem.line.zip(problem.column), Some((3, 11)), "{problem:?}");
 }
 
 #[test]

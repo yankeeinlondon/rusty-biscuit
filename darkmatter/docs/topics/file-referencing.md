@@ -75,6 +75,23 @@ md compose /work/notes/todo.md    # an absolute path may point anywhere
 Outside every repository nothing names a tree, so a relative argument may
 point anywhere.
 
+A document in another Git repository takes its tree from that repository,
+whether you open it directly or a document in the repository you ran `md` in
+reaches it. Its `./`, bare, `&`, and `^` references resolve in its own
+repository, while `@` keeps searching the folder you ran `md` from. The
+repository is the nearest checkout above the document (a folder holding a
+`.git` folder or `.git` file), so a checkout nested inside another one, such
+as a submodule at `/work/app/vendor`, is its own repository too:
+
+```md
+<!-- /work/app/root.md, composed from /work/app -->
+::file ~/notes/child.md
+
+<!-- ~/notes/child.md, in its own checkout -->
+::file &/README.md   <!-- ~/notes/README.md -->
+::file @magic.md     <!-- /work/app/magic.md -->
+```
+
 ## When a reference fails
 
 Every failure names a stable class (`no-match`, `invalid-reference`,

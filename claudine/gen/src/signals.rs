@@ -146,8 +146,8 @@ fn load_doc(
     slug: &'static str,
     context: &FileResolutionContext,
 ) -> Result<DocTable, GenError> {
-    let doc_path = area.join(format!("docs/research/signals/{slug}.md"));
-    let sidecar = area.join("docs/research/signals/_schema.yaml");
+    let doc_path = area.join(format!("docs/research/providers/signals/{slug}.md"));
+    let sidecar = area.join("docs/research/providers/signals/_schema.yaml");
     if !sidecar.is_file() {
         return Err(GenError::SidecarMissing { path: sidecar });
     }

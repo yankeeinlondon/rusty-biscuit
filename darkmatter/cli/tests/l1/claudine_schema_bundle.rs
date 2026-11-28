@@ -1,15 +1,19 @@
 //! `md schema validate` and `md schema triggers` against Claudine's shipped
-//! schema bundle (`claudine/schemas/`, `2026-10-21-claudine-schemas`
+//! schema bundle (`claudine/registration/`, `2026-10-21-claudine-schemas`
 //! criteria 1 and 5, `2026-10-26-task-inputs-and-providers` criterion 9, and
 //! `2026-10-30-claudine-recursive-schemas` criteria 4 and 8):
-//! the seven files are copied into a fixture repository's `schemas/` folder,
-//! and a representative subset of Claudine's AC5 and sequence-schema fixture
-//! corpora, which carry no `$schema:` pointer, is discovered and validated
-//! through the CLI. The full corpora are judged in-process by Claudine's
+//! the bundle's trigger, library, and namespace files and its lifecycle
+//! artifact are installed in the fixture home as a format 3 `claudine` host
+//! registration, as Claudine's setup publishes it, and a representative
+//! subset of Claudine's AC5 and sequence-schema fixture corpora, which carry
+//! no `$schema:` pointer, is judged through the CLI by the registered
+//! triggers. The full corpora are judged in-process by Claudine's
 //! `claudine_schemas` and `sequence_schema` suites.
 
 use crate::common;
+use crate::host_fixtures::{Bundle, MANIFEST_NAME};
 
+use biscuit_file::{PathIdentity, canonicalize_simplified};
 use common::{CliProcessFixture, write};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -25,14 +29,27 @@ fn initialize_repository(root: &Path) {
     std::fs::write(git_dir.join("config"), "[core]\nrepositoryformatversion = 0\nbare = false\n").unwrap();
 }
 
-/// A fixture repository holding `bundle` in `schemas/` and `documents` in
-/// `docs/`; returns the document paths.
+/// A fixture repository holding `documents` in `docs/`, whose home registers
+/// `bundle` as the `claudine` host (installed under `home/.claudine/`, every
+/// file in `schemas/`, `globals.lifecycle.json` as its lifecycle artifact);
+/// returns the document paths.
 fn repository(process: &CliProcessFixture, bundle: &[(&str, &str)], documents: &[(&str, &str)]) -> Vec<PathBuf> {
     let root = process.cwd();
     initialize_repository(root);
+    let mut registration = Bundle {
+        host: "claudine".to_string(),
+        version: "0.0.1".to_string(),
+        files: Vec::new(),
+        lifecycle: "schemas/globals.lifecycle.json".to_string(),
+        members: Default::default(),
+    };
     for (name, text) in bundle {
-        write(&root.join("schemas").join(name), text);
+        let path = format!("schemas/{name}");
+        registration =
+            if path == registration.lifecycle { registration.with_member(&path, text) } else { registration.with_file(&path, text) };
     }
+    registration.write_to(&process.home().join(".claudine"));
+    write(&process.home().join(".darkmatter.yaml"), &format!("register:\n  - ./.claudine/{MANIFEST_NAME}\n"));
     documents
         .iter()
         .map(|(name, text)| {
@@ -110,20 +127,35 @@ fn source_position(text: &str, needle: &str) -> (u64, u64) {
         .unwrap_or_else(|| panic!("`{needle}` occurs in the fixture"))
 }
 
+/// The trace line of the trigger file named `trigger`. The name must follow a
+/// path separator, so `composition.yaml` never finds
+/// `inline-composition.yaml`.
+fn trigger_line<'a>(trace: &'a str, trigger: &str) -> &'a str {
+    trace
+        .lines()
+        .find(|line| line.contains(&format!("/{trigger}")) || line.contains(&format!("\\{trigger}")))
+        .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"))
+}
+
 /// Asserts the trigger trace lists `trigger` as matched (`true`) or not.
 fn assert_trigger(trace: &str, trigger: &str, matched: bool) {
-    let line = trace
-        .lines()
-        .find(|line| line.contains(&format!("{trigger} ")))
-        .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"));
+    let line = trigger_line(trace, trigger);
     assert_eq!(!line.contains("not matched") && line.contains("matched"), matched, "`{trigger}` matched = {matched}:\n{trace}");
 }
 
-/// The `md schema triggers` trace for `document`.
-fn triggers(process: &CliProcessFixture, document: &Path) -> String {
-    let output = process.command().args(["schema", "triggers"]).arg(document).output().expect("md runs");
-    assert!(output.status.success(), "{output:?}");
-    String::from_utf8_lossy(&output.stdout).into_owned()
+/// Asserts whether the installed trigger contributed a layer during validation.
+fn assert_applied_trigger(process: &CliProcessFixture, record: &Value, trigger: &str, applied: bool) {
+    let path = canonicalize_simplified(&process.home().join(".claudine").join("schemas").join(trigger))
+        .expect("installed trigger");
+    let expected = PathIdentity::new(&path);
+    let count = record["layers"]["triggers"]
+        .as_array()
+        .expect("applied trigger paths")
+        .iter()
+        .map(|path| PathIdentity::new(Path::new(path.as_str().expect("trigger path"))))
+        .filter(|path| *path == expected)
+        .count();
+    assert_eq!(count, usize::from(applied), "{trigger} applied = {applied}: {record}");
 }
 
 #[test]
@@ -132,14 +164,20 @@ fn claudine_bundle_loads_and_its_triggers_are_discovered() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -154,22 +192,11 @@ fn claudine_bundle_loads_and_its_triggers_are_discovered() {
     assert_record(&records, "controls-beside-ticket", true, &[]);
     assert_record(&records, "cancelled-container", true, &[]);
 
-    let output = process
-        .command()
-        .args(["schema", "triggers"])
-        .arg(&documents[0])
-        .output()
-        .expect("md runs");
-    assert!(output.status.success(), "{output:?}");
-    let trace = String::from_utf8_lossy(&output.stdout);
-    for trigger in ["claudine.yaml", "inline-compose.yaml"] {
-        let line = trace
-            .lines()
-            .find(|line| line.contains(trigger))
-            .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"));
-        assert!(line.contains("matched"), "`{trigger}` matched:\n{trace}");
-        assert!(!line.contains("not matched"), "`{trigger}` matched:\n{trace}");
-    }
+    // A prompt document is an inline composition, which `composition.yaml`
+    // excludes.
+    let prompt = &records["controls-beside-ticket"];
+    assert_applied_trigger(&process, prompt, "inline-composition.yaml", true);
+    assert_applied_trigger(&process, prompt, "composition.yaml", false);
 }
 
 #[test]
@@ -178,14 +205,20 @@ fn lifecycle_defects_are_reported_at_their_event_and_key() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -198,7 +231,7 @@ fn lifecycle_defects_are_reported_at_their_event_and_key() {
     );
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
-    assert_record(&records, "shell-in-initialize-then", false, &[("/initialize/0/then/0", "\"shell\"")]);
+    assert_record(&records, "shell-in-initialize-then", false, &[("/initialize/0/then/0", "'shell' was unexpected")]);
     assert_record(&records, "misspelled-parameter", false, &[("/start/0/say", "txet")]);
     assert_record(&records, "long-form-in-root-dictionary", false, &[("/success/say", "text")]);
 }
@@ -213,14 +246,20 @@ fn single_action_dictionaries_validate_through_the_cli() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -239,7 +278,7 @@ fn single_action_dictionaries_validate_through_the_cli() {
         assert_record(&records, name, true, &[]);
     }
     assert_record(&records, "long-forms-in-loop-bundle", false, &[("/loop/ensure_file", "file")]);
-    assert_record(&records, "conditional-root-dictionary", false, &[("/start", "not valid under any of the schemas")]);
+    assert_record(&records, "conditional-root-dictionary", false, &[("/start", "'then' was unexpected")]);
 }
 
 /// A malformed `{{ … }}` span in a string operand is a positioned syntax
@@ -251,14 +290,20 @@ fn malformed_templates_in_string_operands_are_positioned_problems() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let malformed =
         include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-string-template.md");
@@ -299,14 +344,20 @@ fn malformed_templates_in_hand_written_actions_are_positioned_problems() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let malformed =
         include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/handwritten-action-malformed-template.md");
@@ -339,14 +390,20 @@ fn malformed_identifying_values_select_the_trigger_and_unrelated_data_does_not()
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -370,14 +427,20 @@ fn parser_only_defects_pass_schema_validation() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -401,14 +464,20 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let documents = repository(
         &process,
@@ -422,8 +491,9 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
         ],
     );
 
-    // A document whose only control is `sequence` selects sequence.yaml and,
-    // because `sequence` identifies a Claudine document, claudine.yaml too.
+    // A document whose only control is `sequence` selects
+    // sequence-document.yaml and, because `sequence` identifies a Claudine
+    // document, composition.yaml too.
     let output = process
         .command()
         .args(["schema", "triggers"])
@@ -432,44 +502,44 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
         .expect("md runs");
     assert!(output.status.success(), "{output:?}");
     let trace = String::from_utf8_lossy(&output.stdout);
-    let line = |trigger: &str| {
-        trace
-            .lines()
-            .find(|line| line.contains(&format!("{trigger} ")))
-            .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"))
-            .to_string()
-    };
-    assert!(!line("sequence.yaml").contains("not matched") && line("sequence.yaml").contains("matched"), "{trace}");
-    assert!(!line("claudine.yaml").contains("not matched") && line("claudine.yaml").contains("matched"), "{trace}");
+    assert_trigger(&trace, "sequence-document.yaml", true);
+    assert_trigger(&trace, "composition.yaml", true);
 
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
     assert_record(&records, "example-containers-kinds", true, &[]);
     assert_record(&records, "level3-valid", true, &[]);
-    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "\"execution\"")]);
-    assert_record(&records, "root-fail-fast", false, &[("/fail_fast", "null")]);
+    // A removed key's problem points at its owner and names the key.
+    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "key `execution` has been removed")]);
+    assert_record(&records, "root-fail-fast", false, &[("", "key `fail_fast` has been removed")]);
     assert_record(&records, "sequence-mapping", false, &[("/sequence", "tasks")]);
 }
 
 /// `2026-10-30-claudine-recursive-schemas` criteria 4 and 8 through the CLI:
 /// every recursive-depth, generated-verb, and overload fixture of the shared
 /// corpus gets its agreed schema verdict, problems carry their pointer and
-/// document source position, and the trigger trace confirms `claudine.yaml`
-/// was the schema that judged them.
+/// document source position. The depth-six verdict identifies the installed
+/// `composition.yaml` trigger that judged it.
 #[test]
 fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     let process = CliProcessFixture::new();
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let wrong_verb = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md");
     let wrong_type = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md");
@@ -510,13 +580,10 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
         ],
     );
 
-    // The listing is evidence of which schema judged depth 6, never a verdict.
-    let trace = triggers(&process, &documents[0]);
-    assert_trigger(&trace, "claudine.yaml", true);
-    assert_trigger(&trace, "sequence.yaml", false);
-
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
+    assert_applied_trigger(&process, &records["depth6"], "composition.yaml", true);
+    assert_applied_trigger(&process, &records["depth6"], "sequence-document.yaml", false);
     for name in [
         "depth6",
         "depth1",
@@ -557,23 +624,28 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
 }
 
-/// The four depth-four container controls select `sequence.yaml` and `claudine.yaml` and
-/// validate through the CLI; a defect in the innermost container's events is
-/// reported at its own item.
+/// The CLI validates the depth-four controls under the installed trigger layers
+/// and locates each innermost event defect at its action key.
 #[test]
 fn depth_four_container_controls_validate_and_their_innermost_defects_are_located() {
     let process = CliProcessFixture::new();
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let seq_seq = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md");
     let group_group = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md");
@@ -598,21 +670,26 @@ fn depth_four_container_controls_validate_and_their_innermost_defects_are_locate
         ],
     );
 
-    let trace = triggers(&process, &documents[0]);
-    // `sequence` identifies a Claudine document, so the main contract applies too.
-    assert_trigger(&trace, "sequence.yaml", true);
-    assert_trigger(&trace, "claudine.yaml", true);
-
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
+    let sequence = &records["containers-depth4-seq-seq"];
+    assert_applied_trigger(&process, sequence, "sequence-document.yaml", true);
+    assert_applied_trigger(&process, sequence, "composition.yaml", true);
     for name in ["containers-depth4-seq-seq", "containers-depth4-seq-group", "containers-depth4-group-seq", "containers-depth4-group-group"] {
         assert_record(&records, name, true, &[]);
     }
     let seq_leaf = "/sequence/0/sequence/0/sequence/0/sequence/0";
     let group_leaf = "/sequence/0/group/tasks/0/group/tasks/0/group/tasks/0/group";
-    assert_record(&records, "seq-seq-misspelled-verb", false, &[(&format!("{seq_leaf}/start/0"), "sya")]);
-    assert_record(&records, "seq-seq-cancelled-retry", false, &[(&format!("{seq_leaf}/cancelled/0"), "retry")]);
-    assert_record(&records, "group-group-initialize-shell", false, &[(&format!("{group_leaf}/initialize/0"), "shell")]);
+    for (name, pointer, source, verb, action) in [
+        ("seq-seq-misspelled-verb", format!("{seq_leaf}/start/0"), &misspelled_verb, "sya", "sya: start"),
+        ("seq-seq-cancelled-retry", format!("{seq_leaf}/cancelled/0"), &cancelled_retry, "retry", "retry: 3"),
+        ("group-group-initialize-shell", format!("{group_leaf}/initialize/0"), &initialize_shell, "shell", "shell: ls"),
+    ] {
+        assert_record(&records, name, false, &[(&pointer, verb)]);
+        let problem = problem_at(&records, name, &pointer);
+        let (line, column) = source_position(source, action);
+        assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+    }
 }
 
 /// A generated verb's runtime registration decides its literal operands at
@@ -627,14 +704,20 @@ fn generated_verb_registration_rules_decide_through_the_cli() {
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
     let bundle = [
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+        ("globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json")),
+        ("sequence.yaml", include_str!("../../../../claudine/registration/sequence.yaml")),
+        ("sequence-document.yaml", include_str!("../../../../claudine/registration/sequence-document.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
     ];
     let excluded = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-excluded-source.md");
     let seq_seq = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md");

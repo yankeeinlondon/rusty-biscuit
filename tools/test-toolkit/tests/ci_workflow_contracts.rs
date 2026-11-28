@@ -3617,18 +3617,64 @@ fn host_bash() -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(&located.stdout).trim())
 }
 
+/// A `sitecustomize` that pins every clock the step's own script reads: the
+/// first reading is an arbitrary origin and every later one is that origin plus
+/// `BISCUIT_TEST_ELAPSED_NS`. Only calls made from the step's `__main__` are
+/// faked, so the standard library's own timing inside `subprocess` keeps the
+/// real clock.
+#[cfg(unix)]
+const FAKE_CLOCK_SITECUSTOMIZE: &str = r#"import os
+import sys
+import time
+
+_ORIGIN_NS = 7_000_000_000
+_ELAPSED_NS = int(os.environ["BISCUIT_TEST_ELAPSED_NS"])
+_calls = []
+
+
+def _fake(real, scale):
+    def reading():
+        if sys._getframe(1).f_globals.get("__name__") != "__main__":
+            return real()
+        ns = _ORIGIN_NS + (_ELAPSED_NS if _calls else 0)
+        _calls.append(ns)
+        return ns if scale is None else ns / scale
+
+    return reading
+
+
+for _name, _scale in [
+    ("monotonic", 1e9),
+    ("perf_counter", 1e9),
+    ("monotonic_ns", None),
+    ("perf_counter_ns", None),
+]:
+    setattr(time, _name, _fake(getattr(time, _name), _scale))
+"#;
+
 /// Runs the real Lint step body with `just` stubbed to exit `just_exit`.
 ///
 /// `python3_visible` chooses between a `PATH` carrying the host's interpreters
 /// and one holding only the fixture's stubs, which reaches the
-/// no-interpreter case without uninstalling anything.
+/// no-interpreter case without uninstalling anything. `elapsed_ns`, when set,
+/// replaces the step's clock with [`FAKE_CLOCK_SITECUSTOMIZE`], so the published
+/// value is a function of the input rather than of how fast the host ran.
 #[cfg(unix)]
-fn run_lint_step(script: &str, just_exit: i32, python3_visible: bool) -> LintStepRun {
+fn run_lint_step(
+    script: &str,
+    just_exit: i32,
+    python3_visible: bool,
+    elapsed_ns: Option<u64>,
+) -> LintStepRun {
     use std::os::unix::fs::PermissionsExt;
 
     let temp = tempfile::tempdir().expect("temp dir");
     let bin = temp.path().join("bin");
     fs::create_dir(&bin).expect("the stub directory is created");
+    let site = temp.path().join("site");
+    fs::create_dir(&site).expect("the sitecustomize directory is created");
+    fs::write(site.join("sitecustomize.py"), FAKE_CLOCK_SITECUSTOMIZE)
+        .expect("the fake clock is written");
     let stub = bin.join("just");
     fs::write(&stub, format!("#!/bin/sh\nexit {just_exit}\n")).expect("the `just` stub is written");
     fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("the stub is executable");
@@ -3640,14 +3686,19 @@ fn run_lint_step(script: &str, just_exit: i32, python3_visible: bool) -> LintSte
     } else {
         bin.display().to_string()
     };
-    let output = Command::new(host_bash())
+    let mut command = Command::new(host_bash());
+    command
         .arg("-c")
         .arg(script)
         .env_clear()
         .env("PATH", path)
-        .env("GITHUB_OUTPUT", &github_output)
-        .output()
-        .expect("bash must be runnable");
+        .env("GITHUB_OUTPUT", &github_output);
+    if let Some(elapsed_ns) = elapsed_ns {
+        command
+            .env("PYTHONPATH", &site)
+            .env("BISCUIT_TEST_ELAPSED_NS", elapsed_ns.to_string());
+    }
+    let output = command.output().expect("bash must be runnable");
 
     let written = fs::read_to_string(&github_output).expect("the step output is readable");
     let context = format!(
@@ -3689,7 +3740,10 @@ fn lint_step_script() -> String {
 /// publish its duration. The success case repeats because a clock read in two
 /// processes is only *usually* ordered — review 3 of
 /// `fixes/2026-09-13-cicd-redundancies` saw the two-interpreter form publish
-/// `duration_s=-0.001`, so a single sample can pass by luck.
+/// `duration_s=-0.001`, so a single sample can pass by luck. The exact
+/// publication of short durations is pinned by
+/// `the_lint_step_publishes_a_short_measured_duration_as_positive`, which fakes
+/// the clock; this test runs the real one.
 #[cfg(unix)]
 #[test]
 fn the_lint_step_measures_a_sub_second_command_instead_of_recording_zero() {
@@ -3697,7 +3751,7 @@ fn the_lint_step_measures_a_sub_second_command_instead_of_recording_zero() {
 
     for (just_exit, samples) in [(0, 8), (7, 1)] {
         for _ in 0..samples {
-            let run = run_lint_step(&script, just_exit, true);
+            let run = run_lint_step(&script, just_exit, true, None);
             assert_eq!(
                 run.exit_code,
                 Some(just_exit),
@@ -3717,9 +3771,9 @@ fn the_lint_step_measures_a_sub_second_command_instead_of_recording_zero() {
             );
             assert!(
                 seconds > 0.0,
-                "a command that ran took a measurable, non-negative amount of time; two \
-                 `time.monotonic` readings taken in separate interpreters subtract unrelated \
-                 origins and can go backwards; {}",
+                "a command that ran took a measurable, positive amount of time; two clock \
+                 readings taken in separate interpreters subtract unrelated origins and can go \
+                 backwards, and a sub-millisecond run must not round to zero; {}",
                 run.context
             );
             assert!(
@@ -3737,6 +3791,42 @@ fn the_lint_step_measures_a_sub_second_command_instead_of_recording_zero() {
     }
 }
 
+/// A positive measurement must never be published as the `0` that reads as no
+/// measurement, however short the command was. The step's clock is pinned, so
+/// each row is exact rather than a sample of the host's speed: a 400 ns
+/// command once rounded to `0.0` at three decimals, and a command shorter
+/// than the clock's resolution reads as no elapsed time at all, which is
+/// published as the smallest positive unit (1 ns). Elapsed time and the
+/// gate's exit status are independent, so every row runs a passing and a
+/// failing `just`.
+#[cfg(unix)]
+#[test]
+fn the_lint_step_publishes_a_short_measured_duration_as_positive() {
+    let script = lint_step_script();
+
+    for (elapsed_ns, expected) in [
+        (400, "0.000000400"),
+        (499_999, "0.000499999"),
+        (0, "0.000000001"),
+        (1_500_000_000, "1.500000000"),
+    ] {
+        for just_exit in [0, 7] {
+            let run = run_lint_step(&script, just_exit, true, Some(elapsed_ns));
+            assert_eq!(
+                run.exit_code,
+                Some(just_exit),
+                "the lint step must exit with its gate's status; {}",
+                run.context
+            );
+            assert_eq!(
+                run.duration_s, expected,
+                "{elapsed_ns} ns must be published exactly and never as zero; {}",
+                run.context
+            );
+        }
+    }
+}
+
 /// A measurement the step cannot take is an unavailable MEASUREMENT, never a
 /// gate verdict: with no `python3` on `PATH` the step still runs `just _lint`,
 /// still exits with its status, and publishes an EMPTY `duration_s` rather than
@@ -3747,7 +3837,7 @@ fn the_lint_step_publishes_an_empty_duration_when_it_cannot_time_the_command() {
     let script = lint_step_script();
 
     for just_exit in [0, 7] {
-        let run = run_lint_step(&script, just_exit, false);
+        let run = run_lint_step(&script, just_exit, false, None);
         assert_eq!(
             run.exit_code,
             Some(just_exit),
@@ -3935,9 +4025,9 @@ fn the_producer_status_carries_one_record_per_companion_suite() {
             } else if value.contains("steps.companion.outcome") {
                 "failure".to_owned()
             } else if value.contains(".outputs.duration_s") {
-                // Fractional, because the lint step measures a monotonic clock:
+                // The lint step's nine-decimal shape for a sub-millisecond run:
                 // the fold must carry the measurement through unrounded.
-                "0.42".to_owned()
+                "0.000000400".to_owned()
             } else if value.contains("${{") {
                 "success".to_owned()
             } else {
@@ -3983,13 +4073,147 @@ fn the_producer_status_carries_one_record_per_companion_suite() {
         if header == "  lint:" {
             assert_eq!(
                 json["duration_s"],
-                serde_json::json!(0.42),
+                serde_json::json!(0.000_000_4),
                 "R14/AC13: the lint COMMAND's duration is recorded, because no JUnit \
                  report carries it — and a sub-second measurement survives the fold \
                  as a measurement rather than being rounded to the `0` that reads as \
                  an absence: {written}"
             );
         }
+    }
+}
+
+/// Resolves every `${{ <output> || 'null' }}` in a step's env value the way the
+/// runner would: the output's value when `outputs` holds it, the JSON `null`
+/// literal when the step never set it.
+#[cfg(unix)]
+fn resolve_optional_outputs(value: &str, outputs: &[(&str, &str)]) -> String {
+    let mut resolved = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find("${{") {
+        let end = start + rest[start..].find("}}").expect("an expression closes");
+        let expression = rest[start + 3..end].trim();
+        let output = expression
+            .strip_suffix("|| 'null'")
+            .unwrap_or_else(|| panic!("unexpected expression `{expression}` in a timing"))
+            .trim();
+        resolved.push_str(&rest[..start]);
+        resolved.push_str(
+            outputs.iter().find(|(name, _)| *name == output).map_or("null", |(_, value)| value),
+        );
+        rest = &rest[end + 2..];
+    }
+    resolved.push_str(rest);
+    resolved
+}
+
+/// A stage timing is measured in whole seconds, so a fast stage is a measured
+/// `0`; a stage nobody measured must therefore be OMITTED from the status
+/// document rather than published as the same `0`. Both archive consumers'
+/// status steps run for real: one stage measured as `0`, one measured as a
+/// positive value, and the others never reported.
+#[cfg(unix)]
+#[test]
+fn an_unmeasured_consumer_stage_is_omitted_rather_than_published_as_zero() {
+    // `_package-ci.yml`: the stage values arrive as step outputs.
+    let job = job_block("_package-ci.yml", "  test:");
+    let package_steps = steps(&job);
+    let status = step_named(&package_steps, "Record producer status").expect("checked elsewhere");
+    let temp = tempfile::tempdir().expect("temp dir");
+    let mut command = Command::new("bash");
+    command
+        .arg("-c")
+        .arg(step_script(status))
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("RUNNER_TEMP", temp.path());
+    // `step_env` reads single-line values; `TIMINGS` is a folded (`>-`) block,
+    // whose lines YAML joins with one space.
+    let (_, folded) = status.split_once("TIMINGS: >-\n").expect("`TIMINGS` is a folded block");
+    let timings = folded
+        .lines()
+        .take_while(|line| line.starts_with("            "))
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ");
+    for (key, value) in step_env(status) {
+        let resolved = if key == "TIMINGS" {
+            resolve_optional_outputs(
+                &timings,
+                &[
+                    ("steps.verified.outputs.download_seconds", "0"),
+                    ("steps.verified.outputs.extract_ms", "12"),
+                ],
+            )
+        } else if value.contains("runner.temp") {
+            temp.path().join("absent.json").display().to_string()
+        } else if value.contains("${{") {
+            "success".to_owned()
+        } else {
+            value
+        };
+        command.env(key, resolved);
+    }
+    let output = command.output().expect("bash must be runnable");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let written = fs::read_to_string(temp.path().join("status/status.json"))
+        .expect("the status artifact is written");
+    let json: serde_json::Value = serde_json::from_str(&written).expect("JSON");
+    assert_eq!(
+        json["timings"],
+        serde_json::json!({"download_seconds": 0, "extract_ms": 12}),
+        "_package-ci.yml: a measured `0` stays and an unreported stage is omitted: {written}"
+    );
+
+    // `_wsl-ci.yml`: the guest's stages cross the mount as files; this guest
+    // left only `verify.seconds`, and the host's transfer clock reported nothing.
+    let job = job_block("_wsl-ci.yml", "  wsl:");
+    let wsl_steps = steps(&job);
+    let status = step_named(&wsl_steps, "Record producer status").expect("checked elsewhere");
+    let temp = tempfile::tempdir().expect("temp dir");
+    fs::create_dir(temp.path().join("wsl-timing")).expect("the timing directory is created");
+    fs::write(temp.path().join("wsl-timing/verify.seconds"), "0\n").expect("written");
+    let mut command = Command::new("bash");
+    command
+        .arg("-c")
+        .arg(step_script(status))
+        .current_dir(temp.path())
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("RUNNER_TEMP", temp.path());
+    for (key, value) in step_env(status) {
+        let resolved = if key == "DOWNLOAD_SECONDS" {
+            String::new()
+        } else if value.contains("${{") {
+            "success".to_owned()
+        } else {
+            value
+        };
+        command.env(key, resolved);
+    }
+    let output = command.output().expect("bash must be runnable");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let written = fs::read_to_string(temp.path().join("status/status.json"))
+        .expect("the status artifact is written");
+    let json: serde_json::Value = serde_json::from_str(&written).expect("JSON");
+    assert_eq!(
+        json["timings"],
+        serde_json::json!({"verify_seconds": 0}),
+        "_wsl-ci.yml: a measured `0` stays and a missing stage is omitted: {written}"
+    );
+}
+
+/// The compiler-work measurement's stage seconds come from the same
+/// whole-second clock, so an unset step output defaults to `null`, never to
+/// the `0` a fast stage measures.
+#[test]
+fn no_stage_timing_defaults_an_unset_output_to_zero() {
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        let text = workflow(file);
+        assert!(
+            !text.contains("|| 0 }}"),
+            "{file}: an unset timing output must default to `null`, not `0`"
+        );
     }
 }
 

@@ -315,9 +315,12 @@ impl MdRequest {
     /// The context a document at `resolved`, opened as `opening`, resolves its
     /// own references against.
     ///
-    /// A document inside the launch repository derives from the launch context
-    /// (`for_source_reference` / `for_source`), so it keeps the launch
-    /// repository's package catalog and `@` scope. Any other document gets a
+    /// A document whose nearest Git checkout is the launch repository derives
+    /// from the launch context (`for_source_reference` / `for_source`), so it
+    /// keeps the launch repository's package catalog and `@` scope. A
+    /// document in a checkout nested inside the launch tree (a `.git`
+    /// directory or file between it and the launch root) is not in the launch
+    /// repository. Any other document gets a
     /// context built at its own directory, keeping this request's home and
     /// environment: when that build finds a repository (the launch directory
     /// is in another repository, or in none) the document derives from it as a
@@ -343,10 +346,16 @@ impl MdRequest {
             None => launch.for_source(resolved),
         };
         let derived_is_valid = derived.validate().is_ok();
-        if derived_is_valid && launch.repository_root().is_some() {
+        let source_dir = resolved.parent().unwrap_or(self.launch_dir());
+        // Git membership, not containment, decides: a checkout nested in the
+        // launch tree is its own repository.
+        let in_launch_repository = launch.repository_root().is_some()
+            && !darkmatter::markdown::compose::nearest_repository_root(source_dir).is_some_and(|nearest| {
+                darkmatter::markdown::compose::names_another_repository(&nearest, launch.repository_root())
+            });
+        if derived_is_valid && in_launch_repository {
             return Ok(derived);
         }
-        let source_dir = resolved.parent().unwrap_or(self.launch_dir());
         let external = self
             .build_context(&self.snapshot.at_request_dir(source_dir))
             .wrap_err_with(|| {
@@ -358,14 +367,12 @@ impl MdRequest {
         if derived_is_valid && external.repository_root().is_none() {
             return Ok(derived);
         }
-        let source = match opening {
-            Some(reference) => external.for_trusted_external_source_reference(reference, resolved),
-            None => external.for_trusted_external_source(resolved),
-        };
         // The rebuild re-anchors `./`, bare, `&`, and `^` on the document's
         // repository; `@` keeps searching the launch tree, as it does for a
-        // source derived from the launch context.
-        Ok(source.with_launch_magic_scope(launch.launch_magic_scope().clone()))
+        // source derived from the launch context. A document nested under
+        // this one gets the same derivation from the library when it lies in
+        // a repository this context does not name.
+        Ok(darkmatter::markdown::compose::derive_in_own_repository(&external, launch, resolved, opening))
     }
 }
 

@@ -1,8 +1,8 @@
 //! An expression inside a lifecycle stack value reads its event's binding
 //! view from the `md` event registry: diagnostics, hover, and completion all
-//! agree with `registry.globals(id)`, never with a list kept in DMLS. A host
-//! catalog's globals are execution-dependent everywhere, and a host catalog
-//! that fails to load is reported on the document rather than dropped.
+//! agree with `registry.globals(id)`, never with a list kept in DMLS. A
+//! registered host's globals are execution-dependent everywhere; a catalog
+//! in a schema root declares none.
 
 use darkmatter::lifecycle::md_host;
 use darkmatter::markdown::compose::expression::Availability;
@@ -210,20 +210,24 @@ fn host_findings(diagnostics: &[Value]) -> Vec<&Value> {
         .collect()
 }
 
-/// A host-catalog global is execution-dependent, so it is neither undeclared
-/// nor unavailable, inside a stack or not; without the catalog the body
-/// reads stay undeclared document properties.
+/// A registered host's global is execution-dependent, so it is neither
+/// undeclared nor unavailable, inside a stack or not. Without the
+/// registration the body reads stay undeclared document properties, even
+/// with a catalog declaring `seq` in the schema root.
 #[test]
-fn host_catalog_globals_are_never_undeclared_or_unavailable() {
-    let shipped = include_str!("../../../../claudine/schemas/globals.yaml");
+fn registered_host_globals_are_never_undeclared_or_unavailable() {
     let workspace = LspWorkspace::new();
-    let mut fixture = session(&workspace, &[("globals.yaml", shipped)]);
-    let (_, diagnostics) = open_text(&mut fixture, &workspace, "hosts.md", HOST_READS);
+    crate::claudine_host::install(workspace.path(), &crate::claudine_host::bundle());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    // Claudine names `composed` `start`.
+    let text = crate::claudine_host::marked(&HOST_READS.replace("composed:", "start:"));
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "hosts.md", &text);
     assert!(host_findings(&diagnostics).is_empty(), "{diagnostics:#?}");
     fixture.shutdown();
 
     let workspace = LspWorkspace::new();
-    let mut fixture = session(&workspace, &[]);
+    let mut fixture = session(&workspace, &[("globals.yaml", crate::registered_host_views::ROOT_CATALOG)]);
     let (_, diagnostics) = open_text(&mut fixture, &workspace, "hosts.md", HOST_READS);
     let body = line_containing(HOST_READS, "Body");
     let body_reports: Vec<&str> = host_findings(&diagnostics)
@@ -234,30 +238,5 @@ fn host_catalog_globals_are_never_undeclared_or_unavailable() {
     for root in ["seq", "loop", "group"] {
         assert!(body_reports.iter().any(|message| message.starts_with(&format!("`{root}`"))), "{root}: {body_reports:#?}");
     }
-    fixture.shutdown();
-}
-
-/// A host catalog that fails to load is a document diagnostic naming the
-/// file, the field, and the reason; a valid catalog beside it still declares
-/// its globals.
-#[test]
-fn a_broken_host_catalog_is_reported_and_the_others_still_load() {
-    let broken = "kind: schema\ndescription: broken\n$schema:\n    seq: 42\n";
-    let valid = "kind: schema\ndescription: loops\n$schema:\n    loop:\n        count: \"number(integer) -> The iteration.\"\n";
-    let workspace = LspWorkspace::new();
-    let mut fixture = session(&workspace, &[("broken.yaml", broken), ("loops.yaml", valid)]);
-    let text = "---\ntitle: Broken\n---\n\n{{ loop.count }} {{ seq.index }}\n";
-    let (_, diagnostics) = open_text(&mut fixture, &workspace, "broken.md", text);
-
-    let reported = with_code(&diagnostics, "dm.schema.host_catalog");
-    assert_eq!(reported.len(), 1, "{diagnostics:#?}");
-    let message = reported[0]["message"].as_str().unwrap();
-    assert!(message.contains("broken.yaml") && message.contains("`$schema.seq`"), "{message}");
-    let undeclared: Vec<&str> = with_code(&diagnostics, "dm.expression.undeclared_property")
-        .into_iter()
-        .map(|diagnostic| diagnostic["message"].as_str().unwrap())
-        .collect();
-    assert!(!undeclared.iter().any(|message| message.starts_with("`loop`")), "{undeclared:#?}");
-    assert!(undeclared.iter().any(|message| message.starts_with("`seq`")), "{undeclared:#?}");
     fixture.shutdown();
 }

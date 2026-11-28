@@ -135,11 +135,11 @@ impl ResolutionDetail {
         detail["reference"] = json!(self.reference);
         detail["kind"] = json!(file_reference_kind_slug(self.kind));
         detail["effective_kind"] = json!(file_reference_kind_slug(self.effective_kind));
-        detail["base_dir"] = json!(biscuit_file::to_portable_string(&self.base_dir));
+        detail["base_dir"] = json!(biscuit_file::to_forward_slash_string(&self.base_dir));
         detail["repository_root"] = json!(
             self.repository_root
                 .as_ref()
-                .map(|path| biscuit_file::to_portable_string(path))
+                .map(|path| biscuit_file::to_forward_slash_string(path))
         );
         detail["candidates"] = resolution_candidates_detail(&self.candidates);
     }
@@ -160,7 +160,7 @@ fn path_resolution_detail(
         PathResolutionFailure::NoSourceParent => match source_path {
             Some(path) => format!(
                 "source path \"{}\" has no parent directory",
-                biscuit_file::to_portable_string(path)
+                biscuit_file::to_forward_slash_string(path)
             ),
             None => "source path has no parent directory".to_string(),
         },
@@ -168,7 +168,7 @@ fn path_resolution_detail(
             match resolved {
                 Some(path) => format!(
                     "target does not exist: {}",
-                    biscuit_file::to_portable_string(path)
+                    biscuit_file::to_forward_slash_string(path)
                 ),
                 None => "target does not exist".to_string(),
             },
@@ -453,7 +453,7 @@ impl Diagnostic for HarnessError {
                 base["reference"] = json!(raw);
                 base["failure"] = json!(failure.as_str());
                 base["source_path"] =
-                    json!(source_path.as_deref().map(biscuit_file::to_portable_string));
+                    json!(source_path.as_deref().map(biscuit_file::to_forward_slash_string));
                 if let Some(detail) = resolution {
                     detail.apply_to_diagnostic(&mut base);
                 }
@@ -473,7 +473,7 @@ impl Diagnostic for HarnessError {
                 base["reference"] = json!(reference);
                 base["failure"] = json!(file_reference_failure_slug(source));
                 base["source_path"] =
-                    json!(source_path.as_deref().map(biscuit_file::to_portable_string));
+                    json!(source_path.as_deref().map(biscuit_file::to_forward_slash_string));
                 if let Some(detail) = resolution {
                     detail.apply_to_diagnostic(&mut base);
                 }
@@ -575,7 +575,7 @@ fn resolution_candidates_detail(candidates: &[ProbedCandidate]) -> Value {
             .iter()
             .map(|probed| {
                 json!({
-                    "path": biscuit_file::to_portable_string(probed.candidate().path()),
+                    "path": biscuit_file::to_forward_slash_string(probed.candidate().path()),
                     "provenance": root_provenance_slug(probed.candidate().provenance()),
                     "disposition": probe_disposition_slug(probed.disposition()),
                 })

@@ -173,6 +173,16 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             return Err(crate::errors::SchemaError::NotASchemaDocument {
                 path: std::path::PathBuf::new(),
                 reason: crate::errors::NotSchemaReason::NamespaceCatalog,
+                site: None,
+            }
+            .into());
+        }
+        // The factories refuse a callable catalog, so none is ever exported.
+        StandaloneSchemaEnvelope::ExpressionSchema | StandaloneSchemaEnvelope::MutationSchema => {
+            return Err(crate::errors::SchemaError::NotASchemaDocument {
+                path: std::path::PathBuf::new(),
+                reason: crate::errors::NotSchemaReason::CallableCatalog,
+                site: None,
             }
             .into());
         }
@@ -274,8 +284,20 @@ fn write_shape(shape: &SchemaShape) -> Result<Mapping, SimplifiedSchemaError> {
     for (name, def) in &shape.properties {
         mapping.insert(name.as_str().into(), write_def(def)?);
     }
+    for (name, replacement) in shape.removed() {
+        mapping.insert(
+            name.as_str().into(),
+            format!("{}({replacement})", crate::simplified::REMOVED_KEYWORD).into(),
+        );
+    }
     for pattern in &shape.pattern_keys {
         mapping.insert(pattern_key_text(&pattern.key).into(), write_def(&pattern.def)?);
+    }
+    if let Some(excluded) = shape.advise_unknown_keys() {
+        mapping.insert(
+            crate::simplified::ADVISE_UNKNOWN_KEYS.into(),
+            YamlValue::Sequence(excluded.iter().map(|name| name.as_str().into()).collect()),
+        );
     }
     if !shape.constraints.is_empty() {
         mapping.insert("$constraints".into(), YamlValue::Mapping(write_object_constraints(&shape.constraints)?));
@@ -374,6 +396,12 @@ fn expression(atom: &PropertyAtom) -> Result<String, SimplifiedSchemaError> {
             lossy.get_or_insert(
                 "an inline object inside a type expression has pattern keys or `$constraints`, which only the \
                  block form writes",
+            );
+        }
+        if shape.key_declarations.is_some() {
+            lossy.get_or_insert(
+                "an inline object inside a type expression has `removed(…)` keys or `$advise-unknown-keys`, which \
+                 only the block form writes",
             );
         }
         if matches!(shape.composition.as_deref(), Some(ObjectComposition::Extends(_))) {

@@ -577,7 +577,13 @@ over the parsed slot, so referenced, imported, trigger, contract, and
 later-round slots all demand theirs) and it captures a missing `Repo`/
 `Network`/`Agent` part once per session: `for_request` from the request's
 repository observation (`ComposeOptions::slot_repository`) and context
-authority (frozen = stays missing), `for_context` with the context's env at
+authority (frozen = stays missing), `for_request_in_checkout` when that
+observation does not describe the request's own checkout
+(`ComposeOptions::slot_repository_describes` against
+`request.resolution_context()`, e.g. options captured in a parent of a
+nested checkout: `Repo` is captured like `for_context` from the request's
+context, authority permitting, and the session's resolution key uses that
+root), `for_context` with the context's env at
 its repository root (`RepositoryObservation::default()` when it has none),
 `SlotSession::new` never. `serves` re-calls each captured call against the
 requesting session's `SessionObservations`, covered for the calls' groups (a
@@ -626,8 +632,8 @@ authored in `darkmatter/schemas/partials/fm.yaml`. That partial declares
 `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
 (optional, no default) and imports `style@./style.yaml` and
 `context@./context-variables.yaml`. `schemas/embedded.rs::SHIPPED` holds the
-compiled-in bundle (catalog, its partials including the expression-function
-catalog `functions.yaml`, `content_policy::EDITOR_SCHEMA`)
+compiled-in bundle (catalog, its schema partials, `content_policy::EDITOR_SCHEMA`;
+never the callable catalogs `functions.yaml`/`mutations.yaml`)
 keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never
@@ -1310,8 +1316,9 @@ Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
 indentless sequences, plain scalars continued onto more-indented lines,
 literal/folded block scalars, quoted scalars and flow collections that cross
-line breaks, and empty values; only tolerant follows tags and comments inside
-a flow collection. Strict fails unless every non-comment line belongs to the value, and
+line breaks, empty values, and YAML comments. Both recognize YAML node
+properties and aliases on values and sequence items.
+Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -1327,7 +1334,7 @@ Located Failures, and `darkmatter/dmls/docs/diagnostics.md` § Ranging). The sha
 `SchemaSourcePath` of the node it rejected: property keys literally, sequence
 members and root-union arms by index, `$constraints` entries by key, and
 cross-arm checks at the arm that introduced the violation
-(`second_suggestion_span` and `duplicate_overload_arm` return the arm index).
+(`second_suggestion_span` and `signature::duplicate_overload` retain both arm indices).
 `parse_property_definition_with_source` and
 `parse_schema_declaration_with_source` return `LocatedDefinitionFailure`
 (`path`, boxed `error`, `authored_span`, `value_span`, document bytes with
@@ -1337,9 +1344,9 @@ does the same for a standalone document, prefixing `types`/`$schema`, sharing
 for outer envelope and declaration-shape failures (any failure path without a
 property segment). Projection follows the path through the strict located
 tree in lockstep with the parsed YAML and projects a grammar span only through
-a scalar whose decoded text equals the rejected string; a mismatch,
-unsupported presentation, or alias leaves the range `None` but always keeps
-the error. A projection-only failure after a successful parse is the
+a scalar whose decoded text equals the rejected string. An alias stops the
+walk and supplies its own token as the range. A mismatch or unsupported
+presentation leaves the range `None` and keeps the error. A projection-only failure after a successful parse is the
 projection error at the root path. Source-free parsers discard the path.
 
 A failure with two locations carries them structurally, never as offsets in
@@ -1354,10 +1361,12 @@ option's scalar). Registration's text path keeps them on
 `InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
 located in the catalog source. A standalone file's payload failure is a
 `SchemaError::SchemaDocument` whose message repeats the cause and which keeps
-the typed cause (`source`) and its byte `span` in that file; DMLS locates it
-with secondary locations when the overlay is assembled (`overlay::file_failures`, keyed by the path the error
-names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
-request must never read or parse a file.
+the typed cause (`source`) and its byte `span` in that file. Callable-catalog
+conflicts use `SchemaError::CallableCatalog` with both authored spans, including
+when comparison resolves local helper types. DMLS locates other standalone
+payload failures with secondary locations while assembling
+`overlay::file_failures`, keyed by the path in the error. Diagnostics read
+`DocumentOverlay::file_failures` without file I/O or parsing.
 
 `decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
 restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
@@ -1624,11 +1633,12 @@ its `ctx`; `err` and `timing` members equal the runtime
 document `$schema` naming one is an ordinary tagged schema whose globals
 become optional document properties (no catalog-specific refusal).
 Hosts declare their own globals in a catalog of the same format
-(`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
-and the host's requirements). DMLS hovers and completes host globals from the
-catalogs in a document's schema roots (`catalog::host_catalogs`), treating
-each as `ExecutionDependent` (DMLS cannot know loop/group membership); a
-catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
+(Claudine: one `kind: namespace-schema` file per global in
+`claudine/registration/`, prepared with `namespaces::prepare_catalog` over the
+embedded inventory and checked against the host's requirements). DMLS hovers and completes host globals from the
+selected registered host's namespace catalog (`RegisteredHostProfile::globals`),
+treating each as `ExecutionDependent` (DMLS cannot know loop/group
+membership); schema roots are never searched for a host catalog. Inside an
 md event's stack DMLS uses that event's registry `BindingView`
 (`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
 `dm.expression.unavailable_global`.

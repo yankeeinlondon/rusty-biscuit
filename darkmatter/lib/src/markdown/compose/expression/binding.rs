@@ -385,7 +385,7 @@ impl BindingViewBuilder {
     }
 }
 
-fn check_root(root: &str) -> Result<(), BindingError> {
+pub(crate) fn check_root(root: &str) -> Result<(), BindingError> {
     if !is_root_identifier(root) {
         return Err(BindingError::InvalidRoot {
             root: root.to_string(),

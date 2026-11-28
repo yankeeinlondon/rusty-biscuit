@@ -31,7 +31,9 @@ claudine/lib/src/
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
-│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting; `bundle.rs` embeds `claudine/schemas/` as the last-resort trigger location and decides Claudine-control ownership (see topics/schemas.md)
+│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting; `bundle.rs::claudine_hosts()` loads the compiled `claudine/registration/` inventory as the registered `claudine` host (the lowest trigger layer; schema-root triggers layer above) and decides Claudine-control ownership (see topics/schemas.md)
+│   ├── inventory.rs, inventory/walk.rs → The compiled registration inventory: `build.rs` walks `claudine/registration/` with `walk.rs` and embeds it sorted by path; `members()`/`member()`/`bundle_sources()`/`LIFECYCLE_ARTIFACT`
+│   ├── registration.rs, registration/{published,legacy}.rs → Publishing the fixed format 3 tree under `~/.claudine/registrations/darkmatter/` (lock, members then manifest last, no-op when current); `RegistrationInventory::claudine()` is what `claudine registrations` lists; `legacy.rs` removes the retired `~/.claudine/darkmatter-host*` files after setup re-registers
 │   ├── closure.rs → The inline artifact reconciler: reads the agent-written document back, restores the three closure-owned nodes textually, judges the body under Darkmatter's non-strict Simple hash, stamps, writes once atomically, and owns baseline rollback
 │   └── completion.rs → The one completion verdict for both modes: pure evaluate_completion + the complete_active_document orchestration entry point
 ├── config/       → Agent detection, hook registration, atomic writes, backups
@@ -208,7 +210,7 @@ Composition commands resolve whether a session runs interactive via `SharedCompo
 3. `interactive: true` / `false` frontmatter → that value (`SessionInteractivitySource::Frontmatter`)
 4. Otherwise → non-interactive (`SessionInteractivitySource::Default`)
 
-`--interactive` and `--no-interactive` are mutually exclusive at the clap level. The resolved value and its source are stored on `CompositionExecutionRequest` (`session_interactive` and `session_interactive_source`) so downstream diagnostics and dry-run metadata can attribute the mode. `claudine sequence` rejects `interactive: true` frontmatter because a sequence is serial automation; use the explicit `--interactive` flag when an interactive sequence step is required.
+`--interactive` and `--no-interactive` are mutually exclusive at the clap level. The resolved value and its source are stored on `CompositionExecutionRequest` (`session_interactive` and `session_interactive_source`) so downstream diagnostics can attribute the mode. `claudine sequence` rejects `interactive: true` frontmatter because a sequence is serial automation; use the explicit `--interactive` flag when an interactive sequence step is required.
 
 ## Provider Adapters
 
@@ -490,7 +492,7 @@ wire-compatible behavior.
 
 ### Infrastructure
 
-- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` classifier shape + `classify_error_by_keywords` cascade. The ordered tables live in generated `providers/vocabulary.rs`, projected from the schema-validated `docs/research/agent-errors/<slug>.md` frontmatter; evidence stays in research while bucket/item order survives as the runtime precedence contract. Immutable `docs/research/agent-errors/_seeds/<slug>.yaml` baselines preserve pre-graduation row identity for deterministic removal/re-kind/reorder checks. `providers/vocabulary_tests.rs` locks accepted research additions, precedence, exact numeric codes, and representative near misses. Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
+- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` classifier shape + `classify_error_by_keywords` cascade. The ordered tables live in generated `providers/vocabulary.rs`, projected from the schema-validated `docs/research/providers/agent-errors/<slug>.md` frontmatter; evidence stays in research while bucket/item order survives as the runtime precedence contract. Immutable `docs/research/providers/agent-errors/_seeds/<slug>.yaml` baselines preserve pre-graduation row identity for deterministic removal/re-kind/reorder checks. `providers/vocabulary_tests.rs` locks accepted research additions, precedence, exact numeric codes, and representative near misses. Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
 - `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
 - `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
 - `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields
@@ -513,7 +515,7 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 Darkmatter's `render_tree::embedded::without_embedded_metadata` before storing
 the provider prompt. Keep Markdown fallbacks and portable links; internal
 component metadata belongs to Darkmatter's terminal/browser document folds,
-not provider delivery or dry-run stdout.
+not provider delivery or a dry-run preview.
 
 The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
 points and public re-exports in `mod.rs`. `pipeline.rs` owns one
@@ -522,8 +524,8 @@ argv/system-prompt, lifecycle-runtime, initialize-routing, and provider-handoff
 phases. Each phase returns `CompositionPhaseResult`, so completed early
 outcomes, blocked lifecycle routing, preparation failures, and normal
 progression stay explicit without flattening attempt state into the entry
-module. Composition dry-runs return before these launch phases and never
-validate or resolve the selected executable path.
+module. A composition `--dry-run` never reaches it: `main.rs::dispatch` sends
+it to the passive check (`commands/document_check/`).
 
 Other concerns remain split by responsibility:
 
@@ -532,8 +534,9 @@ Other concerns remain split by responsibility:
 - `preflight.rs` — blocked/finalize lifecycle routing before provider launch
 - `runner.rs` — the named per-iteration `run_composition_body` runner and its
   `CompositionRunCtx`
-- `dry_run.rs`, `prep_context.rs`, `target.rs`, and `timeouts.rs` — rendering,
-  shared discovery context, execution-target resolution, and timeout resolution
+- `prep_context.rs`, `target.rs`, and `timeouts.rs` — shared discovery
+  context, execution-target resolution (`decide_target`, shared with the dry
+  run's provider check), and timeout resolution
 
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
@@ -928,8 +931,8 @@ again. The loop route seeds from the bootstrap
 (`build_loop_seed_from_bootstrap`), the engine emits `initialize`, and iteration
 1 composes the stabilized reread. A harness-adopted target (a sequence task has
 no command ledger) takes `bootstrap_harness_prompt` for boot stages 1-3
-(`BootstrapStage::TargetInitialized`). A dry run and a document without
-`initialize` keep eager discovery.
+(`BootstrapStage::TargetInitialized`). A document without `initialize` keeps
+eager discovery.
 
 Sequences do not stage (OQ1 Option A): static preflight
 (`approve_preflight_graph`) composes every referenced prompt document before

@@ -273,17 +273,19 @@ fn match_semantics(match_value: &YamlValue) -> Result<MatchConditions, SchemaErr
 /// The instance path, in the trigger document, of the node `error` is about:
 /// the field a [`SchemaError::TriggerMatch`] or
 /// [`SchemaError::TriggerRenamed`] names (`` `match[0].all[1].$path` ``
-/// becomes `["match", "0", "all", "1", "$path"]`), `match` for an error about
-/// the match expression as a whole, and the document root otherwise.
+/// becomes `["match", "0", "all", "1", "$path"]`), the condition or mapping a
+/// [`SchemaError::TriggerForbiddenConstraint`] or
+/// [`SchemaError::TriggerMixedMapping`] is about, `match` for a vacuous
+/// match expression, and the document root otherwise.
 pub(crate) fn trigger_error_segments(error: &SchemaError) -> Vec<String> {
     let field = match error {
         SchemaError::TriggerMatch { message, .. } => {
             message.strip_prefix('`').and_then(|rest| rest.split_once("`:")).map(|(field, _)| field)
         }
-        SchemaError::TriggerRenamed { field, .. } => Some(field.as_str()),
-        SchemaError::TriggerMixedMapping { .. }
-        | SchemaError::TriggerVacuousMatch
-        | SchemaError::TriggerForbiddenConstraint { .. } => Some("match"),
+        SchemaError::TriggerRenamed { field, .. }
+        | SchemaError::TriggerMixedMapping { field, .. }
+        | SchemaError::TriggerForbiddenConstraint { field, .. } => Some(field.as_str()),
+        SchemaError::TriggerVacuousMatch => Some("match"),
         _ => None,
     };
     let Some(field) = field else {
@@ -320,8 +322,9 @@ impl<'a> TriggerSourcePositions<'a> {
     }
 
     /// The byte span, in the source, of the node `error` is about (see
-    /// [`trigger_error_segments`]); `None` for an error naming no node or a
-    /// source whose structure cannot be located.
+    /// [`trigger_error_segments`]), or of the document's mapping when that
+    /// node is a top-level field it omits; `None` for an error naming no node
+    /// or a source whose structure cannot be located.
     pub(crate) fn span(&self, error: &SchemaError) -> Option<std::ops::Range<usize>> {
         if let SchemaError::TriggerMatch { span: Some(span), .. } = error {
             return Some(span.clone());
@@ -336,13 +339,33 @@ impl<'a> TriggerSourcePositions<'a> {
             .map
             .get_or_init(|| crate::PositionMap::deferred(std::sync::Arc::from(&self.source[self.offset..])));
         let located = crate::yaml_documents::locating_problem(&segments);
-        positions.byte_range(&located).map(|range| range.start + self.offset..range.end + self.offset)
+        positions
+            .byte_range(&located)
+            // A top-level field the document omits (a missing `match`) is
+            // reported at the mapping that lacks it.
+            .or_else(|| match segments.as_slice() {
+                [_] => positions.byte_range(&crate::yaml_documents::locating_problem(&[])),
+                _ => None,
+            })
+            .map(|range| range.start + self.offset..range.end + self.offset)
     }
 
     /// The source these positions locate in.
     pub(crate) fn source(&self) -> &'a str {
         self.source
     }
+}
+
+/// The byte span, in the trigger file text `source`, of the node an error
+/// of [`parse_trigger_envelope_from_str`] over that text is about: the field
+/// the error names (see [`trigger_error_segments`]), so a condition in a
+/// nested `all`/`group`/`none`/`min-match` list is found at its own value,
+/// and an omitted top-level field (`match`) at the mapping that lacks it.
+/// `None` for an error naming no node, so no position is invented at the
+/// document root, and for [`SchemaError::TriggerEnvelopeYaml`], which
+/// carries the parser's own line and column.
+pub fn trigger_error_span(source: &str, error: &SchemaError) -> Option<std::ops::Range<usize>> {
+    TriggerSourcePositions::new(source).span(error)
 }
 
 /// `error` with the byte span, in `positions`' source, of the node it is

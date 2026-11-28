@@ -47,7 +47,7 @@ and `walkdir`.
     verbatim; `gix` and an environment-read home usually yield legacy), and Win32 applies no path
     normalization under the verbatim prefix, so a reference's own `/` separators
     would never resolve.
-  - `to_portable_string` / `try_portable_string`, the path→text boundary, which
+  - `to_forward_slash_string` / `try_forward_slash_string`, the path→text boundary, which
     is unfeatured and so cannot depend on an optional crate. `dunce`'s refusal
     to reduce is authoritative there: a declined path keeps its native spelling
     rather than becoming URL-shaped text.

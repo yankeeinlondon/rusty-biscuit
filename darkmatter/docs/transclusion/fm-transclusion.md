@@ -19,6 +19,26 @@ With frontmatter transclusion we imbue two frontmatter properties special meanin
 - `epilogue`
     - The **epilogue** property behaves exactly the same as **prologue** except that the document or documents referenced are added _after_ the body's content not before.
 
+## Text or File?
+
+Each string is read in one of two ways, and every Darkmatter reader (`md compose`, `md validate refs`, `md graph`, the library's reference APIs, and the language server) decides it the same way.
+
+A value is **inline Markdown text**, inserted as written, when it is empty, spans more than one line, contains a Markdown link (`](`), or is a plain word or phrase with no path separator and no file extension. Anything else is a **file reference**: a value with a `/` or `\`, a sigil such as `~/` or `@`, a URL, or a single `name.ext` word.
+
+| Value                                    | Read as                                             |
+| ---------------------------------------- | --------------------------------------------------- |
+| `prologue: ./intro.md`                   | file `intro.md`                                     |
+| `prologue: intro.md`                     | file `intro.md`                                     |
+| `prologue: Read this first`              | text                                                |
+| `prologue: README`                       | text (no extension), even if a `README` file exists |
+| `prologue: "[Setup](./setup.md)"`        | text holding a link to `./setup.md`                 |
+| `prologue: \|` followed by indented lines | text                                                |
+| `prologue: ""`                           | text that inserts nothing                           |
+| `prologue: "./intro.md#start"`           | file `intro.md#start` (a `#` is part of the name)   |
+| `prologue: ./notes.txt`                  | file `notes.txt`, refused: not a Markdown file      |
+
+Inline text is never checked as a file. The links inside it are checked as ordinary links, so `md validate refs` passes `prologue: "[Setup](./setup.md)"` when `setup.md` exists and reports a missing hyperlink when it does not. A file reference is checked as the whole filename composition opens, so `prologue: "./intro.md#start"` is reported missing even when `intro.md` has a `# Start` heading. A file reference must name a Markdown file (`.md` or `.markdown`), as it must for `::file`: composition and `md validate refs` both refuse `prologue: ./notes.txt` with an unsupported-file-type error at the `prologue:` key, even when `notes.txt` exists.
+
 > **Propagation Exception:** Unlike other frontmatter properties (which propagate from parent to child during transclusion for use in replacement and interpolation), `prologue` and `epilogue` are scoped to the document that defines them. They are not inherited by child documents brought in via `::file` directives or frontmatter transclusion.
 >
 > **Note:** the "options" which we provide in [block transclusion](./block-transclusion.md#) -- including _conditional_ transclusion -- are not available for Frontmatter transclusion.

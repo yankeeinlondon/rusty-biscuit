@@ -1,0 +1,12 @@
+# The `kind: task` YAML document: the task a step's `task: <file-ref>`
+# expands. Hand-maintained; see claudine/docs/topics/schemas.md.
+#
+# A task file holds one task's fields, closed, as the task parser reads it:
+# the same fields as a group leg (sequence.yaml's `leg`), with `kind`
+# required. Its removed keys are refused with their replacement.
+kind: yaml-schema
+description: "A `kind: task` file"
+$schema:
+    $extends: leg@./sequence.yaml
+    kind: literal(task; required) -> the document kind
+    $constraints: { closed: true }

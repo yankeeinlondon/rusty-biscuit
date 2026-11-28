@@ -51,7 +51,15 @@ any request is issued, in one of two ways:
   md compose doc.md --allow host=example.com
   ```
 
-  This works under `network: deny` and changes nothing under `allow`.
+  This works under `network: deny` and `ask`, and changes nothing under
+  `allow`.
+
+Under `network: ask`, a host the run did not name needs approval, which a
+composition never asks for: `::file`, `::code`, and a read-side function
+fail with an approval-required error that names the setting
+(`dm.transclusion.remote_needs_approval`, or the expression kind
+`remote_needs_approval`), and no request is sent. A dry run (Claudine's
+`--dry-run`) sends no request either and reports the read as not checked.
 
 | User file | Repository (`HEAD` / working copy) | `--allow host=example.com` | `https://example.com/a.md` | `https://other.test/a.md` |
 | --- | --- | --- | --- | --- |
@@ -60,10 +68,14 @@ any request is issued, in one of two ways:
 | `allow` | none (outside a repository) | no | fetched | fetched |
 | `allow` | `allow` / `allow` | no | fetched | fetched |
 | `allow` | `deny` / `allow` | no | refused | refused |
+| `ask` | any but `deny` | no | needs approval | needs approval |
+| `ask` | any but `deny` | yes | fetched | needs approval |
 
 A schema slot that reads a URL takes the same decision: under `network:
-allow` its read needs no approval, and under `deny` only the run's hosts are
-read without one.
+allow` its read needs no approval, under `ask` a host the run did not name
+asks (or, where nothing can ask, is an approval-required error), and under
+`deny` only the run's hosts are read and any other URL is refused
+(`dm.schema.slot_network_denied`) without asking.
 
 `network: allow` changes consent, not the transport rules. Only `http` and
 `https` are fetched, a redirect is never followed (every redirect fails the
@@ -75,8 +87,9 @@ value such as `sometimes` or `123`, an invalid `file-read` or
 `shell-commands` entry, or a reference to a missing file), no URL is
 fetched, not even one whose host the run names with `--allow host=HOST`.
 The read fails with a message that names the configuration file, line, and
-setting, and no request is sent. Only a valid `deny` (or an absent or
-`null` setting, which takes the default `deny`) lets a run's host through.
+setting, and no request is sent. Only a valid `deny` or `ask` (or an absent
+or `null` setting, which takes the default `deny`) lets a run's host
+through.
 
 ```bash
 # ~/.darkmatter.yaml says `permissions: {network: sometimes}`
@@ -90,8 +103,9 @@ per-run hosts; the configured `network` permission comes from the request's
 configuration snapshot (`ComposeOptions::with_config_snapshot`, or the one
 `ComposeRequest::prepare` loads). Attach the snapshot before
 `with_shared_remote_fetch()`; a request whose snapshot decides differently
-replaces the shared runtime. An allowed host or `network: allow` enables
-read-side expression URL reads (`frontmatter(url)`, `markdown_title(url)`,
+replaces the shared runtime. An allowed host, `network: allow`, or
+`network: ask` (whose reads then need approval) enables read-side
+expression URL reads (`frontmatter(url)`, `markdown_title(url)`,
 `file_exists(url)`, …) on its own. Remote `::file` / `::code` block
 transclusion additionally requires the explicit
 `with_allow_remote_transclusion(true)` opt-in, since it injects fetched bodies

@@ -34,6 +34,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             containers,
             problem,
+            ..
         } => {
             let hint_link = super::render_file_link(hint_path);
             let inside = if containers.is_empty() {
@@ -56,7 +57,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "task provider selection failed"))
                 .body(crate::composition::agent_message::agent_message_prose(body))
-                .hint(task_selection_hint(problem))
+                .hint(format!("No task has started. {}", problem.remedy()))
         }
         CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
@@ -111,7 +112,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
 ///
 /// The no-TTY abort body must be the **same** styled message the TTY path
 /// would show for the state, so it shares one source of truth with the
-/// dry-run table cell and the live TTY pre-prompt — see
+/// live TTY pre-prompt — see
 /// [`agent_message`](crate::composition::agent_message). The only state with a
 /// distinct (imperative) live message is
 /// [`AgentResolutionState::SingleInvalid`], which is built here from
@@ -145,34 +146,8 @@ pub(crate) fn render_agent_resolution_failed_body(
             "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> was already selected."
         ),
         // Every other prompting state aborts with the same breakdown the
-        // dry-run table predicts and the TTY path shows.
+        // TTY path shows.
         other => agent_state_breakdown(other),
     }
 }
 
-/// What can repair a [`CompositionError::SequenceTaskProviderSelection`]. A
-/// provider flag replaces any `agent` hint, and `--model` or a model variable
-/// any `model` hint, so a remedy names one only where it would help: such a
-/// failure never occurs under the source it would recommend.
-fn task_selection_hint(problem: &SequenceTaskProviderProblem) -> &'static str {
-    match problem {
-        SequenceTaskProviderProblem::Unresolvable { .. } => {
-            "No task has started. Name an installed provider in that `agent`, \
-             or pass --claude, --codex, etc. to run every task on one provider."
-        }
-        SequenceTaskProviderProblem::Circular(variable) if variable.ends_with("model") || variable.ends_with("MODEL") => {
-            "No task has started. Write the model in that `model`, or pass --model \
-             or set MODEL so the hint is not read."
-        }
-        SequenceTaskProviderProblem::Circular(_) => {
-            "No task has started. Name the provider in that `agent`, or pass \
-             --claude, --codex, etc. so the hint is not read."
-        }
-        SequenceTaskProviderProblem::WrongType { .. }
-        | SequenceTaskProviderProblem::Evaluation(_)
-        | SequenceTaskProviderProblem::EmptyAgentList => {
-            "No task has started. Correct that value: the task's prompt still reads it, \
-             whatever provider or model is chosen."
-        }
-    }
-}

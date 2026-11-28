@@ -88,6 +88,12 @@ APFS, reflink-capable Linux filesystems, and Windows ReFS qualify; ext4
 (including WSL's) and NTFS do not. Never mix wrapped and unwrapped builds in
 one `target/`.
 
+Use `just sweep [host|all]` to prune Cargo build artifacts and
+`just sweep-status [host|all]` to see projected free space, cleanup savings, and the schedule.
+Omit the host to run locally, pass an SSH destination, or use `all` for this
+machine and configured `BUILD_*` destinations. Use `just install-sweep` to register
+the local scheduler. See `docs/kache-strategy.md` for the cleanup policies.
+
 ## Git Interaction
 
 Programmatic Git goes through a library, in-process. Shelling out to `git`

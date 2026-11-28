@@ -323,8 +323,14 @@ mod tests {
     /// function has one today, so the shape is built from a fixture catalog.
     #[test]
     fn a_rest_parameter_after_a_fixed_prefix_counts_the_prefix_as_required() {
-        let source = "kind: schema\ncategories:\n    - Text -> Text.\ntypes:\n    joined: |-\n        function(\n            parameters(separator: string, ...parts: string);\n            returns(string);\n            category(Text);\n        ) -> Joins parts.\n";
-        let catalog: &'static _ = Box::leak(Box::new(load_catalog(source, "fixture.yaml", &[]).expect("fixture loads")));
+        let source = "kind: mutation-schema\ncategories:\n    - Text -> Text.\ntypes:\n    joined: |-\n        function(\n            parameters(separator: string, ...parts: string);\n            returns(string);\n            category(Text);\n        ) -> Joins parts.\n";
+        let catalog: &'static _ = Box::leak(Box::new(load_catalog(
+            source,
+            std::path::Path::new("fixture.yaml"),
+            simplified_schema::simplified::StandaloneSchemaEnvelope::MutationSchema,
+            &[],
+        )
+        .expect("fixture loads")));
         let joined = VerbSignature::from_catalog("joined", &catalog.descriptors);
 
         assert!(joined.is_variadic());

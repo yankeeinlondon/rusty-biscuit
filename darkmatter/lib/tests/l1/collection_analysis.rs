@@ -31,7 +31,7 @@ use tempfile::TempDir;
 
 static ENTRIES: AtomicUsize = AtomicUsize::new(0);
 
-const CATALOG: &str = "kind: schema\ncategories:\n    - Project -> Test host.\ntypes:\n    project_label: |-\n        function(\n            parameters(name: string);\n            returns(string);\n            category(Project);\n        ) -> A label.\n";
+const CATALOG: &str = "kind: expression-schema\ncategories:\n    - Project -> Test host.\ntypes:\n    project_label: |-\n        function(\n            parameters(name: string);\n            returns(string);\n            category(Project);\n        ) -> A label.\n";
 
 /// A host whose only function panics when entered.
 fn failing_host() {

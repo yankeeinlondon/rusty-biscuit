@@ -34,6 +34,19 @@ pub enum PositionEncoding {
     Utf16,
 }
 
+impl PositionEncoding {
+    /// The length of `text` in this encoding's code units: the LSP
+    /// `character` of the point just after `text` when it is the start of
+    /// its line.
+    pub fn units(self, text: &str) -> u32 {
+        let units = match self {
+            Self::Utf8 => text.len(),
+            Self::Utf16 => text.encode_utf16().count(),
+        };
+        u32::try_from(units).unwrap_or(u32::MAX)
+    }
+}
+
 /// Line/offset map for one `(uri, version)` snapshot of a document.
 ///
 /// All byte offsets index the exact text passed to [`SourceMap::new`] — no
@@ -101,13 +114,7 @@ impl SourceMap {
         let line_col = self.index.try_line_col(size)?;
         let (line_start, content_end, _) = self.line_bounds(line_col.line)?;
         let clamped = offset.min(content_end);
-        let character = match self.encoding {
-            PositionEncoding::Utf8 => (clamped - line_start) as u32,
-            PositionEncoding::Utf16 => {
-                self.text[line_start..clamped].encode_utf16().count() as u32
-            }
-        };
-        Some(Position::new(line_col.line, character))
+        Some(Position::new(line_col.line, self.encoding.units(&self.text[line_start..clamped])))
     }
 
     /// Converts an LSP position into a byte offset.

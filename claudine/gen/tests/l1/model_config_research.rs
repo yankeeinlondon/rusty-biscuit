@@ -26,21 +26,21 @@ fn every_shipped_model_config_document_satisfies_its_sidecar() {
         .expect("gen crate lives under the claudine package area")
         .to_path_buf();
     let documents = [
-        area.join("docs/research/model-config/antigravity.md"),
-        area.join("docs/research/model-config/claude.md"),
-        area.join("docs/research/model-config/codex.md"),
-        area.join("docs/research/model-config/gemini.md"),
-        area.join("docs/research/model-config/goose.md"),
-        area.join("docs/research/model-config/kilo.md"),
-        area.join("docs/research/model-config/kimi.md"),
-        area.join("docs/research/model-config/opencode.md"),
-        area.join("docs/research/model-config/pi.md"),
-        area.join("docs/research/model-config/qwen.md"),
+        area.join("docs/research/providers/model-config/antigravity.md"),
+        area.join("docs/research/providers/model-config/claude.md"),
+        area.join("docs/research/providers/model-config/codex.md"),
+        area.join("docs/research/providers/model-config/gemini.md"),
+        area.join("docs/research/providers/model-config/goose.md"),
+        area.join("docs/research/providers/model-config/kilo.md"),
+        area.join("docs/research/providers/model-config/kimi.md"),
+        area.join("docs/research/providers/model-config/opencode.md"),
+        area.join("docs/research/providers/model-config/pi.md"),
+        area.join("docs/research/providers/model-config/qwen.md"),
     ];
 
     // A provider document added later must be listed above, or it would go
     // unvalidated here.
-    let on_disk: BTreeSet<String> = fs::read_dir(area.join("docs/research/model-config"))
+    let on_disk: BTreeSet<String> = fs::read_dir(area.join("docs/research/providers/model-config"))
         .expect("read the model-config topic directory")
         .map(|entry| entry.expect("directory entry").file_name().to_string_lossy().into_owned())
         .filter(|name| name.ends_with(".md") && !name.starts_with('_'))
@@ -98,11 +98,11 @@ fn a_scalar_notes_is_rejected_in_every_record_type() {
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf();
-    let sidecar = real_area.join("docs/research/model-config/_schema.yaml");
-    let shipped = include_str!("../../../docs/research/model-config/claude.md");
+    let sidecar = real_area.join("docs/research/providers/model-config/_schema.yaml");
+    let shipped = include_str!("../../../docs/research/providers/model-config/claude.md");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let topic = dir.path().join("docs/research/model-config");
+    let topic = dir.path().join("docs/research/providers/model-config");
     fs::create_dir_all(&topic).unwrap();
     fs::copy(&sidecar, topic.join("_schema.yaml")).expect("copy the real sidecar");
 
@@ -138,7 +138,7 @@ fn the_gate_inlines_record_types_from_the_sidecar_types_mapping() {
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf();
-    let sidecar = real_area.join("docs/research/model-config/_schema.yaml");
+    let sidecar = real_area.join("docs/research/providers/model-config/_schema.yaml");
     let schema = claudine_gen::schema_compat::load_sidecar_schema(&sidecar).expect("the sidecar loads");
     let simplified_schema::SchemaRoot::Single(shape) = schema else {
         panic!("the sidecar is one schema");

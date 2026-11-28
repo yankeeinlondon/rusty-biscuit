@@ -29,7 +29,6 @@
 //! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
 //! | `dm.collection.malformed`, `dm.expression.invalid_callback`, `dm.collection.invalid_source`, `dm.collection.pattern_mismatch`, `dm.collection.invalid_sort_key`, `dm.collection.untyped_*_source` | `ERROR` | A `::map` / `::filter` region composition rejects. Darkmatter owns each code and span; DMLS reports the same. |
 //! | `dm.expression.invalid_spread_operand` | `ERROR` | An object spread whose operand is provably neither an object nor `null` (`{ ...5 }`), ranged at the operand; composition rejects the document under the same code. |
-//! | `dm.lifecycle.incomplete_analysis` | `WARNING` | No host catalog's lifecycle artifact could be used (missing, stale, or invalid), so lifecycle stacks are analyzed as the `md` host's, which may not be the document's host. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -107,6 +106,10 @@ pub mod code {
     pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
     pub const SCHEMA_PREPARE: &str = simplified_schema::SCHEMA_PREPARE_CODE;
+    /// Two matched triggers of the document's registered host declare a
+    /// property or the root rules incompatibly, so the host layer cannot be
+    /// built.
+    pub const HOST_TRIGGER_CONFLICT: &str = darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE;
     /// A value did not match its declared type.
     pub const SCHEMA_TYPE_MISMATCH: &str = simplified_schema::SCHEMA_TYPE_MISMATCH_CODE;
     /// A non-type constraint (range, length, pattern, enum, …) failed.
@@ -118,21 +121,18 @@ pub mod code {
     pub const SCHEMA_MISSING_REQUIRED: &str = simplified_schema::SCHEMA_MISSING_REQUIRED_CODE;
     /// A key the schema does not declare is present (strict mode).
     pub const SCHEMA_UNKNOWN_KEY: &str = simplified_schema::SCHEMA_UNKNOWN_KEY_CODE;
-    /// A deprecated key is present.
-    pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
+    /// A key the schema declares `removed(<replacement>)` is present; the
+    /// replacement is the diagnostic's hint.
+    pub const SCHEMA_REMOVED_KEY: &str = simplified_schema::SCHEMA_REMOVED_KEY_CODE;
+    /// Advice: an undeclared key of an opted-in open object closely
+    /// resembles one declared key.
+    pub const SCHEMA_NEAR_MISS_KEY: &str = simplified_schema::SCHEMA_NEAR_MISS_KEY_CODE;
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
     pub const SCHEMA_INVALID_FILE_REFERENCE: &str = simplified_schema::SCHEMA_INVALID_FILE_REFERENCE_CODE;
     /// A `suggest(...)` candidate is invalid metadata: it fails its target
     /// schema's type, range, integer, length, not-empty, or pattern constraint,
     /// or uses invalid decimal syntax or an unsupported lossless representation.
     pub const SCHEMA_INVALID_SUGGESTION: &str = "dm.schema.invalid_suggestion";
-    /// A host global catalog in the document's schema roots failed to load,
-    /// so the globals it declares are not known to this document's analysis.
-    pub const SCHEMA_HOST_CATALOG: &str = "dm.schema.host_catalog";
-    /// No host catalog in the document's schema roots has a usable lifecycle
-    /// artifact, so its lifecycle stacks are analyzed under the `md` host.
-    /// Reported once per catalog, at the top of the document.
-    pub const LIFECYCLE_INCOMPLETE_ANALYSIS: &str = "dm.lifecycle.incomplete_analysis";
     /// A root key is a host-only lifecycle event of a registered host that
     /// does not identify the document, so it is data here. Ranged at the key.
     pub const LIFECYCLE_UNKNOWN_HOST: &str = "dm.lifecycle.unknown_host";

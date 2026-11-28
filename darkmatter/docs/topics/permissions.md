@@ -96,10 +96,54 @@ template shapes are described in
 
 ### `network`
 
-`allow` or `deny`. Under `allow`, every `http` and `https` URL may be
-fetched; under `deny`, none may, except a host you name for one run with
-`--allow host=HOST` (see
+`allow`, `ask`, or `deny`. It decides whether an `http` or `https` URL may
+be fetched when no current-run approval names its host:
+
+| Setting | A URL whose host this run did not allow |
+| --- | --- |
+| `allow` | is fetched |
+| `ask` | needs approval: a schema slot's URL read asks ("allow this URL for this run"); a composition's remote read (`::file`, `::code`, a read-side function) does not ask, and fails with an approval-required error naming the setting; a dry run sends no request and reports the read as not checked |
+| `deny` | is refused, and nothing asks |
+
+Under every setting, a host you name for one run with `--allow host=HOST`
+is fetched (see
 [Remote URL References](./remote-url-references.md#allowed-hosts)).
+
+```yaml
+permissions:
+  network: ask
+```
+
+With that setting, a document holding `::file https://example.com/a.md`
+fails to compose until the host is allowed:
+
+```text
+$ md compose notes.md
+⤫ TransclusionError: remote fetch needs approval
+┃ The URL https://example.com/a.md was not fetched: `permissions.network` is `ask`, and composition does not ask.
+┃ Allow the host for this run (`--allow host=example.com`), or set `permissions.network: allow`.
+
+$ md compose notes.md --allow host=example.com    # fetched
+```
+
+A read-side function (`load_data`, `file_exists`, …) given such a URL fails
+the same way, with the expression error kind `remote_needs_approval`.
+
+The remedy these refusals name depends on the program running Darkmatter.
+`md` has `--allow host=HOST`, so it suggests that flag. A host program with no
+per-run host allowance installs a different remedy once at startup, and its
+refusals then name only the setting:
+
+```rust
+use darkmatter::config::network::{install_network_remedy, NetworkRemedy};
+
+// Claudine has no `--allow host=HOST`.
+let _ = install_network_remedy(NetworkRemedy::Setting);
+// The hint above then reads: Set `permissions.network: allow`.
+```
+
+The first install wins for the process; a program that installs nothing gets
+`md`'s wording.
 
 ## Defaults and overrides
 
@@ -163,6 +207,14 @@ working copy (see
 [The Repository File at HEAD and in the Working Copy](./configuration.md#the-repository-file-at-head-and-in-the-working-copy)).
 Outside a repository only the user file applies.
 
+The repository is the Git checkout the request resolves in: the nearest
+folder holding a `.git` directory or `.git` file. A checkout nested inside
+another (a submodule, or `app/vendor` with its own `.git` inside `app`) is
+its own repository, so a request there reads `app/vendor`'s configuration,
+and its repository default (`&**/*.<ext>`) covers `app/vendor` only, never
+the rest of `app`. That holds even when a library caller captured its
+options in `app`, unless the caller supplied the configuration itself.
+
 A file read or a shell command is **pre-approved** (it runs without asking)
 when:
 
@@ -220,19 +272,22 @@ permissions:                      permissions:
 
 ### `network` is the most restrictive
 
-`network` does not use the union. It is `allow` only when **every**
-applicable block says `allow`: the user file outside a repository; the user
-file, `HEAD`, and the working copy inside one. An absent file counts as its
-defaults (`deny`), so a repository without `.darkmatter.yaml` keeps the
-network closed even when your user file says `allow`. `--allow host=HOST`
-still allows one host for one run on top.
+`network` does not use the union. The applicable blocks are the user file
+outside a repository; the user file, `HEAD`, and the working copy inside
+one. The most restrictive of them wins, `deny` over `ask` over `allow`: it
+is `deny` when any block says `deny`, otherwise `ask` when any says `ask`,
+and `allow` only when **every** block says `allow`. An absent file counts
+as its defaults (`deny`), so a repository without `.darkmatter.yaml` keeps
+the network closed even when your user file says `allow`. `--allow
+host=HOST` still allows one host for one run on top.
 
-| User | Repository (`HEAD` / working copy) | Every URL fetched without asking? |
+| User | Repository (`HEAD` / working copy) | Effective `network` |
 | --- | --- | --- |
-| `allow` | none (outside a repository) | yes |
-| `allow` | `allow` / `allow` | yes |
-| `allow` | `deny` / `allow` | no |
-| `allow` | absent | no |
+| `allow` | none (outside a repository) | `allow` |
+| `allow` | `allow` / `allow` | `allow` |
+| `allow` | `allow` / `ask` | `ask` |
+| `ask` | `deny` / `allow` | `deny` |
+| `allow` | absent | `deny` |
 
 ### An invalid block
 
@@ -254,7 +309,7 @@ forgotten when the run ends (unless you choose "always allow"):
 | --- | --- |
 | `shell-commands` | a prompt answer ("allow once", or an "always allow" choice), or a host's pre-approval (Claudine's pre-flight, `--yolo`); it can approve an excluded command, never a blacklisted one |
 | `file-read` | "allow this file for this run" lets the read happen even when an exclusion matches; "deny for this run" refuses it (`dm.schema.slot_denied`) even when the configuration pre-approves it |
-| `network` | `--allow host=HOST`; for a schema slot's URL read, an "allow this URL for this run" or "deny for this run" answer |
+| `network` | `--allow host=HOST`; under `ask`, a schema slot's URL read also takes an "allow this URL for this run" or "deny for this run" answer |
 
 Where nothing can ask (a data output such as `--output json`, `md graph`,
 `md validate refs`, the editor, or a run without a terminal), an operation

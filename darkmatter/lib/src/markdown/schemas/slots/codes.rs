@@ -22,6 +22,8 @@ pub const SLOT_PATTERN_REJECTED_CODE: &str = "dm.schema.slot_pattern_rejected";
 pub const SLOT_APPROVAL_REQUIRED_CODE: &str = "dm.schema.slot_approval_required";
 /// The slot reads something a deny decision covers.
 pub const SLOT_DENIED_CODE: &str = "dm.schema.slot_denied";
+/// The slot reads a URL the captured `permissions.network: deny` refuses.
+pub const SLOT_NETWORK_DENIED_CODE: &str = "dm.schema.slot_network_denied";
 /// Resolving the slot needs the template it belongs to.
 pub const SLOT_CYCLE_CODE: &str = "dm.schema.slot_cycle";
 /// The schema holds slots that were not resolved for this run.
@@ -61,6 +63,7 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_PATTERN_REJECTED_CODE,
     SLOT_APPROVAL_REQUIRED_CODE,
     SLOT_DENIED_CODE,
+    SLOT_NETWORK_DENIED_CODE,
     SLOT_CYCLE_CODE,
     SLOT_PENDING_CODE,
     SLOT_FAILED_CODE,
@@ -76,13 +79,14 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
 ];
 
 /// Whether `code` reports a read the session's permissions or approvals
-/// refused: a missing approval, a deny for this run, or invalid
-/// `permissions` (a `dm.config.*` code). Such a failure depends on the
-/// session, so it is never cached for another and a reference check defers
-/// only the first two.
+/// refused: a missing approval, a deny for this run, a URL `network: deny`
+/// refuses, or invalid `permissions` (a `dm.config.*` code). Such a failure
+/// depends on the session, so it is never cached for another and a
+/// reference check defers only the first two.
 #[must_use]
 pub(crate) fn is_permission_code(code: &str) -> bool {
-    matches!(code, SLOT_APPROVAL_REQUIRED_CODE | SLOT_DENIED_CODE) || code.starts_with("dm.config.")
+    matches!(code, SLOT_APPROVAL_REQUIRED_CODE | SLOT_DENIED_CODE | SLOT_NETWORK_DENIED_CODE)
+        || code.starts_with("dm.config.")
 }
 
 /// The code of a slot whose value the library could not use.
@@ -166,7 +170,7 @@ mod tests {
             assert!(segments[2].starts_with("slot_"), "{code}");
             assert!(seen.insert(code), "{code} repeats");
         }
-        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 20);
+        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 21);
     }
 
     /// Each template-type result kind has its own code, so a script can tell

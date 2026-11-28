@@ -198,7 +198,7 @@ mod local_templates {
             let error = output.expect_err(item);
             assert!(matches!(error.without_iteration(), MarkdownError::ShellExpansion(_)), "{item}: {error:?}");
             let [record] = error_diagnostics(&error).try_into().expect("one record");
-            assert_eq!(record.iteration_path.to_string(), "data[0]", "{item}: {record:?}");
+            assert_eq!(record.iteration_path().to_string(), "data[0]", "{item}: {record:?}");
             assert_eq!(record.source.as_ref().and_then(|source| source.line), Some(7), "{item}: {record:?}");
         }
     }
@@ -334,7 +334,7 @@ mod scoped_children {
             "{error}"
         );
         let [record] = error_diagnostics(&error).try_into().expect("one record");
-        assert_eq!(record.iteration_path.to_string(), "names[1]", "{record:?}");
+        assert_eq!(record.iteration_path().to_string(), "names[1]", "{record:?}");
 
         // Control: the document discovery walked composes.
         write(&root, "doc.md", &names_doc("::map names\n::file {{ i }}\n::end-map\n", "[a.md, b.md]"));

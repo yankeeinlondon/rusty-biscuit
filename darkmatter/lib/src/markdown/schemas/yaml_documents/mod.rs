@@ -9,7 +9,10 @@
 //!
 //! A YAML document selects its schema by its top-level `kind` when a
 //! `kind: yaml-schema` definition claims it, and otherwise by a root
-//! `$schema`; a document with neither is not validated. The selected schema
+//! `$schema`; a document with neither is not validated. The attached
+//! registered hosts' definitions
+//! ([`DarkmatterSchemas::with_registered_hosts`]) claim only a kind the
+//! shipped and local definitions establish is unclaimed. The selected schema
 //! alone validates the document: no Markdown baseline and no trigger layers
 //! apply, on either route. Validation is soft, on a converted copy that is
 //! never written back, and whole-value `{{ … }}` / `$(…)` strings are
@@ -30,13 +33,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use simplified_schema::yaml_documents::{
-    FILE_READING_KINDS, KindHost, KindRegistry, LoadedYaml, LoadedYamlDocument, RegistryScope, Selection, select,
+    DefinitionSource, FILE_READING_KINDS, KindHost, KindRegistry, LoadedYaml, LoadedYamlDocument, RegisteredSource,
+    RegistryScope, Selection, select_with_registered,
 };
 use simplified_schema::triggers::assemble;
 use simplified_schema::{SchemaError, ValidationProblem};
 
 use super::embedded::SHIPPED_SOURCES;
 use super::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
+
+/// The diagnostic code of a [`SchemaError::CallableCatalog`] failure, as
+/// `md schema validate` and the editor report it.
+pub const CALLABLE_CATALOG_CODE: &str = "dm.schema.callable_catalog";
 
 /// Darkmatter's [`KindHost`]: its shipped sources and the shipped
 /// definitions its accepted artifact recorded (or, when the artifact or its
@@ -203,14 +211,29 @@ impl DarkmatterSchemas {
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf);
         let schema_roots = registry.roots().search_paths().to_vec();
-        let selection = select(&registry, &loaded.value)?;
+        // Registered hosts' definitions are the lowest tier: consulted only
+        // for a kind the shipped and local definitions leave unclaimed.
+        let registered_kinds = self.registered_hosts.as_deref().map(crate::config::registration::RegisteredHosts::yaml_kinds);
+        let selection = select_with_registered(&registry, registered_kinds, &loaded.value)?;
         if !matches!(selection, Selection::NoSchema) {
             crate::note_work!(YamlContractPreparation);
         }
+        let mut registered = None;
         let (route, definition, effective) = match selection {
             Selection::NoSchema => return Ok(None),
             Selection::Kind { kind, definition } => {
+                // A callable catalog's semantics are judged by the catalog
+                // reader before its kind contract. The shared reader's
+                // located conflicts use this route as well. Shape and syntax
+                // refusals without a competing declaration stay with the
+                // kind contract.
+                if let Err(error @ SchemaError::CallableCatalog { .. }) = self.validate_callable_catalog(document) {
+                    return Err(error);
+                }
                 let effective = EffectiveSchema::for_yaml_document(definition.resolved().clone(), base_dir, self)?;
+                if let DefinitionSource::Registered(source) = definition.source() {
+                    registered = Some(source.clone());
+                }
                 (Route::Kind(kind), definition.source().label(), effective)
             }
             Selection::RootSchema(value) => {
@@ -236,7 +259,7 @@ impl DarkmatterSchemas {
                         // Markdown document's `$schema` does.
                         .or_else(|error| self.resolve_template(error, &super::document_template_identity(&json, &base_dir)))
                         .map_err(|error| match assemble::refused_trigger_file(&error) {
-                            Some(path) => assemble::trigger_schema_referenced(&path),
+                            Some(refused) => assemble::trigger_schema_referenced(&refused.path, refused.site),
                             None => error,
                         })?;
                     assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
@@ -253,6 +276,7 @@ impl DarkmatterSchemas {
         Ok(Some(YamlContract {
             route,
             definition,
+            registered,
             effective: Arc::new(effective),
             schema_roots,
             context: context.clone(),
@@ -261,6 +285,67 @@ impl DarkmatterSchemas {
 }
 
 impl DarkmatterSchemas {
+    /// Judges `document` as a callable catalog when its `kind` is
+    /// `expression-schema` or `mutation-schema`, with the one catalog reader
+    /// registration uses; `Ok` for every other document. Passive: nothing is
+    /// resolved, read, or evaluated.
+    ///
+    /// The built-in catalogs (`darkmatter/schemas/partials/functions.yaml`
+    /// and `mutations.yaml`, matched by path identity: that relative path, or
+    /// the same path under this instance's captured repository root) admit
+    /// their own names and read their compiled-in file-form examples. Every
+    /// other catalog is judged as a host would author it: no file-form
+    /// examples, and an expression callable may not reuse a built-in
+    /// function's canonical name or alias.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::CallableCatalog`] for a failed callable check, located
+    /// in `document`'s text, with both declarations when they conflict.
+    /// Shape and other syntax refusals retain the shared reader's error.
+    pub fn validate_callable_catalog(&self, document: &LoadedYamlDocument) -> Result<(), SchemaError> {
+        use crate::markdown::compose::expression::catalog::{self as catalog, CatalogError};
+        use simplified_schema::simplified::StandaloneSchemaEnvelope;
+
+        let envelope = match document.loaded().value.get("kind").and_then(serde_yaml_ng::Value::as_str) {
+            Some("expression-schema") => StandaloneSchemaEnvelope::ExpressionSchema,
+            Some("mutation-schema") => StandaloneSchemaEnvelope::MutationSchema,
+            _ => return Ok(()),
+        };
+        let (path, source) = (document.path(), document.text());
+        let result = match (self.builtin_catalog(path), envelope) {
+            (Some(BuiltInCatalog::Functions), StandaloneSchemaEnvelope::ExpressionSchema) => {
+                catalog::load_catalog(source, path, envelope, catalog::EXAMPLE_FILES)
+            }
+            (Some(BuiltInCatalog::Mutations), StandaloneSchemaEnvelope::MutationSchema) => {
+                catalog::load_catalog(source, path, envelope, &[])
+            }
+            _ => catalog::load_authored_catalog(source, path, envelope),
+        };
+        result.map(drop).map_err(CatalogError::into_schema_error)
+    }
+
+    /// Which built-in catalog `path` is, by path identity: the catalog's
+    /// repository-relative path itself, or that path under the captured
+    /// repository root. A file name alone never matches.
+    fn builtin_catalog(&self, path: &Path) -> Option<BuiltInCatalog> {
+        use biscuit_file::{PathIdentity, canonicalize_simplified};
+        let context = &self.file_resolution_context;
+        let identity = |path: &Path| PathIdentity::new(&canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()));
+        let absolute = if path.is_absolute() { path.to_path_buf() } else { context.cwd().join(path) };
+        let target = identity(&absolute);
+        [
+            (crate::markdown::compose::expression::catalog::CATALOG_PATH, BuiltInCatalog::Functions),
+            (crate::effects::types::MUTATIONS_PATH, BuiltInCatalog::Mutations),
+        ]
+        .into_iter()
+        .find(|(relative, _)| {
+            PathIdentity::new(path) == PathIdentity::new(Path::new(relative))
+                || context.repository_root().is_some_and(|root| identity(&root.join(relative)) == target)
+        })
+        .map(|(_, catalog)| catalog)
+    }
+
     /// Prepares `resolved`, the configuration schema the caller selected for
     /// the YAML document at `path` by its location, as that document's
     /// contract ([`Route::Configuration`]). `definition` names the schema in
@@ -287,11 +372,19 @@ impl DarkmatterSchemas {
         Ok(YamlContract {
             route: Route::Configuration,
             definition: definition.into(),
+            registered: None,
             effective: Arc::new(effective),
             schema_roots: Vec::new(),
             context: context.clone(),
         })
     }
+}
+
+/// A built-in callable catalog, by source identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltInCatalog {
+    Functions,
+    Mutations,
 }
 
 /// The schema a whole YAML document selected, prepared and compiled
@@ -301,6 +394,9 @@ impl DarkmatterSchemas {
 pub struct YamlContract {
     route: Route,
     definition: String,
+    /// The registered host definition that was selected, when the kind came
+    /// from the registered tier.
+    registered: Option<RegisteredSource>,
     effective: Arc<EffectiveSchema>,
     schema_roots: Vec<PathBuf>,
     context: biscuit_file::FileResolutionContext,
@@ -311,6 +407,7 @@ impl std::fmt::Debug for YamlContract {
         f.debug_struct("YamlContract")
             .field("route", &self.route)
             .field("definition", &self.definition)
+            .field("registered", &self.registered)
             .finish_non_exhaustive()
     }
 }
@@ -320,6 +417,14 @@ impl YamlContract {
     #[must_use]
     pub fn route(&self) -> &Route {
         &self.route
+    }
+
+    /// The registered host and definition that judge the document, when its
+    /// `kind` was left unclaimed by the shipped and local definitions and a
+    /// registered host's `kind: yaml-schema` claims it.
+    #[must_use]
+    pub fn registered(&self) -> Option<&RegisteredSource> {
+        self.registered.as_ref()
     }
 
     /// The selected schema alone, as [`YamlValidation::effective`].
@@ -341,7 +446,10 @@ impl YamlContract {
     /// [`declaration_key`](LoadedYamlDocument::declaration_key) of the
     /// document this contract was prepared from, against the prepared
     /// schema, then (only when the schema reports nothing) runs its kind's
-    /// checks over the copy the schema accepted. Passive unless
+    /// checks over the copy the schema accepted; when it reports a problem
+    /// at a kind's `$schema` or `types` carrier whose declaration does not
+    /// parse, the problem is narrowed to the failing declaration
+    /// ([`LoadedYamlDocument::locate_declaration_problems`]). Passive unless
     /// [`Self::checks_read_files`].
     #[must_use]
     pub fn validate(&self, document: &LoadedYamlDocument) -> YamlValidation {
@@ -357,13 +465,16 @@ impl YamlContract {
             map.shift_remove("$schema");
         }
         let mut report = self.effective.validate_data(&instance, &loaded.positions);
-        if report.valid
-            && let Route::Kind(kind) = &self.route
+        if let Route::Kind(kind) = &self.route
             && simplified_schema::yaml_documents::CHECKED_KINDS.contains(&kind.as_str())
         {
-            let accepted = self.effective.data_copy(&instance);
-            report.problems = document.kind_checks(kind, &accepted, &self.schema_roots, &self.context, SHIPPED_SOURCES);
-            report.valid = report.problems.is_empty();
+            if report.valid {
+                let accepted = self.effective.data_copy(&instance);
+                report.problems = document.kind_checks(kind, &accepted, &self.schema_roots, &self.context, SHIPPED_SOURCES);
+                report.valid = report.problems.is_empty();
+            } else {
+                document.locate_declaration_problems(kind, &mut report.problems);
+            }
         }
         YamlValidation {
             route: self.route.clone(),

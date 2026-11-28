@@ -3,36 +3,40 @@ kind: feature
 created: 2026-11-22
 status: finalized-spec
 area: claudine
+implemented-by: claude/opus
 owner: Ken Snyder <ken@ken.net>
 related:
-    - 2026-11-22-claudine-doctor
-    - 2026-11-18-ergonomic-sequences
-    - 2026-10-09-frontmatter-warnings
+- 2026-11-22-claudine-doctor
+- 2026-11-18-ergonomic-sequences
+- 2026-10-09-frontmatter-warnings
 $schema:
-    status: |-
-        enum(
-            draft-spec,
-            finalized-spec,
-            planned,
-            implemented,
-            review-findings,
-            human-in-the-loop,
-            completed,
-            on-hold,
-            abandoned
-        ) -> an indicator of progress for this specification
-    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
-    reviewed-by: string -> the agent and model used in the spec review
-    reviewed-on: date -> the date the spec was reviewed
-    review-iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
-    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
-    implemented: boolean -> indicates whether this spec's plan has been implemented
-    implemented-by: string -> the agent who implemented the plan
+  status: |-
+    enum(
+        draft-spec,
+        finalized-spec,
+        planned,
+        implemented,
+        review-findings,
+        human-in-the-loop,
+        completed,
+        on-hold,
+        abandoned
+    ) -> an indicator of progress for this specification
+  reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+  reviewed-by: string -> the agent and model used in the spec review
+  reviewed-on: date -> the date the spec was reviewed
+  review-iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+  clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+  implemented: boolean -> indicates whether this spec's plan has been implemented
+  implemented-by: string -> the agent who implemented the plan
 reviewed: true
-reviewed-by: "codex/gpt-6.2-sol"
-reviewed-on: "2026-11-22"
-review-iterations: 0
+reviewed-by: codex/gpt-6.2-sol
+reviewed-on: 2026-11-22
+review-iterations: 5
 needs-rulings: false
+implemented: true
+ready: false
+human-review: false
 ---
 
 # Better errors and a diagnostic dry run

@@ -433,11 +433,18 @@ fn compose_runs_edit_in_order_in_start_success_and_finalize() {
 #[test]
 fn a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children() {
     let run = EditRun::new("edit-container-order", "code");
+    // Shell commands run under `cmd` on Windows, which has no `test`.
+    #[cfg(windows)]
+    let ordered = "if exist start.md if not exist finalize.md echo ordered> trace.txt";
+    #[cfg(not(windows))]
+    let ordered = "test -f start.md && test ! -f finalize.md && echo ordered > trace.txt";
     let document = run.write_doc(
         "ship.md",
-        "---\nsequence:\n  - name: ordered\n    sequence:\n      - name: child\n        \
-         shell: \"test -f start.md && test ! -f finalize.md && echo ordered > trace.txt\"\n    \
-         start:\n      - edit: start.md\n    finalize:\n      - edit: finalize.md\n---\n",
+        &format!(
+            "---\nsequence:\n  - name: ordered\n    sequence:\n      - name: child\n        \
+             shell: \"{ordered}\"\n    \
+             start:\n      - edit: start.md\n    finalize:\n      - edit: finalize.md\n---\n"
+        ),
     );
 
     let output = run.sequence(&document);

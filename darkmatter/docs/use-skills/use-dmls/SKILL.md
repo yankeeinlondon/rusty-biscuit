@@ -1,6 +1,6 @@
 ---
 name: use-dmls
-description: "How to USE DMLS, the Darkmatter Language Server, in an editor — installing the `dmls` binary and wiring it into VS Code, Zed, Neovim, or Helix; what it provides (Markdown links/anchors/backlinks, wiki links, schema-aware frontmatter completion/hover/diagnostics, Darkmatter DSL intelligence for `{{{ }}}`/`::file`/`::block`/`::map`, rename, code actions, formatting, semantic tokens); configuring it with `.dmls.toml` (`[workspace]`, `[wiki]`, `[schema]`, `[expressions]`, `[formatting.markdown]`, `[semantic_tokens]`, `DMLS_CACHE_DIR`); and writing the schema files it reads — `$schema`, `kind: schema` type libraries, `kind: schema-trigger` files, `kind: yaml-schema` definitions, schema roots, and `SCHEMAS_DIR`. Use when someone sets up, configures, troubleshoots, or authors schemas for DMLS. For changing DMLS's own source code, load the repo's `darkmatter` skill instead."
+description: "How to USE DMLS, the Darkmatter Language Server, in an editor — installing the `dmls` binary and wiring it into VS Code, Zed, Neovim, or Helix; what it provides (Markdown links/anchors/backlinks, wiki links, schema-aware frontmatter completion/hover/diagnostics, Darkmatter DSL intelligence for `{{{ }}}`/`::file`/`::block`/`::map`, rename, code actions, formatting, semantic tokens); configuring it with `.dmls.toml` (`[workspace]`, `[wiki]`, `[schema]`, `[expressions]`, `[formatting.markdown]`, `[semantic_tokens]`, `DMLS_CACHE_DIR`); and writing the schema files it reads — `$schema`, `kind: schema` type libraries, `kind: schema-trigger` files, `kind: yaml-schema` definitions, `kind: namespace-schema`, `kind: expression-schema` and `kind: mutation-schema` callable catalogs, schema roots, and `SCHEMAS_DIR`. Use when someone sets up, configures, troubleshoots, or authors schemas for DMLS. For changing DMLS's own source code, load the repo's `darkmatter` skill instead."
 ---
 
 # Using DMLS
@@ -87,6 +87,12 @@ list-item-padding = "none"
   watching, or on the next save when the client has no watcher (Neovim on
   Linux). **Unsaved** edits to a trigger or `$schema` file reach Markdown
   documents only after you save.
+- **A host registration change takes about 300 ms to show.** After
+  `claudine setup` or an upgrade rewrites a registered host's files, DMLS
+  waits until they have been quiet for about 300 ms, keeping the previous
+  results meanwhile, then reloads without a restart. A client that can't
+  watch those folders reloads after the next save instead. See
+  [schemas.md](schemas.md#claudine).
 - **Missing required keys are not reported by default.** A value might be
   supplied at compose time. Set `[schema] strict = true` to see them.
 - **A missing `file(...)` target is not a diagnostic.** You may not have

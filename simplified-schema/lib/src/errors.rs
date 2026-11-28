@@ -62,6 +62,19 @@ pub struct GrammarRelated {
     pub arm: Option<usize>,
 }
 
+/// Another location a [`SchemaError::CallableCatalog`] failure involves,
+/// such as the first of two declarations with the same binding contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogRelated {
+    /// What the location is, as an editor would label it.
+    pub message: String,
+    /// The file `span` is a byte range of: the catalog itself, another
+    /// catalog of the same host, or a built-in catalog's identity.
+    pub file: PathBuf,
+    /// Byte range in `file`'s text; `None` when only the file is known.
+    pub span: Option<Range<usize>>,
+}
+
 /// One reference of a rejected [`SchemaError::NonDescendingCycle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycleReference {
@@ -188,9 +201,47 @@ pub enum NotSchemaReason {
     /// for a host's global catalog, so it is neither a `$schema` target nor
     /// a `Name@file` import source, and its `types` are private to it.
     NamespaceCatalog,
+    /// A `kind: expression-schema` or `kind: mutation-schema` document,
+    /// well formed or not: it describes callable signatures for a callable
+    /// catalog, so it is neither a `$schema` target nor a `Name@file` import
+    /// source, and its `types` are private to it.
+    CallableCatalog,
+    /// A file claiming the `kind: schema-trigger` envelope, well formed or
+    /// not: a trigger activates by placement and match, so it is neither a
+    /// `$schema` target nor a `Name@file` import source. A trigger payload or
+    /// document `$schema` naming one reports it as
+    /// [`SchemaError::TriggerPayloadCycle`] or
+    /// [`SchemaError::TriggerSchemaReferenced`].
+    TriggerEnvelope,
+    /// A `Name@file` import source whose `$schema` is a root union: it
+    /// declares no named types, so nothing can be imported from it.
+    RootUnionImport,
+    /// A `Name@file` import source whose `$schema` is a whole-file
+    /// reference: imports are defined only among a file's own entries, so
+    /// nothing can be imported from it.
+    ReferenceImport,
 }
 
 impl NotSchemaReason {
+    /// Whether the file is refused only for the role it was named in: it is
+    /// a valid document of another kind (a types library, a YAML kind, a
+    /// namespace, a trigger, a schema with no named types to import), so the
+    /// declaration that named it is the mistake. `false` for a file that is
+    /// no schema document at all, a defect of its own content.
+    #[must_use]
+    pub fn is_role(self) -> bool {
+        match self {
+            NotSchemaReason::TypesOnly
+            | NotSchemaReason::SelectedByKind
+            | NotSchemaReason::NamespaceCatalog
+            | NotSchemaReason::CallableCatalog
+            | NotSchemaReason::TriggerEnvelope
+            | NotSchemaReason::RootUnionImport
+            | NotSchemaReason::ReferenceImport => true,
+            NotSchemaReason::NoSchemaProperty | NotSchemaReason::NotAMapping | NotSchemaReason::JsonMissingDialect => false,
+        }
+    }
+
     /// The migration hint for this reason in a file at `path`, when there is
     /// one. A non-object `.json` root gets the same dialect hint as a missing
     /// declaration.
@@ -199,8 +250,12 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
             NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
             NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
-            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog => {
+            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog | NotSchemaReason::CallableCatalog => {
                 Some("move shared types into a `kind: schema` file and import them from there")
+            }
+            NotSchemaReason::TriggerEnvelope => Some("reference the trigger's payload file instead"),
+            NotSchemaReason::RootUnionImport | NotSchemaReason::ReferenceImport => {
+                Some("import the type from the file that declares it")
             }
             NotSchemaReason::NotAMapping | NotSchemaReason::NoSchemaProperty => None,
         }
@@ -228,7 +283,71 @@ impl fmt::Display for NotSchemaReason {
             NotSchemaReason::NamespaceCatalog => {
                 "it is a `namespace-schema`; it declares a host namespace and is read only by a host's catalog"
             }
+            NotSchemaReason::CallableCatalog => {
+                "it is a callable catalog (`expression-schema` or `mutation-schema`); it describes callable \
+                 signatures and cannot be used as a document schema or a named-type import"
+            }
+            NotSchemaReason::TriggerEnvelope => {
+                "it is a `schema-trigger`; trigger schemas activate by placement and match, never by reference"
+            }
+            NotSchemaReason::RootUnionImport => "its `$schema` is a root union, which declares no named types",
+            NotSchemaReason::ReferenceImport => {
+                "its `$schema` is a whole-file reference; imports are defined only among a file's own entries"
+            }
         })
+    }
+}
+
+/// Two matched triggers of one registered host declare a top-level
+/// property, or the payload's root rules, in ways that cannot be layered:
+/// their types are incomparable, or the narrower one disagrees on presence,
+/// null admission, a constraint, a default, or a description; or both write
+/// root rules, or one declares a key that defines another's root-union
+/// alternatives.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "registered host `{host}`'s triggers `{}` and `{}` conflict on {}: {reason}",
+    HostTriggerConflict::label(first_name.as_deref(), first),
+    HostTriggerConflict::label(second_name.as_deref(), second),
+    subject.as_ref().map_or_else(|| "the root rules".to_string(), |key| format!("`{key}`"))
+)]
+pub struct HostTriggerConflict {
+    /// The document whose matched triggers met.
+    pub document: Option<PathBuf>,
+    pub host: String,
+    /// The trigger file representing the first declaration.
+    pub first: PathBuf,
+    /// The first trigger's valid display `name`, when it declares one.
+    pub first_name: Option<String>,
+    pub second: PathBuf,
+    /// The second trigger's valid display `name`, when it declares one.
+    pub second_name: Option<String>,
+    /// The property name; `None` for the root rules.
+    pub subject: Option<String>,
+    pub reason: String,
+}
+
+impl HostTriggerConflict {
+    /// A trigger as the conflict names it: `name (path)` for a named
+    /// trigger, its path alone otherwise.
+    #[must_use]
+    pub fn label(name: Option<&str>, path: &std::path::Path) -> String {
+        match name {
+            Some(name) => format!("{name} ({})", path.display()),
+            None => path.display().to_string(),
+        }
+    }
+
+    /// The first trigger as the conflict names it ([`Self::label`]).
+    #[must_use]
+    pub fn first_label(&self) -> String {
+        Self::label(self.first_name.as_deref(), &self.first)
+    }
+
+    /// The second trigger as the conflict names it ([`Self::label`]).
+    #[must_use]
+    pub fn second_label(&self) -> String {
+        Self::label(self.second_name.as_deref(), &self.second)
     }
 }
 
@@ -438,10 +557,13 @@ impl fmt::Display for UnresolvedSlots {
 }
 
 fn not_schema_message(path: &Path, reason: NotSchemaReason) -> String {
-    with_hint_line(
-        format!("`{}` is not a valid schema definition: {reason}", path.display()),
-        reason.hint(path),
-    )
+    // A root union or a whole-file reference is a valid document schema; it
+    // is refused only as an import source.
+    let refusal = match reason {
+        NotSchemaReason::RootUnionImport | NotSchemaReason::ReferenceImport => "cannot supply named imports",
+        _ => "is not a valid schema definition",
+    };
+    with_hint_line(format!("`{}` {refusal}: {reason}", path.display()), reason.hint(path))
 }
 
 /// Errors produced by the schemas subsystem.
@@ -542,6 +664,9 @@ pub enum SchemaError {
         reference: String,
         #[source]
         source: biscuit_file::FileReferenceError,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
     },
 
     /// A `$schema` file reference matched no file
@@ -550,14 +675,31 @@ pub enum SchemaError {
     /// The message carries the literal-glob hint
     /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
     #[error("{}", crate::errors::with_glob_hint(format!("could not resolve $schema reference `{reference}`"), biscuit_file::ResolutionFailure::NoMatch, reference))]
-    NoMatch { reference: String, bare_name: bool },
+    NoMatch {
+        reference: String,
+        bare_name: bool,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A file is not a schema definition a document's `$schema` may target:
     /// a YAML document needs a top-level `$schema`, a JSON file must be an
     /// object declaring the Draft 2020-12 dialect. The message carries the
     /// reason's migration hint ([`NotSchemaReason::hint`]) on a `hint:` line.
+    ///
+    /// `site` is the declaration that asked for the file in this role (a
+    /// `$schema` value or arm, a `Name@file` import), when one did and the
+    /// reason is a role refusal ([`NotSchemaReason::is_role`],
+    /// [`SchemaError::reference_site`]): the file is refused for that use,
+    /// not for its own content. A file that is no schema document at all
+    /// records none and is reported at itself.
     #[error("{}", not_schema_message(path, *reason))]
-    NotASchemaDocument { path: PathBuf, reason: NotSchemaReason },
+    NotASchemaDocument {
+        path: PathBuf,
+        reason: NotSchemaReason,
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A referenced JSON schema file declares a `$schema` dialect other than
     /// exactly [`DRAFT_2020_12_DIALECT`] (an empty string or a trailing `#`
@@ -566,11 +708,20 @@ pub enum SchemaError {
         "`{path}` declares the unsupported JSON Schema dialect `{declared}`; only \
          `https://json-schema.org/draft/2020-12/schema` is supported"
     )]
-    UnsupportedJsonDialect { path: PathBuf, declared: String },
+    ///
+    /// `site` is the `$schema` declaration that named the file, when one did
+    /// ([`SchemaError::reference_site`]).
+    UnsupportedJsonDialect {
+        path: PathBuf,
+        declared: String,
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A referenced Draft 2020-12 JSON schema file fails the dialect's
     /// meta-schema. Distinct from a format rejection: the file is a JSON
     /// Schema in the supported dialect, but not a valid one.
+    /// A defect of the file's own content, so it records no declaration:
+    /// a host reports it at the file.
     #[error("`{path}` is not a valid Draft 2020-12 JSON Schema: {message}")]
     InvalidJsonSchema { path: PathBuf, message: String },
 
@@ -595,14 +746,42 @@ pub enum SchemaError {
         span: Option<Range<usize>>,
     },
 
+    /// A callable catalog (`kind: expression-schema` or
+    /// `kind: mutation-schema`) fails a check of its callables: a missing or
+    /// disagreeing category, a callable mixed with an ordinary type, a
+    /// duplicate or colliding name, an invalid overload. `span` is the byte
+    /// range of the failing declaration or field in `path`'s text, `None`
+    /// when only the file is known; `related` holds the other locations a
+    /// conflict involves (the earlier declaration), empty otherwise. Every
+    /// consumer (registration, `md schema validate`, the editor) reports
+    /// this one judgment.
+    #[error("invalid callable catalog `{}`: {message}", path.display())]
+    CallableCatalog {
+        path: PathBuf,
+        message: String,
+        span: Option<Range<usize>>,
+        related: Vec<CatalogRelated>,
+    },
+
     /// A `$schema` value is a remote URL; v1 only supports local references.
     #[error("remote $schema references are not supported in this version: `{reference}`")]
-    RemoteUnsupported { reference: String },
+    RemoteUnsupported {
+        reference: String,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A [`bundle`](crate::resolve::bundle) scope in force refused a schema
     /// reference before anything was probed or read.
     #[error("schema reference `{reference}` is refused: {boundary}")]
-    BundleBoundary { reference: String, boundary: crate::resolve::bundle::BundleBoundary },
+    BundleBoundary {
+        reference: String,
+        boundary: crate::resolve::bundle::BundleBoundary,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// The baseline schema could not be loaded, parsed, or violates the
     /// "simple object schema" restriction documented in the spec.
@@ -796,9 +975,14 @@ pub enum SchemaError {
     /// (`$schema: ./other.yaml`) — and each root-union file arm — re-enters
     /// reference resolution, so a self- or mutually-referencing pair would
     /// otherwise recurse until the process stack overflows. `chain` lists the
-    /// canonical paths in visit order.
+    /// canonical paths in visit order; `site` is the declaration whose
+    /// reference closed the loop, when one did
+    /// ([`SchemaError::reference_site`]).
     #[error("$schema file-reference cycle detected: {chain}")]
-    ReferenceCycle { chain: String },
+    ReferenceCycle {
+        chain: String,
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A `$schema` file-reference chain exceeded the delegation depth cap
     /// while every file in it was distinct. Deliberately distinct from
@@ -806,9 +990,15 @@ pub enum SchemaError {
     /// so reporting it as a cycle would send the author looking for a
     /// self-reference that does not exist. `limit` is the cap that was
     /// reached; `chain` lists the canonical paths in visit order, ending at
-    /// the hop that would have exceeded it.
+    /// the hop that would have exceeded it; `site` is the declaration whose
+    /// reference made that hop, when one did
+    /// ([`SchemaError::reference_site`]).
     #[error("$schema file-reference chain exceeded the {limit}-file depth limit: {chain}")]
-    ReferenceDepthExceeded { limit: usize, chain: String },
+    ReferenceDepthExceeded {
+        limit: usize,
+        chain: String,
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// An `example(...)` constraint (Feature A) referenced a file that is
     /// missing, malformed, or does not validate against the example-artifact
@@ -817,7 +1007,13 @@ pub enum SchemaError {
     /// is a fail-loud schema-load error, never a warning. `reference` is the
     /// authored `example(...)` reference; `message` is the underlying reason.
     #[error("invalid example artifact `{reference}`: {message}")]
-    InvalidExample { reference: String, message: String },
+    InvalidExample {
+        reference: String,
+        message: String,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A schema-trigger envelope or match expression is malformed (a field of
     /// the wrong shape, an unknown key, or an otherwise unparseable `match:`
@@ -864,17 +1060,20 @@ pub enum SchemaError {
     /// match-safe subset (constraints that resolve files, import types, load
     /// examples, provide defaults, mark generated values, or eager-existence-
     /// check `file`). `property` names the offending property; `constraint`
-    /// names the forbidden constraint keyword.
+    /// names the forbidden constraint keyword; `field` is the condition's
+    /// place in the trigger, written from `match` down as the
+    /// [`SchemaError::TriggerMatch`] messages are (`match.all[0].group[6].prompt`).
     #[error(
         "schema-trigger match condition for `{property}` uses a forbidden constraint: {constraint}"
     )]
-    TriggerForbiddenConstraint { property: String, constraint: String },
+    TriggerForbiddenConstraint { property: String, constraint: String, field: String },
 
     /// A schema-trigger match mapping mixes structural keys (combinators
     /// `all`/`group`/`none`/`min-match` or the `$path` predicate) with
     /// property-condition keys. Mixing is a load error — never a guess about
     /// the author's intent. `structural` and `properties` list the offending
-    /// keys.
+    /// keys; `field` is the mixed mapping's place, written from `match` down
+    /// (`match.all[1]`).
     #[error(
         "schema-trigger match mapping mixes structural keys ({structural:?}) with property keys \
          ({properties:?}); use `all:` to combine them"
@@ -882,6 +1081,7 @@ pub enum SchemaError {
     TriggerMixedMapping {
         structural: Vec<String>,
         properties: Vec<String>,
+        field: String,
     },
 
     /// A schema-trigger's whole match expression is vacuous: some way of
@@ -945,7 +1145,13 @@ pub enum SchemaError {
         "bare-name schema reference `{reference}` was not found in any schema root; \
          a document-sibling file exists — use `{suggestion}` to reference it"
     )]
-    BareNameSiblingExists { reference: String, suggestion: String },
+    BareNameSiblingExists {
+        reference: String,
+        suggestion: String,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
+    },
 
     /// A schema-trigger payload did not resolve to a merge-compatible object
     /// schema. Trigger payloads must be SimplifiedSchema single objects or
@@ -989,7 +1195,10 @@ pub enum SchemaError {
     /// or through an import cycle), rather than to an ordinary schema file.
     /// `trigger` is the originating envelope; `payload_path` is the file the
     /// payload resolved to; `chain` describes the resolution path for the
-    /// indirect case.
+    /// indirect case. `site` is the declaration that named the trigger file
+    /// (the payload's `$schema` value or arm, or a `Name@file` import,
+    /// possibly in a library the payload imports), when the resolver
+    /// recorded one ([`SchemaError::reference_site`]).
     #[error(
         "schema-trigger payload in `{}` resolved to a schema-trigger envelope `{}`",
         trigger.display(),
@@ -999,6 +1208,7 @@ pub enum SchemaError {
         trigger: PathBuf,
         payload_path: PathBuf,
         chain: String,
+        site: Option<Box<SchemaReferenceSite>>,
     },
 
     /// A document `$schema` directly referenced a `kind: schema-trigger` file.
@@ -1012,6 +1222,9 @@ pub enum SchemaError {
     TriggerSchemaReferenced {
         reference: String,
         suggestion: String,
+        /// The declaration that wrote `reference`, when one did
+        /// ([`SchemaError::reference_site`]).
+        site: Option<Box<SchemaReferenceSite>>,
     },
 
     /// The `default(...)` of a property, needed because its value is
@@ -1043,6 +1256,12 @@ pub enum SchemaError {
         property: String,
         declarations: Vec<String>,
     },
+
+    /// Two matched triggers of one registered host cannot be layered as one
+    /// host layer (`dm.host.trigger_conflict`). A schema preparation error:
+    /// validation and composition fail, and no higher layer clears it.
+    #[error("{0}")]
+    HostTriggerConflict(Box<HostTriggerConflict>),
 
     /// Default preparation would never end: a `$ref` chain returns to
     /// itself without describing a child value (`path` is `None`, and
@@ -1097,6 +1316,88 @@ impl SchemaError {
             }
             _ => None,
         }
+    }
+
+    /// The declaration that wrote the failing file reference of a
+    /// reference-resolution error ([`SchemaError::Unresolved`],
+    /// [`SchemaError::NoMatch`], [`SchemaError::RemoteUnsupported`],
+    /// [`SchemaError::BundleBoundary`], [`SchemaError::InvalidExample`],
+    /// [`SchemaError::BareNameSiblingExists`],
+    /// [`SchemaError::TriggerSchemaReferenced`]), or of a file it selected
+    /// and then refused for the role it was named in
+    /// ([`SchemaError::NotASchemaDocument`],
+    /// [`SchemaError::UnsupportedJsonDialect`],
+    /// [`SchemaError::ReferenceCycle`],
+    /// [`SchemaError::ReferenceDepthExceeded`],
+    /// [`SchemaError::TriggerPayloadCycle`]): the source that wrote it and
+    /// the declaration's structural path there, as the resolver read them
+    /// before the reference was normalized or the declaration was inherited
+    /// through an import, `$extends`, or a spread. `None` for any other
+    /// error, and for a reference no declaration wrote (one a caller
+    /// supplied directly). A file that fails to parse is reported with its
+    /// own parse position instead ([`SchemaError::SchemaDocument`]).
+    #[must_use]
+    pub fn reference_site(&self) -> Option<&SchemaReferenceSite> {
+        match self {
+            SchemaError::Unresolved { site, .. }
+            | SchemaError::NoMatch { site, .. }
+            | SchemaError::RemoteUnsupported { site, .. }
+            | SchemaError::BundleBoundary { site, .. }
+            | SchemaError::InvalidExample { site, .. }
+            | SchemaError::BareNameSiblingExists { site, .. }
+            | SchemaError::TriggerSchemaReferenced { site, .. }
+            | SchemaError::NotASchemaDocument { site, .. }
+            | SchemaError::UnsupportedJsonDialect { site, .. }
+            | SchemaError::ReferenceCycle { site, .. }
+            | SchemaError::ReferenceDepthExceeded { site, .. }
+            | SchemaError::TriggerPayloadCycle { site, .. } => site.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// `self` with `site` as the declaration that wrote its reference, when
+    /// it is a reference-resolution error that has none yet: the first
+    /// declaration to read a reference wins, so a caller that only passed
+    /// the reference on never overwrites it.
+    #[must_use]
+    pub(crate) fn written_at(mut self, site: impl FnOnce() -> SchemaReferenceSite) -> Self {
+        match &mut self {
+            SchemaError::Unresolved { site: slot, .. }
+            | SchemaError::NoMatch { site: slot, .. }
+            | SchemaError::RemoteUnsupported { site: slot, .. }
+            | SchemaError::BundleBoundary { site: slot, .. }
+            | SchemaError::InvalidExample { site: slot, .. }
+            | SchemaError::BareNameSiblingExists { site: slot, .. }
+            | SchemaError::TriggerSchemaReferenced { site: slot, .. }
+                if slot.is_none() =>
+            {
+                *slot = Some(Box::new(site()));
+            }
+            _ => {}
+        }
+        self
+    }
+
+    /// `self` with `site` as the declaration that asked for the file
+    /// `target` in a role it cannot serve, when `self` refuses exactly that
+    /// file for its role ([`SchemaError::NotASchemaDocument`] with a
+    /// [`NotSchemaReason::is_role`] reason, [`SchemaError::UnsupportedJsonDialect`])
+    /// and records no declaration yet. A file refused for its own content
+    /// (no schema at all, a JSON Schema the meta-schema rejects, a parse
+    /// failure) is reported at that file, and a refusal of another file (one
+    /// `target` delegates to) keeps the site its own reader recorded, or
+    /// none: neither is attributed to a declaration that did not cause it.
+    #[must_use]
+    pub(crate) fn refused_at(mut self, target: &Path, site: impl FnOnce() -> SchemaReferenceSite) -> Self {
+        let slot = match &mut self {
+            SchemaError::NotASchemaDocument { path, reason, site } if path == target && reason.is_role() => site,
+            SchemaError::UnsupportedJsonDialect { path, site, .. } if path == target => site,
+            _ => return self,
+        };
+        if slot.is_none() {
+            *slot = Some(Box::new(site()));
+        }
+        self
     }
 }
 
@@ -1256,7 +1557,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      on <cyan>number</cyan>, <cyan>pattern</cyan> on <cyan>string</cyan>).",
                 ),
 
-            SchemaError::Unresolved { reference, source } => StatusBlock::new(StatusState::Error)
+            SchemaError::Unresolved { reference, source, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "$schema unresolved"))
                 .body(vec![
                     Prose::new(format!(
@@ -1273,7 +1574,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      <cyan>~/</cyan>, <cyan>@/</cyan>), and is readable.",
                 ),
 
-            SchemaError::NoMatch { reference, bare_name } => {
+            SchemaError::NoMatch { reference, bare_name, .. } => {
                 let cause = if *bare_name {
                     format!("no schema root holds `{reference}`")
                 } else {
@@ -1299,7 +1600,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )
             }
 
-            SchemaError::NotASchemaDocument { path, reason } => StatusBlock::new(StatusState::Error)
+            SchemaError::NotASchemaDocument { path, reason, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "not a schema definition"))
                 .body(vec![
                     Prose::new(format!(
@@ -1318,7 +1619,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         .to_string(),
                 }),
 
-            SchemaError::UnsupportedJsonDialect { path, declared } => StatusBlock::new(StatusState::Error)
+            SchemaError::UnsupportedJsonDialect { path, declared, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "unsupported JSON Schema dialect"))
                 .body(Prose::new(format!(
                     "<cyan>{}</cyan> declares the dialect <cyan>{}</cyan>.",
@@ -1327,7 +1628,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 )))
                 .hint("Only <cyan>https://json-schema.org/draft/2020-12/schema</cyan> is supported."),
 
-            SchemaError::InvalidJsonSchema { path, message } => StatusBlock::new(StatusState::Error)
+            SchemaError::InvalidJsonSchema { path, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "invalid JSON Schema"))
                 .body(vec![
                     Prose::new(format!(
@@ -1337,6 +1638,25 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::new(format!("<dim>Reason:</dim> {}", Prose::escape_text(message))),
                 ])
                 .hint("Fix the schema so it satisfies the Draft 2020-12 meta-schema."),
+
+            SchemaError::CallableCatalog { path, message, related, .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "callable catalog invalid"))
+                .body(
+                    std::iter::once(Prose::new(format!(
+                        "<cyan>{}</cyan>: {}",
+                        Prose::escape_text(&path.display().to_string()),
+                        Prose::escape_text_outside_code_spans(message)
+                    )))
+                    .chain(related.iter().map(|related| {
+                        Prose::new(format!(
+                            "<dim>Related:</dim> {} <dim>({})</dim>",
+                            Prose::escape_text_outside_code_spans(&related.message),
+                            Prose::escape_text(&related.file.display().to_string())
+                        ))
+                    }))
+                    .collect::<Vec<_>>(),
+                )
+                .hint("Fix the declaration at the reported location; a callable catalog is checked by the host that reads it."),
 
             SchemaError::SchemaDocument { path, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -1360,7 +1680,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      <cyan>simplified-schema/schemas/</cyan>.",
                 ),
 
-            SchemaError::RemoteUnsupported { reference } => StatusBlock::new(StatusState::Error)
+            SchemaError::RemoteUnsupported { reference, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
                     "remote $schema not supported",
@@ -1371,7 +1691,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 )))
                 .hint("Download the schema locally and reference it with a relative or absolute path."),
 
-            SchemaError::BundleBoundary { reference, boundary } => StatusBlock::new(StatusState::Error)
+            SchemaError::BundleBoundary { reference, boundary, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "schema reference outside the bundle"))
                 .body(Prose::new(format!(
                     "<cyan>{}</cyan> is refused: {}",
@@ -1627,7 +1947,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ])
                 .hint("Fix the member where it is declared; every object that composes it receives the fix."),
 
-            SchemaError::ReferenceCycle { chain } => StatusBlock::new(StatusState::Error)
+            SchemaError::ReferenceCycle { chain, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "$schema reference cycle"))
                 .body(Prose::new(format!(
                     "<dim>Chain:</dim> {}",
@@ -1639,7 +1959,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      an actual schema.",
                 ),
 
-            SchemaError::ReferenceDepthExceeded { limit, chain } => {
+            SchemaError::ReferenceDepthExceeded { limit, chain, .. } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
@@ -1660,7 +1980,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )
             }
 
-            SchemaError::InvalidExample { reference, message } => {
+            SchemaError::InvalidExample { reference, message, .. } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("SchemaError", "invalid example artifact"))
                     .body(vec![
@@ -1735,7 +2055,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     .hint(TRIGGER_YAML_HINT)
             }
 
-            SchemaError::TriggerForbiddenConstraint { property, constraint } => {
+            SchemaError::TriggerForbiddenConstraint { property, constraint, .. } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
@@ -1759,6 +2079,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::TriggerMixedMapping {
                 structural,
                 properties,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
@@ -1869,6 +2190,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::BareNameSiblingExists {
                 reference,
                 suggestion,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
@@ -1923,6 +2245,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 trigger,
                 payload_path,
                 chain,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
@@ -1968,6 +2291,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::TriggerSchemaReferenced {
                 reference,
                 suggestion,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
@@ -1989,6 +2313,14 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "Use the payload file (without the <cyan>.trigger</cyan> infix) as the \
                      document <cyan>$schema</cyan>. Trigger envelopes live in <cyan>schemas/</cyan> \
                      and activate automatically when their match conditions hold.",
+                ),
+
+            SchemaError::HostTriggerConflict(_) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "registered host triggers conflict"))
+                .body(vec![Prose::new(Prose::escape_text_outside_code_spans(&self.to_string()))])
+                .hint(
+                    "Declare the property once, in a types library both triggers extend, or make \
+                     the two declarations agree. The host's publisher owns these files.",
                 ),
 
             SchemaError::InvalidDefault { .. }
@@ -2077,6 +2409,7 @@ mod tests {
     fn remote_unsupported_display_includes_reference() {
         let err = SchemaError::RemoteUnsupported {
             reference: "https://example.com/schema.json".into(),
+            site: None,
         };
         assert!(err.to_string().contains("https://example.com/schema.json"));
     }
@@ -2086,6 +2419,7 @@ mod tests {
         let err = SchemaError::NotASchemaDocument {
             path: PathBuf::from("./schemas/post.yaml"),
             reason: NotSchemaReason::TypesOnly,
+            site: None,
         };
         let rendered = err.to_string();
         assert!(rendered.contains("post.yaml"), "{rendered}");
@@ -2094,11 +2428,13 @@ mod tests {
         let json = SchemaError::NotASchemaDocument {
             path: PathBuf::from("schema.JSON"),
             reason: NotSchemaReason::NotAMapping,
+            site: None,
         };
         assert!(json.to_string().contains(DRAFT_2020_12_DIALECT), "{json}");
         let yaml = SchemaError::NotASchemaDocument {
             path: PathBuf::from("schema.yaml"),
             reason: NotSchemaReason::NotAMapping,
+            site: None,
         };
         assert!(!yaml.to_string().contains("hint:"), "{yaml}");
     }
@@ -2108,6 +2444,7 @@ mod tests {
         let dialect = SchemaError::UnsupportedJsonDialect {
             path: PathBuf::from("s.json"),
             declared: "http://json-schema.org/draft-07/schema#".into(),
+            site: None,
         };
         assert!(dialect.to_string().contains("draft-07"), "{dialect}");
         let invalid = SchemaError::InvalidJsonSchema {
@@ -2177,7 +2514,7 @@ mod tests {
         let reference = SchemaError::CompositionReference {
             operand: "base@./missing.yaml".into(),
             site: site("order"),
-            source: Box::new(SchemaError::NoMatch { reference: "./missing.yaml".into(), bare_name: false }),
+            source: Box::new(SchemaError::NoMatch { reference: "./missing.yaml".into(), bare_name: false, site: None }),
         };
         assert!(std::error::Error::source(&reference).is_some(), "the cause stays in the chain");
         let out = render(&reference);
@@ -2367,6 +2704,7 @@ mod tests {
     fn remote_unsupported_block_renders_url() {
         let err = SchemaError::RemoteUnsupported {
             reference: "https://example.com/schema.json".into(),
+            site: None,
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");
@@ -2385,6 +2723,7 @@ mod tests {
         let err = SchemaError::NotASchemaDocument {
             path: PathBuf::from("./schemas/post.yaml"),
             reason: NotSchemaReason::NoSchemaProperty,
+            site: None,
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");
@@ -2397,6 +2736,7 @@ mod tests {
         let dialect = render(&SchemaError::UnsupportedJsonDialect {
             path: PathBuf::from("s.json"),
             declared: "http://json-schema.org/draft-07/schema#".into(),
+            site: None,
         });
         assert!(dialect.contains("unsupported JSON Schema dialect"), "{dialect}");
         assert!(dialect.contains("s.json"), "{dialect}");

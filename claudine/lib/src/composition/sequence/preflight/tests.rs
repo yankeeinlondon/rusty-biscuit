@@ -639,7 +639,7 @@ mod cycles {
         );
 
         let error = legacy_err_for(&source);
-        let CompositionError::SequenceReferenceCycle { chain } = &error else {
+        let CompositionError::SequenceReferenceCycle { chain, .. } = &error else {
             panic!("expected a cycle, got: {error}");
         };
         let names: Vec<String> = chain
@@ -1015,6 +1015,7 @@ mod write_back {
             target,
             first,
             second,
+            ..
         } = &error
         else {
             panic!("expected a write-back collision, got: {error}");
@@ -2774,7 +2775,7 @@ mod nesting {
         write_yaml(dir.path(), "a.json", &json!({"sequence":[{"name":"b","sequence":"b.json"}]}));
         write_yaml(dir.path(), "b.json", &json!({"sequence":[{"name":"a","sequence":"a.json"}]}));
         let path = write_source(dir.path(), "root.md", &[("sequence", json!([{"name":"a","sequence":"a.json"}]))], "body");
-        let CompositionError::SequenceReferenceCycle { chain } = err_for(&path) else { panic!("cycle diagnostic") };
+        let CompositionError::SequenceReferenceCycle { chain, .. } = err_for(&path) else { panic!("cycle diagnostic") };
         assert_eq!(chain.iter().map(|path| path.file_name().unwrap().to_str().unwrap()).collect::<Vec<_>>(), ["root.md", "a.json", "b.json", "a.json"]);
     }
 }
@@ -2803,7 +2804,7 @@ mod phase7 {
             {"name":"checks","tasks":[{"name":"back","sequence":"inner.json"}]}
         ]}));
         let path = write_source(dir.path(), "root.md", &[("sequence", json!([{ "name":"inner", "sequence":"inner.json" }]))], "");
-        let CompositionError::SequenceReferenceCycle { chain } = err_for(&path) else { panic!("cycle diagnostic") };
+        let CompositionError::SequenceReferenceCycle { chain, .. } = err_for(&path) else { panic!("cycle diagnostic") };
         assert_eq!(chain.iter().map(|path| path.file_name().unwrap().to_str().unwrap()).collect::<Vec<_>>(),
             ["root.md", "inner.json", "task.json", "catalog.json#checks", "inner.json"]);
     }

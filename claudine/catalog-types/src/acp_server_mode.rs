@@ -5,7 +5,7 @@ use strum::{EnumIter, IntoStaticStr, VariantNames};
 
 /// ACP server posture the provider itself offers.
 ///
-/// Mirrors the `docs/research/acp/_schema.yaml` `support` vocabulary
+/// Mirrors the `docs/research/providers/acp/_schema.yaml` `support` vocabulary
 /// verbatim — the sidecar is the vocabulary authority (Ken, 2026-07-05).
 /// This records what the provider offers, NOT whether Claudine integrates
 /// with it (Claudine does not use ACP today).

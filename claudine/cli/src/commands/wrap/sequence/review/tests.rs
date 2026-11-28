@@ -90,7 +90,6 @@ fn select_with_model(
             favorite: None,
             environment,
             silent: true,
-            dry_run: false,
         },
     )
 }
@@ -264,7 +263,7 @@ fn list_hints_follow_the_canonical_installed_provider_rule() {
 fn selection_failure(error: CompositionError) -> (String, String, Vec<String>, SequenceTaskProviderProblem) {
     match error {
         CompositionError::SequenceTaskProviderSelection { task, property, containers, problem, .. } => {
-            (task, property, containers, *problem)
+            (task, property, containers.into_vec(), *problem)
         }
         other => panic!("expected a task provider selection failure, got {other:?}"),
     }

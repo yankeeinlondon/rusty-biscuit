@@ -17,6 +17,11 @@ use tracing::warn;
 /// Relative path (from repo root) to the user-customizable guardrails file.
 const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/inline-compose.md";
 
+/// The `stage` of the warning an inline preparation adds when the
+/// repository's guardrails file still holds retired instructions; its `path`
+/// names that file, which every inline prompt in the repository reads.
+pub const RETIRED_GUARDRAILS_STAGE: &str = "inline_guardrails";
+
 /// Token a guardrail template may use for the active document's native
 /// absolute path; [`render_guardrails`] replaces it with a code span.
 pub const DOCUMENT_PATH_PLACEHOLDER: &str = "{document_path}";
@@ -121,6 +126,13 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     load_or_create_guardrails_with(repo_root, crate::config::atomic::atomic_write)
 }
 
+/// [`load_or_create_guardrails`] without writing: a missing file reads as the
+/// shipped default and a historical shipped copy is not migrated. For a dry
+/// run, which writes nothing.
+pub(super) fn load_guardrails_passively(repo_root: Option<&Path>) -> String {
+    load_or_create_guardrails_with(repo_root, |_, _| Ok(()))
+}
+
 /// Identify a customized guardrail file that still directs the agent to use
 /// the retired response-harvesting workflow.
 pub(super) fn retired_custom_guardrails_path(
@@ -152,7 +164,7 @@ where
             if let Err(error) = write(&guardrails_path, DEFAULT_GUARDRAILS.as_bytes()) {
                 warn!(
                     "failed to migrate guardrails file {}: {error}",
-                    biscuit_file::to_portable_string(&guardrails_path)
+                    biscuit_file::to_forward_slash_string(&guardrails_path)
                 );
             }
             return DEFAULT_GUARDRAILS.to_string();
@@ -163,7 +175,7 @@ where
     if let Err(error) = write(&guardrails_path, DEFAULT_GUARDRAILS.as_bytes()) {
         warn!(
             "failed to write guardrails file {}: {error}",
-            biscuit_file::to_portable_string(&guardrails_path)
+            biscuit_file::to_forward_slash_string(&guardrails_path)
         );
     }
 

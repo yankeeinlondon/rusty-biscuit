@@ -30,7 +30,7 @@ fn write(dir: &Path, name: &str, content: impl AsRef<[u8]>) -> PathBuf {
 /// The portable spelling `data_location.file` uses for `name` in `dir`.
 fn entry(dir: &Path, name: &str) -> String {
     let canonical = biscuit_file::canonicalize_simplified(dir).expect("canonical dir");
-    biscuit_file::to_portable_string(&canonical.join(name))
+    biscuit_file::to_forward_slash_string(&canonical.join(name))
 }
 
 fn failure_with(path: &Path, options: ComposeOptions) -> Box<ComposeFailure> {
@@ -633,7 +633,7 @@ fn a_violation_inside_a_map_callback_keeps_its_iteration_path_and_data_location(
     let found = records(dir.path(), "x {{ map([1, 2], n => load_data(\"os.yaml\", \"number[]\")) }}\n");
     let record = only(found);
     assert_eq!(record.code, MISMATCH);
-    assert!(!record.iteration_path.is_empty(), "{record:#?}");
+    assert!(!record.iteration_path().is_empty(), "{record:#?}");
     assert_eq!(places(std::slice::from_ref(&record)), vec![place("/0", 1, 3)]);
     assert_eq!(record.source.as_ref().and_then(|source| source.line), Some(1));
 }
@@ -709,7 +709,7 @@ macro_rules! missing_file {
             let record = only(records(dir.path(), concat!("x {{ ", $call, " }}\n")));
             assert_eq!(record.code, EVALUATION_FAILURE);
             assert_eq!(reference_fields(&record), (Some("file not found"), Some($construct), Some("missing.md"), Some("no-match")));
-            assert!(record.reference_details.as_ref().unwrap().included_via.is_none());
+            assert!(record.included_via().is_none());
             // The message is the one composition reported before these fields
             // existed, byte for byte.
             assert_eq!(record.message, concat!("interpolation of `", $call, "` failed: invalid file path: missing.md"));
@@ -810,7 +810,7 @@ fn assert_failed_fetch(call: &str, records: Vec<Diagnostic>, construct: &str, ur
     let record = only(records);
     assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
     assert_eq!(reference_fields(&record), (Some("unreachable"), Some(construct), Some(url), Some("io")));
-    assert!(record.reference_details.as_ref().unwrap().included_via.is_none());
+    assert!(record.included_via().is_none());
     let detail = detail.replace("{url}", url);
     assert_eq!(record.message, format!("interpolation of `{call}` failed: {construct}: {detail}"));
     assert_eq!(record.data_location, None);
@@ -1064,10 +1064,10 @@ fn a_missing_contract_import_keeps_its_file_reference_record() {
         reference_fields(&record),
         (Some("file not found"), Some("load_data()"), Some("./types.yaml"), Some("no-match"))
     );
-    assert!(record.reference_details.as_ref().unwrap().included_via.is_none());
+    assert!(record.included_via().is_none());
     assert_eq!(record.message, format!("interpolation of `{}` failed: invalid file path: ./types.yaml", importing_call()));
     assert_eq!(record.source, Some(DiagnosticSource::at(Some(dir.path().join("doc.md")), 1, 3)), "the call site");
-    assert!(record.iteration_path.is_empty());
+    assert!(record.iteration_path().is_empty());
     assert_eq!(record.data_location, None);
 }
 
@@ -1102,7 +1102,7 @@ fn a_missing_contract_import_in_a_callback_keeps_its_item_position() {
     let record = only(records(dir.path(), &format!("x {{{{ {call} }}}}\n")));
     assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
     assert_eq!(reference_fields(&record).2, Some("./types.yaml"));
-    assert_eq!(record.iteration_path.to_string(), "map[0]", "{record:#?}");
+    assert_eq!(record.iteration_path().to_string(), "map[0]", "{record:#?}");
 }
 
 /// A malformed data file read inside a nested composition reports its

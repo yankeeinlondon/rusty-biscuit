@@ -196,11 +196,11 @@ mod tests {
         assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
         assert_eq!(
             materialized.frontmatter["prepared_cwd"],
-            serde_json::json!(biscuit_file::to_portable_string(&launch_dir))
+            serde_json::json!(biscuit_file::to_forward_slash_string(&launch_dir))
         );
         assert_eq!(
             materialized.frontmatter["prepared_repo"],
-            serde_json::json!(biscuit_file::to_portable_string(&launch_repo))
+            serde_json::json!(biscuit_file::to_forward_slash_string(&launch_repo))
         );
         assert_eq!(materialized.prompt, "provider-owned prompt");
         let resolution = materialized.file_resolution_context;

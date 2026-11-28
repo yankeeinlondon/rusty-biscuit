@@ -12,7 +12,7 @@
 //!
 //! Before the fix, command-level template discovery dereferences the body's
 //! `::file` transclusion (condition-blind by design) before `initialize` runs,
-//! so the run fails with `TransclusionError: I/O failure` / `File not found`
+//! so the run fails with `TransclusionError: file not found in ::file` / `File not found`
 //! and the file that initialization would have created is never written.
 //!
 //! A third test pins the R2 approval boundary on the direct route: without
@@ -292,8 +292,9 @@ fn level2_direct_initialize_shell_has_no_effect_when_approval_is_unavailable() {
 
 /// OQ1 Option A in a real terminal: a sequence keeps its static preflight, so a
 /// prompt step whose own `initialize` would create an included file fails
-/// before any step starts, and the pane shows the note telling the author to
-/// create the file first ahead of the unchanged typed error.
+/// before any step starts. The pane shows the note telling the author to create
+/// the file first, then the combined preflight report once, in place of the
+/// typed error block, ending with the line that names the stopping cause.
 #[test]
 #[serial(level2_terminal)]
 fn level2_sequence_preflight_note_renders_for_an_include_initialize_would_create() {
@@ -326,11 +327,44 @@ fn level2_sequence_preflight_note_renders_for_an_include_initialize_would_create
         .find(&squash("note: a sequence checks every prompt document before its first step runs"))
         .unwrap_or_else(|| panic!("the preflight note is missing from the pane:\n{frame}"));
     assert!(flat.contains(&squash("Create the file before starting the sequence.")), "{frame}");
-    let error = flat
-        .find("TransclusionError")
-        .unwrap_or_else(|| panic!("the typed error is missing from the pane:\n{frame}"));
-    assert!(note < error, "the note precedes the error block:\n{frame}");
-    assert!(flat.contains(&squash("File not found: generated/notes.md")), "{frame}");
+    let report = flat
+        .find(&squash("Sequence preflight found 1 error and 0 warnings; no task ran"))
+        .unwrap_or_else(|| panic!("the combined preflight report is missing from the pane:\n{frame}"));
+    assert!(note < report, "the note precedes the combined report:\n{frame}");
+    assert_eq!(
+        flat.matches(&squash("Sequence preflight found")).count(),
+        1,
+        "the combined report renders once:\n{frame}"
+    );
+    assert!(
+        !flat.contains("TransclusionError"),
+        "the retired typed error block must not render beside the report:\n{frame}"
+    );
+
+    let finding = flat[report..]
+        .find(&squash("file not found in `::file`"))
+        .map(|offset| report + offset)
+        .unwrap_or_else(|| panic!("the report omits the transclusion finding:\n{frame}"));
+    let location = flat[finding..]
+        .find("attarget.md:7:1")
+        .map(|offset| finding + offset)
+        .unwrap_or_else(|| panic!("the finding is not located at target.md:7:1:\n{frame}"));
+    assert!(
+        flat[finding..location].contains("::filegenerated/notes.md"),
+        "the finding quotes the authored reference:\n{frame}"
+    );
+    let stopped = flat
+        .find(&squash("The run stopped at:"))
+        .unwrap_or_else(|| panic!("the report omits the line naming the cause:\n{frame}"));
+    assert!(location < stopped, "the stopping cause ends the report:\n{frame}");
+    assert!(
+        flat[stopped..].contains(&squash("File not found: generated/notes.md")),
+        "the stopping line names the missing include:\n{frame}"
+    );
+    assert!(
+        !staged.prompt_file.exists(),
+        "the provider received a prompt although preflight stopped the run:\n{frame}"
+    );
     assert!(
         !cwd.join("generated").exists() && event_lines(&staged).is_empty(),
         "no step, initialize, or provider may run:\n{frame}"

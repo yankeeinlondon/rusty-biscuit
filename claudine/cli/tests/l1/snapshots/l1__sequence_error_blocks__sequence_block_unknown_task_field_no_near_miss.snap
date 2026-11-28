@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: plain(&err)
+---
+⤫ CompositionError: unknown task field
+┃ 
+┃ zzz is not a field of a shell task; expected one of name, shell, when
+┃ 
+┃ at: prompts/seq.md
+┃ property: sequence[1].prompt
+┃ task: review
+┃ 
+┃ Remove zzz, or use one of name, shell, when.

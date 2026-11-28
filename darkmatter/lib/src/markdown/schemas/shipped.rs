@@ -61,7 +61,7 @@ pub const OWNER: &str = "darkmatter";
 /// what the shipped sources prepare to (catalog resolution, baseline
 /// lowering, kind-definition or function-catalog loading, a record's shape),
 /// then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 4;
+pub const PREPARATION_REVISION: u32 = 5;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "darkmatter/lib/generated/shipped.json";
@@ -80,7 +80,8 @@ const PARTIALS: &str = "darkmatter/schemas/partials/";
 
 /// Every compiled-in text Darkmatter's preparation reads, by virtual path:
 /// [`embedded::SHIPPED`], the kind definitions (the library's
-/// `ENVELOPE_DEFINITIONS`), `mutations.yaml`, and the
+/// `ENVELOPE_DEFINITIONS`), the callable catalogs `functions.yaml` and
+/// `mutations.yaml`, and the
 /// expression catalog's file-form examples under
 /// `darkmatter/schemas/partials/function-examples/`.
 pub fn sources() -> &'static [EmbeddedDocument<'static>] {
@@ -91,6 +92,9 @@ pub fn sources() -> &'static [EmbeddedDocument<'static>] {
             EXAMPLE_PATHS.get_or_init(|| functions::EXAMPLE_FILES.iter().map(|(key, _)| format!("{PARTIALS}{key}")).collect());
         let mut documents = SHIPPED.to_vec();
         documents.extend_from_slice(ENVELOPE_DEFINITIONS);
+        // The two callable catalogs are read only by their own reader, never
+        // served as `Name@darkmatter:<stem>` imports.
+        documents.push(EmbeddedDocument { path: functions::CATALOG_PATH, text: functions::CATALOG_SOURCE });
         documents.push(EmbeddedDocument {
             path: crate::effects::types::MUTATIONS_PATH,
             text: crate::effects::types::MUTATIONS_SOURCE,
@@ -552,10 +556,6 @@ fn accept_function_catalog(_: &Acceptance<'_>, catalog: FunctionCatalog) -> Resu
 /// A message naming the first source that does not prepare or check.
 pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> {
     let mode = PreparationMode::Uncached(fresh);
-    if embedded::find(SHIPPED, functions::CATALOG_PATH).map(|document| document.text) != Some(functions::CATALOG_SOURCE) {
-        return Err(format!("`{}` is compiled in twice with different text", functions::CATALOG_PATH));
-    }
-
     let tables = SHIPPED
         .iter()
         .filter(|document| document.path.starts_with(PARTIALS) || is_alias_target(document.path))
@@ -590,14 +590,16 @@ pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> 
 
     let functions_catalog = functions::load_catalog_with_mode(
         functions::CATALOG_SOURCE,
-        functions::CATALOG_PATH,
+        std::path::Path::new(functions::CATALOG_PATH),
+        simplified_schema::simplified::StandaloneSchemaEnvelope::ExpressionSchema,
         functions::EXAMPLE_FILES,
         mode,
     )
     .map_err(|error| error.to_string())?;
     let effects = functions::load_catalog_with_mode(
         crate::effects::types::MUTATIONS_SOURCE,
-        crate::effects::types::MUTATIONS_PATH,
+        std::path::Path::new(crate::effects::types::MUTATIONS_PATH),
+        simplified_schema::simplified::StandaloneSchemaEnvelope::MutationSchema,
         &[],
         mode,
     )

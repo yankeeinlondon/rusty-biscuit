@@ -42,6 +42,7 @@
 //! four of them are the arms that prove the scanner is not blind, and merging
 //! those into the corpus test would make the corpus test its own witness.
 
+mod sequence_scope;
 mod source_scan;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1115,6 +1116,15 @@ mod corpus {
                 }),
             ),
             (
+                "CompositionError::SchemaSlotFailed",
+                Box::new(CompositionError::SchemaSlotFailed {
+                    source_path: PathBuf::from("run.md"),
+                    slot_code: "dm.schema.slot_network_denied".to_string(),
+                    message: "remote read denied for host example.com".to_string(),
+                    slots: Vec::new(),
+                }),
+            ),
+            (
                 "CompositionError::SchemaParse",
                 Box::new(CompositionError::SchemaParse {
                     source_path: PathBuf::from("schema.yaml"),
@@ -1165,6 +1175,11 @@ mod corpus {
                         reference: "https://example.com/spec.md".to_string(),
                     }),
                 }),
+            ),
+            // A sequence run of a file with no `sequence` list.
+            (
+                "CompositionError::SequenceUndefined",
+                Box::new(CompositionError::sequence_undefined(std::path::Path::new("prompt.md"))),
             ),
             // The completion verdict's two halves.
             (

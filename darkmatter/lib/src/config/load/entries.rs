@@ -49,6 +49,10 @@ pub struct ShellCommandEntry {
 pub enum NetworkAccess {
     /// Every URL may be fetched.
     Allow,
+    /// A URL may be fetched only once this run approves it: an answer to a
+    /// schema slot's prompt, or a per-run `--allow host=HOST`. Where nothing
+    /// asks, the read needs approval instead of being refused outright.
+    Ask,
     /// No URL may be fetched without a per-run `--allow host=HOST`.
     Deny,
 }

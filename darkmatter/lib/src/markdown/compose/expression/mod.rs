@@ -133,7 +133,7 @@ pub use catalog::{
 pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
 pub use diagnostics::{
-    DataLocation, Diagnostic, DiagnosticSource, ExpressionDiagnostic, GrantNeeded, INCOMPATIBLE_CALL_CODE, ReferenceDetails, SchemaDefaultOrigin, Severity,
+    DataLocation, Diagnostic, DiagnosticRelated, DiagnosticSource, ExpressionDiagnostic, GrantNeeded, INCOMPATIBLE_CALL_CODE, LegacyTrailProjection, ReferenceDetails, SchemaDefaultOrigin, Severity,
     UNCERTAIN_CALL_CODE, UNDECLARED_MEMBER_CODE,
     call_severity, expression_call_diagnostics, one_based_position,
 };
@@ -170,6 +170,7 @@ pub use simplified_schema::expression::lexer::{
 pub use simplified_schema::expression::parser::{
     ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_spanned,
 };
+
 pub use prepared::{
     AuthoredMode, PlaceholderView, PreparationError, PreparedExpression, PreparedInterpolation,
     PreparedInterpolationView, PreparedPlaceholder, PreparedValue, ValidationDiagnostic,
@@ -182,6 +183,14 @@ use serde_json::Value;
 use simplified_schema::numeric::{self, NumberTextError, NumericAdmissionError};
 
 use crate::catalog::{describe_for_error, suggest};
+
+// The parser calls a Variable followed by '('. Check the exact token text
+// because the lexer skips whitespace and can stop before the input ends.
+fn is_callable_name(name: &str) -> bool {
+    let mut lexer = Lexer::new(name);
+    matches!(lexer.next_token(), Ok(Token::Variable(spelling)) if spelling == name)
+        && matches!(lexer.next_token(), Ok(Token::Eof))
+}
 
 /// A value read as an arithmetic operand.
 enum ArithmeticOperand {
@@ -701,10 +710,8 @@ fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
         observer.member_read(std::ptr::from_ref(expr).addr());
     }
     match expr {
-        Expr::Variable(path) => {
-            let binding = lookup.resolve(path)?;
-            observe_missing(path, &binding, scope, observer);
-            Ok(binding.into_value().unwrap_or(Value::Null))
+        Expr::Variable(_) | Expr::Index { .. } | Expr::MemberAccess { .. } => {
+            select_node(expr, lookup, scope, observer, budget).map(|(value, _)| value)
         }
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
         Expr::NumberLiteral(n) => number_literal(*n)
@@ -761,19 +768,6 @@ fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
             let left = evaluate_expr(left, lookup, operand, observer, budget)?;
             let right = evaluate_expr(right, lookup, operand, observer, budget)?;
             evaluate_binary(*op, &left, &right)
-        }
-        Expr::Index { base, index } => {
-            if let Some(value) = lookup_index(base, index, lookup) {
-                return value;
-            }
-            // Access on a handled value is still that value's absence check.
-            let base = evaluate_expr(base, lookup, scope, observer, budget)?;
-            let index = evaluate_expr(index, lookup, operand, observer, budget)?;
-            Ok(evaluate_index(&base, &index))
-        }
-        Expr::MemberAccess { base, name } => {
-            let base = evaluate_expr(base, lookup, scope, observer, budget)?;
-            Ok(evaluate_member(&base, name))
         }
         Expr::LogicalOr { left: left_expr, right } => {
             let left = evaluate_expr(left_expr, lookup, scope.absence_check(), observer, budget)?;
@@ -832,6 +826,105 @@ fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
         Expr::FunctionCall { name, args } => {
             evaluate_function(name, args, lookup, scope, observer, budget)
         }
+    }
+}
+
+/// Evaluates `expr` as the base of a member or index selection, as
+/// [`evaluate_expr`] would, returning with its value the path it selected
+/// in a dry run ([`select_node`]); `None` for any other expression.
+fn evaluate_selection<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &Expr,
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<(Value, Option<String>), ExpressionError> {
+    if !matches!(expr, Expr::Variable(_) | Expr::Paren(_) | Expr::Index { .. } | Expr::MemberAccess { .. }) {
+        return evaluate_expr(expr, lookup, scope, observer, budget).map(|value| (value, None));
+    }
+    // This evaluates the node itself, so it records it as `evaluate_node`
+    // and `evaluate_expr` would.
+    if O::OBSERVES_MEMBERS && is_member_selector(expr) {
+        observer.member_read(std::ptr::from_ref(expr).addr());
+    }
+    let selected = match expr {
+        Expr::Paren(inner) => evaluate_selection(inner, lookup, scope, observer, budget),
+        _ => select_node(expr, lookup, scope, observer, budget),
+    };
+    if trace::is_active() && !matches!(expr, Expr::Paren(_)) {
+        trace::derive();
+    }
+    selected
+}
+
+/// A variable read or a member or index selection, with the path it
+/// selected while a dry run can defer a read: the variable's path, then
+/// each member, and each computed key as it evaluated. `seq.outputs`,
+/// `seq['outputs']`, `(seq).outputs`, and `seq['out' + 'puts']` all select
+/// `seq.outputs`, and each selection is checked against the passive session
+/// ([`passive::check_selected`]), so a read is deferred by what it selects,
+/// never by how it is spelled.
+///
+/// [`passive::check_selected`]: crate::markdown::compose::passive::check_selected
+fn select_node<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &Expr,
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<(Value, Option<String>), ExpressionError> {
+    use crate::markdown::compose::passive;
+    let checked = |selected: Option<String>, value: Value| {
+        if let Some(path) = &selected {
+            passive::check_selected(lookup, path, &value)?;
+        }
+        Ok((value, selected))
+    };
+    match expr {
+        Expr::Variable(path) => {
+            let binding = lookup.resolve(path)?;
+            passive::check_read(lookup, path, &binding)?;
+            observe_missing(path, &binding, scope, observer);
+            let selected = passive::is_active(lookup).then(|| path.clone());
+            Ok((binding.into_value().unwrap_or(Value::Null), selected))
+        }
+        Expr::Index { base, index } => {
+            if let Some(value) = lookup_index(base, index, lookup) {
+                return checked(looked_up_selection(base, index, lookup), value?);
+            }
+            // Access on a handled value is still that value's absence check.
+            let (base, selected) = evaluate_selection(base, lookup, scope, observer, budget)?;
+            let index = evaluate_expr(index, lookup, scope.operand(), observer, budget)?;
+            let selected = selected.and_then(|path| selected_key(path, &index));
+            checked(selected, evaluate_index(&base, &index))
+        }
+        Expr::MemberAccess { base, name } => {
+            let (base, selected) = evaluate_selection(base, lookup, scope, observer, budget)?;
+            checked(selected.map(|path| format!("{path}.{name}")), evaluate_member(&base, name))
+        }
+        Expr::Paren(inner) => evaluate_selection(inner, lookup, scope, observer, budget),
+        _ => evaluate_node(expr, lookup, scope, observer, budget).map(|value| (value, None)),
+    }
+}
+
+/// `path` selected one step further by the computed key `index`: a string
+/// key as a member, a number as a position; `None` for any other key.
+fn selected_key(path: String, index: &Value) -> Option<String> {
+    match index {
+        Value::String(key) => Some(format!("{path}.{key}")),
+        Value::Number(position) => Some(format!("{path}[{position}]")),
+        _ => None,
+    }
+}
+
+/// The path `base[index]` selects when the lookup answered it itself
+/// ([`lookup_index`]), in a dry run.
+fn looked_up_selection<L: EvaluationLookup>(base: &Expr, index: &Expr, lookup: &L) -> Option<String> {
+    match (base, index) {
+        (Expr::Variable(root), Expr::StringLiteral(key)) if crate::markdown::compose::passive::is_active(lookup) => {
+            Some(format!("{root}.{key}"))
+        }
+        _ => None,
     }
 }
 
@@ -1182,6 +1275,18 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
     observer: &mut O,
     budget: &iteration::IterationBudget,
 ) -> Result<(Value, Option<String>), ExpressionError> {
+    caller_file_selection(expr, lookup, scope, observer, budget).map(|(value, occurrence, _)| (value, occurrence))
+}
+
+/// [`evaluate_caller_file_argument`], with the path the argument selected
+/// in a dry run ([`select_node`]).
+fn caller_file_selection<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &Expr,
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<(Value, Option<String>, Option<String>), ExpressionError> {
     match expr {
         Expr::Index { base, index } => {
             // This arm evaluates the index node itself, so it records it as
@@ -1190,12 +1295,20 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
                 observer.member_read(std::ptr::from_ref(expr).addr());
             }
             if let Some(value) = lookup_index(base, index, lookup) {
-                return Ok((value?, None));
+                let value = value?;
+                if let Some(path) = looked_up_selection(base, index, lookup) {
+                    crate::markdown::compose::passive::check_selected(lookup, &path, &value)?;
+                }
+                return Ok((value, None, None));
             }
-            let (base_value, base_occurrence) =
-                evaluate_caller_file_argument(base, lookup, scope, observer, budget)?;
+            let (base_value, base_occurrence, selected) =
+                caller_file_selection(base, lookup, scope, observer, budget)?;
             let index_value = evaluate_expr(index, lookup, scope.operand(), observer, budget)?;
             let value = evaluate_index(&base_value, &index_value);
+            let selected = selected.and_then(|path| selected_key(path, &index_value));
+            if let Some(path) = &selected {
+                crate::markdown::compose::passive::check_selected(lookup, path, &value)?;
+            }
             let occurrence = base_occurrence.and_then(|mut occurrence| {
                 selected_array_index(&base_value, &index_value).map(|index| {
                     occurrence.push('/');
@@ -1203,10 +1316,13 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
                     occurrence
                 })
             });
-            Ok((value, occurrence))
+            Ok((value, occurrence, selected))
         }
-        Expr::Paren(inner) => evaluate_caller_file_argument(inner, lookup, scope, observer, budget),
-        _ => Ok((evaluate_expr(expr, lookup, scope, observer, budget)?, caller_file_occurrence(expr))),
+        Expr::Paren(inner) => caller_file_selection(inner, lookup, scope, observer, budget),
+        _ => {
+            let (value, selected) = evaluate_selection(expr, lookup, scope, observer, budget)?;
+            Ok((value, caller_file_occurrence(expr), selected))
+        }
     }
 }
 

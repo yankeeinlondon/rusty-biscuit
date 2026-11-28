@@ -32,11 +32,11 @@ pub(crate) fn run_stage(
     let mut watch = ReportWatch::new(report, options, FinalVerdict { markdown, state, schemas });
     let source = markdown.source_context_for_errors();
     body.data.ensure_describes(markdown.content())?;
-    let regions = page_blocks::parser::parse_page_blocks_in(
-        markdown.content(),
-        Some(&body.data),
-        source.clone(),
-    )?;
+    let regions = page_blocks::parser::parse_page_blocks_in(markdown.content(), Some(&body.data), source.clone())
+        .map_err(|error| {
+            let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
+            error.at_authored_lines(markdown, origin, Some(&body.data))
+        })?;
     if regions.is_empty() {
         return Ok(());
     }

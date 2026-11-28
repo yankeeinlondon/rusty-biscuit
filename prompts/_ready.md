@@ -18,7 +18,20 @@
         - a guarantee stronger than the spec states, including one an earlier repair cycle wrote into a `docs/` page; when such a page overpromises, the finding is to narrow the page
         - inputs only a contrived or adversarial test can produce
 - set the `findings` frontmatter property to every finding in the review, high, medium, and low, whether or not `ready` is `true`:
-    - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
+    - write each entry as a mapping with `id`, `priority` (`high`, `medium`, or `low`), and `description` (the finding's title; no details), and add `blocked: true` when it waits on a `human-in-the-loop` item:
+
+        ```yaml
+        findings:
+            - id: R2-F3
+              priority: medium
+              description: absent cap reads as zero
+            - id: R2-F4
+              priority: high
+              description: a retried step repeats its side effect
+              blocked: true
+        ```
+
+    - never set an entry's `result`: the repair step writes it, and the next review verifies it
     - the repair step reads this list: it fixes high findings first, then medium and low ones, and the cycle continues until the list is empty, so a finding missing from it is a finding nobody repairs
 - set `human-review` to a boolean value to indicate whether the author should look at something **after** the review/fix cycle ends
     - this list never stops the cycle and never blocks a finding, but every item interrupts the author, so it is **not** a log of the decisions the agents made; those belong in the review body

@@ -222,8 +222,9 @@ fn the_file_factory_reaches_the_cell_s_verdict() {
 
 /// Judges `text` as a whole YAML document the way a host does: load, select
 /// by `kind`, validate softly against the claiming shipped definition, then
-/// run the kind's checks on the accepted copy.
-fn whole_yaml_problems(text: &str, dir: &Path) -> Vec<ValidationProblem> {
+/// run the kind's checks on the accepted copy, or narrow a rejected
+/// carrier's problem to the declaration that failed.
+pub(crate) fn whole_yaml_problems(text: &str, dir: &Path) -> Vec<ValidationProblem> {
     let document = LoadedYamlDocument::load(text, &dir.join("subject.yaml")).expect("admissible YAML");
     let registry = KindRegistry::shipped_from(shipped());
     let context = biscuit_file::FileResolutionContext::new(dir);
@@ -234,7 +235,11 @@ fn whole_yaml_problems(text: &str, dir: &Path) -> Vec<ValidationProblem> {
         Prepared::new(Arc::new(definition.resolved().json_schema.clone()), None, context.clone()).expect("prepared");
     match prepared.validate_soft(document.json()) {
         Ok(accepted) => document.kind_checks(&kind, &accepted.value, &[], &context, ShippedSources::NONE),
-        Err(failure) => failure.into_problems(),
+        Err(failure) => {
+            let mut problems = failure.into_problems();
+            document.locate_declaration_problems(&kind, &mut problems);
+            problems
+        }
     }
 }
 
@@ -305,9 +310,10 @@ fn duplicate_keys_and_inadmissible_numbers_still_fail_the_load() {
                 assert!(message.contains(expected), "{label}: {message}");
                 let span = span.unwrap_or_else(|| panic!("{label}: the whole-YAML load locates its error"));
                 let line = text[..span.start].matches('\n').count() + 1;
-                // The parser places a duplicate key at the mapping holding
-                // it (here the root), a number at the number.
-                let expected_line = if label == "duplicate" { 1 } else { 2 };
+                // A duplicate key is reported at its second spelling, a
+                // number at the number.
+                let expected_line =
+                    if label == "duplicate" { text[..text.rfind("types:").unwrap()].matches('\n').count() + 1 } else { 2 };
                 assert_eq!(line, expected_line, "{label}: {message} at {span:?}");
             }
             other => panic!("{label}: expected a located load error, got {other:?}"),
@@ -385,7 +391,7 @@ fn match_conditions_still_forbid_defaults_imports_and_generated_values() {
     ] {
         let text = edit(TRIGGER, "string(required)", condition);
         match parse_trigger_envelope_from_str(&text) {
-            Err(SchemaError::TriggerForbiddenConstraint { property, constraint: found }) => {
+            Err(SchemaError::TriggerForbiddenConstraint { property, constraint: found, .. }) => {
                 assert_eq!(property, "title", "{condition}");
                 assert!(found.starts_with(constraint), "{condition}: {found}");
             }

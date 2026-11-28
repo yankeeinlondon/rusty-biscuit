@@ -13,6 +13,13 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::markdown::compose::parse_utils::CursorError;
+use crate::markdown::compose::transclusion::at_line;
+use crate::markdown::types::AuthoredSpan;
+
+/// ` (line N)`, or nothing for the unknown line `0`.
+fn line_note(line: usize) -> String {
+    if line == 0 { String::new() } else { format!(" (line {line})") }
+}
 
 /// Allowed document extensions (without leading dots), compared case-insensitively.
 ///
@@ -100,29 +107,36 @@ pub struct FileLinksResult {
 /// Every variant with a `line` also names its `document`, as
 /// [`TocLinkingError`](crate::markdown::compose::TocLinkingError) does: the
 /// file of the document whose body holds the directive, or a file-less
-/// document's context identity. `line` counts that body.
+/// document's context identity. `line` and `authored` follow
+/// [`TocLinkingError`](crate::markdown::compose::TocLinkingError)'s rule: the
+/// line as written in a file (`0`, unknown, when unproven), or the body's
+/// line in a document with no file.
 #[derive(Error, Debug)]
 pub enum FileLinksError {
     /// Failed to parse a `::file-links` directive line.
-    #[error("Failed to parse file-links directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String, document: Option<PathBuf> },
+    #[error("Failed to parse file-links directive{}: {message}", at_line(*.line))]
+    ParseDirective { line: usize, message: String, document: Option<PathBuf>, authored: Option<AuthoredSpan> },
+
+    /// A `--depth` value is not a non-negative integer.
+    #[error("Failed to parse file-links directive{}: '--depth' expects a non-negative integer, got '{value}'", at_line(*.line))]
+    InvalidDepth { value: String, line: usize, document: Option<PathBuf>, authored: Option<AuthoredSpan> },
 
     /// The directive was used without a containing source file.
-    #[error("file-links directive at line {line} requires a source file")]
-    MissingSourceContext { line: usize, document: Option<PathBuf> },
+    #[error("file-links directive{} requires a source file", at_line(*.line))]
+    MissingSourceContext { line: usize, document: Option<PathBuf>, authored: Option<AuthoredSpan> },
 
     /// The referenced target directory does not exist.
-    #[error("Target directory '{path}' does not exist (line {line})")]
-    TargetNotFound { path: String, line: usize, document: Option<PathBuf> },
+    #[error("Target directory '{path}' does not exist{}", line_note(*.line))]
+    TargetNotFound { path: String, line: usize, document: Option<PathBuf>, authored: Option<AuthoredSpan> },
 
     /// The `--dir` target exists but is not a directory.
-    #[error("Target '{path}' is not a directory (line {line})")]
-    TargetNotDirectory { path: String, line: usize, document: Option<PathBuf> },
+    #[error("Target '{path}' is not a directory{}", line_note(*.line))]
+    TargetNotDirectory { path: String, line: usize, document: Option<PathBuf>, authored: Option<AuthoredSpan> },
 
     /// The glob reference could not be parsed, rooted, or listed: an invalid
     /// glob or prefix, a relative glob leaving the file tree, `&`/`^` outside
     /// a repository, or a search root that cannot be read.
-    #[error("{source} (line {line})")]
+    #[error("{source}{}", line_note(*.line))]
     GlobReference {
         line: usize,
         // Shared like `ExpressionError::GlobReference`, keeping this enum
@@ -131,18 +145,20 @@ pub enum FileLinksError {
         #[source]
         source: Arc<biscuit_file::GlobReferenceError>,
         document: Option<PathBuf>,
+        authored: Option<AuthoredSpan>,
     },
 
     /// A `--dir` scan reached a directory it could not read, or an entry
     /// whose type could not be determined. The scan fails rather than
     /// rendering a tree with that directory's files left out.
-    #[error("cannot read '{}' (line {line}): {source}", path.display())]
+    #[error("cannot read '{}'{}: {source}", path.display(), line_note(*.line))]
     Unreadable {
         path: std::path::PathBuf,
         line: usize,
         #[source]
         source: std::io::Error,
         document: Option<PathBuf>,
+        authored: Option<AuthoredSpan>,
     },
 
     /// I/O error during discovery.
@@ -156,6 +172,7 @@ impl FileLinksError {
     pub fn document(&self) -> Option<&Path> {
         match self {
             Self::ParseDirective { document, .. }
+            | Self::InvalidDepth { document, .. }
             | Self::MissingSourceContext { document, .. }
             | Self::TargetNotFound { document, .. }
             | Self::TargetNotDirectory { document, .. }
@@ -165,11 +182,64 @@ impl FileLinksError {
         }
     }
 
+    /// The directive's opener in its loaded file, when `line` is authored.
+    pub fn authored(&self) -> Option<&AuthoredSpan> {
+        match self {
+            Self::ParseDirective { authored, .. }
+            | Self::InvalidDepth { authored, .. }
+            | Self::MissingSourceContext { authored, .. }
+            | Self::TargetNotFound { authored, .. }
+            | Self::TargetNotDirectory { authored, .. }
+            | Self::GlobReference { authored, .. }
+            | Self::Unreadable { authored, .. } => authored.as_ref(),
+            Self::Io(_) => None,
+        }
+    }
+
+    /// This error placed at `site`, its directive's site in the document
+    /// whose current body its `line` counted; an I/O error is unchanged.
+    #[must_use]
+    pub(crate) fn at_site(mut self, site: &crate::markdown::compose::site_scope::DirectiveSite) -> Self {
+        match &mut self {
+            Self::ParseDirective { line, authored, .. }
+            | Self::InvalidDepth { line, authored, .. }
+            | Self::MissingSourceContext { line, authored, .. }
+            | Self::TargetNotFound { line, authored, .. }
+            | Self::TargetNotDirectory { line, authored, .. }
+            | Self::GlobReference { line, authored, .. }
+            | Self::Unreadable { line, authored, .. } => site.place(line, authored),
+            Self::Io(_) => {}
+        }
+        self
+    }
+
+    /// This error, raised for `markdown`'s current body, at its directive's
+    /// line as written; `origin` maps that body.
+    #[must_use]
+    pub(crate) fn at_authored_line(
+        self,
+        markdown: &crate::markdown::Markdown,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+    ) -> Self {
+        let line = match &self {
+            Self::ParseDirective { line, .. }
+            | Self::InvalidDepth { line, .. }
+            | Self::MissingSourceContext { line, .. }
+            | Self::TargetNotFound { line, .. }
+            | Self::TargetNotDirectory { line, .. }
+            | Self::GlobReference { line, .. }
+            | Self::Unreadable { line, .. } => *line,
+            Self::Io(_) => return self,
+        };
+        self.at_site(&crate::markdown::compose::site_scope::DirectiveSite::of_line(markdown, origin, line))
+    }
+
     /// This error with `document` named; an I/O error is unchanged.
     #[must_use]
     pub fn with_document(mut self, named: Option<PathBuf>) -> Self {
         match &mut self {
             Self::ParseDirective { document, .. }
+            | Self::InvalidDepth { document, .. }
             | Self::MissingSourceContext { document, .. }
             | Self::TargetNotFound { document, .. }
             | Self::TargetNotDirectory { document, .. }
@@ -184,6 +254,9 @@ impl FileLinksError {
     pub fn reason(&self) -> String {
         match self {
             Self::ParseDirective { message, .. } => format!("invalid `::file-links` directive: {message}"),
+            Self::InvalidDepth { value, .. } => {
+                format!("invalid `::file-links` directive: '--depth' expects a non-negative integer, got '{value}'")
+            }
             Self::MissingSourceContext { .. } => "`::file-links` requires a source file".to_string(),
             Self::TargetNotFound { path, .. } => format!("`::file-links` target directory '{path}' does not exist"),
             Self::TargetNotDirectory { path, .. } => format!("`::file-links` target '{path}' is not a directory"),
@@ -202,6 +275,7 @@ impl From<CursorError> for FileLinksError {
             line: e.line,
             message: e.message,
             document: None,
+            authored: None,
         }
     }
 }
@@ -215,6 +289,7 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+        use crate::markdown::compose::site_scope::{line_row, status_rows};
 
         match self {
             FileLinksError::ParseDirective { line, message, .. } => StatusBlock::new(StatusState::Error)
@@ -222,19 +297,32 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "directive parse failed",
                 ))
-                .body(Prose::new(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                )).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([line_row(*line), Some(format!("<dim>Message:</dim> {message}"))]))
+                    .with_line_breaks(LineBreaks::Hard))
                 .hint("Syntax: <cyan>::file-links \"docs/**/*.md\"</cyan> or <cyan>::file-links --dir docs --depth 2</cyan>."),
+
+            FileLinksError::InvalidDepth { value, line, .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "FileLinksError",
+                    "invalid depth",
+                ))
+                .body(Prose::new(status_rows([
+                    line_row(*line),
+                    Some(format!("<dim>Depth:</dim> <cyan>{}</cyan>", Prose::escape_text(value))),
+                ]))
+                .with_line_breaks(LineBreaks::Hard))
+                .hint("<cyan>--depth</cyan> takes a non-negative integer, such as <cyan>::file-links --dir docs --depth 2</cyan>."),
 
             FileLinksError::MissingSourceContext { line, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "FileLinksError",
                     "no source file",
                 ))
-                .body(Prose::new(format!(
-                    "<dim>Line:</dim> {line}\nPaths resolve relative to the containing document, but no source file was provided."
-                )).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([
+                    line_row(*line),
+                    Some("Paths resolve relative to the containing document, but no source file was provided.".to_string()),
+                ]))
+                .with_line_breaks(LineBreaks::Hard))
                 .hint("Compose from a file (e.g. <cyan>md compose doc.md</cyan>) or pass <cyan>ComposeOptions::with_source_file</cyan>."),
 
             FileLinksError::TargetNotFound { path, line, .. } => StatusBlock::new(StatusState::Error)
@@ -242,9 +330,8 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "target directory not found",
                 ))
-                .body(Prose::new(format!(
-                    "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
-                )).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([Some(format!("<dim>Path:</dim> <cyan>{path}</cyan>")), line_row(*line)]))
+                    .with_line_breaks(LineBreaks::Hard))
                 .hint("Confirm the directory exists relative to the document."),
 
             FileLinksError::TargetNotDirectory { path, line, .. } => StatusBlock::new(StatusState::Error)
@@ -252,9 +339,8 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "target is not a directory",
                 ))
-                .body(Prose::new(format!(
-                    "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
-                )).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([Some(format!("<dim>Path:</dim> <cyan>{path}</cyan>")), line_row(*line)]))
+                    .with_line_breaks(LineBreaks::Hard))
                 .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
             FileLinksError::GlobReference { line, source, .. } if let biscuit_file::GlobReferenceError::Io { path, .. } = source.as_ref() => StatusBlock::new(StatusState::Error)
@@ -262,7 +348,12 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "glob search failed",
                 ))
-                .body(Prose::new(format!("<dim>Line:</dim> {line}\n<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Message:</dim> {source}", path.display())).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([
+                    line_row(*line),
+                    Some(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display())),
+                    Some(format!("<dim>Message:</dim> {source}")),
+                ]))
+                .with_line_breaks(LineBreaks::Hard))
                 .hint("Make the directory readable, or narrow the glob so its search does not enter it."),
 
             FileLinksError::GlobReference { line, source, .. } => StatusBlock::new(StatusState::Error)
@@ -270,15 +361,18 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "invalid glob reference",
                 ))
-                .body(Prose::new(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}")).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([line_row(*line), Some(format!("<dim>Message:</dim> {source}"))]))
+                    .with_line_breaks(LineBreaks::Hard))
                 .hint("A glob takes a file-reference prefix (<cyan>&</cyan>, <cyan>^</cyan>, <cyan>@</cyan>, <cyan>~/</cyan>, <cyan>./</cyan>) and stays inside the file tree unless it names its root."),
 
             FileLinksError::Unreadable { path, line, source, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("FileLinksError", "directory unreadable"))
-                .body(Prose::new(format!(
-                    "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}",
-                    path.display()
-                )).with_line_breaks(LineBreaks::Hard))
+                .body(Prose::new(status_rows([
+                    Some(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display())),
+                    line_row(*line),
+                    Some(format!("<dim>Message:</dim> {source}")),
+                ]))
+                .with_line_breaks(LineBreaks::Hard))
                 .hint("Make the directory readable, or lower <cyan>--depth</cyan> so the scan does not enter it."),
 
             FileLinksError::Io(source) => StatusBlock::new(StatusState::Error)

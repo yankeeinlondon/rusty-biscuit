@@ -68,8 +68,7 @@ pub(super) struct SequencePreflight {
 /// is returned so the user can fix the full sequence in one edit.
 ///
 /// `runtime` is the root's runtime state as the first step will compose
-/// against it (its `initialize` writes; `None` for a dry run, which fires
-/// no lifecycle), so a value `initialize` wrote is never reported missing.
+/// against it (its `initialize` writes), so a value `initialize` wrote is never reported missing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_phase_1c_with_schema(
     source: &ResolvedCompositionSource,
@@ -241,12 +240,8 @@ impl RootPlanRequest<'_> {
             .with_compose_context(self.compose_context)
             .with_caller_layers(layers)
             .with_invocation(self.invocation);
-        let plan = composition::resolve_sequence_plan_with(&self.root.authored, options)?.ok_or_else(|| {
-            eyre!(
-                "file '{}' does not define a `sequence` frontmatter property",
-                self.root.authored.resolved_path.display()
-            )
-        })?;
+        let plan = composition::resolve_sequence_plan_with(&self.root.authored, options)?
+            .ok_or_else(|| CompositionError::sequence_undefined(&self.root.authored.resolved_path))?;
         Ok(plan.with_sequence_id(&self.root.sequence_id))
     }
 }
@@ -291,7 +286,7 @@ pub(super) fn prepare_root_plan(
         if let Some(plan) = plan {
             // No step probes an empty root, so its failure is rechecked too.
             let recheck_owners = inventory.failed_owners.iter()
-                .any(|&owner| inventory.owners[owner].role != composition::InputOwnerRole::Root || plan.steps.is_empty());
+                .any(|failed| inventory.owners[failed.owner].role != composition::InputOwnerRole::Root || plan.steps.is_empty());
             return Ok(RootPlan { plan, inventory, layers, overrides, recheck_owners });
         }
         let contexts = inventory.missing_entries().into_iter()
@@ -333,9 +328,14 @@ fn failures_slice(contexts: &[StepMissingContext]) -> Vec<SequenceMissingPropert
 fn into_sequence_missing(contexts: Vec<StepMissingContext>) -> CompositionError {
     let failures: Vec<SequenceMissingPropertiesEntry> =
         contexts.into_iter().map(|c| c.failure).collect();
+    // The report belongs to the file the first missing input was declared in.
+    let root_site = failures.first().map_or_else(claudine::composition::SequenceSite::unlocated, |first| {
+        claudine::composition::SequenceSite::file(&first.source_path)
+    });
     CompositionError::SequenceMissingProperties {
         failure_count: failures.len(),
         failures,
+        site: Box::new(root_site),
     }
 }
 

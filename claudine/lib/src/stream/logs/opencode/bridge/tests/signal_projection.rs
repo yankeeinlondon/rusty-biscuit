@@ -4,10 +4,10 @@ use super::*;
 use claudine_catalog_types::SignalKind;
 
 const USAGE_CAP_1178: &str = include_str!(
-    "../../../../../../../docs/research/signals/fixtures/opencode/stream-error-1178-usage-cap.txt"
+    "../../../../../../../docs/research/providers/signals/fixtures/opencode/stream-error-1178-usage-cap.txt"
 );
 const VERSION_ANNOUNCEMENT: &str = include_str!(
-    "../../../../../../../docs/research/signals/fixtures/opencode/version-announcement.txt"
+    "../../../../../../../docs/research/providers/signals/fixtures/opencode/version-announcement.txt"
 );
 
 #[test]

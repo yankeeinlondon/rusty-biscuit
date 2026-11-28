@@ -1,0 +1,56 @@
+[
+  {
+    "code": "dm.schema.removed_key",
+    "severity": "error",
+    "message": "key `fail_fast` has been removed",
+    "hint": "set fail_fast on a group object",
+    "instance_path": "",
+    "line": 2,
+    "column": 1
+  },
+  {
+    "code": "dm.schema.unknown_key",
+    "severity": "error",
+    "message": "Additional properties are not allowed ('max_paralel' was unexpected)",
+    "hint": "did you mean `max_parallel`?",
+    "instance_path": "/sequence/1/group",
+    "line": 13,
+    "column": 7
+  },
+  {
+    "code": "dm.schema.removed_key",
+    "severity": "error",
+    "message": "key `execution` has been removed",
+    "hint": "omit execution; use a nested sequence for ordered work",
+    "instance_path": "/sequence/1/group",
+    "line": 12,
+    "column": 7
+  },
+  {
+    "code": "dm.schema.removed_key",
+    "severity": "error",
+    "message": "key `teardown` has been removed",
+    "hint": "use a group's `finalize:`; wrap a single task in a group of one",
+    "instance_path": "/sequence/1/group/tasks/0",
+    "line": 15,
+    "column": 44
+  },
+  {
+    "code": "dm.schema.removed_key",
+    "severity": "error",
+    "message": "key `setup` has been removed",
+    "hint": "use a preceding `side_effect:` task for an action or `shell:` task for a command",
+    "instance_path": "/sequence/2",
+    "line": 16,
+    "column": 30
+  },
+  {
+    "code": "dm.schema.near_miss_key",
+    "severity": "warning",
+    "message": "key `promt` is not a declared field, so it is kept as data",
+    "hint": "did you mean `prompt`?",
+    "instance_path": "/sequence/0",
+    "line": 5,
+    "column": 5
+  }
+]

@@ -99,6 +99,7 @@ Go deep: read every caller.
 |---|---|
 | `agent`, `model` | default provider and model (see above) |
 | `prompt` | the prompt for `inline-compose` |
+| `sections` | the prompt as a heading → content mapping; schema-checked only, since `inline-compose` can't run it yet |
 | `interactive` | run interactively (not allowed in a sequence document) |
 | `yolo` | turn on the provider's permission bypass; it does **not** approve shell |
 | `argv` | reserved: the extra bare words from the command line |
@@ -117,6 +118,11 @@ Claudine's trigger schemas type these keys automatically, even with no
 - A schema problem with an optional key that your own `$schema` declares
   is dropped with a warning.
 - Redeclaring a Claudine key in your `$schema` takes it over.
+- An inline composition (`prompt`, `sections`, or `kind: inline-compose`,
+  and no `sequence`) must set exactly one of `prompt` and `sections`. Both,
+  or `kind: inline-compose` with neither, is a schema error. In the editor
+  such a document gets diagnostics but no completion or hover from
+  Claudine's schemas.
 
 In your own `$schema`, a missing key and `null` are the same value:
 
@@ -213,8 +219,12 @@ so earlier body and frontmatter edits are available to them. A step-level
 ## Previewing
 
 ```bash
-claudine compose @review.md target=lib --dry-run > composed.md   # body on stdout; frontmatter + table on stderr
+claudine compose @review.md target=lib --dry-run > composed.md   # composed prompt on stdout; report on stderr
+claudine compose @review.md --dry-run --json                     # one JSON report: file, outcome, diagnostics, summary
 ```
 
-No agent starts and no lifecycle event fires, but `$(…)` expansions do
-run.
+Nothing runs: no agent, lifecycle event, `$(…)` expansion, `::shell`, or
+question, and nothing is written. What needs a command stays as written,
+marked `[not evaluated in a dry run]`. The provider is chosen as a real run
+chooses it, so name one (`--claude`, `agent:`) for a clean report. Exit `2`
+when any finding is an error or warning, else `0`.

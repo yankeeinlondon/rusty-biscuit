@@ -212,7 +212,7 @@ fn question_request_current_shape_auto_response_keys_on_envelope_id() {
     // synthetic empty answer must reply to the JSON-RPC envelope id
     // ("question-1"), not the payload `id` ("q-1") or `tool_call_id`.
     const QUESTION_LINE: &str = include_str!(
-        "../../../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        "../../../../../../docs/research/providers/signals/fixtures/kimi/wire-question-request.jsonl"
     );
     let value: Value = serde_json::from_str(QUESTION_LINE.trim()).unwrap();
     let Some(KimiEnvelope::Request { id, params }) = KimiEnvelope::classify(value) else {

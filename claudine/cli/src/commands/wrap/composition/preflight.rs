@@ -47,7 +47,7 @@ pub(super) enum PreflightBlockedOutcome {
 ///
 /// The spec requires a blocked iteration to reach `blocked` then `finalize`,
 /// each running its stack. Pre-flight failures (harness-plan parse,
-/// shell-approval denial, dry-run pre-check) used to call
+/// shell-approval denial) used to call
 /// [`LifecycleRunGuard::emit_blocked_or_failure`], which has no execution
 /// context and only emits the root-level literal communication, skipping the
 /// rest of the stacks and `finalize`. That left documents relying on

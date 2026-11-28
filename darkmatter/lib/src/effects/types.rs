@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::markdown::compose::expression::catalog::load_catalog;
+use simplified_schema::simplified::StandaloneSchemaEnvelope;
 use crate::markdown::compose::expression::{ExpressionFunctionDescriptor, FunctionCatalog, FunctionRegistration};
 
 /// The embedded file's repository path, used in load errors.
@@ -37,7 +38,7 @@ pub fn effect_function_catalog() -> &'static FunctionCatalog {
 pub(crate) fn effect_function_catalog_from_sources() -> &'static FunctionCatalog {
     static CATALOG: LazyLock<FunctionCatalog> = LazyLock::new(|| {
         crate::note_work!(ShippedRuntimePreparation);
-        load_catalog(MUTATIONS_SOURCE, MUTATIONS_PATH, &[])
+        load_catalog(MUTATIONS_SOURCE, std::path::Path::new(MUTATIONS_PATH), StandaloneSchemaEnvelope::MutationSchema, &[])
             .unwrap_or_else(|error| panic!("the embedded side-effect catalog does not load: {error}"))
     });
     &CATALOG
@@ -152,7 +153,7 @@ mod tests {
             "",
         );
         assert_ne!(without_append_line, MUTATIONS_SOURCE, "the fixture must remove the `append_line` entry");
-        let catalog = load_catalog(&without_append_line, "fixture/mutations.yaml", &[]).expect("fixture loads");
+        let catalog = load_catalog(&without_append_line, std::path::Path::new("fixture/mutations.yaml"), StandaloneSchemaEnvelope::MutationSchema, &[]).expect("fixture loads");
 
         let (untyped, undescribed) = coverage_gaps(&catalog);
 
@@ -167,7 +168,7 @@ mod tests {
             "            ) -> Creates an empty file if missing. Returns the absolute path.\n        - |-\n            function(\n                parameters(file: string, content: string, mode: string);\n                returns(string);\n                category(File & Directory);\n                fallible;\n            ) -> Not a real overload.\n",
         );
         assert_ne!(extra, MUTATIONS_SOURCE, "the fixture must add an `ensure_file` overload");
-        let catalog = load_catalog(&extra, "fixture/mutations.yaml", &[]).expect("fixture loads");
+        let catalog = load_catalog(&extra, std::path::Path::new("fixture/mutations.yaml"), StandaloneSchemaEnvelope::MutationSchema, &[]).expect("fixture loads");
 
         let (untyped, undescribed) = coverage_gaps(&catalog);
 

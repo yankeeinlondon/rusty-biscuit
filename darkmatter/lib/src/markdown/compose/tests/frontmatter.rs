@@ -208,7 +208,7 @@ fn assert_bare_sidecar_rejected(err: MarkdownError, document: &std::path::Path, 
             assert!(problems.is_empty(), "got: {problems:?}");
             let source = source.expect("schema preparation error");
             match source.downcast_ref::<simplified_schema::SchemaError>() {
-                Some(simplified_schema::SchemaError::NotASchemaDocument { path, reason }) => {
+                Some(simplified_schema::SchemaError::NotASchemaDocument { path, reason, .. }) => {
                     assert_eq!(path, schema);
                     assert_eq!(*reason, simplified_schema::NotSchemaReason::NoSchemaProperty);
                 }
@@ -321,16 +321,20 @@ fn transcluded_bare_sidecar_rejection_is_a_transclusion_warning() {
     assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
     let warning = &report.warnings[0];
     assert_eq!(warning.stage, "transclusion");
-    assert_eq!(warning.code, None);
-    let schema_name = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
-    assert!(
+    // A tolerated child failure no other code describes keeps the
+    // tolerated-transclusion code.
+    assert_eq!(warning.code.as_deref(), Some(crate::markdown::compose::report_diagnostics::TRANSCLUSION_FAILURE_CODE));
+    // The child arrives at its canonical path while the request's context
+    // keeps the temp directory as written; on macOS (`/var` for
+    // `/private/var`) the schema is named in the context's spelling.
+    let canonical = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
+    let named = |path: &std::path::Path| {
         warning.message.contains(&format!(
             "`{}` is not a valid schema definition: it has no `$schema` property",
-            schema_name.display()
-        )),
-        "got: {}",
-        warning.message
-    );
+            path.display()
+        ))
+    };
+    assert!(named(&schema_path) || named(&canonical), "got: {}", warning.message);
 }
 
 // ── DM1: exclude-keys integration tests ───────────────────────────

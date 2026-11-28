@@ -1,0 +1,21 @@
+exit: 1
+--- stdout
+    ╭── 📄 ./gone.md [missing]
+    │
+    ├── 📸 ./image.png [missing]
+    │
+📄 root.md
+    │
+    ╰◀─ 📄 child.md inserted into the '# Root' section
+
+Broken references in root.md
+
+docs/root.md
+  file not found in hyperlink  `./gone.md`    root.md:3:1
+  file not found in image      `./image.png`  root.md:7:1
+
+docs/child.md (transcluded at root.md:5)
+  file not found in hyperlink  `./child-gone.md`  child.md:3:1
+
+Checked 5 references across 2 documents: 2 ok, 3 broken
+--- stderr

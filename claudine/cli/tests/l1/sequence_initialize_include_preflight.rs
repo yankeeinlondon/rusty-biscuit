@@ -112,13 +112,13 @@ fn flatten(text: &str) -> String {
 fn assert_missing_include_failure(success: bool, output: &str, code: Option<&str>) {
     assert!(!success, "a generated include must fail sequence preflight:\n{output}");
     let error = output
-        .find("TransclusionError")
-        .unwrap_or_else(|| panic!("the typed transclusion error renders:\n{output}"));
+        .find("Sequence preflight found")
+        .unwrap_or_else(|| panic!("the preflight report renders:\n{output}"));
     assert!(output.contains(&format!("File not found: {GENERATED}")), "{output}");
     let note = output
         .find(NOTE)
         .unwrap_or_else(|| panic!("the preflight note renders:\n{output}"));
-    assert!(note < error, "the note precedes the error block:\n{output}");
+    assert!(note < error, "the note precedes the report:\n{output}");
     assert_eq!(output.matches("note:").count(), 1, "{output}");
     assert_eq!(output.matches("File not found").count(), 1, "{output}");
     // The note adds guidance only: the selected diagnostic is the same one
@@ -136,14 +136,43 @@ fn a_prompt_whose_initialize_would_create_its_include_fails_sequence_preflight()
     case.assert_no_side_effects(&output);
 }
 
+/// The dry run reports the same missing include as a finding on the prompt
+/// task, with nothing run.
 #[test]
 fn a_dry_run_reports_the_same_preflight_failure_without_side_effects() {
     let case = Case::new("sequence-generated-include-dry");
+    // The check only looks the provider up, so a stub keeps its report to
+    // the include.
+    let claude = case.fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
-    let (success, output, code) = case.run_sequence(&["--dry-run", "--claude"]);
+    let output = case
+        .fixture
+        .command()
+        .args(["sequence", case.sequence.to_str().unwrap(), "--dry-run", "--json", "--claude"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert_missing_include_failure(success, &output, code.as_deref());
-    case.assert_no_side_effects(&output);
+    assert_eq!(output.status.code(), Some(2), "{stdout}");
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let errors: Vec<&serde_json::Value> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .collect();
+    assert_eq!(errors.len(), 1, "{stdout}");
+    assert_eq!(errors[0]["code"], "dm.reference.missing_transclusion", "{stdout}");
+    assert_eq!(errors[0]["message"], "file not found in `::file`", "{stdout}");
+    assert_eq!(errors[0]["reference"], GENERATED, "{stdout}");
+    assert_eq!(errors[0]["trail"][0]["label"], "one", "{stdout}");
+    case.assert_no_side_effects(&stdout);
 }
 
 /// The note is scoped to sequence preflight: direct `compose` of a document

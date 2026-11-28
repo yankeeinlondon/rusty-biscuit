@@ -82,7 +82,11 @@ name biscuit-file's `file_reference::glob` module shares). `ignore`'s
 `WalkBuilder` is a walker, not a matcher, and is allowed. Match file
 references with `GlobReference`; extend the allowlist only for globs that are
 not file references (heading text, editor configuration), and add another
-package's allowlisted file to `lib/Cargo.toml` `source-inputs`.
+package's allowlisted file to `lib/Cargo.toml` `source-inputs`. It reads its
+39 MB of source through `source_scan::production_sources_where`, which blanks
+only the files whose raw text names an identifier (and the files that could
+declare one of them test-only); blanking every file took 1.4 s alone on Linux
+in debug. A new gate that searches for a few identifiers does the same.
 
 **Schema-variable docs guard.**
 `lib/tests/l1/schema_roots.rs::no_doc_or_skill_names_the_singular_schema_variable`
@@ -109,9 +113,14 @@ repositories with disjoint `magic.md` markers and `order.yaml` enums) backs
 the library, `md`, and Claudine runners' `external_*` tests (DMLS's request
 belongs to the document's repository by design): a source in another repository takes `&`,
 `^`, and bare root lookups from its own repository and `@` from the launch
-scope. A CLI that rebuilds a context at a foreign document's directory must
-copy the launch scope back (`with_launch_magic_scope`, as
-`MdRequest::document_context` does); Claudine completion uses
+scope. `reference_bare_schema_roots.rs` (library) and `reference_bare_schema.rs`
+(CLI) also hold the nested-checkout fixtures (`NestedCheckouts`,
+`nested_checkouts`): a component inside the launch checkout made with a
+`.git` file naming a separate Git directory, and one nested in an unrelated
+checkout beside a `seed.md` included before and after it, so a containment
+shortcut or an order-dependent repository memo fails them. A CLI that rebuilds a context at a foreign document's directory must
+copy the launch scope back (`derive_in_own_repository`, as
+`MdRequest::document_context` and the library's source admission do); Claudine completion uses
 `claudine::composition::derive_request_context_for_source`, composition's
 policy.
 The library and DMLS runners take every form at every depth. The `md` and

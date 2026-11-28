@@ -15,6 +15,7 @@ use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
+mod combined;
 mod lifecycle;
 
 use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
@@ -23,10 +24,16 @@ use biscuit_terminal::output::OutputTarget;
 use darkmatter::markdown::output::command::ReferenceSummary;
 use renderable::Width;
 
-/// Whether `policy` recovers a missing target of `kind`.
-fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
+/// Whether `policy` recovers `issue`: only a missing target
+/// ([`is_missing_target`](darkmatter::markdown::reference::validate::ReferenceIssue::is_missing_target)),
+/// and only under its kind's allowance. An invalid, unreadable, or malformed
+/// target refuses whatever is allowed.
+fn recovers_missing(policy: &ResolvedPolicy, issue: &darkmatter::markdown::reference::validate::ReferenceIssue) -> bool {
     use darkmatter::markdown::reference::types::ReferenceKind;
-    match kind {
+    if !issue.is_missing_target() {
+        return false;
+    }
+    match issue.kind {
         ReferenceKind::Hyperlink => policy.recovers("missing-hyperlinks"),
         ReferenceKind::Image => policy.recovers("missing-image-refs"),
         ReferenceKind::Transclusion => policy.recovers("missing-transclusions"),
@@ -279,9 +286,11 @@ pub fn run_compose(
         let shared = darkmatter::lifecycle::md_host::shared_event_keys(profile.lifecycle().registry());
         request.report_host_diagnostics(&[profile.foreign_document_notice(&lifecycle_source, &shared)]);
     }
-    // The host's functions are declared for this thread's analysis and
-    // typing only: an analysis-only set has no handler, so a call fails when
-    // evaluated, as any failing function does.
+    // The selected host's functions are declared for analysis and typing
+    // only, for the rest of this request (reference check, call check,
+    // lifecycle, and composition; transcluded children inherit them): an
+    // analysis-only set has no handler, so a call fails when evaluated with
+    // `host function <name>() requires the host runtime`.
     let _host_functions: Vec<_> = foreign
         .iter()
         .flat_map(|profile| profile.functions().iter().map(|set| set.functions.enter()))
@@ -378,6 +387,18 @@ pub fn run_compose(
         sink.reads_from(&data_runtime);
     }
     options = options.with_data_runtime(data_runtime);
+    // Likewise one single-flight remote-fetch runtime for every pass (the
+    // reference check, a combined report's passive composition, pre-flight,
+    // and composition), so each URL is fetched once. It is built under the
+    // remote-read configuration and cache root, and after the configuration
+    // snapshot so it fetches under the configured `network` permission; the
+    // configuration itself (its ICMP grants) reaches only composition.
+    if let Some(cache_root) = cache_root {
+        options = options.with_cache_root(cache_root);
+    }
+    options = options
+        .with_config_snapshot(std::sync::Arc::clone(&config_snapshot))
+        .with_shared_remote_fetch_under(&remote_config);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
         ComposeRequest::with_context(
             options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)),
@@ -403,11 +424,24 @@ pub fn run_compose(
     let mut pending_triggers = PendingTriggerWarnings::default();
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
-    let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
-        let check_request = prepare_request(options.clone())?;
-        let check = check_references(&md, &check_request, policy).inspect_err(|error| {
-            deliver_check_failure_warnings(error, &check_request, &mut pending_triggers, sink, &term_cell);
-        })?;
+    // The request of the reference check, kept for the passive checks a
+    // later reference stop (the pre-flight walk's) runs.
+    let check_request =
+        if resolved_input.is_some() && lifecycle.is_none() { Some(prepare_request(options.clone())?) } else { None };
+    let deferred_report = if let Some(check_request) = &check_request {
+        let check = match check_references(&md, check_request, policy) {
+            Ok(check) => check,
+            Err(error) => {
+                deliver_check_failure_warnings(&error, check_request, &mut pending_triggers, sink, &term_cell);
+                return Err(match combined::after_check_failure(&md, check_request, policy, &error, &launch_dir) {
+                    Some(combined) => {
+                        combined.deliver(sink, &launch_dir);
+                        ReportedExit(1).into()
+                    }
+                    None => error,
+                });
+            }
+        };
         match check {
             ReferenceCheck::Clean(summary) => {
                 if let Some(sink) = sink {
@@ -423,16 +457,27 @@ pub fn run_compose(
                 Some(report)
             }
             ReferenceCheck::Refused(report) => {
-                pending_triggers.hold(&report.trigger_warnings);
-                pending_triggers.deliver(sink, None, &term_cell);
+                deliver_refused_check_warnings(&report, &mut pending_triggers, sink, &term_cell);
+                let combined = combined::after_refusal(&md, check_request, &report, &launch_dir);
                 if let Some(sink) = sink {
-                    sink.references(&report);
+                    match &combined {
+                        Some(combined) => {
+                            sink.summary(ReferenceSummary::from_report(&report));
+                            combined.deliver(Some(sink), &launch_dir);
+                        }
+                        None => sink.references(&report),
+                    }
                     perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
                     return Err(ReportedExit(1).into());
                 }
-                let term = term_cell.get_or_init(stderr_terminal);
-                eprint!("{}", render_reference_report(&report, &launch_dir));
-                eprint!("{}", render_reference_warnings(&report, term));
+                match combined {
+                    Some(combined) => combined.deliver(None, &launch_dir),
+                    None => {
+                        let term = term_cell.get_or_init(stderr_terminal);
+                        eprint!("{}", render_reference_report(&report, &launch_dir));
+                        eprint!("{}", render_reference_warnings(&report, term));
+                    }
+                }
                 return Err(ReportedExit(1).into());
             }
         }
@@ -485,20 +530,10 @@ pub fn run_compose(
     options = options.with_perf(perf);
     options = options.with_remote_read_config(remote_config);
     options = options.with_allow_remote_transclusion(true);
-    if let Some(cache_root) = cache_root {
-        options = options.with_cache_root(cache_root);
-    }
     // `--indent` only parses 2, 4, or 8.
     if let Some(indentation) = indent.and_then(Indentation::from_spaces) {
         options = options.with_indentation(indentation);
     }
-    // Share one single-flight remote-fetch runtime between the pre-flight
-    // approval walk and the compose pass so each remote URL is fetched once,
-    // not once per stage. Must follow the remote-read-config and cache-root
-    // wiring above so the shared runtime inherits both, and follow the
-    // configuration snapshot so it fetches under the configured `network`
-    // permission.
-    options = options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)).with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
     perf_stage("build options", build_options_dur);
@@ -582,7 +617,20 @@ pub fn run_compose(
             Some(sink) => sink.warnings(&warnings),
             None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
         }
-        preflight_approval_error(e)
+        let error = preflight_approval_error(e);
+        // The walk is condition-blind, so it can stop at an inclusion the
+        // reference check left out with its block; the passive checks then
+        // join the stop's report.
+        match check_request
+            .as_ref()
+            .and_then(|check_request| combined::after_inclusion_stop(&md, check_request, policy, &error, &launch_dir, sink.is_some()))
+        {
+            Some(combined) => {
+                combined.deliver(sink, &launch_dir);
+                ReportedExit(1).into()
+            }
+            None => error,
+        }
     };
     let slot_grants = if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
@@ -632,6 +680,9 @@ pub fn run_compose(
         compose_error(failure.error)
     })?;
     pending_triggers.merge_into(&mut report.warnings);
+    if let Some(warning) = combined::empty_body_warning(&md, composed.content(), &report) {
+        report.add_warning(warning);
+    }
     if let Some(checked) = &deferred_report {
         report.warnings.retain(|warning| !reference_check_reported(warning, checked));
     }
@@ -802,8 +853,10 @@ pub(crate) enum ReferenceCheck {
 /// Validates references with the same request composition will use, so
 /// interpolation inside transclusion targets resolves as it will compose.
 ///
-/// An error `policy` does not recover refuses the document, and so does a
-/// reported issue its blocking policy selects.
+/// An error `policy` does not recover refuses the document (an allowance
+/// recovers a missing target only, never an invalid or unreadable one), and
+/// so does a reported issue its blocking policy selects. The direct and the
+/// lifecycle route both decide here.
 ///
 /// The check is passive: body `::shell` directives stay unexpanded, because
 /// running one here would be an effect ahead of the shell-approval walk and
@@ -817,19 +870,14 @@ pub(crate) enum ReferenceCheck {
 pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> Result<ReferenceCheck> {
     use darkmatter::markdown::compose::expression::Severity;
     use darkmatter::markdown::compose::policy::missing_reference_code;
-    use darkmatter::markdown::reference::ReferenceGraphOptions;
-    use darkmatter::markdown::reference::validate::{
-        ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
-    };
+    use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
 
-    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
-    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
-    let report = md.validate_references(val_options).map_err(compose_error)?;
+    let report = reference_report(md, request)?;
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
     if report
         .issues
         .iter()
-        .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i.kind))
+        .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i))
     {
         return Ok(ReferenceCheck::Refused(report));
     }
@@ -856,6 +904,46 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         return Ok(ReferenceCheck::Report(report));
     }
     Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
+}
+
+/// The passive reference report of `md` under `request`
+/// ([`ComposeOptions::for_reference_check`]).
+///
+/// ## Errors
+///
+/// As [`check_references`].
+fn reference_report(
+    md: &Markdown,
+    request: &ComposeRequest,
+) -> Result<darkmatter::markdown::reference::validate::ReferenceValidationReport> {
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
+    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
+    md.validate_references(val_options).map_err(compose_error)
+}
+
+/// [`reference_report`], or `None` when the check could not run.
+fn validate(md: &Markdown, request: &ComposeRequest) -> Option<darkmatter::markdown::reference::validate::ReferenceValidationReport> {
+    reference_report(md, request).ok()
+}
+
+/// Delivers the warnings of a reference check that refused the document:
+/// those held so far, its skipped triggers, and those its preparation found,
+/// which composition would have reported had it run.
+pub(crate) fn deliver_refused_check_warnings(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&ReportSink>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    let mut warnings = report.earlier_warnings.clone();
+    pending_triggers.hold(&report.trigger_warnings);
+    pending_triggers.merge_into(&mut warnings);
+    match sink {
+        Some(sink) => sink.warnings(&warnings),
+        None => report_failure_trigger_warnings(&warnings, None, term_cell),
+    }
 }
 
 /// Delivers what the failed reference check `error` had found before it

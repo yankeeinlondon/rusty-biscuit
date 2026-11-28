@@ -97,6 +97,12 @@ impl AuthoredSpan {
         })
     }
 
+    /// A position another locator already proved: `range` starting at
+    /// one-based `line` and character `column`.
+    pub(crate) fn proven(range: Range<usize>, line: usize, column: usize) -> Self {
+        Self { range, line, column }
+    }
+
     /// Byte range of the `{{ … }}` construct in the loaded document text.
     pub fn range(&self) -> Range<usize> {
         self.range.clone()
@@ -242,6 +248,10 @@ pub enum MarkdownError {
     /// File-links directive pipeline error.
     #[error("File-links error: {0}")]
     FileLinks(#[from] crate::markdown::compose::FileLinksError),
+
+    /// The heading normalization stage failed.
+    #[error("Normalization failed: {0}")]
+    Normalization(#[from] crate::markdown::normalize::NormalizationError),
 
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
@@ -827,6 +837,7 @@ impl BlockError for MarkdownError {
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
             MarkdownError::FileLinks(inner) => inner.status_block(term),
+            MarkdownError::Normalization(inner) => inner.status_block(term),
             MarkdownError::Reference(inner) => inner.status_block(term),
             MarkdownError::CtxMerge(inner) => inner.status_block(term),
 

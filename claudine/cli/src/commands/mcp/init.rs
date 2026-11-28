@@ -203,7 +203,7 @@ fn render_init_summary(
 fn render_reentry_help(repo_root: Option<&Path>) {
     let user_path = defaults_path();
     let repo_path = repo_root.map(repo_defaults_path);
-    let user_label = biscuit_file::to_portable_string(&user_path);
+    let user_label = biscuit_file::to_forward_slash_string(&user_path);
     let user_link = crate::cli_utils::file_url(&user_path).map_or_else(
         || user_label.clone(),
         |href| format!(r#"<a href="{href}">{user_label}</a>"#),
@@ -211,7 +211,7 @@ fn render_reentry_help(repo_root: Option<&Path>) {
     log::data("MCP mode is already initialized.");
     log::data(&Prose::new(format!("User defaults: {user_link}")).render(&crate::log::terminal()));
     if let Some(repo_path) = repo_path {
-        let repo_label = biscuit_file::to_portable_string(&repo_path);
+        let repo_label = biscuit_file::to_forward_slash_string(&repo_path);
         let repo_link = crate::cli_utils::file_url(&repo_path).map_or_else(
             || repo_label.clone(),
             |href| format!(r#"<a href="{href}">{repo_label}</a>"#),

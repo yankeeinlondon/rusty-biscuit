@@ -1,0 +1,15 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of doc.md (no commands run)
+
+doc.md
+  ⚠ `spec=spec` names no file, so an interactive run asks which file to use; 1
+    file matches
+      deep/spec.md
+      in doc.md
+      hint: pass the file's path, such as `spec=deep/spec.md`, to run
+            without the choice
+
+Dry run found 0 errors and 1 warning; 0 checks not run. Previewed 1 of 1 task.

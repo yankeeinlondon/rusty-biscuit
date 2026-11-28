@@ -234,12 +234,12 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
         Some(&launch_dir),
     )
     .unwrap();
-    let launch_repo_text = biscuit_file::to_portable_string(&launch_repo);
+    let launch_repo_text = biscuit_file::to_forward_slash_string(&launch_repo);
 
     assert!(primary.composed_markdown.contains("PRIMARY-SOURCE-BODY AREA=alpha"));
     assert!(primary.composed_markdown.contains(&format!(
         "CWD={}",
-        biscuit_file::to_portable_string(&launch_dir)
+        biscuit_file::to_forward_slash_string(&launch_dir)
     )));
     assert!(primary.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(primary.composed_markdown.contains("FILE=true"));
@@ -247,7 +247,7 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
     assert!(appendix.composed_markdown.contains("APPENDIX-SOURCE-BODY AREA=alpha"));
     assert!(appendix.composed_markdown.contains(&format!(
         "CWD={}",
-        biscuit_file::to_portable_string(&launch_dir)
+        biscuit_file::to_forward_slash_string(&launch_dir)
     )));
     assert!(appendix.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(appendix.composed_markdown.contains("FILE=true"));
@@ -861,7 +861,7 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         eprintln!("skipping cwd probe test because rustc is unavailable");
         return;
     };
-    let probe = biscuit_file::to_portable_string(&probe);
+    let probe = biscuit_file::to_forward_slash_string(&probe);
 
     let tmp = TempDir::new().unwrap();
     let launch = tmp.path().join("launch");
@@ -904,14 +904,14 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
     assert!(
         prepared
             .composed_markdown
-            .contains(biscuit_file::to_portable_string(&launch).as_str()),
+            .contains(biscuit_file::to_forward_slash_string(&launch).as_str()),
         "shell did not run in launch cwd: {}",
         prepared.composed_markdown
     );
     assert!(
         !prepared
             .composed_markdown
-            .contains(biscuit_file::to_portable_string(&source_repo).as_str()),
+            .contains(biscuit_file::to_forward_slash_string(&source_repo).as_str()),
         "shell ran beside the prompt source: {}",
         prepared.composed_markdown
     );

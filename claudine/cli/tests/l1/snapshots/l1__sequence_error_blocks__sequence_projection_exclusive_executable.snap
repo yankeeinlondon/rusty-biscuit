@@ -1,0 +1,16 @@
+---
+source: claudine/cli/tests/l1/sequence_error_blocks.rs
+expression: projection(&err)
+---
+{
+  "code": "composition.failed",
+  "category": "Composition",
+  "disposition": "Correctable",
+  "origin": "Author",
+  "detail": {
+    "source_path": null
+  },
+  "snapshot_cause": null,
+  "message": "step 2 declares more than one executable field (prompt, shell); a step declares at most one of prompt, shell, side_effect, group, task, sequence",
+  "hint": "Keep one of prompt, shell and move the others to steps of their own."
+}

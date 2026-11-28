@@ -1937,7 +1937,7 @@ fn prepare_harness_plan_phase(
         }
         let message = format!(
             "source file does not exist: {}",
-            biscuit_file::to_portable_string(&prompt_state.source_path)
+            biscuit_file::to_forward_slash_string(&prompt_state.source_path)
         );
         let err_info = LifecycleErrorInfo::from_action_failure("missing_source", &message);
         if let Some(error) = emit_blocked_finalize_with_err(

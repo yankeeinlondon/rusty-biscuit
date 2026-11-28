@@ -1,14 +1,39 @@
-kind: schema-trigger
-description: the shape of Claudine's lifecycle events
-
+# Claudine's lifecycle stack types and the `loop:` block type.
+# Hand-maintained; see claudine/docs/topics/schemas.md.
+#
+# Three recursive families type every event stack at every conditional depth:
+# - `stack`/`item`/`conditional` for the ordinary events and a loop's `gate:`;
+# - `initialize-*` for `initialize`, which never admits a shell, in either
+#   branch, at any depth;
+# - `cancelled-*` for `cancelled`, which admits `stop` as its only flow
+#   directive.
+# Each family recurses through a conditional's `then`/`else`, so the resolver
+# stores it once as a definition and references it wherever it is used. The
+# schema has no depth limit: the lifecycle parser alone rejects a sixth
+# conditional level.
+#
+# A family's `entry` is an action written as a dictionary: a single-action
+# dictionary (a category, whose one verb takes its short or long form) or a
+# bundle of short forms. A stack root or a `then`/`else` body is a list or an
+# entry; a list item is an entry, a conditional, or a bare verb. Only a list
+# item may be a conditional, so every family's cycle runs stack -> item[] ->
+# conditional -> then/else -> stack through child values, and `entry`, which
+# is not recursive, is inlined at both of its references. A root or body
+# dictionary's `when` beside its actions passes these types, as a bundle's
+# did before single-action dictionaries were typed; validation refuses it
+# with the lifecycle parser's own placement rules, which it applies to every
+# action dictionary.
+#
+# A loop's loose verb keys are a bundle of short forms (`loop-bundle`) or a
+# single action in either form (`loop-single`, typed like a category), beside
+# the iteration controls, which `uncounted-keys` leaves out of its one-key
+# count. A `gate` never sits beside a loose verb, so only the bundle arm
+# declares it.
+#
+# The sequence container types (`step`, `task`, `group`) that import these
+# stacks live in sequence.yaml.
+kind: schema
 types:
-    initialized: event
-    start: event
-    blocked: event
-    success: event
-    failure: event
-    finalize: event
-
     bare-verb: "enum(stop, skip, error, retry, break, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
     stack:
         - item[]

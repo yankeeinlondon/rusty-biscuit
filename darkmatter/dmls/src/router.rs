@@ -183,6 +183,11 @@ pub struct StartupHooks {
     pub slot_cache_root: Option<PathBuf>,
     /// Receives a [`StartupEvent`] as each background step completes.
     pub observer: Option<Sender<StartupEvent>>,
+    /// Replaces [`REGISTRATION_SETTLE`](crate::overlay::hosts::REGISTRATION_SETTLE),
+    /// how long changed host-registration inputs must be quiet before they
+    /// reload, so a test can reload at once (`Duration::ZERO`) or drive the
+    /// window with a [`ManualClock`](crate::clock::ManualClock).
+    pub registration_settle: Option<Duration>,
 }
 
 /// A background step that completed.
@@ -350,6 +355,10 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
     // server's clock (wall and monotonic, paired).
     overlay.slots().set_clock(Arc::clone(&options.clock));
     overlay.slots().set_cache_root(options.startup.slot_cache_root.clone());
+    // Host-registration settle deadlines are on the same clock.
+    overlay.set_registration_settle(
+        options.startup.registration_settle.unwrap_or(crate::overlay::hosts::REGISTRATION_SETTLE),
+    );
     let slot_jobs = {
         let internal = internal_tx.clone();
         let observer = options.startup.observer.clone();
@@ -1266,7 +1275,7 @@ impl ServerState {
             current
                 .entry(crate::overlay::registry::normalized(&found.file))
                 .or_default()
-                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found));
+                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found, self.profile.position_encoding));
         }
         let changed: std::collections::BTreeSet<PathBuf> = {
             let mut published = self.registration_files.borrow_mut();
@@ -1822,8 +1831,15 @@ impl Router {
             // The deadline is on the store's clock, which a test advances by
             // hand, so the wait is measured from that clock's now.
             let slots = self.state.overlay.slots();
+            let now = slots.clock().now();
             let expiry = match slots.next_deadline() {
-                Some(deadline) => crossbeam_channel::after(deadline.saturating_duration_since(slots.clock().now())),
+                Some(deadline) => crossbeam_channel::after(deadline.saturating_duration_since(now)),
+                None => crossbeam_channel::never(),
+            };
+            // A changed host registration reloads once its inputs have been
+            // quiet for the settle window, on the same clock.
+            let host_reload = match self.state.overlay.next_host_reload() {
+                Some(deadline) => crossbeam_channel::after(deadline.saturating_duration_since(now)),
                 None => crossbeam_channel::never(),
             };
             let message = crossbeam_channel::select! {
@@ -1842,7 +1858,15 @@ impl Router {
                     self.expire_observations();
                     continue;
                 }
+                recv(host_reload) -> _ => {
+                    self.start_due_host_reloads();
+                    self.after_message();
+                    continue;
+                }
             };
+            // Before the message, so a reload whose window ended (on a
+            // clock a test advances) is queued ahead of the message's reply.
+            self.start_due_host_reloads();
             match message {
                 Message::Request(request) => {
                     if request.method == lsp_types::request::Shutdown::METHOD {
@@ -1958,6 +1982,17 @@ impl Router {
             }
             let typ = if missing { MessageType::WARNING } else { MessageType::INFO };
             show_message(&self.connection.sender, typ, format!("dmls: {}: {}", notice.code, notice.message));
+        }
+    }
+
+    /// Queues the reload of every host registration whose settle window has
+    /// ended: the workspace scopes' pass and each open document's own
+    /// preparation. Until a reload installs, documents keep the view they
+    /// have; its completion republishes them.
+    fn start_due_host_reloads(&mut self) {
+        if self.state.overlay.take_due_host_reloads() {
+            self.state.prepare_workspace_registries();
+            self.state.refresh_all_diagnostics();
         }
     }
 
@@ -2967,8 +3002,10 @@ impl Router {
                 }
                 if self.state.watch_mode == WatchMode::ClientWatched && self.state.schema_watch_fallback {
                     // No watcher covers schema inputs or Markdown
-                    // dependencies outside the workspace.
-                    self.state.overlay.invalidate_all_trigger_registries();
+                    // dependencies outside the workspace. Host
+                    // registrations reload after the settle window, as a
+                    // watched change would.
+                    self.state.overlay.invalidate_unwatched_inputs();
                     self.state.prepare_workspace_registries();
                     self.state.recheck_dependencies();
                     self.state.refresh_all_diagnostics();

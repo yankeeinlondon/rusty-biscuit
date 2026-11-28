@@ -370,12 +370,12 @@ fn propagated_callback_error_keeps_item_position() {
     let inline = format!("{front}{{{{ map(items, i => try(load_data(i, 'string[]')[0], 'FALLBACK')) }}}}\n");
     let failure = failure_of(dir.path(), &inline, ComposeOptions::new());
     let found = assert_reported_at(&failure, UNSUPPORTED, (6, 1));
-    assert_eq!(found.iteration_path.to_string(), "map[1]");
+    assert_eq!(found.iteration_path().to_string(), "map[1]");
 
     let region = format!("{front}::map items \"i => try(load_data(i, 'string[]')[0], 'FALLBACK')\"\n- {{{{ i }}}}\n::end-map\n");
     let failure = failure_of(dir.path(), &region, ComposeOptions::new());
     let found = assert_reported_at(&failure, UNSUPPORTED, (6, 13));
-    assert_eq!(found.iteration_path.to_string(), "items[1]");
+    assert_eq!(found.iteration_path().to_string(), "items[1]");
 }
 
 #[test]

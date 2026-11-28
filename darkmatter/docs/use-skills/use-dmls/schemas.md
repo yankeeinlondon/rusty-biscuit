@@ -48,6 +48,15 @@ wins:
 - A file name in an earlier root **shadows** the same name in later roots,
   even when the earlier file is broken.
 - `[workspace]` settings don't affect the roots.
+- Being in a root applies only `kind: schema-trigger` files (to the Markdown
+  documents they match) and `kind: yaml-schema` files (to the YAML files
+  whose `kind` they claim). Any other schema file there is only
+  **available**: it applies to a document whose `$schema` names it, such as
+  `$schema: food.yaml`, and to no other.
+- A root reaches only the documents it serves: a package's `schemas/` that
+  package, a package area's that area, `{repo}/schemas/` the whole
+  repository, and `$SCHEMAS_DIR` and `~/schemas/` every document in any
+  repository.
 
 `md schema triggers doc.md` prints the roots for a document, which triggers
 matched (condition by condition), which files were shadowed, and which were
@@ -118,7 +127,18 @@ $schema:
 | `kind: schema` | `$schema` and/or `types`, `description`, `categories` | a `$schema` target if it has `$schema`; otherwise a **type library** for imports |
 | `kind: schema-trigger` | **only** `kind`, `match`, `$schema`, and optionally `name`, `description`, `types` (local to the trigger) | applies automatically to matching Markdown documents; never named in `$schema` |
 | `kind: yaml-schema` | `kind`, `$schema` (required), `types`, `description`, `categories` | applies automatically to **YAML files** whose `kind` it claims |
+| `kind: namespace-schema` | `kind`, `namespace` (required), `$schema` (required), `description`, `types` | declares one host expression global in a host registration; never a `$schema` target or import source |
+| `kind: expression-schema` | `kind`, `categories` (required), `types` (required), `description` | declares expression functions (with private local helpers); checked by `md schema validate` and DMLS (`dm.schema.callable_catalog`); never a `$schema` target or import source; disallows `when` |
+| `kind: mutation-schema` | `kind`, `categories` (required), `types` (required), `description` | declares Darkmatter's built-in signature-backed lifecycle actions; checked like `expression-schema` (refusing `narrows(...)` and `when`); refused in host registrations |
 | `.json` | a Draft 2020-12 JSON Schema | a `$schema` target. It validates, but adds no completion or hover |
+
+Callable catalog conflicts point to both declarations. DMLS links a built-in
+declaration when matching source is available and otherwise shows the
+embedded catalog's file label, line, and column. DMLS marks a callable key
+that cannot be used in an expression, such as `project label` or `true`.
+For a bad type reference, inspect the marked reference or its enclosing type
+expression, such as the specific overload's signature. An aliased arm is
+marked at its YAML alias token.
 
 Any other top-level key is a malformed-envelope error.
 
@@ -203,6 +223,36 @@ In the editor:
   related information.
 - **Editing an imported target,** even in an unsaved buffer, refreshes the
   receiving schema's diagnostics and its property completions.
+
+### Retired keys and near-miss advice
+
+Declare a retired key `removed(<replacement>)` instead of deleting it, and
+opt an open object into typo advice with `$advise-unknown-keys` (the exact
+keys never to advise on, `[]` for none):
+
+```yaml
+$schema:
+    name: string
+    fail_fast: "removed(set fail_fast on a group object)"
+    step:
+        prompt: string
+        "<string>": unknown
+        $advise-unknown-keys: [agent]
+```
+
+- **A removed key** is an error wherever it is written, `null` included:
+  `dm.schema.removed_key`, underlined at the key, its message ending with
+  the replacement. It is never completed or suggested. Write it only as a
+  block-form property's whole value (not on a pattern key, a `$` key, a
+  `types` entry, or inside an inline `{ … }`).
+- **Near-miss advice** is a warning, `dm.schema.near_miss_key`, at a key
+  one edit from exactly one declared key (`promt` beside `prompt`); the
+  value stays valid. It applies to the object that declares
+  `$advise-unknown-keys`, not to objects that extend it.
+- **An unknown key** on a closed object ends its message with
+  ``did you mean `name`?`` when one declared key is near it, and
+  otherwise ``remove `zzz`, or use one of `name`, `tags` `` (at most
+  eight declared keys, then `…`).
 
 ## Schema triggers
 
@@ -312,6 +362,9 @@ one. Otherwise it isn't validated.
   compose step.
 - Every root's definitions count; there's no shadowing here. Two definitions
   claiming the same kind is an error.
+- A registered host's `kind: yaml-schema` files claim kinds too, below the
+  shipped and schema-root definitions: a host's `roster` applies only where
+  no local definition claims `roster`.
 - In the editor, this needs DMLS attached to YAML buffers; see
   [install.md](install.md#yaml-files).
 
@@ -328,21 +381,48 @@ read them. Use a trigger with `$path` when `md` should apply the schema too.
 
 ## Claudine
 
-Claudine's schemas are ordinary trigger files in `claudine/schemas/`. DMLS
-needs no configuration for them.
+Claudine's schemas reach DMLS as a **host registration**, not as files in a
+schema root. Claudine's setup (`claudine setup`) publishes them to
+`~/.claudine/registrations/darkmatter/` and adds the manifest to
+`~/.darkmatter.yaml`:
 
-- **Under `claudine/`**, documents find them through the package-area root.
-- **Elsewhere**, put the complete set of eight files in the repository
-  root's `schemas/`, an absolute `SCHEMAS_DIR`, or `~/schemas`:
-  `action.yaml`, `lifecycle.yaml`, `sequence-types.yaml`, `linking.yaml`,
-  `document.yaml`, `claudine.yaml`, `inline-compose.yaml`, and
-  `sequence.yaml`. They import each other, so all eight are needed.
-- **Use regular files.** A symlinked trigger is ignored.
-- **For Claudine's globals and lifecycle checks**, also copy `globals.yaml`
-  and `globals.lifecycle.json`.
+```yaml
+# ~/.darkmatter.yaml
+register:
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
+```
 
-DMLS reads these only from disk. An installed `claudine` binary doesn't make
-them available to the editor.
+With that entry, DMLS types Claudine documents in any folder, with no
+configuration and no `$schema`: frontmatter checks, completion, and hover,
+the `seq`, `loop`, and `group` globals, and Claudine's lifecycle events and
+verbs (`start:`, `success:`, `say`, …).
+
+- **A document is Claudine's when one of Claudine's triggers matches it**
+  (it has a lifecycle event of Claudine's, `prompt`, `agent`, `model`,
+  `sequence`, …). A document with only keys every host shares
+  (`initialize:` alone) stays a plain Darkmatter document. A document two
+  registered hosts both match is analyzed as plain Darkmatter with a
+  `dm.host.ambiguous` warning.
+- **A YAML file with `kind: sequence`** is judged by Claudine's registered
+  definition, unless a shipped or schema-root definition claims that kind.
+- **Don't copy Claudine's files into a schema root.** A copied trigger is an
+  ordinary trigger layered on top of Claudine's, not a replacement, and a
+  copied lifecycle artifact supplies nothing.
+- **`dm.host.registration` saying "unsupported host registration format version"**
+  (format 1 or format 2) means an older Claudine install. Update Claudine and
+  run `claudine setup` or `claudine doctor --fix`: it republishes the format 3
+  bundle in place (manifest last) and rewrites any legacy `~/.claudine/darkmatter-host.yaml`
+  entry in `~/.darkmatter.yaml`.
+- **After an upgrade or a new setup**, DMLS waits until the published files
+  have been quiet for about 300 ms, keeps showing the previous results
+  meanwhile, then reloads. No restart is needed, and a warning the new files
+  fix clears by itself.
+- **`prompt` and `sections` aren't completed.** Inline composition's rule
+  ("one of `prompt` or `sections`") is validated but offers no completion or
+  hover.
+- **`dm.host.trigger_conflict`** (an error on the document) means two of
+  Claudine's matching triggers disagree about one property. It's a defect
+  in the published files, not in your document; update Claudine.
 
 ## Schema templates
 

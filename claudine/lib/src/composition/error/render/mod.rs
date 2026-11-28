@@ -13,6 +13,7 @@ mod lifecycle;
 mod provider;
 mod schema;
 mod selection;
+mod sequence;
 mod sequence_loop;
 
 #[cfg(test)]
@@ -27,6 +28,9 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
                 inner.status_block(term)
             }
+            // The CLI renders a check failure's report instead of a block;
+            // any other surface shows the cause it reports for.
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).status_block(term),
 
             // Semantic over a typed Darkmatter cause: this layer owns the code
             // (a Darkmatter error supplies no facets), but the cause is what
@@ -84,6 +88,7 @@ impl BlockError for CompositionError {
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }
+            | CompositionError::SchemaSlotFailed { .. }
             | CompositionError::SchemaParse { .. }
             | CompositionError::SchemaValidation { .. }
             | CompositionError::MissingProperties { .. }
@@ -105,10 +110,69 @@ impl BlockError for CompositionError {
             CompositionError::LoopIterationFailed { .. }
             | CompositionError::LoopRateLimited { .. }
             | CompositionError::SequenceMissingProperties { .. }
-            | CompositionError::SequenceInteractiveRejected(..)
+            | CompositionError::SequenceInteractiveRejected { .. }
             | CompositionError::InlineComposeSequenceMismatch { .. } => {
                 sequence_loop::status_block(self)
             }
+
+            // Sequence errors: a block per variant, its site as data.
+            CompositionError::SequenceInvalid { .. }
+            | CompositionError::SequenceEmpty { .. }
+            | CompositionError::SequenceReferenceResolution { .. }
+            | CompositionError::SequenceSourceRead { .. }
+            | CompositionError::SequenceSourceParse { .. }
+            | CompositionError::SequenceExternalWrongType { .. }
+            | CompositionError::SequenceStepNameMissing { .. }
+            | CompositionError::SequenceStepNameWrongType { .. }
+            | CompositionError::SequenceReservedTemplateKey { .. }
+            | CompositionError::SequenceExclusiveExecutable { .. }
+            | CompositionError::SequenceReservedStateKey { .. }
+            | CompositionError::SequenceInvalidTaskField { .. }
+            | CompositionError::SequenceUnknownTaskField { .. }
+            | CompositionError::SequenceSourceSyntax { .. }
+            | CompositionError::SequenceUnknownOperator { .. }
+            | CompositionError::SequenceOperatorArity { .. }
+            | CompositionError::SequenceOffsetMissing { .. }
+            | CompositionError::SequenceOffsetNotAList { .. }
+            | CompositionError::SequenceOffsetUnsupported { .. }
+            | CompositionError::SequenceOperatorItemNotObject { .. }
+            | CompositionError::SequenceOperatorMissingField { .. }
+            | CompositionError::SequenceOperatorEmptyName { .. }
+            | CompositionError::SequenceExpressionFailed { .. }
+            | CompositionError::SequenceShellFailed { .. }
+            | CompositionError::SequenceNullItem { .. }
+            | CompositionError::SequenceStateSchemaViolation { .. }
+            | CompositionError::SequenceDeclarationMisplaced { .. }
+            | CompositionError::SequenceDeclarationShape { .. }
+            | CompositionError::SequenceDeclarationLoad { .. }
+            | CompositionError::SequenceContainerSchemaViolation { .. }
+            | CompositionError::SequenceReferenceCycle { .. }
+            | CompositionError::SequenceReferenceInvalid { .. }
+            | CompositionError::SequenceNestedSequence { .. }
+            | CompositionError::SequenceUnsupportedConstruct { .. }
+            | CompositionError::SequenceUndefined { .. }
+            | CompositionError::SequenceTaskPromptLaunch { .. }
+            | CompositionError::SequenceStepNotExecutable { .. }
+            | CompositionError::SequenceGroupCatalogLookup { .. }
+            | CompositionError::SequenceGroupInvalid { .. }
+            | CompositionError::SequenceWriteBackCollision { .. }
+            | CompositionError::SequenceShellLateBinding { .. }
+            | CompositionError::SequenceShellTargetIdentity { .. }
+            | CompositionError::SequenceShellResolution { .. }
+            | CompositionError::SequenceShellLateValue { .. }
+            | CompositionError::SequenceShellApprovalChanged { .. }
+            | CompositionError::SequenceTaskTimeoutInvalid { .. }
+            | CompositionError::SequenceTaskShellExit { .. }
+            | CompositionError::SequenceTaskShellTimeout { .. }
+            | CompositionError::SequenceTaskShellRunaway { .. }
+            | CompositionError::SequenceTaskShellSpawn { .. }
+            | CompositionError::SequenceTaskShellWait { .. }
+            | CompositionError::SequenceTaskShellIsolation { .. }
+            | CompositionError::SequenceTaskPromptFailed { .. }
+            | CompositionError::SequenceTaskInvalidSideEffect { .. }
+            | CompositionError::SequenceTaskWithReserved { .. }
+            | CompositionError::SequenceTaskValueResolution { .. }
+            | CompositionError::SequenceTaskUnsupported { .. } => sequence::status_block(self),
 
             // Provider / execution / file-reference family, plus the generic
             // catch-all for every variant without a dedicated block.
@@ -193,7 +257,7 @@ pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> Stri
 }
 
 pub(super) fn render_file_link(path: &std::path::Path) -> String {
-    let label = biscuit_file::to_portable_string(path);
+    let label = biscuit_file::to_forward_slash_string(path);
     let escaped_label = escape_prose_path(&label);
     let absolute = biscuit_file::canonicalize_simplified(path).ok().or_else(|| {
         if path.is_absolute() {
@@ -301,30 +365,30 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     base["kind"] = json!(diagnostic.kind.as_str());
     // The published key predates the `cwd` vocabulary; it is the document
     // directory, not the tree root.
-    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.cwd));
+    base["base_dir"] = json!(biscuit_file::to_forward_slash_string(&diagnostic.cwd));
     base["suggestions"] = json!(suggestions);
     base["fallback_dir"] = json!(
         diagnostic
             .fallback_dir
             .as_ref()
-            .map(|path| biscuit_file::to_portable_string(path))
+            .map(|path| biscuit_file::to_forward_slash_string(path))
     );
     if let Some(caller) = &diagnostic.caller {
         base["source_path"] = json!(
             caller
                 .origin
                 .source_path()
-                .map(biscuit_file::to_portable_string)
+                .map(biscuit_file::to_forward_slash_string)
         );
         base["property"] = json!(caller.property);
         base["repository_root"] = json!(
             caller
                 .origin
                 .repository_root()
-                .map(biscuit_file::to_portable_string)
+                .map(biscuit_file::to_forward_slash_string)
         );
         base["candidates"] = json!([{
-            "path": biscuit_file::to_portable_string(&caller.candidate),
+            "path": biscuit_file::to_forward_slash_string(&caller.candidate),
             "provenance": caller_root_provenance_slug(caller.candidate_provenance),
             "disposition": null,
         }]);
@@ -349,20 +413,20 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
         simplified_schema::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
         _ => "not_found",
     });
-    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.cwd()));
+    detail["base_dir"] = json!(biscuit_file::to_forward_slash_string(caller.origin.cwd()));
     detail["source_path"] = json!(caller
         .origin
         .source_path()
-        .map(biscuit_file::to_portable_string));
+        .map(biscuit_file::to_forward_slash_string));
     detail["property"] = json!(problem.path.strip_prefix('/').unwrap_or(&problem.path));
     detail["repository_root"] = json!(caller
         .origin
         .repository_root()
-        .map(biscuit_file::to_portable_string));
+        .map(biscuit_file::to_forward_slash_string));
     detail["suggestions"] = json!([]);
     if let Some(candidate) = &caller.candidate {
         detail["candidates"] = json!([{
-            "path": biscuit_file::to_portable_string(candidate.path()),
+            "path": biscuit_file::to_forward_slash_string(candidate.path()),
             "provenance": caller_root_provenance_slug(candidate.provenance()),
             "disposition": null,
         }]);
@@ -411,6 +475,10 @@ impl Diagnostic for CompositionError {
         match self {
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => Some(inner.as_ref()),
+            // Below the cause, not the cause: the wrapper speaks with the
+            // cause's identity, so the cause must not appear a second time
+            // as its own `err.cause`.
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).diagnostic_source(),
             other => std::error::Error::source(other),
         }
     }
@@ -421,6 +489,7 @@ impl Diagnostic for CompositionError {
             // same delegation their `status_block` and `Display` already do.
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
+            CompositionError::CheckFailed { cause, .. } => checked_diagnostic(cause).code(),
             CompositionError::ComposeFailed(md)
             | CompositionError::PreFlightDiscoveryFailed(md) => compose_failed_code(md),
             CompositionError::InvalidReference { .. }
@@ -431,6 +500,7 @@ impl Diagnostic for CompositionError {
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
             CompositionError::LifecycleEditFailed { .. } => "composition.lifecycle_edit_failed",
+            CompositionError::SequenceUndefined { .. } => "composition.sequence_undefined",
             // The agent produced the document, so its output postcondition
             // failed, not the author's document.
             CompositionError::InlineAgentFrontmatterRejected { .. } => {
@@ -443,6 +513,7 @@ impl Diagnostic for CompositionError {
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
+            CompositionError::SchemaSlotFailed { .. } => "composition.schema_slot_failed",
             CompositionError::SchemaParse { .. } => "composition.schema_parse",
             CompositionError::SchemaValidation { .. }
             | CompositionError::UnresolvedFileReference { .. } => "composition.schema_validation",
@@ -500,21 +571,37 @@ impl Diagnostic for CompositionError {
     }
 
     fn category(&self) -> Category {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).category();
+        }
         code_spec(self.code())
             .map(|spec| spec.category)
             .unwrap_or(Category::Composition)
     }
 
     fn disposition(&self) -> Disposition {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).disposition();
+        }
         code_spec(self.code())
             .map(|spec| spec.disposition)
             .unwrap_or(Disposition::Correctable)
     }
 
     fn origin(&self) -> Origin {
+        if let CompositionError::CheckFailed { cause, .. } = self {
+            return checked_diagnostic(cause).origin();
+        }
         code_spec(self.code())
             .map(|spec| spec.origin)
             .unwrap_or(Origin::Author)
+    }
+
+    fn severity(&self) -> crate::diagnostics::Severity {
+        match self {
+            CompositionError::CheckFailed { cause, .. } => Diagnostic::severity(checked_diagnostic(cause)),
+            _ => self.disposition().default_severity(),
+        }
     }
 
     fn detail(&self) -> Value {
@@ -529,6 +616,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
                 return inner.detail();
             }
+            CompositionError::CheckFailed { cause, .. } => return checked_diagnostic(cause).detail(),
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 cause,
                 expression,
@@ -583,7 +671,7 @@ impl Diagnostic for CompositionError {
                 }
                 base["reference"] = json!(context.reference);
                 base["source_path"] =
-                    json!(biscuit_file::to_portable_string(&context.source_path));
+                    json!(biscuit_file::to_forward_slash_string(&context.source_path));
                 base["property"] = json!(context.property);
                 base["event"] = json!(context.event);
             }
@@ -611,7 +699,7 @@ impl Diagnostic for CompositionError {
                 message,
                 ..
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["property"] = json!(property);
                 base["message"] = json!(message);
             }
@@ -619,7 +707,17 @@ impl Diagnostic for CompositionError {
                 source_path,
                 message,
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
+                base["message"] = json!(message);
+            }
+            CompositionError::SchemaSlotFailed {
+                source_path,
+                slot_code,
+                message,
+                ..
+            } => {
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
+                base["slot_code"] = json!(slot_code);
                 base["message"] = json!(message);
             }
             // `composition.schema_validation` declares `source_path`,
@@ -629,7 +727,7 @@ impl Diagnostic for CompositionError {
                 problems,
                 ..
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["problems"] = json!(problems);
                 base["pointer_paths"] = json!([]);
             }
@@ -647,7 +745,7 @@ impl Diagnostic for CompositionError {
                 property,
                 ..
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["problems"] = json!([format!("/{property}")]);
                 base["pointer_paths"] = json!([]);
             }
@@ -673,21 +771,21 @@ impl Diagnostic for CompositionError {
                 }
             }
             CompositionError::InlinePromptDirectiveFailed { source_path, .. } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
             }
             // `io.write_failed` declares `path`.
             CompositionError::AtomicWriteFailed { path, .. }
             | CompositionError::InlineRollbackFailed { path, .. } => {
-                base["path"] = json!(biscuit_file::to_portable_string(path));
+                base["path"] = json!(biscuit_file::to_forward_slash_string(path));
             }
             // `io.read_failed` declares `path`.
             CompositionError::LaunchRepositoryUnreadable { launch_dir, .. } => {
-                base["path"] = json!(biscuit_file::to_portable_string(launch_dir));
+                base["path"] = json!(biscuit_file::to_forward_slash_string(launch_dir));
             }
             // `document.invalid_frontmatter` declares `doc`, `property`,
             // `problems`.
             CompositionError::InlineAgentFrontmatterRejected { path, rejection } => {
-                base["doc"] = json!(biscuit_file::to_portable_string(path));
+                base["doc"] = json!(biscuit_file::to_forward_slash_string(path));
                 base["property"] = json!(rejection.property);
                 base["problems"] = json!([rejection.to_string()]);
             }
@@ -695,11 +793,11 @@ impl Diagnostic for CompositionError {
             // cannot start, whose remediation the cause names. `source_path`
             // is the one key that code declares.
             CompositionError::InlineBaselineUnstampable { path, .. } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(path));
             }
             // `io.read_failed` declares `path`.
             CompositionError::InlineArtifactUnreadable { path, .. } => {
-                base["path"] = json!(biscuit_file::to_portable_string(path));
+                base["path"] = json!(biscuit_file::to_forward_slash_string(path));
             }
             // `usage.invalid_argument` declares `argument`, `expected`.
             CompositionError::InlineGuardMissing { .. } => {
@@ -709,9 +807,9 @@ impl Diagnostic for CompositionError {
             // `composition.lifecycle_edit_failed` declares `source_path`,
             // `property`, `target`, `reason`.
             CompositionError::LifecycleEditFailed { source_path, property, target, error } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["property"] = json!(property);
-                base["target"] = json!(biscuit_file::to_portable_string(target));
+                base["target"] = json!(biscuit_file::to_forward_slash_string(target));
                 base["reason"] = json!(error.to_string());
             }
             // `composition.body_unchanged` declares `source_path`, `reason`.
@@ -719,7 +817,7 @@ impl Diagnostic for CompositionError {
                 source_path,
                 reason,
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["reason"] = json!(reason.as_str());
             }
             // `composition.completion_schema` declares `source_path`,
@@ -729,7 +827,7 @@ impl Diagnostic for CompositionError {
                 problems,
                 ..
             } => {
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_path));
                 base["properties"] = json!(
                     problems
                         .iter()
@@ -751,7 +849,7 @@ impl Diagnostic for CompositionError {
                 property,
             } => {
                 base["command"] = json!(command);
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_file));
                 base["line"] = optional_line(*line);
                 base["property"] = json!(property);
                 base["reason"] = json!("denied");
@@ -764,7 +862,7 @@ impl Diagnostic for CompositionError {
                 failure,
             } => {
                 base["command"] = json!(command);
-                base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
+                base["source_path"] = json!(biscuit_file::to_forward_slash_string(source_file));
                 base["line"] = optional_line(*line);
                 base["property"] = json!(property);
                 base["reason"] = json!(failure.as_str());
@@ -930,4 +1028,14 @@ impl Diagnostic for CompositionError {
 
         base
     }
+}
+
+/// The diagnostic that speaks for a [`CompositionError::CheckFailed`]'s
+/// cause: the one [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic)
+/// chooses for the cause alone, so the wrapper reports what the unwrapped
+/// failure reported, through a transparent wrapper too.
+pub(crate) fn checked_diagnostic(cause: &CompositionError) -> &(dyn Diagnostic + 'static) {
+    crate::diagnostics::select_effective_diagnostic(cause)
+        .and_then(crate::diagnostics::EffectiveDiagnostic::diagnostic)
+        .unwrap_or(cause)
 }

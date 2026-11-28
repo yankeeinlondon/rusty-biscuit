@@ -48,7 +48,7 @@ impl LaunchWorkspaceContext {
                     None,
                     vec![format!(
                         "monorepo detected at '{}' but no packages were reported",
-                        biscuit_file::to_portable_string(&repo.root)
+                        biscuit_file::to_forward_slash_string(&repo.root)
                     )],
                 ),
             },
@@ -102,8 +102,8 @@ fn package_context_for_dir(
         None,
         vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            biscuit_file::to_portable_string(&repo.root),
-            biscuit_file::to_portable_string(cwd)
+            biscuit_file::to_forward_slash_string(&repo.root),
+            biscuit_file::to_forward_slash_string(cwd)
         )],
     )
 }

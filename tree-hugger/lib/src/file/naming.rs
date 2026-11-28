@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 
 use biscuit_file::{
-    PathIdentity, RelativeRoute, canonicalize_simplified, to_portable_string, try_portable_string,
+    PathIdentity, RelativeRoute, canonicalize_simplified, to_forward_slash_string, try_forward_slash_string,
 };
 
 use crate::shared::ProgrammingLanguage;
@@ -199,9 +199,9 @@ fn project(path: &Path, root: &Path) -> Projection {
         Some(route) => route_text(&route),
         // Resolution turns a share into a verbatim `\\?\UNC\...` path; keep
         // the spelling the file was named by instead.
-        None => match try_portable_string(&resolved) {
+        None => match try_forward_slash_string(&resolved) {
             Some(text) => Projection { text, lossless: resolved.to_str().is_some() },
-            None => Projection { text: to_portable_string(&absolute), lossless: absolute.to_str().is_some() },
+            None => Projection { text: to_forward_slash_string(&absolute), lossless: absolute.to_str().is_some() },
         },
     }
 }

@@ -1,18 +1,22 @@
-//! Claudine's embedded schema bundle and the launch verdict that uses it
-//! (`2026-10-21-claudine-schemas`, criteria 6, 10, and 13).
+//! Claudine's compiled registration, loaded as its registered host profile,
+//! and the launch verdict that uses it (`2026-10-21-claudine-schemas`,
+//! criteria 6, 10, and 13).
 //!
-//! - The embed: `CLAUDINE_SCHEMA_FILES` is the eight repository files byte for
-//!   byte, each parses as its kind, and every export and every payload resolves
-//!   through the embedded seam with no disk schema anywhere.
+//! - The embed: the inventory's trigger and library members are the
+//!   repository files byte for byte, each parses as its kind, and every export
+//!   and every payload resolves inside the compiled registration with no disk
+//!   schema anywhere.
 //! - The input robustness matrix of `claudine_schemas_matrix.rs`, walked with
-//!   each edited bundle supplied as an embedded bundle.
-//! - Schema locations and the last-resort rule, through Claudine's public
-//!   launch verdict (`pre_validate_schema`) and the effective schema it judges
-//!   by.
+//!   each edited bundle loaded from its bytes.
+//! - Schema locations, through Claudine's public launch verdict
+//!   (`pre_validate_schema`) and the effective schema it judges by: every
+//!   schema-root trigger, a same-name copy of a registration file included,
+//!   is an ordinary trigger layered above the registered one.
 //! - Document metadata from `document.yaml`, judged by passive validation and
 //!   the launch verdict through each metadata trigger alone, their merge, a
-//!   disk copy of `inline-compose.yaml`, and one `hash` definition shared by
-//!   two properties; the longhand `kind` default is declared, never inserted.
+//!   disk trigger named `inline-composition.yaml`, and one `hash` definition
+//!   shared by two properties; the longhand `kind` default is declared, never
+//!   inserted.
 //! - The strict policy for Claudine controls at the library boundary.
 //! - Passive parity: for the AC5 fixtures, the launch verdict and the DMLS
 //!   path agree.
@@ -26,12 +30,14 @@
 use simplified_schema::triggers::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
+use claudine::composition::registration::{FileKind, PublishedFile, RegistrationInventory};
 use claudine::composition::schema::bundle::{
-    CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_SCHEMA_FILES, CLAUDINE_TRIGGER_FILES, claudine_schema_bundle,
-    is_claudine_owned,
+    self, CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES, claudine_hosts, claudine_profile, is_claudine_owned,
 };
+use darkmatter::config::registration::RegisteredHosts;
 use claudine::composition::{
     CompositionError, PreValidatedSchema, drop_invalid_optionals, pre_validate_schema,
     resolve_composition_source_in_context,
@@ -41,7 +47,6 @@ use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolu
 use simplified_schema::simplified::{DefKey, DefNamespace};
 use simplified_schema::triggers::parse_trigger_envelope_from_str;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
-use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
 use simplified_schema::triggers::TriggerSource;
 use simplified_schema::{SchemaOriginKind, StandaloneSchemaEnvelope, parse_standalone_schema_document};
@@ -125,12 +130,12 @@ impl Bare {
         Self { dir, context }
     }
 
-    /// Discovery with `bundle` as the only trigger source.
-    fn schemas(&self, bundle: EmbeddedSchemaBundle) -> DarkmatterSchemas {
+    /// Discovery with `hosts` as the only trigger source.
+    fn schemas(&self, hosts: Arc<RegisteredHosts>) -> DarkmatterSchemas {
         let schemas = DarkmatterSchemas::new(self.context.clone())
-            .with_embedded_trigger_bundle(bundle)
-            .and_then(DarkmatterSchemas::with_trigger_discovery)
-            .expect("the embedded bundle loads");
+            .with_registered_hosts(hosts)
+            .with_trigger_discovery()
+            .expect("no schema root exists");
         let roots = SchemaRoots::for_document(&self.context).expect("schema roots");
         assert!(roots.searched().is_empty(), "no disk schema root exists: {:?}", roots.searched());
         schemas
@@ -161,22 +166,31 @@ fn judge_memory(schemas: &DarkmatterSchemas, frontmatter: &str) -> (EffectiveSch
 
 #[test]
 fn embedded_files_are_the_repository_files_byte_for_byte() {
-    let repository: [(&str, &str); 8] = [
-        ("action.yaml", include_str!("../../../schemas/action.yaml")),
-        ("claudine.yaml", include_str!("../../../schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml")),
-        ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../schemas/linking.yaml")),
-        ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml")),
-        ("sequence.yaml", include_str!("../../../schemas/sequence.yaml")),
+    let repository: [(&str, &str); 11] = [
+        ("action.yaml", include_str!("../../../registration/action.yaml")),
+        ("claudine-config.yaml", include_str!("../../../registration/claudine-config.yaml")),
+        ("composition.yaml", include_str!("../../../registration/composition.yaml")),
+        ("content-policy.yaml", include_str!("../../../registration/content-policy.yaml")),
+        ("document.yaml", include_str!("../../../registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../registration/inline-composition.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../registration/linking.yaml")),
+        ("sequence-document.yaml", include_str!("../../../registration/sequence-document.yaml")),
+        ("sequence.yaml", include_str!("../../../registration/sequence.yaml")),
+        ("shared.yaml", include_str!("../../../registration/shared.yaml")),
     ];
-    assert_eq!(CLAUDINE_SCHEMA_FILES, &repository[..], "the embed is the eight repository files, unchanged");
-    assert_eq!(claudine_schema_bundle().name(), CLAUDINE_SCHEMA_BUNDLE_NAME);
-    assert_eq!(claudine_schema_bundle().files(), CLAUDINE_SCHEMA_FILES);
+    let embedded: Vec<(&str, &str)> = RegistrationInventory::claudine()
+        .members()
+        .filter(|file| matches!(file.kind(), FileKind::Trigger | FileKind::Library))
+        .map(|file| {
+            let name = file.path().strip_prefix("schemas/").expect("a schemas/ member");
+            (name, std::str::from_utf8(file.bytes()).expect("UTF-8 member"))
+        })
+        .collect();
+    assert_eq!(embedded, repository, "the registration's trigger and library members are the repository files, unchanged");
 
     let mut triggers = Vec::new();
-    for (name, text) in CLAUDINE_SCHEMA_FILES {
+    for (name, text) in &embedded {
         let envelope = parse_trigger_envelope_from_str(text).unwrap_or_else(|error| panic!("{name}: {error}"));
         if envelope.is_some() {
             triggers.push(*name);
@@ -188,7 +202,10 @@ fn embedded_files_are_the_repository_files_byte_for_byte() {
         assert_eq!(library.envelope, StandaloneSchemaEnvelope::Tagged, "{name} is a `kind: schema` library");
     }
     assert_eq!(triggers, CLAUDINE_TRIGGER_FILES, "exactly the three trigger files are trigger envelopes");
-    assert_eq!((CLAUDINE_SCHEMA_FILES.len(), triggers.len()), (8, 3), "eight trigger and library files, three of them triggers");
+    assert_eq!((embedded.len(), triggers.len()), (11, 3), "eleven trigger and library files, three of them triggers");
+    let registered: Vec<&str> = claudine_profile().triggers().iter().map(|trigger| trigger.bundle_path.as_str()).collect();
+    let expected: Vec<String> = CLAUDINE_TRIGGER_FILES.iter().map(|file| format!("schemas/{file}")).collect();
+    assert_eq!(registered, expected, "the compiled profile registers exactly the trigger members");
 }
 
 /// One export's probes: its library, its name, and a value it accepts and one
@@ -255,28 +272,32 @@ const DOCUMENT_PROBES: &[ExportProbe] = &[
     ("last_updated", "2026-10-26", "[2026-10-26]"),
 ];
 
-/// A test trigger, added to a copy of the embedded bundle, whose payload
-/// imports every export of `library` as `t_{export}`. Its imports resolve
-/// inside the bundle exactly as the shipped payloads' do.
+/// A test trigger, added to a copy of the compiled registration, whose
+/// payload imports every export of `library` as `t_{export}`. Its imports
+/// resolve inside the bundle exactly as the shipped payloads' do.
 fn exports_trigger(library: &str, probes: &[ExportProbe]) -> String {
     let marker = library.trim_end_matches(".yaml");
-    let mut text = format!("kind: schema-trigger\nmatch:\n    probe_{marker}: string(required)\n$schema:\n");
+    let mut text = format!("kind: schema-trigger\nname: exports-{marker}\nmatch:\n    probe_{marker}: string(required)\n$schema:\n");
     for (export, _, _) in probes {
         text.push_str(&format!("    t_{export}: \"{export}@./{library}\"\n"));
     }
     text
 }
 
-/// Resolves and judges the supplied exports through the embedded seam with no
-/// disk schemas.
+/// Resolves and judges the supplied exports inside the compiled
+/// registration, loaded from its bytes, with no disk schemas.
 fn assert_exports_resolve_embedded(library: &'static str, probes: &[ExportProbe]) {
     let bare = Bare::new();
-    let exports_name: &'static str = Box::leak(format!("exports-{library}").into_boxed_str());
-    let mut files: Vec<(&'static str, &'static str)> = CLAUDINE_SCHEMA_FILES.to_vec();
-    files.push((exports_name, Box::leak(exports_trigger(library, probes).into_boxed_str())));
-    let bundle = EmbeddedSchemaBundle::new(CLAUDINE_SCHEMA_BUNDLE_NAME, Box::leak(files.into_boxed_slice()));
-    let schemas = bare.schemas(bundle);
     let marker = library.trim_end_matches(".yaml");
+    let exports_path = format!("schemas/exports-{library}");
+    let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+        exports_path.clone(),
+        FileKind::Trigger,
+        Some(format!("exports-{marker}")),
+        exports_trigger(library, probes).into_bytes(),
+    ));
+    let profile = bundle::profile_of(&inventory).unwrap_or_else(|refusals| panic!("the edited inventory registers: {refusals:#?}"));
+    let schemas = bare.schemas(bundle::hosts_of(profile));
 
     let mut failures = Vec::new();
     for (export, good, bad) in probes {
@@ -289,7 +310,7 @@ fn assert_exports_resolve_embedded(library: &'static str, probes: &[ExportProbe]
         assert_eq!(origin.kind, SchemaOriginKind::Trigger);
         assert_eq!(
             origin.trigger_source(),
-            Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: exports_name.to_string() }),
+            Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: exports_path.clone() }),
             "{export} is declared by the embedded test trigger"
         );
         assert!(effective.dependencies().is_empty(), "an embedded schema has no file dependencies");
@@ -311,7 +332,7 @@ fn embedded_action_exports_resolve_without_disk_schemas() {
 
 #[test]
 fn embedded_lifecycle_exports_resolve_without_disk_schemas() {
-    assert_exports_resolve_embedded("lifecycle.yaml", LIFECYCLE_PROBES);
+    assert_exports_resolve_embedded("lifecycle-events.yaml", LIFECYCLE_PROBES);
 }
 
 #[test]
@@ -334,7 +355,7 @@ macro_rules! sequence_export_tests {
                     .find(|probe| probe.0 == $export)
                     .expect("the export has positive and negative probes");
                 assert_exports_resolve_embedded(
-                    "sequence-types.yaml",
+                    "sequence.yaml",
                     std::slice::from_ref(probe),
                 );
             }
@@ -369,48 +390,49 @@ const PAYLOAD_LIMIT_BYTES: usize = 1_000_000;
 
 /// The recursive event families, each stored once as a definition.
 const EVENT_FAMILIES: &[(&str, &str)] = &[
-    ("lifecycle.yaml", "stack"),
-    ("lifecycle.yaml", "item"),
-    ("lifecycle.yaml", "conditional"),
-    ("lifecycle.yaml", "initialize-stack"),
-    ("lifecycle.yaml", "initialize-item"),
-    ("lifecycle.yaml", "initialize-conditional"),
-    ("lifecycle.yaml", "cancelled-stack"),
-    ("lifecycle.yaml", "cancelled-item"),
-    ("lifecycle.yaml", "cancelled-conditional"),
+    ("lifecycle-events.yaml", "stack"),
+    ("lifecycle-events.yaml", "item"),
+    ("lifecycle-events.yaml", "conditional"),
+    ("lifecycle-events.yaml", "initialize-stack"),
+    ("lifecycle-events.yaml", "initialize-item"),
+    ("lifecycle-events.yaml", "initialize-conditional"),
+    ("lifecycle-events.yaml", "cancelled-stack"),
+    ("lifecycle-events.yaml", "cancelled-item"),
+    ("lifecycle-events.yaml", "cancelled-conditional"),
 ];
 
 /// The container families and every event family their events reach.
 const CONTAINER_FAMILIES: &[(&str, &str)] = &[
-    ("sequence-types.yaml", "steps"),
-    ("sequence-types.yaml", "step"),
-    ("sequence-types.yaml", "task"),
-    ("sequence-types.yaml", "group"),
-    ("lifecycle.yaml", "stack"),
-    ("lifecycle.yaml", "initialize-stack"),
-    ("lifecycle.yaml", "cancelled-stack"),
+    ("sequence.yaml", "steps"),
+    ("sequence.yaml", "step"),
+    ("sequence.yaml", "task"),
+    ("sequence.yaml", "group"),
+    ("lifecycle-events.yaml", "stack"),
+    ("lifecycle-events.yaml", "initialize-stack"),
+    ("lifecycle-events.yaml", "cancelled-stack"),
 ];
 
 /// Names of the retired unrolled and loose types, by their authored file.
 const UNROLLED_TYPE_NAMES: &[(&str, &str)] = &[
-    ("lifecycle.yaml", "loose-body"),
-    ("lifecycle.yaml", "item-1"),
-    ("lifecycle.yaml", "stack-2"),
-    ("lifecycle.yaml", "conditional-3"),
-    ("lifecycle.yaml", "initialize-item-1"),
-    ("lifecycle.yaml", "initialize-stack-3"),
-    ("lifecycle.yaml", "cancelled-item-1"),
-    ("lifecycle.yaml", "cancelled-stack-6"),
-    ("sequence-types.yaml", "steps-2"),
-    ("sequence-types.yaml", "step-2"),
-    ("sequence-types.yaml", "task-2"),
-    ("sequence-types.yaml", "group-3"),
+    ("lifecycle-events.yaml", "loose-body"),
+    ("lifecycle-events.yaml", "item-1"),
+    ("lifecycle-events.yaml", "stack-2"),
+    ("lifecycle-events.yaml", "conditional-3"),
+    ("lifecycle-events.yaml", "initialize-item-1"),
+    ("lifecycle-events.yaml", "initialize-stack-3"),
+    ("lifecycle-events.yaml", "cancelled-item-1"),
+    ("lifecycle-events.yaml", "cancelled-stack-6"),
+    ("sequence.yaml", "steps-2"),
+    ("sequence.yaml", "step-2"),
+    ("sequence.yaml", "task-2"),
+    ("sequence.yaml", "group-3"),
 ];
 
 /// Whether `name`, declared by the bundle file `file`, is a definition of
-/// `effective`, looked up by its `DefKey` (never by a `$defs` key).
+/// `effective`, looked up by its `DefKey` (never by a `$defs` key). A
+/// registered bundle's files are namespaced by their virtual path.
 fn embedded_definition(effective: &EffectiveSchema, file: &str, name: &str) -> bool {
-    let namespace = DefNamespace::Embedded(format!("{CLAUDINE_SCHEMA_BUNDLE_NAME}/{file}"));
+    let namespace = DefNamespace::File(PathBuf::from(format!("<{CLAUDINE_SCHEMA_BUNDLE_NAME}>/schemas/{file}")));
     effective.definition(&DefKey::new(namespace, name)).is_some()
 }
 
@@ -422,11 +444,11 @@ fn embedded_definition(effective: &EffectiveSchema, file: &str, name: &str) -> b
 #[test]
 fn embedded_trigger_payloads_resolve_within_one_megabyte() {
     let bare = Bare::new();
-    let schemas = bare.schemas(claudine_schema_bundle());
+    let schemas = bare.schemas(Arc::clone(claudine_hosts()));
     let mut report = Vec::new();
     for (label, frontmatter, families) in [
-        ("claudine.yaml", "start: []", EVENT_FAMILIES),
-        ("sequence.yaml", "sequence: []", CONTAINER_FAMILIES),
+        ("composition.yaml", "start: []", EVENT_FAMILIES),
+        ("sequence-document.yaml", "sequence: []", CONTAINER_FAMILIES),
         ("both", "start: []\nsequence: []", CONTAINER_FAMILIES),
     ] {
         let markdown = memory_document(frontmatter);
@@ -452,35 +474,38 @@ fn embedded_trigger_payloads_resolve_within_one_megabyte() {
 #[test]
 fn embedded_payloads_apply_without_disk_schemas() {
     let bare = Bare::new();
-    let schemas = bare.schemas(claudine_schema_bundle());
+    let schemas = bare.schemas(Arc::clone(claudine_hosts()));
     let embedded = |name: &str| {
-        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: name.to_string() })
+        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: format!("schemas/{name}") })
     };
-    let sources: Vec<String> = schemas
-        .trigger_registry()
-        .expect("registry")
-        .triggers
-        .iter()
-        .map(|trigger| trigger.source.to_string())
-        .collect();
+    let sources: Vec<String> =
+        claudine_profile().triggers().iter().map(|trigger| trigger.trigger.source.to_string()).collect();
     assert_eq!(
         sources,
-        ["embedded:claudine/claudine.yaml", "embedded:claudine/inline-compose.yaml", "embedded:claudine/sequence.yaml"]
+        [
+            "embedded:claudine/schemas/composition.yaml",
+            "embedded:claudine/schemas/inline-composition.yaml",
+            "embedded:claudine/schemas/sequence-document.yaml"
+        ]
+    );
+    assert!(
+        schemas.trigger_registry().expect("registry").triggers.is_empty(),
+        "no schema-root trigger exists; the registered layer is the only trigger source"
     );
 
-    // claudine.yaml's payload, with its lifecycle, action, and linking imports.
+    // composition.yaml's payload, with its lifecycle, action, and linking imports.
     let (effective, found, valid) =
         judge_memory(&schemas, "start: [stop, { say: hi }]\ninitialize: [{ info: hi }]\nloop: { gate: [stop] }\nname: x");
     assert!(valid, "{found:?}");
     for property in ["start", "initialize", "loop", "name", "agent", "timeout"] {
         let origin = effective.origins.get(property).unwrap_or_else(|| panic!("{property} has an origin"));
-        assert_eq!(origin.trigger_source(), embedded("claudine.yaml"), "{property}");
+        assert_eq!(origin.trigger_source(), embedded("composition.yaml"), "{property}");
         assert!(is_claudine_owned(&effective, property), "{property} is a Claudine control");
     }
     assert!(effective.dependencies().is_empty(), "{:?}", effective.dependencies());
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        // `agent` selects composition.yaml; `initialize` alone is shared with md.
         ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
@@ -490,18 +515,18 @@ fn embedded_payloads_apply_without_disk_schemas() {
         assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from([property.to_string()]));
     }
 
-    // inline-compose.yaml's payload, applied after claudine.yaml.
+    // inline-composition.yaml's payload: a prompt document selects it alone.
     let (effective, found, valid) = judge_memory(&schemas, "prompt: hi\nhash: abc");
     assert!(valid, "{found:?}");
     for property in ["prompt", "hash", "last_updated"] {
-        assert_eq!(effective.origins[property].trigger_source(), embedded("inline-compose.yaml"), "{property}");
+        assert_eq!(effective.origins[property].trigger_source(), embedded("inline-composition.yaml"), "{property}");
     }
     assert!(effective.dependencies().is_empty());
     let (_, found, valid) = judge_memory(&schemas, "prompt: hi\nhash: [1]");
     assert!(!valid);
     assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from(["hash".to_string()]));
 
-    // sequence.yaml's payload, with its sequence-types and lifecycle imports:
+    // sequence-document.yaml's payload, with its sequence and lifecycle-events imports:
     // a sequence document with no other control is a Claudine control.
     let (effective, found, valid) = judge_memory(
         &schemas,
@@ -509,24 +534,27 @@ fn embedded_payloads_apply_without_disk_schemas() {
     );
     assert!(valid, "{found:?}");
     for property in ["sequence", "template", "fail_fast"] {
-        assert_eq!(effective.origins[property].trigger_source(), embedded("sequence.yaml"), "{property}");
+        assert_eq!(effective.origins[property].trigger_source(), embedded("sequence-document.yaml"), "{property}");
         assert!(is_claudine_owned(&effective, property), "{property} is a Claudine control");
     }
     assert!(effective.dependencies().is_empty());
     for (frontmatter, property) in [
         ("sequence: [{ name: a, sequence: [{ name: b, sequence: [{ name: c, with: [1] }] }] }]", "sequence"),
         ("sequence: [{ group: { tasks: [{ name: l }], execution: parallel } }]", "sequence"),
-        ("sequence: [a]\nfail_fast: true", "fail_fast"),
     ] {
         let (_, found, valid) = judge_memory(&schemas, frontmatter);
         assert!(!valid, "`{frontmatter}` is rejected");
         assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from([property.to_string()]));
     }
+    // A removed root key is reported at the root, which owns it, by name.
+    let (_, found, valid) = judge_memory(&schemas, "sequence: [a]\nfail_fast: true");
+    assert!(!valid);
+    assert_eq!(found, [(String::new(), "key `fail_fast` has been removed".to_string())], "{found:?}");
 
     bare.assert_untouched();
 }
 
-// ── The input robustness matrix, embedded origin ───────────────────────────
+// ── The input robustness matrix, loaded from bytes ─────────────────────────
 
 macro_rules! embedded_matrix_tests {
     ($($test:ident => ($column:literal, $syntax:ident);)*) => {
@@ -602,7 +630,7 @@ fn embedded_non_string_top_level_trigger_key_is_an_error() {
     assert_non_string_trigger_key_errors(&shipped_bundle!(), Origin::Embedded);
 }
 
-// ── AC13: schema locations and the last-resort rule ────────────────────────
+// ── AC13: schema locations above the registered layer ──────────────────────
 
 /// The schema roots a fixture can write to, in search order.
 #[derive(Clone, Copy, Debug)]
@@ -733,11 +761,39 @@ impl Locations {
     /// The trigger discovery the launch verdict uses, from the document
     /// folder's own context.
     fn schemas(&self) -> DarkmatterSchemas {
+        self.schemas_with(Arc::clone(claudine_hosts()))
+    }
+
+    /// [`Self::schemas`] with `hosts` as the registered layer.
+    fn schemas_with(&self, hosts: Arc<RegisteredHosts>) -> DarkmatterSchemas {
         let document = self.document("discovery", "title: x");
         DarkmatterSchemas::new(self.context().for_source(&document))
-            .with_embedded_trigger_bundle(claudine_schema_bundle())
-            .and_then(DarkmatterSchemas::with_trigger_discovery)
+            .with_registered_hosts(hosts)
+            .with_trigger_discovery()
             .expect("discovery succeeds")
+    }
+
+    /// The compiled registration published into the fixture home by
+    /// Claudine's publisher and loaded through a `register` entry, as
+    /// Darkmatter loads an installed registration.
+    fn installed_hosts(&self) -> Arc<RegisteredHosts> {
+        use darkmatter::config::load::{ConfigRevision, Registration};
+        let home = self.root.join("home");
+        claudine::composition::registration::publish(&home, RegistrationInventory::claudine()).expect("the registration publishes");
+        let entry = Registration {
+            reference: claudine::composition::registration::MANIFEST_REFERENCE.to_string(),
+            index: 0,
+            declared_in: home.join(".darkmatter.yaml"),
+            revision: ConfigRevision::User,
+            at: None,
+        };
+        let loaded = darkmatter::config::registration::load_entries(
+            &[entry],
+            &self.context(),
+            darkmatter::config::registration::md_owned_names(),
+        );
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        Arc::new(RegisteredHosts::new(Arc::new(loaded)))
     }
 
     /// The effective schema of a document holding `frontmatter`.
@@ -765,7 +821,7 @@ fn tier_trigger(tier: &str) -> String {
     format!("kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    tier: enum({tier})\n")
 }
 
-/// A same-name `claudine.yaml` that types `model` as a number.
+/// A disk `composition.yaml` that types `model` as a number.
 const NUMBER_MODEL_TRIGGER: &str =
     "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    model: number\n";
 
@@ -773,8 +829,8 @@ fn is_load_failure(error: &CompositionError) -> bool {
     matches!(error, CompositionError::SchemaLoad { .. } | CompositionError::SchemaParse { .. })
 }
 
-/// The first root holding `claudine.yaml` wins over every later one, and
-/// with no disk copy left the embedded one applies.
+/// The first root holding `composition.yaml` wins over every later one, and
+/// with no disk copy left the registered one alone applies.
 #[test]
 fn nearest_claudine_trigger_shadows_farther_ones() {
     let locations = Locations::new();
@@ -786,7 +842,7 @@ fn nearest_claudine_trigger_shadows_farther_ones() {
         (Root::Home, "home"),
     ];
     for (root, tier) in order {
-        locations.write_schema(root, "claudine.yaml", &tier_trigger(tier));
+        locations.write_schema(root, "composition.yaml", &tier_trigger(tier));
     }
     let document = locations.document("roots", "title: x");
     let roots = SchemaRoots::for_document(&locations.context().for_source(&document)).expect("schema roots");
@@ -806,25 +862,25 @@ fn nearest_claudine_trigger_shadows_farther_ones() {
                 &format!("{root:?} shadows the farther `{farther}`"),
             );
         }
-        locations.remove_schema(*root, "claudine.yaml");
+        locations.remove_schema(*root, "composition.yaml");
     }
-    // No disk copy is left: the embedded claudine.yaml applies.
-    assert_accepts(locations.verdict("tier", "start: [stop]\ntier: anything"), "the embedded payload leaves `tier` open");
-    assert_rejects_at(locations.verdict("tier", "start: [{ inf0: hi }]"), "start", "the embedded payload types `start`");
+    // No disk copy is left: the registered composition.yaml applies alone.
+    assert_accepts(locations.verdict("tier", "start: [stop]\ntier: anything"), "the registered payload leaves `tier` open");
+    assert_rejects_at(locations.verdict("tier", "start: [{ inf0: hi }]"), "start", "the registered payload types `start`");
 }
 
-/// A symlinked `claudine.yaml` in a root is not a root file: it claims no
-/// name, so the embedded copy applies.
+/// A symlinked `composition.yaml` in a root is not a root file: it is not
+/// read, and the registered copy alone applies.
 #[cfg(unix)]
 #[test]
 fn symlinked_trigger_file_in_a_root_is_ignored() {
     let locations = Locations::new();
-    let real = locations.write_schema(Root::Tree, "claudine.yaml", &tier_trigger("linked"));
+    let real = locations.write_schema(Root::Tree, "composition.yaml", &tier_trigger("linked"));
     assert_rejects_at(locations.verdict("link", "start: [stop]\ntier: other"), "tier", "control: the real file applies");
 
     let elsewhere = locations.root.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).expect("elsewhere");
-    let target = elsewhere.join("claudine.yaml");
+    let target = elsewhere.join("composition.yaml");
     std::fs::rename(&real, &target).expect("move the trigger out of the root");
     std::os::unix::fs::symlink(&target, &real).expect("symlink");
 
@@ -832,31 +888,32 @@ fn symlinked_trigger_file_in_a_root_is_ignored() {
     assert_rejects_at(
         locations.verdict("link", "start: [{ inf0: hi }]"),
         "start",
-        "the symlink claims no name, so the embedded claudine.yaml applies",
+        "the symlink is not read, and the registered composition.yaml types `start`",
     );
 }
 
 /// A disk bundle resolves every relative import from disk: a disk-only
-/// spelling in `lifecycle.yaml` reaches `start` through `claudine.yaml`, and
-/// the action and linking imports type their properties.
+/// spelling in `lifecycle-events.yaml` reaches `start` through the disk
+/// `composition.yaml`, an ordinary trigger whose declaration of `start`
+/// replaces the registered one, so `start` is no longer a Claudine control.
 #[test]
 fn disk_bundle_resolves_its_relative_imports_from_disk() {
     let locations = Locations::new();
     // Without a disk bundle the spelling is unknown.
-    assert_rejects_at(locations.verdict("disk", "start: [disk-only]"), "start", "embedded: `disk-only` is no verb");
+    assert_rejects_at(locations.verdict("disk", "start: [disk-only]"), "start", "registered: `disk-only` is no verb");
 
     let mut bundle: Vec<BundleFile> = shipped_bundle!().to_vec();
-    let lifecycle = &mut bundle.iter_mut().find(|(name, _)| *name == "lifecycle.yaml").expect("lifecycle").1;
+    let lifecycle = &mut bundle.iter_mut().find(|(name, _)| *name == "lifecycle-events.yaml").expect("lifecycle").1;
     let edited = lifecycle.replacen("\"enum(stop, skip,", "\"enum(stop, disk-only, skip,", 1);
     assert_ne!(&edited, lifecycle, "the bare-verb enum was edited");
     *lifecycle = edited;
     locations.write_bundle(Root::Tree, &bundle);
 
-    assert_accepts(locations.verdict("disk", "start: [disk-only]"), "disk: the edited lifecycle.yaml is read");
+    assert_accepts(locations.verdict("disk", "start: [disk-only]"), "disk: the edited lifecycle-events.yaml is read");
     let schemas = locations.schemas();
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        // `agent` selects composition.yaml; `initialize` alone is shared with md.
         ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
@@ -867,45 +924,53 @@ fn disk_bundle_resolves_its_relative_imports_from_disk() {
     let effective = locations.effective(&schemas, "origin", "start: [disk-only]");
     assert_eq!(
         effective.origins["start"].trigger_source(),
-        Some(TriggerSource::File(locations.folder(Root::Tree).join("claudine.yaml")))
+        Some(TriggerSource::File(locations.folder(Root::Tree).join("composition.yaml")))
     );
-    assert!(is_claudine_owned(&effective, "start"));
+    assert!(!is_claudine_owned(&effective, "start"), "a disk copy of a registration file is an ordinary trigger");
     assert!(!effective.dependencies().is_empty(), "disk payload files are dependencies");
 }
 
-/// A trigger envelope is not a schema: naming one in `$schema` fails, and an
-/// embedded trigger is no bare name at all.
+/// A trigger envelope is not a schema: naming one in `$schema` fails, and a
+/// registered trigger is no bare name at all.
 #[test]
 fn schema_reference_to_a_trigger_envelope_fails() {
     let locations = Locations::new();
-    locations.write_schema(Root::Tree, "claudine.yaml", &tier_trigger("x"));
-    for frontmatter in ["$schema: claudine.yaml\ntitle: x", "$schema: inline-compose.yaml\ntitle: x"] {
+    locations.write_schema(Root::Tree, "composition.yaml", &tier_trigger("x"));
+    for frontmatter in ["$schema: composition.yaml\ntitle: x", "$schema: inline-composition.yaml\ntitle: x"] {
         let error = locations.verdict("reference", frontmatter).expect_err(frontmatter);
         assert!(is_load_failure(&error), "{frontmatter}: {error:?}");
     }
 }
 
-/// A same-name disk `claudine.yaml` replaces the embedded one: its `model`
-/// type applies, and the embedded `start` type no longer does.
+/// A schema-root trigger, even one named like a registration file, layers
+/// above the registered layer: its `model` declaration replaces the
+/// registered one (and takes `model` from Claudine), while the registered
+/// `start` type still applies.
 #[test]
-fn same_name_disk_trigger_wins_over_the_embedded_copy() {
+fn a_schema_root_trigger_overrides_a_registered_property() {
     let locations = Locations::new();
-    assert_accepts(locations.verdict("model", "start: [stop]\nmodel: claude"), "embedded: `model` is a string");
+    assert_accepts(locations.verdict("model", "start: [stop]\nmodel: claude"), "registered: `model` is a string");
 
-    locations.write_schema(Root::Tree, "claudine.yaml", NUMBER_MODEL_TRIGGER);
+    let disk = locations.write_schema(Root::Tree, "composition.yaml", NUMBER_MODEL_TRIGGER);
     assert_rejects_at(locations.verdict("model", "start: [stop]\nmodel: claude"), "model", "disk: `model` is a number");
-    assert_accepts(locations.verdict("model", "start: [{ inf0: hi }]\nmodel: 5"), "disk: `start` is untyped");
+    assert_accepts(locations.verdict("model", "start: [stop]\nmodel: 5"), "disk: a numeric `model`");
+    assert_rejects_at(locations.verdict("model", "start: [{ inf0: hi }]\nmodel: 5"), "start", "registered: `start` is still typed");
+
+    let effective = locations.effective(&locations.schemas(), "model", "start: [stop]\nmodel: 5");
+    assert_eq!(effective.origins["model"].trigger_source(), Some(TriggerSource::File(disk)));
+    assert!(!is_claudine_owned(&effective, "model"), "the schema-root trigger owns `model`");
+    assert!(is_claudine_owned(&effective, "start"), "Claudine still owns `start`");
 }
 
-/// With no disk bundle, the embedded trigger applies and owns its controls.
+/// With no disk bundle, the registered trigger applies and owns its controls.
 #[test]
 fn embedded_trigger_applies_with_no_disk_bundle() {
     let locations = Locations::new();
-    assert_rejects_at(locations.verdict("embedded", "start: [{ inf0: hi }]"), "start", "embedded payload");
+    assert_rejects_at(locations.verdict("embedded", "start: [{ inf0: hi }]"), "start", "registered payload");
     let effective = locations.effective(&locations.schemas(), "embedded", "start: [stop]");
     assert_eq!(
         effective.origins["start"].trigger_source(),
-        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: "claudine.yaml".to_string() })
+        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: "schemas/composition.yaml".to_string() })
     );
     assert!(is_claudine_owned(&effective, "start"));
 }
@@ -928,107 +993,122 @@ fn authored_schema_override_applies_last_and_takes_ownership() {
     assert!(is_claudine_owned(&effective, "start"), "Claudine still owns `start`");
 }
 
-/// The disk `claudine.yaml` discovery skipped, with no Claudine payload
-/// applied: the skipped file still shadows the embedded copy.
-fn assert_skipped_without_embedded_fallback(locations: &Locations, name: &str) {
+/// The disk `composition.yaml` discovery skipped, beside the registered
+/// layer: the skipped file replaces nothing, so the registered payload still
+/// types `start`, and the launch verdict carries the skipped trigger.
+fn assert_skipped_beside_the_registered_layer(locations: &Locations, name: &str) {
     let schemas = locations.schemas();
     let skipped: Vec<_> = schemas
         .discovery_findings()
         .iter()
-        .filter(|finding| finding.source().path().is_some_and(|path| path.ends_with("claudine.yaml")))
+        .filter(|finding| finding.source().path().is_some_and(|path| path.ends_with("composition.yaml")))
         .collect();
     assert_eq!(skipped.len(), 1, "{:?}", schemas.discovery_findings());
     let findings = claudine::composition::TriggerFindings::default();
-    assert_accepts(locations.verdict_recording(name, "start: [{ inf0: hi }]", &findings), "no Claudine payload applies");
+    assert_rejects_at(
+        locations.verdict_recording(name, "start: [{ inf0: hi }]", &findings),
+        "start",
+        "the registered payload still applies",
+    );
     let recorded: Vec<_> = findings.warnings().into_iter().map(|warning| warning.source).collect();
     assert_eq!(recorded, [skipped[0].identity().clone()], "the launch verdict carries the skipped trigger");
     assert_accepts(locations.verdict(name, "title: x"), "an unrelated document launches");
 }
 
-/// A malformed disk `claudine.yaml` is skipped for every launch verdict; it
-/// never falls back to the embedded copy.
+/// A malformed disk `composition.yaml` is skipped for every launch verdict;
+/// the registered one still applies.
 #[test]
-fn malformed_disk_trigger_is_skipped_without_embedded_fallback() {
+fn malformed_disk_trigger_is_skipped_beside_the_registered_layer() {
     let locations = Locations::new();
-    locations.write_schema(Root::Tree, "claudine.yaml", "kind: schema-trigger\nmatch: 42\n$schema: {}\n");
-    assert_skipped_without_embedded_fallback(&locations, "malformed");
+    locations.write_schema(Root::Tree, "composition.yaml", "kind: schema-trigger\nmatch: 42\n$schema: {}\n");
+    assert_skipped_beside_the_registered_layer(&locations, "malformed");
 }
 
-/// A disk trigger's import never resolves to the embedded file of the same
+/// A disk trigger's import never resolves to the registered file of the same
 /// basename.
 #[test]
 fn disk_import_never_falls_back_to_an_embedded_file() {
     let locations = Locations::new();
     locations.write_schema(
         Root::Tree,
-        "claudine.yaml",
-        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
+        "composition.yaml",
+        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle-events.yaml\n",
     );
     // The missing disk import skips the trigger.
-    assert_skipped_without_embedded_fallback(&locations, "import");
+    assert_skipped_beside_the_registered_layer(&locations, "import");
 }
 
-/// A disk `lifecycle.yaml` whose recursive family names a type it does not
-/// declare skips the trigger importing it: the embedded file of the same
+/// A disk `lifecycle-events.yaml` whose recursive family names a type it does not
+/// declare skips the trigger importing it: the registered file of the same
 /// basename, which declares `item`, never supplies it.
 #[test]
 fn broken_disk_recursive_family_never_falls_back_to_an_embedded_file() {
     let locations = Locations::new();
     locations.write_schema(
         Root::Tree,
-        "claudine.yaml",
-        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
+        "composition.yaml",
+        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle-events.yaml\n",
     );
     locations.write_schema(
         Root::Tree,
-        "lifecycle.yaml",
+        "lifecycle-events.yaml",
         "kind: schema\ntypes:\n    stack:\n        - item[]\n    conditional:\n        when: expression(required)\n        then: stack(required)\n",
     );
     // The broken disk family skips the trigger.
-    assert_skipped_without_embedded_fallback(&locations, "broken");
+    assert_skipped_beside_the_registered_layer(&locations, "broken");
 }
 
-/// A disk `claudine.yaml` that matches nothing still shadows the embedded
-/// one, while the embedded inline-compose.yaml still applies.
+/// A disk `composition.yaml` that matches nothing shadows nothing: both
+/// registered triggers still apply.
 #[test]
-fn non_matching_disk_trigger_still_shadows_the_embedded_one() {
+fn non_matching_disk_trigger_shadows_no_registered_trigger() {
     let locations = Locations::new();
-    locations.write_schema(
-        Root::Tree,
-        "claudine.yaml",
-        "kind: schema-trigger\nmatch:\n    never_set: string(required)\n$schema:\n    never_set: string\n",
+    locations.write_schema(Root::Tree, "composition.yaml", NEVER_MATCHING_TRIGGER);
+    assert_rejects_at(locations.verdict("shadow", "start: [{ inf0: hi }]"), "start", "registered composition.yaml applies");
+    assert_rejects_at(
+        locations.verdict("shadow", "prompt: hi\nstart: [{ inf0: hi }]"),
+        "start",
+        "registered inline-composition types the shared controls",
     );
-    assert_accepts(locations.verdict("shadow", "start: [{ inf0: hi }]"), "no Claudine payload applies");
-    assert_accepts(locations.verdict("shadow", "prompt: hi\nstart: [{ inf0: hi }]"), "inline-compose does not type `start`");
-    assert_rejects_at(locations.verdict("shadow", "prompt: hi\nhash: [1]"), "hash", "embedded inline-compose applies");
+    assert_rejects_at(locations.verdict("shadow", "prompt: hi\nhash: [1]"), "hash", "registered inline-compose applies");
 }
 
-/// A winning disk `claudine.yaml` and the embedded inline-compose.yaml apply
-/// together, and both own their properties.
+/// A disk `composition.yaml` and the registered triggers apply together: the
+/// disk payload owns the key only it declares, and that key is not a
+/// Claudine control; the registered ones stay Claudine's.
 #[test]
 fn disk_claudine_and_embedded_inline_compose_apply_together() {
     let locations = Locations::new();
-    locations.write_schema(Root::Tree, "claudine.yaml", NUMBER_MODEL_TRIGGER);
-    let effective = locations.effective(&locations.schemas(), "both", "prompt: hi\nstart: [stop]\nmodel: 5\nhash: abc");
+    locations.write_schema(
+        Root::Tree,
+        "composition.yaml",
+        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    disk_only: number\n",
+    );
+    let effective = locations.effective(&locations.schemas(), "both", "prompt: hi\nstart: [stop]\ndisk_only: 5\nhash: abc");
     assert_eq!(
-        effective.origins["model"].trigger_source(),
-        Some(TriggerSource::File(locations.folder(Root::Tree).join("claudine.yaml")))
+        effective.origins["disk_only"].trigger_source(),
+        Some(TriggerSource::File(locations.folder(Root::Tree).join("composition.yaml")))
     );
     assert_eq!(
         effective.origins["hash"].trigger_source(),
-        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: "inline-compose.yaml".to_string() })
+        Some(TriggerSource::Embedded {
+            bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(),
+            name: "schemas/inline-composition.yaml".to_string()
+        })
     );
-    for property in ["model", "prompt", "hash", "last_updated"] {
+    assert!(!is_claudine_owned(&effective, "disk_only"), "the disk trigger's key is not a Claudine control");
+    for property in ["prompt", "hash", "last_updated", "start"] {
         assert!(is_claudine_owned(&effective, property), "{property} is a Claudine control");
     }
-    assert_rejects_at(locations.verdict("both", "prompt: hi\nstart: [stop]\nmodel: claude"), "model", "disk payload");
-    assert_rejects_at(locations.verdict("both", "prompt: hi\nstart: [stop]\nhash: [1]"), "hash", "embedded payload");
+    assert_rejects_at(locations.verdict("both", "prompt: hi\nstart: [stop]\ndisk_only: { a: 1 }"), "disk_only", "disk payload");
+    assert_rejects_at(locations.verdict("both", "prompt: hi\nstart: [stop]\nhash: [1]"), "hash", "registered payload");
 }
 
-/// The same bundle on disk and embedded classifies the same properties as
-/// Claudine controls; only the origin's source differs.
+/// The compiled registration and the same registration installed in the
+/// home classify the same properties as Claudine controls; only the origin's
+/// source differs.
 #[test]
-fn disk_and_embedded_bundles_own_the_same_properties() {
+fn installed_and_embedded_registrations_own_the_same_properties() {
     let frontmatter = "$schema:\n    model: number\nprompt: hi\nstart: [stop]";
     let owned = |effective: &EffectiveSchema| -> BTreeSet<String> {
         effective.origins.keys().filter(|property| is_claudine_owned(effective, property)).cloned().collect()
@@ -1036,29 +1116,29 @@ fn disk_and_embedded_bundles_own_the_same_properties() {
 
     let embedded_only = Locations::new();
     let embedded = embedded_only.effective(&embedded_only.schemas(), "owned", frontmatter);
-    let on_disk = Locations::new();
-    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
-    let disk = on_disk.effective(&on_disk.schemas(), "owned", frontmatter);
+    let installed_only = Locations::new();
+    let installed = installed_only.effective(&installed_only.schemas_with(installed_only.installed_hosts()), "owned", frontmatter);
 
     let embedded_owned = owned(&embedded);
     assert!(embedded_owned.contains("start") && embedded_owned.contains("hash"), "{embedded_owned:?}");
     assert!(!embedded_owned.contains("model"), "the authored `model` is not Claudine's");
-    assert_eq!(embedded_owned, owned(&disk));
+    assert_eq!(embedded_owned, owned(&installed));
     assert!(matches!(embedded.origins["start"].trigger_source(), Some(TriggerSource::Embedded { .. })));
-    assert!(matches!(disk.origins["start"].trigger_source(), Some(TriggerSource::File(_))));
+    assert!(matches!(installed.origins["start"].trigger_source(), Some(TriggerSource::File(_))));
 }
 
 /// Document metadata cases: the frontmatter and the one property a problem
 /// is reported under, or `None` when the document is valid. Absent and null
 /// metadata stay valid, both stored hash forms are accepted, and the
-/// longhand `value` takes any data. A scalar `prompt` or shorthand `hash` is
-/// convertible text, and `last_updated` must be a calendar date.
+/// longhand `value` takes any data. A scalar shorthand `hash` is convertible
+/// text, a number or boolean `prompt` is not prompt text (the inline runtime
+/// refuses it too), and `last_updated` must be a calendar date.
 const DOCUMENT_METADATA_CASES: &[(&str, Option<&str>)] = &[
     ("prompt: hi", None),
     ("prompt: hi\nhash: null\nlast_updated: null", None),
     ("start: [stop]\nprompt: null", None),
-    ("prompt: 5", None),
-    ("prompt: true", None),
+    ("prompt: 5", Some("prompt")),
+    ("prompt: true", Some("prompt")),
     ("prompt: hi\nhash: 0123456789abcdef", None),
     ("prompt: hi\nhash: 42", None),
     ("prompt: hi\nhash: { kind: detailed, value: [1, { a: b }], ignored: [title] }", None),
@@ -1083,19 +1163,35 @@ const DOCUMENT_METADATA_CASES: &[(&str, Option<&str>)] = &[
 /// The metadata properties `document.yaml` declares.
 const DOCUMENT_METADATA: [&str; 3] = ["prompt", "hash", "last_updated"];
 
-/// A disk trigger that never matches. It shadows the embedded trigger of its
-/// name, so the other metadata trigger applies alone.
+/// A disk trigger that never matches.
 const NEVER_MATCHING_TRIGGER: &str =
     "kind: schema-trigger\nmatch:\n    never_set: string(required)\n$schema:\n    never_set: string\n";
 
-/// Asserts the passive verdict and the launch verdict of every metadata
-/// case at `locations`.
-fn assert_document_metadata_cases(locations: &Locations, label: &str) {
-    let schemas = locations.schemas();
-    for (frontmatter, rejected_at) in DOCUMENT_METADATA_CASES {
+/// Asserts the passive verdict of every metadata case at `locations`
+/// through `schemas`, each written after `prefix`, and, when `launch`, the
+/// launch verdict (which always judges with the compiled registration).
+fn assert_document_metadata_cases(locations: &Locations, schemas: &DarkmatterSchemas, label: &str, prefix: &str, launch: bool) {
+    assert_metadata_cases_where(locations, schemas, label, prefix, launch, |_| true);
+}
+
+/// [`assert_document_metadata_cases`] over the cases `select` keeps, given
+/// each case's rejected property.
+fn assert_metadata_cases_where(
+    locations: &Locations,
+    schemas: &DarkmatterSchemas,
+    label: &str,
+    prefix: &str,
+    launch: bool,
+    select: impl Fn(Option<&str>) -> bool,
+) {
+    for (frontmatter, rejected_at) in DOCUMENT_METADATA_CASES.iter().filter(|(_, rejected_at)| select(*rejected_at)) {
+        let frontmatter = &format!("{prefix}{frontmatter}");
         let what = format!("{label}: `{frontmatter}`");
         let expected: BTreeSet<String> = rejected_at.iter().map(|property| property.to_string()).collect();
-        assert_eq!(locations.passive(&schemas, "metadata", frontmatter), expected, "{what}: passive");
+        assert_eq!(locations.passive(schemas, "metadata", frontmatter), expected, "{what}: passive");
+        if !launch {
+            continue;
+        }
         match rejected_at {
             None => assert_accepts(locations.verdict("metadata", frontmatter), &what),
             Some(property) => assert_rejects_at(locations.verdict("metadata", frontmatter), property, &what),
@@ -1103,38 +1199,59 @@ fn assert_document_metadata_cases(locations: &Locations, label: &str) {
     }
 }
 
-/// Passive validation and the launch verdict agree on every metadata case,
-/// with the embedded bundle alone and with the shipped bundle on disk, where
-/// the disk triggers import `document.yaml` from disk.
+/// Passive validation and the launch verdict agree on every metadata case
+/// with the compiled registration alone.
 #[test]
 fn document_metadata_verdicts_agree_between_passive_validation_and_launch() {
     let embedded = Locations::new();
-    let on_disk = Locations::new();
-    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
-    for (label, locations) in [("embedded", &embedded), ("disk", &on_disk)] {
-        assert_document_metadata_cases(locations, label);
-        let effective = locations.effective(&locations.schemas(), "origin", "prompt: hi");
-        for property in DOCUMENT_METADATA {
-            assert!(is_claudine_owned(&effective, property), "{label}: `{property}` is a Claudine control");
-        }
+    assert_document_metadata_cases(&embedded, &embedded.schemas(), "embedded", "", true);
+    let effective = embedded.effective(&embedded.schemas(), "origin", "prompt: hi");
+    for property in DOCUMENT_METADATA {
+        assert!(is_claudine_owned(&effective, property), "`{property}` is a Claudine control");
     }
 }
 
+/// The same agreement holds with the shipped bundle copied into a schema
+/// root above the compiled registration, where the disk triggers import
+/// `document.yaml` from disk. The accepted and rejected cases are separate
+/// tests so each stays inside the test time budget on Windows.
+#[test]
+fn accepted_metadata_verdicts_agree_with_the_shipped_bundle_on_disk() {
+    let on_disk = Locations::new();
+    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
+    assert_metadata_cases_where(&on_disk, &on_disk.schemas(), "disk", "", true, |rejected_at| rejected_at.is_none());
+}
+
+/// See [`accepted_metadata_verdicts_agree_with_the_shipped_bundle_on_disk`].
+#[test]
+fn rejected_metadata_verdicts_agree_with_the_shipped_bundle_on_disk() {
+    let on_disk = Locations::new();
+    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
+    assert_metadata_cases_where(&on_disk, &on_disk.schemas(), "disk", "", true, |rejected_at| rejected_at.is_some());
+}
+
 /// Each metadata trigger alone gives every metadata case the verdict the
-/// merged pair gives it. A never-matching disk copy shadows the other
-/// embedded trigger, so the metadata is declared by the one that applies.
+/// whole bundle gives it: a registration without the other trigger declares
+/// the metadata by the one that applies. The launch verdict always judges
+/// with the whole compiled registration, so these cases are passive.
+/// composition.yaml types `prompt` only where inline-composition.yaml does
+/// not apply, so its cases are written in a sequence document.
 #[test]
 fn document_metadata_verdicts_agree_through_each_trigger_alone() {
-    for (shadowed, applies) in [("inline-compose.yaml", "claudine.yaml"), ("claudine.yaml", "inline-compose.yaml")] {
+    for (removed, applies, prefix) in
+        [("inline-composition.yaml", "composition.yaml", "sequence: [a]\n"), ("composition.yaml", "inline-composition.yaml", "")]
+    {
         let locations = Locations::new();
-        locations.write_schema(Root::Tree, shadowed, NEVER_MATCHING_TRIGGER);
+        let inventory = RegistrationInventory::claudine().clone().without_member(&format!("schemas/{removed}"));
+        let profile = bundle::profile_of(&inventory).unwrap_or_else(|refusals| panic!("{removed} removed: {refusals:#?}"));
+        let schemas = locations.schemas_with(bundle::hosts_of(profile));
         let label = format!("{applies} alone");
-        assert_document_metadata_cases(&locations, &label);
-        let effective = locations.effective(&locations.schemas(), "origin", "prompt: hi");
+        assert_document_metadata_cases(&locations, &schemas, &label, prefix, false);
+        let effective = locations.effective(&schemas, "origin", &format!("{prefix}prompt: hi"));
         for property in DOCUMENT_METADATA {
             assert_eq!(
                 effective.origins[property].trigger_source(),
-                Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: applies.to_string() }),
+                Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: format!("schemas/{applies}") }),
                 "{label}: `{property}`"
             );
             assert!(is_claudine_owned(&effective, property), "{label}: `{property}` is a Claudine control");
@@ -1142,38 +1259,36 @@ fn document_metadata_verdicts_agree_through_each_trigger_alone() {
     }
 }
 
-/// A disk `inline-compose.yaml` shadows the embedded one independently of
-/// `claudine.yaml`, and the nearest copy wins. Where the copy alone applies,
-/// its own type for `hash` judges the document. Where the embedded
-/// `claudine.yaml` also applies, it is later in registry order, so its
-/// declaration of `hash` replaces the copy's.
+/// A disk trigger named `inline-composition.yaml` is an ordinary trigger:
+/// the nearest copy wins among the schema roots, and the winner layers above
+/// the registered triggers, so its own type for `hash` judges every document
+/// it selects, beside a prompt or in a sequence document alike.
 #[test]
-fn a_disk_inline_compose_trigger_shadows_the_embedded_one_and_types_the_metadata() {
+fn a_disk_inline_compose_trigger_layers_above_the_registered_ones_and_types_the_metadata() {
     let locations = Locations::new();
     let shadow = |hash: &str| {
         format!("kind: schema-trigger\nmatch:\n    hash: number(required)\n$schema:\n    hash: \"{hash}\"\n")
     };
     let origin = |frontmatter: &str| locations.effective(&locations.schemas(), "origin", frontmatter).origins["hash"].trigger_source();
-    let embedded_claudine =
-        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: "claudine.yaml".to_string() });
     assert_accepts(locations.verdict("none", "hash: 0"), "no trigger applies without a copy");
 
-    let user = locations.write_schema(Root::Home, "inline-compose.yaml", &shadow("number(min(1))"));
-    assert_eq!(origin("hash: 5"), Some(TriggerSource::File(user)));
+    let user = locations.write_schema(Root::Home, "inline-composition.yaml", &shadow("number(min(1))"));
+    assert_eq!(origin("hash: 5"), Some(TriggerSource::File(user.clone())));
     assert_accepts(locations.verdict("user", "hash: 5"), "user copy alone");
     assert_rejects_at(locations.verdict("user", "hash: 0"), "hash", "user copy alone: below its minimum");
 
-    let project = locations.write_schema(Root::Package, "inline-compose.yaml", &shadow("number(max(0))"));
-    assert_eq!(origin("hash: 0"), Some(TriggerSource::File(project)));
+    let project = locations.write_schema(Root::Package, "inline-composition.yaml", &shadow("number(max(0))"));
+    assert_eq!(origin("hash: 0"), Some(TriggerSource::File(project.clone())));
     assert_accepts(locations.verdict("project", "hash: 0"), "project copy alone");
     assert_rejects_at(locations.verdict("project", "hash: 5"), "hash", "the project copy shadows the user copy");
 
-    // Beside a prompt the embedded claudine.yaml applies too, after the copy.
-    // The embedded inline-compose.yaml would follow it and own `hash`, so
-    // this origin also shows that the copy shadows it.
-    assert_eq!(origin("prompt: hi\nhash: 5"), embedded_claudine);
-    assert_accepts(locations.verdict("merged", "prompt: hi\nhash: 5"), "claudine.yaml's shorthand converts the number");
-    assert_rejects_at(locations.verdict("merged", "prompt: hi\nhash: [1]"), "hash", "claudine.yaml's `hash`");
+    // Beside a prompt, and in a sequence document, a registered trigger
+    // declaring `hash` applies too, below the copy.
+    for prefix in ["prompt: hi\n", "sequence: [a]\n"] {
+        assert_eq!(origin(&format!("{prefix}hash: 0")), Some(TriggerSource::File(project.clone())), "{prefix}");
+        assert_accepts(locations.verdict("merged", &format!("{prefix}hash: 0")), &format!("{prefix}: the copy's `hash`"));
+        assert_rejects_at(locations.verdict("merged", &format!("{prefix}hash: 5")), "hash", &format!("{prefix}: the copy's maximum"));
+    }
 }
 
 /// The `default` of `kind` in `hash`'s longhand arm within `fragment`,
@@ -1195,18 +1310,19 @@ fn longhand_kind_default(root: &serde_json::Value, fragment: &serde_json::Value)
 #[test]
 fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     let both = Locations::new();
-    let claudine_alone = Locations::new();
-    claudine_alone.write_schema(Root::Tree, "inline-compose.yaml", NEVER_MATCHING_TRIGGER);
-    let inline_alone = Locations::new();
-    inline_alone.write_schema(Root::Tree, "claudine.yaml", NEVER_MATCHING_TRIGGER);
-    for (label, locations) in [("both", &both), ("claudine.yaml alone", &claudine_alone), ("inline-compose.yaml alone", &inline_alone)] {
-        let effective = locations.effective(&locations.schemas(), "default", "prompt: hi");
+    let without = |member: &str| {
+        let inventory = RegistrationInventory::claudine().clone().without_member(&format!("schemas/{member}"));
+        bundle::hosts_of(bundle::profile_of(&inventory).unwrap_or_else(|refusals| panic!("{member} removed: {refusals:#?}")))
+    };
+    for (label, hosts, frontmatter) in [
+        ("the whole bundle", Arc::clone(claudine_hosts()), "prompt: hi"),
+        ("composition.yaml alone", without("inline-composition.yaml"), "sequence: [a]\nprompt: hi"),
+        ("inline-composition.yaml alone", without("composition.yaml"), "prompt: hi"),
+    ] {
+        let effective = both.effective(&both.schemas_with(hosts), "default", frontmatter);
         let schema = &effective.json_schema;
-        assert_eq!(
-            longhand_kind_default(schema, &schema["properties"]["hash"]),
-            Some(serde_json::json!("simple")),
-            "{label}: `kind` declares its default"
-        );
+        let (hash, _) = crate::claudine_schemas::declared_fragment(schema, "hash");
+        assert_eq!(longhand_kind_default(schema, hash), Some(serde_json::json!("simple")), "{label}: `kind` declares its default");
     }
 
     let context = both.context();
@@ -1248,7 +1364,7 @@ fn a_shared_hash_definition_keeps_both_stored_forms_through_the_launch_verdict()
     let locations = Locations::new();
     let library = locations.root.join("repo/area/pkg/docs/lib/document.yaml");
     std::fs::create_dir_all(library.parent().expect("parent")).expect("library dir");
-    std::fs::write(&library, include_str!("../../../schemas/document.yaml")).expect("write the library");
+    std::fs::write(&library, include_str!("../../../registration/document.yaml")).expect("write the library");
     let schema = "$schema:\n    first: hash@./lib/document.yaml\n    second: hash@./lib/document.yaml\ntitle: x";
 
     let effective = locations.effective(&locations.schemas(), "shared", schema);
@@ -1372,7 +1488,7 @@ fn assert_passive_parity(name: &str, text: &str) {
     let discovered = repo.discover().expect("the shipped bundle loads");
     let path = repo.write_document(&format!("{name}.md"), text);
     let editor = discovered
-        .judge(&path, include_str!("../../../schemas/claudine.yaml"), include_str!("../../../schemas/inline-compose.yaml"))
+        .judge(&path, include_str!("../../../registration/composition.yaml"), include_str!("../../../registration/inline-composition.yaml"))
         .expect("judged")
         .report;
     let editor_properties = top_level(editor.problems.iter().map(|problem| problem.path.clone()));
@@ -1514,29 +1630,34 @@ fn passive_parity_tests_cover_every_ac5_fixture() {
 /// every acyclic helper was inlined at each use.
 #[test]
 fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
-    use simplified_schema::ValidationProblemCode::ConstraintViolation;
+    use simplified_schema::ValidationProblemCode::{ConstraintViolation, UnknownKey};
     use simplified_schema::validate::build_position_map;
 
-    const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
     let bare = Bare::new();
-    let schemas = bare.schemas(claudine_schema_bundle());
-    /// `(instance path, line, column, explanation)` of each expected problem.
-    type Expected = &'static [(&'static str, u32, u32, &'static str)];
+    let schemas = bare.schemas(Arc::clone(claudine_hosts()));
+    /// `(instance path, line, column, code, explanation)` of each expected
+    /// problem. A key no arm of the action union declares is reported by
+    /// name, as an unknown key with no arm's explanation.
+    type Expected = &'static [(&'static str, u32, u32, simplified_schema::ValidationProblemCode, Option<&'static str>)];
     let cases: [(&str, Expected); 5] = [
         (
             "start:\n  - inf0: hi\nfinalize:\n  - say: hi\n  - inf0: hi\n",
-            &[("/start/0", 2, 5, BARE_VERB), ("/finalize/1", 5, 5, BARE_VERB)],
+            &[("/start/0", 2, 5, UnknownKey, None), ("/finalize/1", 5, 5, UnknownKey, None)],
         ),
         (
             "success:\n  - when: \"{{ ready }}\"\n    then:\n      - say: hi\n      - inf0: hi\n",
-            &[("/success/0/then/1", 5, 9, BARE_VERB)],
+            &[("/success/0/then/1", 5, 9, UnknownKey, None)],
         ),
-        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
+        // Beside a known verb, the unknown key's own token is the position.
+        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 3, 5, UnknownKey, None)]),
         // `cancelled` admits a shell; `initialize` never does. The shared
-        // events select nothing alone, so `agent` selects claudine.yaml.
-        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        // events select nothing alone, so `agent` selects composition.yaml.
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, UnknownKey, None)]),
         // A loop action missing its required `prop`.
-        ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
+        (
+            "loop:\n  action:\n    op: set\n",
+            &[("/loop/action", 3, 5, ConstraintViolation, Some("an iteration action such as increment(iteration)"))],
+        ),
     ];
     for (frontmatter, expected) in cases {
         let markdown = memory_document(frontmatter);
@@ -1550,7 +1671,7 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
             .collect();
         let expected: Vec<_> = expected
             .iter()
-            .map(|(path, line, column, description)| (ConstraintViolation, *path, Some(*line), Some(*column), Some(*description)))
+            .map(|(path, line, column, code, description)| (*code, *path, Some(*line), Some(*column), *description))
             .collect();
         assert_eq!(found, expected, "`{frontmatter}`");
         for property in instance.as_object().expect("a mapping").keys() {
@@ -1559,7 +1680,7 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
                 origin.trigger_source(),
                 Some(TriggerSource::Embedded {
                     bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(),
-                    name: "claudine.yaml".to_string()
+                    name: "schemas/composition.yaml".to_string()
                 }),
                 "`{property}` in `{frontmatter}`"
             );
@@ -1605,4 +1726,70 @@ fn a_proxy_overlays_lifecycle_stack_is_judged_by_its_own_authored_flags() {
         panic!("the overlay's flag beside `then` is refused");
     };
     assert!(error.contains("cannot sit beside `then`/`else`"), "{error}");
+}
+
+/// A blank `types:` on the published `kind: sequence` definition is no named
+/// types, as its member envelope admits it: the embedded profile still loads
+/// with that kind and every trigger, while a numeric table is refused at
+/// `types`.
+#[test]
+fn a_blank_types_table_on_an_embedded_yaml_kind_keeps_the_profile() {
+    let shipped = bundle::profile_of(RegistrationInventory::claudine()).unwrap_or_else(|refusals| panic!("ships: {refusals:#?}"));
+    let definition = RegistrationInventory::claudine()
+        .members()
+        .find(|file| file.path() == "schemas/formal-sequence-file.yaml")
+        .expect("formal-sequence-file.yaml is a member");
+    let edited = |types: &str| {
+        let text = format!("{}{types}", definition.text().expect("UTF-8"));
+        let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+            definition.path().to_string(),
+            definition.kind(),
+            definition.name().map(str::to_string),
+            text.clone().into_bytes(),
+        ));
+        (text, bundle::profile_of(&inventory))
+    };
+
+    for blank in ["types:\n", "types: null\n"] {
+        let profile = edited(blank).1.unwrap_or_else(|refusals| panic!("{blank:?}: {refusals:#?}"));
+        assert!(
+            profile.yaml_kinds().iter().any(|kind| kind.source().path == "schemas/formal-sequence-file.yaml"),
+            "{blank:?}: the sequence kind is published"
+        );
+        assert_eq!(profile.triggers().len(), shipped.triggers().len(), "{blank:?}: every trigger");
+    }
+
+    let (text, refused) = edited("types: 7\n");
+    let refusals = refused.expect_err("a numeric table");
+    assert_eq!(refusals.len(), 1, "{refusals:#?}");
+    let line = text.lines().position(|line| line.starts_with("types:")).expect("types") + 1;
+    assert_eq!(refusals[0].line, Some(line), "{refusals:#?}");
+}
+
+/// The compiled registration loads as it ships, and the same bundle with one
+/// unused declaration importing an unlisted file is refused as a whole, at
+/// that import in `shared.yaml`: a declaration nothing uses still faces the
+/// bundle boundary on the embedded route Claudine launches through.
+#[test]
+fn an_unused_unlisted_import_refuses_the_embedded_registration() {
+    bundle::profile_of(RegistrationInventory::claudine()).unwrap_or_else(|refusals| panic!("the shipped bundle loads: {refusals:#?}"));
+    let shared = RegistrationInventory::claudine()
+        .members()
+        .find(|file| file.path() == "schemas/shared.yaml")
+        .expect("shared.yaml is a member");
+    let text = format!("{}    optional-host-settings: Options@./options.yaml\n", shared.text().expect("UTF-8"));
+    let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+        shared.path().to_string(),
+        shared.kind(),
+        shared.name().map(str::to_string),
+        text.clone().into_bytes(),
+    ));
+
+    let refusals = bundle::profile_of(&inventory).expect_err("the edited bundle is refused");
+
+    assert_eq!(refusals.len(), 1, "{refusals:#?}");
+    let offset = text.find("./options.yaml").expect("the import");
+    let line = text[..offset].matches('\n').count() + 1;
+    assert_eq!(refusals[0].file.file_name().and_then(|name| name.to_str()), Some("shared.yaml"), "{refusals:#?}");
+    assert_eq!(refusals[0].line, Some(line), "{refusals:#?}");
 }

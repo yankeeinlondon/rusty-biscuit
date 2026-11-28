@@ -7,7 +7,7 @@ use std::process::Command;
 #[test]
 fn frontmatter_literal_survives_shell_bracketed_interpolation_passes() {
     let executable = std::env::current_exe().expect("test executable path should be available");
-    let portable_executable = biscuit_file::to_portable_string(&executable);
+    let portable_executable = biscuit_file::to_forward_slash_string(&executable);
     let shell_command = format!("\"{portable_executable}\" --list");
     let approved_command = format!("{portable_executable} --list");
     let expected_shell_output = Command::new(&executable)

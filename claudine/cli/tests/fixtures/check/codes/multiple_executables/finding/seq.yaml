@@ -1,0 +1,5 @@
+sequence:
+  - name: both
+    shell: "echo hi"
+    prompt: ./ask.md
+    with: { agent: claude }

@@ -14,7 +14,7 @@ use crate::commands::wrap::exec::control::StdioControl;
 use std::io::Write;
 use std::sync::Arc;
 
-/// Research execution-interface id (`docs/research/non-interactive-sessions/codex.md`)
+/// Research execution-interface id (`docs/research/providers/non-interactive-sessions/codex.md`)
 /// of the managed launch the wrapper implements.
 const APP_SERVER_INTERFACE: &str = "app-server";
 
@@ -64,7 +64,7 @@ fn codex_sqlite_home(env: &EnvBaseline, source_root: &Path) -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!(
             "Codex SQLite home '{}' must be an absolute path",
-            biscuit_file::to_portable_string(&path)
+            biscuit_file::to_forward_slash_string(&path)
         );
     }
     Ok(path)

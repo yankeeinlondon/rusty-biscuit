@@ -23,7 +23,6 @@ pub(crate) struct SequencePerfAccumulator {
     env_setup_elapsed: Duration,
     substages: Vec<SubstageTiming>,
     steps: Vec<SequenceStepPerf>,
-    dry_run: bool,
     partial: bool,
     invocation_work: Option<InvocationWorkCounts>,
 }
@@ -39,7 +38,6 @@ impl SequencePerfAccumulator {
             env_setup_elapsed: Duration::ZERO,
             substages: Vec::new(),
             steps: Vec::new(),
-            dry_run: false,
             partial: false,
             invocation_work: None,
         }
@@ -69,11 +67,6 @@ impl SequencePerfAccumulator {
     /// Append a step's performance data.
     pub fn add_step(&mut self, step: SequenceStepPerf) {
         self.steps.push(step);
-    }
-
-    /// Mark the sequence as a dry run (agent execution was skipped).
-    pub fn set_dry_run(&mut self) {
-        self.dry_run = true;
     }
 
     /// Mark the sequence as partially completed (interrupted or fail-fast).
@@ -169,9 +162,6 @@ impl SequencePerfAccumulator {
         if self.partial {
             notes.push("partial sequence metrics".into());
         }
-        if self.dry_run {
-            notes.push("Agent execution skipped (dry run)".into());
-        }
         if let Some(work) = self.invocation_work {
             notes.push(work.note());
         }
@@ -190,7 +180,7 @@ impl SequencePerfAccumulator {
                 prep_substages: self.startup.prep_substages,
             },
             composition,
-            agent: if self.dry_run { None } else { agent },
+            agent,
             notes,
             placement: CompositionPlacement::UnderStep,
             sequence_steps: self.steps,

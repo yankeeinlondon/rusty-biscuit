@@ -19,7 +19,7 @@ is the whole list, while an expression error may have another behind it.
 | Family | Stopping rule | What you see |
 | --- | --- | --- |
 | Setters | The run stops at the first setter that cannot be applied | One `dm.setter.invalid` error, before that document's stages run |
-| References | Every problem is collected, then reported together | One grouped report, before anything is composed |
+| References | Every problem is collected, then reported together; the checks that do not depend on a reference still run, without running anything | One grouped report, before anything is composed; one [combined report](#a-reference-stop-with-other-findings) when another check also finds something |
 | Schema | Every problem in one document is collected, then the run stops | Every problem in that document, none from later documents |
 | Transclusion | A fatal failure, such as a cycle, stops the run; a tolerated failure is reported and composition continues | A fatal error, or a notice in the document and a warning |
 | Expression | The run stops at the first error it meets, which is not always the earliest in the document | One error |
@@ -53,7 +53,60 @@ Checked 2 references across 1 document: 0 ok, 2 broken
 ```
 
 Only the reference report groups its problems. Every other family keeps its own
-error block in a terminal.
+error block in a terminal, except where a reference stop combines them, as
+described next.
+
+### A reference stop with other findings
+
+When a broken reference stops `md compose`, three checks that do not need the
+reference still run, passively: nothing is executed, fetched, or written. They
+are the call check (a call that can never succeed), the schema verdict on the
+frontmatter, and whether the composed body would be empty. If none of them
+finds anything, the run prints the reference report above, unchanged. If one
+does, the run prints one report for the document instead, with every finding
+in it, and exits 1:
+
+```md
+---
+title: Release notes
+draft: false
+---
+::block when="draft"
+::file ./missing.md
+::end-block
+```
+
+```text
+$ md compose notes.md
+notes.md
+  ✗ file not found in `::file`
+      ::file ./missing.md
+      at notes.md:6:1
+      hint: create missing.md, or correct the reference
+  ⚠ the body would be empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)
+      at notes.md:5:1
+      hint: pass the values those conditions read, or add body content outside the conditional blocks
+
+Checked notes.md: 1 error, 1 warning
+```
+
+A check that could not be decided is listed as `not checked` with its reason,
+and counted in the closing line. For example, a condition that reads a
+command's output (`draft: $(echo false)`) is not known until the document runs,
+so the empty-body check is not run. A call refusal stops the schema and
+empty-body checks; both are listed as not checked. An expression that fails
+only when it is evaluated, such as `{{ 1 / 0 }}`, belongs to none of these
+checks, so the example at the top of this section still prints the reference
+report alone.
+
+The full output, and the same report in `--output json`, are in
+[`md compose`](../cli/compose.md#the-combined-report).
+
+### An empty body warns
+
+A document that composes to an empty body is reported with the warning
+`dm.compose.empty_body`, located at the first block that excluded content. The
+run still succeeds; add `--deny dm.compose.empty_body` to make it fail.
 
 `md validate refs --fail-fast` and the library's `fail_fast` option stop reference
 checking at the first error. `md compose` always collects them.
@@ -236,14 +289,40 @@ broken `::code` target on line 9, and `types.md` pulled it in on line 8:
 
 When a problem's position cannot be proven, `source` still names the file, with a
 `null` line and column. A line counted in text a stage rewrote is never published as
-authored, so a `::shell` directive or a `::shell-block` command reports its file alone,
-and its message may name a different line than the file has:
+authored. A command `md compose` refuses before anything runs (its pre-flight approval
+check) is one such case: its message names the line the command was written on, but
+`source` names the file alone, because that check reports every document it walks
+against the one it was asked about:
 
 ```json
 {
   "code": "dm.shell.failure",
   "message": "Approval required for 'echo hi' at line 8",
   "source": { "file": "/work/repo/notes.md", "line": null, "column": null, "inserted": false }
+}
+```
+
+A `::shell-block` that same check cannot read is different: its record names the
+file that holds the block, so it keeps the line. Here `echo "open` on line 10 has
+no closing quote:
+
+```json
+{
+  "code": "dm.shell.failure",
+  "message": "Shell block error: Shell block parse error at line 10: Command tokenization failed: Unterminated double quote",
+  "source": { "file": "/work/repo/notes.md", "line": 10, "column": 1, "inserted": false }
+}
+```
+
+A `::shell` command that fails while the document composes (a program that is not
+installed, a refused approval, a non-zero exit) is placed at its directive, even
+after a false `::block` above it removed lines from the body:
+
+```json
+{
+  "code": "dm.shell.failure",
+  "message": "Command not found: 'nonexistentcmd' at line 11",
+  "source": { "file": "/work/repo/notes.md", "line": 11, "column": 1, "inserted": false }
 }
 ```
 
@@ -255,10 +334,14 @@ What each family reports:
 | A `load_data` failure | the start of the `{{ … }}` interpolation that holds the call; its `as` argument for a contract the call check rejects; its options argument for options the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
-| A `::file` directive that does not parse, or a malformed `::block` | the file |
-| A `::shell-block` with an invalid option or no `::end-block` | the file that holds the block, which may be a child rather than the named document |
+| A `::file`, `::code`, `::url`, or `::shell` directive that does not parse | the directive's opener in the file as written; the file alone when a stage wrote the opener or the body no longer matches the file |
+| A `::shell` command, or a `::shell-block` command, that fails while composing | the `::shell` directive's opener, or the block command's own line; the file alone when its position cannot be proven, and for a command the pre-flight approval check refuses |
+| A malformed `::block`, an `::end-block` with no opener, or a `::block` or `::shell-block` with no `::end-block` | the marker's line in the file as written; the file alone when its position cannot be proven |
+| A `prologue:` or `epilogue:` that is not a string or a list of strings | the file and the line of its key; the column is `null` |
+| A `::file`, `::code`, `::url`, `prologue:`, or `epilogue:` whose target is invalid (a bare `@`), refused by its directive (a `::file`, `prologue:`, or `epilogue:` file that is not Markdown, a `::url` that is not an absolute URL), missing, unreadable, or refused by the network policy | the directive's opener, or the value (each list entry its own), in the file that wrote it, which may be a child rather than the named document; the same from composition, its pre-flight check, `md graph`, and `md validate refs`, on the warning when a `::file` tolerates a child's failure, and on the warning, under the same code, when composition leaves the inclusion out instead (an absent target with `--allow missing-transclusions`, or any of these in a document that sets `ignore_invalid: true`); the file alone when its position cannot be proven |
+| A `::shell-block` with an invalid option, or a block command that does not parse | the opener's line (an option) or the command's line in the file that holds the block, which may be a child rather than the named document, also when the pre-flight approval check finds it; the file alone when its position cannot be proven |
 | A transclusion cycle | the document holding the directive that closes the cycle, which may be a child rather than the named document |
-| A `::toc-linking` or `::file-links` directive that fails, or whose failure a `::file` tolerated as a warning | the file that holds the directive, which may be a child rather than the named document; the line is `null` |
+| A `::toc-linking` or `::file-links` directive that fails, or whose failure a `::file` tolerated as a warning | the directive's opener in the file that holds it, which may be a child rather than the named document; the file alone when its position cannot be proven. A `::toc-linking` target it selected that cannot be read (`dm.input.read_failure`, a warning when composing) is placed there too, and its message names the selected file |
 | An undeclared property | the file and the line of its first read (for a read in frontmatter, its key's line); the column is `null` |
 | Another warning | the document that reported it |
 | Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |
@@ -283,6 +366,199 @@ $ md compose doc.md count=abc --output json
 Apart from `dm.setter.invalid`, `source` is `null` only when no file is known: input read from stdin or built in
 memory, or a lifecycle `error:` step, whose message is the author's own text.
 
+### Telling directive failures apart
+
+Every failure has its own code, so a script branches on `code` and never on
+the message. A `::toc-linking` or `::file-links` directive reports what was
+wrong with it: for example, a level outside `h1`–`h6` is
+`dm.toc_linking.invalid_level`, and a `--depth` that is not a number is
+`dm.file_links.invalid_depth`. The full list is in
+[Data contracts](../cli/data-contracts.md#codes).
+
+```md
+::toc-linking ./guide.md level=h9
+```
+
+```json
+{
+  "code": "dm.toc_linking.invalid_level",
+  "severity": "error",
+  "message": "TOC linking error: Invalid heading level 'h9' at line 3",
+  "source": { "file": "/work/repo/doc.md", "line": 3, "column": 1, "inserted": false }
+}
+```
+
+A CI step that fixes a level automatically but stops on anything else can
+read the code from the data output:
+
+```sh
+md compose doc.md --output json > result.json || {
+    case "$(jq -r '.diagnostics[0].code' result.json)" in
+        dm.toc_linking.invalid_level) echo "use a level from h1 to h6 in ::toc-linking" ;;
+        dm.file_links.invalid_depth) echo "give ::file-links --depth a whole number" ;;
+        *) jq -r '.diagnostics[0].message' result.json ;;
+    esac
+    exit 1
+}
+```
+
+`md validate refs` and `md graph` report the same codes for the same
+directives.
+
+Some of these failures do not stop `md compose`. A `::toc-linking` whose
+`filter=` does not compile, or a `::file-links` whose glob is invalid, whose
+`--dir` is missing, is a file, or cannot be read, or that sits in text read
+from stdin, is left out of the document, and composition continues. The
+failure is still reported, as a `warning`, under the same code it has when it
+stops a run, so the script above works for both:
+
+```md
+::file-links ./notes/[.md
+```
+
+```json
+{
+  "code": "dm.file_links.invalid_glob",
+  "severity": "warning",
+  "message": "File-links error: glob reference `./notes/[.md` is not a valid glob: unclosed character class; missing ']' (line 3)",
+  "source": { "file": "/work/repo/doc.md", "line": 3, "column": 1, "inserted": false }
+}
+```
+
+To make such a failure stop the run instead, deny its code:
+`md compose doc.md --deny dm.file_links.invalid_glob`. See
+[Policy](../cli/policy.md#diagnostics---deny).
+
+A directive's line is always its line in the file as you wrote it. The
+frontmatter header and a `::block` that composition removes do not shift it:
+here the bad `::file` is reported at line 7 by `md compose`, `md graph`, and
+`md validate refs` alike, although it is the third line of the body and the
+block before it is dropped.
+
+```md
+---
+title: Notes
+---
+::block when="false"
+draft
+::end-block
+::file
+```
+
+```json
+{
+  "code": "dm.directive.parse_failure",
+  "message": "Transclusion error: Failed to parse directive at line 7: Expected value, found end of directive",
+  "source": { "file": "/work/repo/doc.md", "line": 7, "column": 1, "inserted": false }
+}
+```
+
+When Darkmatter cannot prove where the directive was written (a stage wrote
+it, or a caller changed the text after loading the file), the message names
+no line and `source.line` is `null`.
+
+A directive that parses but names a target that cannot be used is reported at
+the same place, and the message starts with that place as `file:line:column`.
+Here `nested.md`, which `doc.md` includes, writes `::file @` on line 7, and a
+bare `@` names no file:
+
+```json
+{
+  "code": "dm.reference.failure",
+  "message": "Transclusion error: /work/repo/nested.md:7:1: File reference error: file reference syntax is invalid: the `@` sigil requires a relative payload: `@`",
+  "source": { "file": "/work/repo/nested.md", "line": 7, "column": 1, "inserted": false }
+}
+```
+
+A `prologue: "@"` on line 3 is reported at its value, `line: 3` and
+`column: 11`. A target that does not exist keeps
+`dm.reference.missing_transclusion`, at the same place.
+
+When composition leaves such an inclusion out instead of failing (a missing
+`::code ./gone.rs` on line 6 under `--allow missing-transclusions`, or a
+`::file ./notes.txt` in a document that sets `ignore_invalid: true`), its
+warning has the code and the place the failure would have had:
+
+```json
+{
+  "code": "dm.reference.missing_transclusion",
+  "severity": "warning",
+  "message": "Transclusion error: /work/repo/doc.md:6:1: I/O error: File not found: ./gone.rs",
+  "source": { "file": "/work/repo/doc.md", "line": 6, "column": 1, "inserted": false }
+}
+```
+
+`md compose` also reports the same miss from its reference check, at the same
+place; that record has a `construct` field, and the composition warning has
+none.
+
+In a terminal, the error block for such a failure starts with the place,
+one row each for the file and, when it is known, the line:
+
+```text
+⤫ TransclusionError: file reference failure
+┃
+┃ File: /work/repo/nested.md
+┃ Line: 7
+┃
+┃ file reference syntax is invalid: the `@` sigil requires a relative payload: `@`
+```
+
+A link or image is not an inclusion: an invalid target such as `[setup](@)`
+does not stop the reference check part-way. The check reports it as a broken
+reference at the link's line and column, with the reason
+`invalid file reference`, beside every other broken reference it finds, and
+`md compose` then fails with status 1, as it does for a missing link target.
+
 Reference graphs keep a second set of numbers. `ReferenceOrigin::line` and `span`
 count lines in the prepared body, after frontmatter removal and expansion, because
 code that walks the graph works on that text. No report or data output shows them.
+
+### Headings pushed past H6
+
+Markdown has six heading levels. When a heading would have to move deeper
+than H6, Darkmatter reports it under a code of its own, so a script can tell
+it apart from every other problem.
+
+A `::file` child's headings are shifted to sit under the heading before the
+directive. A child heading that would land past H6 is written as bold text
+instead, and composition continues with a `warning`:
+
+```md
+###### Setup
+
+::file ./steps.md
+```
+
+Here `steps.md` starts with `## Steps` and has a `### Details` heading.
+`## Steps` becomes `###### Steps`, and `### Details`, which would become
+H7, becomes `**Details**`:
+
+```json
+{
+  "code": "dm.transclusion.heading_overflow",
+  "severity": "warning",
+  "message": "Heading overflow at line 3: converted to bold text (would become H7)",
+  "source": { "file": "/work/repo/doc.md", "line": null, "column": null, "inserted": false }
+}
+```
+
+The line in the message is the heading's line in `steps.md`; `source` names
+the composed document, with no line, because the bold text is not where the
+author wrote the heading. To stop the run instead, deny the code:
+`md compose doc.md --deny dm.transclusion.heading_overflow`.
+
+The library's `Markdown::normalize` and `Markdown::relevel` return a
+`NormalizationError` when a target level would push a heading past H6.
+`error_diagnostics` reports it as `dm.normalization.level_overflow`
+(`dm.normalization.validation_failed` for a heading structure rule), so a
+caller branches on the code, never on the message:
+
+```rust
+use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+use darkmatter::markdown::{HeadingLevel, Markdown};
+
+let doc = Markdown::from("#### Four\n\n###### Six\n".to_string());
+let error = doc.relevel(HeadingLevel::H5).unwrap_err();
+assert_eq!(error_diagnostics(&error)[0].code, "dm.normalization.level_overflow");
+```

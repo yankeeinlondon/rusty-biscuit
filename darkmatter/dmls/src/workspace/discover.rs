@@ -300,7 +300,7 @@ mod tests {
         let names: Vec<String> = report
             .files
             .iter()
-            .map(|p| biscuit_file::to_portable_string(p.strip_prefix(root).unwrap()))
+            .map(|p| biscuit_file::to_forward_slash_string(p.strip_prefix(root).unwrap()))
             .collect();
         assert!(names.contains(&"a.md".to_string()));
         assert!(names.contains(&"docs/b.markdown".to_string()));
@@ -361,7 +361,7 @@ mod tests {
     fn relative_names(root: &Path, paths: &[PathBuf]) -> Vec<String> {
         let mut names: Vec<String> = paths
             .iter()
-            .map(|path| biscuit_file::to_portable_string(path.strip_prefix(root).unwrap()))
+            .map(|path| biscuit_file::to_forward_slash_string(path.strip_prefix(root).unwrap()))
             .collect();
         names.sort();
         names

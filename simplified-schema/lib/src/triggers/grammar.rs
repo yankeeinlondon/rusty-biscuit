@@ -321,6 +321,24 @@ fn relocate(at: &str, error: SchemaError) -> SchemaError {
     }
 }
 
+/// `error`, raised by the property condition at field `at`, carrying that
+/// field so it can be located: a forbidden constraint keeps its variant with
+/// `at` as its `field`; an unlocated [`SchemaError::TriggerMatch`] and any
+/// other error of the condition's type grammar become a
+/// [`SchemaError::TriggerMatch`] naming `at`.
+fn at_condition(at: &str, error: SchemaError) -> SchemaError {
+    match error {
+        SchemaError::TriggerForbiddenConstraint { property, constraint, .. } => {
+            SchemaError::TriggerForbiddenConstraint { property, constraint, field: at.to_string() }
+        }
+        error @ SchemaError::TriggerMatch { .. } => relocate(at, error),
+        // A `Grammar` error names only the property, never where its
+        // condition sits in a nested list; the field is the one carrier that
+        // survives to the trigger's locators.
+        other => located(at, other.to_string()),
+    }
+}
+
 /// Parses one entry of a condition list. A list entry is never read as an
 /// OR group: alternatives are spelled `group:`.
 fn parse_list_entry(at: &str, item: &YamlValue) -> Result<MatchExpr, SchemaError> {
@@ -378,6 +396,7 @@ fn parse_match_expr(at: &str, value: &YamlValue) -> Result<MatchExpr, SchemaErro
         return Err(SchemaError::TriggerMixedMapping {
             structural: structural_keys.iter().map(|s| s.to_string()).collect(),
             properties: property_keys.iter().map(|s| s.to_string()).collect(),
+            field: at.to_string(),
         });
     }
 
@@ -398,7 +417,7 @@ fn parse_match_expr(at: &str, value: &YamlValue) -> Result<MatchExpr, SchemaErro
     let mut conditions = Vec::with_capacity(property_keys.len());
     for (key, val) in map {
         let k = key.as_str().expect("key string checked above");
-        let atom = parse_property_condition_atom(k, val).map_err(|error| relocate(&format!("{at}.{k}"), error))?;
+        let atom = parse_property_condition_atom(k, val).map_err(|error| at_condition(&format!("{at}.{k}"), error))?;
         conditions.push(MatchExpr::Property {
             name: k.to_string(),
             atom,
@@ -499,6 +518,7 @@ fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<Proper
         return Err(SchemaError::TriggerForbiddenConstraint {
             property: name.to_string(),
             constraint: "`{{ … }}` slot (only a trigger's payload may hold slots)".into(),
+            field: name.to_string(),
         });
     }
     match def {
@@ -639,12 +659,14 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
 }
 
 /// Enforces the match-safe constraint subset and rejects imported types for
-/// one property condition atom.
+/// one property condition atom. A refusal's `field` is `name`; the match
+/// parser replaces it with the condition's place in the trigger.
 pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaError> {
     if matches!(atom.ty, TypeExpr::Imported { .. }) {
         return Err(SchemaError::TriggerForbiddenConstraint {
             property: name.to_string(),
             constraint: "imported type (Name@file)".into(),
+            field: name.to_string(),
         });
     }
     // Trigger matching has no launch phase, so eager's phase metadata is
@@ -659,6 +681,7 @@ pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaE
         return Err(SchemaError::TriggerForbiddenConstraint {
             property: name.to_string(),
             constraint: "eager".into(),
+            field: name.to_string(),
         });
     }
     for constraint in &atom.constraints {
@@ -666,6 +689,7 @@ pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaE
             return Err(SchemaError::TriggerForbiddenConstraint {
                 property: name.to_string(),
                 constraint: constraint.keyword().to_string(),
+                field: name.to_string(),
             });
         }
     }
@@ -674,6 +698,7 @@ pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaE
             return Err(SchemaError::TriggerForbiddenConstraint {
                 property: name.to_string(),
                 constraint: constraint.keyword().to_string(),
+                field: name.to_string(),
             });
         }
     }
@@ -825,8 +850,10 @@ mod tests {
         ] {
             let error = parse_match_conditions(&yaml(text)).expect_err(case);
             match &error {
-                SchemaError::TriggerForbiddenConstraint { property: found, constraint } => {
+                SchemaError::TriggerForbiddenConstraint { property: found, constraint, field } => {
                     assert_eq!(found, property, "{case}");
+                    let expected = if case == "inside a group" { "match.group[0].os".to_string() } else { format!("match.{property}") };
+                    assert_eq!(field, &expected, "{case}: the condition's place in the trigger");
                     assert!(constraint.contains("slot"), "{case}: {constraint}");
                 }
                 other => panic!("{case}: {other:?}"),

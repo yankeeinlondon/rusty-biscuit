@@ -15,10 +15,11 @@
 //!   reference, or the reverse, compares the resolved blocks);
 //! - a removed positive (`file-read` or `shell-commands`) entry;
 //! - an added `!` exclusion;
-//! - `network: allow` becoming `deny`.
+//! - `network` becoming more restrictive (`allow` → `ask` → `deny`).
 //!
 //! Every other difference is a [`WideningReason`]: an added positive entry, a
-//! removed exclusion, `deny` becoming `allow`, a shipped default that grows
+//! removed exclusion, `network` becoming less restrictive (`deny` → `ask` or
+//! `allow`, `ask` → `allow`), a shipped default that grows
 //! or that the trusted code cannot read, and a change to any checker input.
 //! Rewriting a glob or a command template is an added entry (and a removed
 //! one): no containment between two globs or two templates is attempted.
@@ -209,7 +210,7 @@ pub struct ResolvedPolicy {
     /// `shell-commands` rules in canonical form, `!` included.
     #[serde(rename = "shell-commands")]
     pub shell_commands: Vec<String>,
-    /// `allow` or `deny`.
+    /// `allow`, `ask`, or `deny`.
     pub network: &'static str,
 }
 
@@ -232,7 +233,8 @@ pub enum ReasonKind {
     AddedAllow,
     /// A `!` entry the head no longer has.
     RemovedExclusion,
-    /// `network` became `allow`.
+    /// `network` became less restrictive (`deny` → `ask` or `allow`,
+    /// `ask` → `allow`).
     NetworkAllowed,
     /// A changed default schema whose defaults the trusted code cannot read.
     DefaultsNotUnderstood,
@@ -383,8 +385,11 @@ pub fn compare_policies(input: &str, before: &ResolvedPolicy, after: &ResolvedPo
             reasons.push(reason(ReasonKind::RemovedExclusion, format!("`{list}` loses the exclusion `{removed}`")));
         }
     }
-    if before.network == "deny" && after.network == "allow" {
-        reasons.push(reason(ReasonKind::NetworkAllowed, "`network` changes from `deny` to `allow`".to_string()));
+    if network_rank(after.network) > network_rank(before.network) {
+        reasons.push(reason(
+            ReasonKind::NetworkAllowed,
+            format!("`network` changes from `{}` to `{}`", before.network, after.network),
+        ));
     }
     reasons
 }
@@ -512,8 +517,21 @@ fn normalize(block: &ScopePermissions, block_file: Option<String>) -> ResolvedPo
         shell_commands: shell_commands.into_iter().collect(),
         network: match block.network.value {
             NetworkAccess::Allow => "allow",
+            NetworkAccess::Ask => "ask",
             NetworkAccess::Deny => "deny",
         },
+    }
+}
+
+/// How much a resolved `network` setting lets through: `deny` < `ask` <
+/// `allow`. A spelling the trusted code does not know ranks highest, so a
+/// change to it is never proven narrowing.
+fn network_rank(network: &str) -> u8 {
+    match network {
+        "deny" => 0,
+        "ask" => 1,
+        "allow" => 2,
+        _ => 3,
     }
 }
 

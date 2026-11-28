@@ -467,8 +467,7 @@ impl SetterInventory {
     }
 }
 
-#[test]
-fn every_style_setter_family_decides_the_same_in_both_spellings() {
+fn assert_style_setter_parity(second_half: bool) {
     let local = Local::new();
     let inventory = SetterInventory::walk(&local);
     // The built-in style alone declares hundreds of paths; a short walk means
@@ -480,14 +479,31 @@ fn every_style_setter_family_decides_the_same_in_both_spellings() {
     let sampled: BTreeSet<&str> = sample.iter().map(|(_, family)| *family).collect();
     assert_eq!(families, sampled, "every value family is sampled");
 
+    // Both halves cover the complete sample even when the inventory gains a field.
+    let midpoint = sample.len().div_ceil(2);
+    assert!(midpoint <= 64, "split the {} setter samples into more L1 tests", sample.len());
+    let (first, second) = sample.split_at(midpoint);
+    let group = if second_half { second } else { first };
+    assert!(!group.is_empty(), "each half exercises at least one path");
+
     let mut refused = Vec::new();
-    for (setter, family) in &sample {
+    for (setter, family) in group {
         let outcome = local.assert_spellings_agree(setter, &["doc.md".to_string(), setter.clone()]);
         if !outcome.contains("\nvalue {") {
             refused.push(format!("{setter} ({family}): {}", outcome.lines().last().unwrap_or_default()));
         }
     }
     assert!(refused.is_empty(), "each representative must be a value the style accepts:\n{}", refused.join("\n"));
+}
+
+#[test]
+fn style_setter_parity_first_half() {
+    assert_style_setter_parity(false);
+}
+
+#[test]
+fn style_setter_parity_second_half() {
+    assert_style_setter_parity(true);
 }
 
 /// No subcommand name after `--` is a command: each is the input, in both

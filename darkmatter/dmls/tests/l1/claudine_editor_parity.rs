@@ -284,7 +284,7 @@ invalid_fixture_tests! {
     the_cli_rejected_deferred_beside_unknown_parameter_is_rejected_at_the_call => (
         "generated-verb-deferred-beside-unknown-parameter",
         include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
-        [("/start/0/pr_list", ["pr_list: ", "{"], "limit")]
+        [("/start/0/pr_list", ["pr_list: ", "limit"], "limit")]
     );
     the_cli_rejected_deferred_beside_extra_argument_is_rejected_at_the_argument => (
         "generated-verb-deferred-beside-extra-argument",
@@ -324,7 +324,7 @@ invalid_fixture_tests! {
     the_cli_rejected_conditional_root_dictionary_is_rejected_at_the_stack => (
         "conditional-root-dictionary",
         include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/conditional-root-dictionary.md"),
-        [("/start", ["when"], "anyOf")]
+        [("/start", ["then"], "then")]
     );
 }
 

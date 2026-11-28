@@ -216,22 +216,20 @@ where
 /// (it walks the repo with its own glob-matching `WalkBuilder` rather than
 /// through [`walk_scope`], but the exclusion contract must be identical).
 pub(crate) fn entry_passes_filters(entry: &DirEntry) -> bool {
-    if entry.depth() == 0 {
-        return true;
-    }
-    let Some(name) = entry.file_name().to_str() else {
+    entry.depth() == 0 || name_passes_filters(entry.file_name())
+}
+
+/// [`entry_passes_filters`] for an entry below the root, judged by its name
+/// alone: the subtree filter an operation-file miss hands to Darkmatter's
+/// repository basename search.
+pub(crate) fn name_passes_filters(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
         // Non-UTF-8 names are exceedingly rare; pass them through so the
         // caller's extension check can decide. Filtering them here would
         // mask broken filesystems silently.
         return true;
     };
-    if name.starts_with('_') {
-        return false;
-    }
-    if SKIP_DIRS.contains(&name) {
-        return false;
-    }
-    true
+    !name.starts_with('_') && !SKIP_DIRS.contains(&name)
 }
 
 #[cfg(test)]

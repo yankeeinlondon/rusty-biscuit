@@ -336,7 +336,7 @@ fn an_unknown_file_key_is_excluded_with_a_warning() {
     let warnings = inputs.warnings(&prepared);
     assert_eq!(warnings.iter().map(|record| record.code.as_str()).collect::<Vec<_>>(), ["dm.style.unknown_key"]);
     let source = warnings[0].source.as_ref().expect("the style file");
-    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_portable_string(&fixture.root.join("style.yaml")))));
+    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_forward_slash_string(&fixture.root.join("style.yaml")))));
     assert_eq!(source.line, Some(2));
 }
 
@@ -454,7 +454,7 @@ fn a_yaml_value_problem_points_at_the_style_file_and_its_line() {
     let record = first_error(&error);
     assert!(record.code.starts_with("dm.schema.") || record.code.starts_with("dm.style."), "{}", record.code);
     let source = record.source.expect("a located record");
-    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_portable_string(&path))));
+    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_forward_slash_string(&path))));
     assert_eq!(source.line, Some(3));
 }
 
@@ -465,7 +465,7 @@ fn a_malformed_yaml_file_is_located() {
     let error = fails_with(fixture.prepare(&["style.yaml"], &[]), "dm.data.malformed");
     let record = first_error(&error);
     let source = record.source.clone().expect("located");
-    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_portable_string(&path))));
+    assert_eq!(source.file.as_deref(), Some(Path::new(&biscuit_file::to_forward_slash_string(&path))));
     assert!(source.line.is_some(), "{record:?}");
 }
 

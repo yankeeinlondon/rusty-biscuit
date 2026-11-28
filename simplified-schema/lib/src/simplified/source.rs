@@ -8,11 +8,10 @@
 //! and folded block scalars; block sequences, including one aligned with its
 //! parent key, and flow sequences; implicit scalar-key block and flow
 //! mappings; explicit scalar-key block mapping pairs in mapping roots or
-//! compact sequence items; and the mapping-value anchors and scalar aliases
-//! used by that corpus. This is not a general YAML concrete-syntax tree. Other
-//! YAML presentations accepted by `serde_yaml_ng` (tags, quoted scalars
-//! continued across lines) are outside the v1 source-map contract and return a
-//! projection error even when semantic parsing succeeds.
+//! compact sequence items; and node properties and aliases on mapping values
+//! and sequence items. Quoted scalars and flow collections can cross lines.
+//! Comments are outside scalar and key spans. The locator pairs these authored
+//! nodes with the parsed value to verify the source map.
 
 use std::{collections::BTreeMap, ops::Range};
 
@@ -614,6 +613,36 @@ pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefin
     Some(locate_keyed_failure(failure, payload, source, payload_key, 0))
 }
 
+/// Finds the definition failure of the declaration under the top-level `key`
+/// (`$schema`, or a `types` table) of any YAML mapping document `source`,
+/// such as a schema trigger or a namespace file, and locates it in `source`.
+///
+/// The declaration is parsed by the same shared parser every carrier uses,
+/// so the failure is the semantic error that parser reports first; its path
+/// starts at `key` and keeps union-arm indices. Ranges are byte offsets into
+/// `source` (a leading byte-order mark included).
+///
+/// ## Returns
+///
+/// `None` when `source` is not one YAML mapping, has no non-null `key`, or
+/// its declaration parses, and for a failure on no property (the
+/// declaration's own shape, which its envelope reports).
+///
+/// ## Notes
+///
+/// Passive: reads no files, resolves no imports, evaluates nothing.
+pub fn locate_carrier_definition_failure(source: &str, key: &str) -> Option<LocatedDefinitionFailure> {
+    let offset = if source.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+    let body = &source[offset..];
+    let document = crate::numeric::load_admitted_yaml(body).ok()?;
+    let payload = document.as_mapping()?.get(key).filter(|payload| !payload.is_null())?;
+    let failure = parse_schema_declaration_located_as(payload, MappingMode::of_carrier(key)).err()?;
+    if !failure.path.segments().iter().any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_))) {
+        return None;
+    }
+    Some(locate_keyed_failure(failure, payload, body, key, offset))
+}
+
 /// Parses `value`, the entry `key` of the YAML mapping authored as
 /// `mapping_source`, as a schema declaration. A failure is located in
 /// `mapping_source` with `source_offset` applied, its path starting at `key`.
@@ -742,8 +771,9 @@ fn quote_unquoted_slot(
 /// value the semantic parser read, and prefixes its path with `prefix`.
 ///
 /// Every step along the path must agree structurally with the parsed value,
-/// and a token is projected only through a scalar whose decoded text equals
-/// the string the parser rejected; anything less leaves the range `None`
+/// and a scalar token is projected only through text matching the parsed
+/// string. An alias token locates a failure anywhere in the value it supplies.
+/// For a scalar whose text does not match, the range is `None`
 /// rather than pointing at another node.
 fn project_definition_failure(
     failure: DefinitionFailure,
@@ -768,6 +798,12 @@ fn project_definition_failure(
                         }),
                     };
                     let span = project_token(node, &entry.span, source_offset)?;
+                    if rejected.is_some_and(|(node, _)| {
+                        matches!(node.kind, LocatedKind::Alias)
+                            && span == offset_span(&node.span, source_offset)
+                    }) {
+                        return None;
+                    }
                     Some(LocatedRelated { message: entry.message.clone(), span })
                 })
                 .collect();
@@ -784,15 +820,17 @@ fn project_definition_failure(
     }
 }
 
-/// `span`, a range in the decoded text of the string scalar `node`, in
-/// authored bytes; `None` unless `node` is that scalar and the range
-/// projects to a non-empty one.
+/// The authored scalar range corresponding to the decoded token, or the
+/// whole alias token when the decoded value is supplied elsewhere.
 fn project_token(
     node: Option<(&LocatedValue, &YamlValue)>,
     span: &Range<usize>,
     source_offset: usize,
 ) -> Option<Range<usize>> {
     match node? {
+        (LocatedValue { kind: LocatedKind::Alias, span }, _) => {
+            Some(offset_span(span, source_offset))
+        }
         (
             LocatedValue {
                 kind: LocatedKind::Scalar(scalar),
@@ -819,7 +857,8 @@ fn sibling_arm(path: &SchemaSourcePath, arm: usize) -> Option<SchemaSourcePath> 
 }
 
 /// The located node and parsed value `path` addresses, following both trees
-/// in lockstep. `None` as soon as they disagree in shape, size, or key.
+/// in lockstep. An authored alias is the deepest location in its expansion.
+/// Returns `None` as soon as the trees disagree in shape, size, or key.
 fn follow_path<'a>(
     mut located: &'a LocatedValue,
     mut value: &'a YamlValue,
@@ -827,6 +866,7 @@ fn follow_path<'a>(
 ) -> Option<(&'a LocatedValue, &'a YamlValue)> {
     for segment in path.segments() {
         match (segment, &located.kind, value) {
+            (_, LocatedKind::Alias, _) => return Some((located, value)),
             (
                 SchemaSourcePathSegment::Property(key),
                 LocatedKind::Mapping(pairs),
@@ -999,15 +1039,11 @@ fn project_located_schema_suggestions(
             }
             Ok(())
         }
-        (schema, LocatedKind::Scalar(scalar)) if scalar.decoded().starts_with('*') => {
-            let suggests = |shape: &SchemaShape| {
-                shape.properties.values().any(property_has_suggestions)
-                    || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def))
-            };
+        (schema, LocatedKind::Alias) => {
             let has_suggestions = match schema {
-                SchemaRoot::Single(shape) => suggests(shape),
+                SchemaRoot::Single(shape) => shape_has_suggestions(shape),
                 SchemaRoot::Union(arms) => arms.iter().any(|arm| match arm {
-                    SchemaArm::Inline(shape) => suggests(shape),
+                    SchemaArm::Inline(shape) => shape_has_suggestions(shape),
                     SchemaArm::FileRef(_) => false,
                 }),
             };
@@ -1017,16 +1053,24 @@ fn project_located_schema_suggestions(
     }
 }
 
+fn shape_has_suggestions(shape: &SchemaShape) -> bool {
+    shape.properties.values().any(property_has_suggestions)
+        || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def))
+}
+
 fn project_located_shape_suggestions(
     shape: &mut SchemaShape,
     located: &LocatedValue,
     source_offset: usize,
 ) -> Result<(), SchemaError> {
+    if matches!(located.kind, LocatedKind::Alias) && !shape_has_suggestions(shape) {
+        return Ok(());
+    }
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
     };
     for pair in pairs {
-        if pair.key == "$constraints" || is_extends_directive(shape, &pair.key) {
+        if pair.key == "$constraints" || is_extends_directive(shape, &pair.key) || is_key_metadata(shape, &pair.key) {
             continue;
         }
         let definition = match shape.properties.get_mut(&pair.key) {
@@ -1051,9 +1095,7 @@ fn project_located_property_suggestions(
     located: &LocatedValue,
     source_offset: usize,
 ) -> Result<(), SchemaError> {
-    if let LocatedKind::Scalar(scalar) = &located.kind
-        && scalar.decoded().starts_with('*')
-    {
+    if matches!(located.kind, LocatedKind::Alias) {
         return if property_has_suggestions(definition) {
             Err(projection_error())
         } else {
@@ -1083,6 +1125,9 @@ fn project_located_atom_suggestions(
     located: &LocatedValue,
     source_offset: usize,
 ) -> Result<(), SchemaError> {
+    if matches!(located.kind, LocatedKind::Alias) && !atom_has_suggestions(atom) {
+        return Ok(());
+    }
     match (&mut atom.ty, &located.kind) {
         (TypeExpr::InlineObject(shape), LocatedKind::Mapping(_)) => {
             project_located_shape_suggestions(shape, located, source_offset)
@@ -1185,12 +1230,9 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
         .map(|located| public_node(&located, source_offset))
 }
 
-/// [`locate_schema_value`] for a document's frontmatter, which also follows a
-/// tag instead of giving up, follows a flow collection past its comments, and
-/// does not require every line to belong to the value.
-///
-/// Schema documents keep [`locate_schema_value`]'s strict grammar, which
-/// rejects those presentations.
+/// Locates a value in frontmatter, where incomplete source in an editor may
+/// leave lines outside the located node. Standalone schemas require every
+/// non-comment line to belong to the node.
 pub fn locate_frontmatter_value(
     yaml_source: &str,
     source_offset: usize,
@@ -1202,7 +1244,7 @@ pub fn locate_frontmatter_value(
 
 fn public_node(located: &LocatedValue, offset: usize) -> SchemaValueNode {
     let kind = match &located.kind {
-        LocatedKind::Scalar(_) => SchemaValueKind::Scalar,
+        LocatedKind::Scalar(_) | LocatedKind::Alias => SchemaValueKind::Scalar,
         LocatedKind::Mapping(pairs) => SchemaValueKind::Mapping(
             pairs
                 .iter()
@@ -1231,6 +1273,7 @@ struct LocatedValue {
 
 #[derive(Debug, Clone)]
 enum LocatedKind {
+    Alias,
     Scalar(DecodedScalar),
     Mapping(Vec<LocatedPair>),
     Sequence(Vec<LocatedValue>),
@@ -1263,8 +1306,7 @@ enum LocatorGrammar {
     /// belong to the located node, so a presentation the locator does not
     /// model fails instead of leaving lines unread.
     Strict,
-    /// Frontmatter lookup, which also follows tags, compact sequence items
-    /// wider than `- `, and comments beside a node.
+    /// Frontmatter lookup, which also follows compact sequence items wider than `- `.
     Tolerant,
 }
 
@@ -1296,8 +1338,9 @@ fn locate_yaml_value_with(
 
 fn source_lines(source: &str) -> Vec<SourceLine> {
     let mut lines = Vec::new();
-    let mut start = 0;
-    for raw in source.split_inclusive('\n') {
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let mut start = source.len() - body.len();
+    for raw in body.split_inclusive('\n') {
         let mut end = start + raw.len();
         if raw.ends_with('\n') {
             end -= 1;
@@ -1308,9 +1351,14 @@ fn source_lines(source: &str) -> Vec<SourceLine> {
         let line = &source[start..end];
         let indent = line.bytes().take_while(|byte| byte.is_ascii_whitespace()).count();
         let content_start = start + indent;
-        if content_start < end
-            && !source[content_start..end].starts_with('#')
-            && !(indent == 0 && matches!(&source[content_start..end], "---" | "..."))
+        let content = &source[content_start..end];
+        let marker = indent == 0
+            && content.strip_prefix("---").or_else(|| content.strip_prefix("..."))
+                .is_some_and(|tail| {
+                    let content = tail.trim_start_matches([' ', '\t']);
+                    content.is_empty() || tail.len() > content.len() && content.starts_with('#')
+                });
+        if !content.is_empty() && !content.starts_with('#') && !marker
         {
             lines.push(SourceLine {
                 end,
@@ -1319,22 +1367,6 @@ fn source_lines(source: &str) -> Vec<SourceLine> {
             });
         }
         start += raw.len();
-    }
-    if start < source.len() {
-        let end = source.len();
-        let line = &source[start..end];
-        let indent = line.bytes().take_while(|byte| byte.is_ascii_whitespace()).count();
-        let content_start = start + indent;
-        if content_start < end
-            && !source[content_start..end].starts_with('#')
-            && !(indent == 0 && matches!(&source[content_start..end], "---" | "..."))
-        {
-            lines.push(SourceLine {
-                end,
-                indent,
-                content_start,
-            });
-        }
     }
     lines
 }
@@ -1372,7 +1404,7 @@ impl BlockLocator<'_> {
                 // line as that line alone.
                 locate_inline(self.source, range, LocatorGrammar::Tolerant)
             } else {
-                self.inline_value(range, indent)
+                self.value(range, indent)
             }
         }
     }
@@ -1415,8 +1447,12 @@ impl BlockLocator<'_> {
                 break;
             };
             self.next += 1;
-            let item_start = line.content_start + relative;
-            if item_start < line.end && !(self.tolerant && self.source[item_start..line.end].starts_with('#')) {
+            let item_range = line.content_start + relative..line.end;
+            let properties = node_properties_end(self.source, &item_range);
+            let item_start = properties.map_or(item_range.start, |end| {
+                past_leading_comments(self.source, end..item_range.end).start
+            });
+            let mut item = if item_start < line.end && !self.source[item_start..line.end].starts_with('#') {
                 let item_content = &self.source[item_start..line.end];
                 if explicit_indicator_content(item_content, '?').is_some()
                     || mapping_separator(item_content, false).is_some()
@@ -1453,9 +1489,9 @@ impl BlockLocator<'_> {
                             break;
                         }
                     }
-                    items.push(located_mapping(pairs)?);
+                    located_mapping(pairs)?
                 } else {
-                    items.push(self.inline_value(item_start..line.end, indent)?);
+                    self.inline_value(item_start..line.end, indent)?
                 }
             } else if let Some(child_indent) = self
                 .lines
@@ -1463,16 +1499,18 @@ impl BlockLocator<'_> {
                 .filter(|next| next.indent > indent)
                 .map(|next| next.indent)
             {
-                items.push(self.node(child_indent)?);
+                self.node(child_indent)?
             } else {
-                // An empty item is null, which a schema union may write as
-                // its `null` arm.
-                let at = item_start.min(line.end);
-                items.push(LocatedValue {
-                    span: at..at,
-                    kind: LocatedKind::Scalar(DecodedScalar::empty(at)),
-                });
+                // An empty item is the authored form of the null arm.
+                LocatedValue {
+                    span: item_start..item_start,
+                    kind: LocatedKind::Scalar(DecodedScalar::empty(item_start)),
+                }
+            };
+            if properties.is_some() {
+                item.span.start = item_range.start;
             }
+            items.push(item);
         }
         let end = items.last().map(|item| item.span.end).unwrap_or(start);
         Ok(LocatedValue {
@@ -1505,7 +1543,7 @@ impl BlockLocator<'_> {
         let key_content = &self.source[key_line.clone()];
         let key_relative = explicit_indicator_content(key_content, '?')
             .ok_or_else(projection_error)?;
-        let key_range = trim_range(self.source, key_line.start + key_relative..key_line.end);
+        let key_range = node_without_comments(self.source, key_line.start + key_relative..key_line.end);
         let key = decoded_text(self.source, &key_range)?;
 
         let value_line = self.lines.get(self.next).ok_or_else(projection_error)?.clone();
@@ -1534,21 +1572,23 @@ impl BlockLocator<'_> {
         indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
         // A comment after the key leaves the value to the following lines.
-        let is_comment = self.tolerant && self.source[value_range.clone()].starts_with('#');
+        let is_comment = self.source[value_range.clone()].starts_with('#');
         if value_range.start < value_range.end && !is_comment {
             if let Some(after_properties) =
-                node_properties_end(self.source, &value_range, self.tolerant)
+                node_properties_end(self.source, &value_range)
             {
                 let remainder = trim_range(self.source, after_properties..value_range.end);
-                let mut value = if remainder.start < remainder.end {
+                let mut value = if remainder.start < remainder.end
+                    && !self.source[remainder.clone()].starts_with('#')
+                {
                     self.inline_value(remainder, indent)?
                 } else if let Some(node) = self.block_value(indent)? {
                     node
-                } else if self.tolerant {
-                    // A tagged empty value (`key: !!str`) has no node to descend into.
-                    locate_inline(self.source, value_range.clone(), LocatorGrammar::Tolerant)?
                 } else {
-                    return Err(projection_error());
+                    LocatedValue {
+                        span: after_properties..after_properties,
+                        kind: LocatedKind::Scalar(DecodedScalar::empty(after_properties)),
+                    }
                 };
                 value.span.start = value_range.start;
                 Ok(value)
@@ -1603,20 +1643,14 @@ impl BlockLocator<'_> {
         if raw.starts_with(['[', '{']) {
             return self.flow_collection(range.start);
         }
+        if raw.starts_with('*') {
+            return locate_alias(self.source, range);
+        }
         let continues = self
             .lines
             .get(self.next)
             .is_some_and(|line| line.indent > parent_indent);
-        let multi_line = if self.tolerant {
-            is_block_scalar_header(raw) || raw.starts_with(['\'', '"']) || continues
-        } else {
-            // A tagged, anchored, or aliased first line stays single-line
-            // here, so its continuation lines go unconsumed and the strict
-            // grammar rejects the document.
-            is_block_scalar_header(raw)
-                || raw.starts_with(['\'', '"'])
-                || (continues && !raw.starts_with(['!', '&', '*']))
-        };
+        let multi_line = is_block_scalar_header(raw) || raw.starts_with(['\'', '"']) || continues;
         if !multi_line {
             let grammar = if self.tolerant { LocatorGrammar::Tolerant } else { LocatorGrammar::Strict };
             return locate_inline(self.source, range, grammar);
@@ -1659,30 +1693,46 @@ fn explicit_indicator_content(source: &str, indicator: char) -> Option<usize> {
     (spaces > 0).then_some(indicator.len_utf8() + spaces)
 }
 
-/// Where the node properties opening `range` end: an anchor and, with `tags`
-/// set, a tag, in either order. `None` when the value has none.
-fn node_properties_end(source: &str, range: &Range<usize>, tags: bool) -> Option<usize> {
-    let mut end = None;
-    let mut pos = range.start;
-    let (mut tag, mut anchor) = (false, false);
-    loop {
-        let rest = &source[pos..range.end];
-        let token = rest
-            .bytes()
-            .take_while(|byte| !byte.is_ascii_whitespace())
-            .count();
-        match rest.as_bytes().first() {
-            Some(b'&') if !anchor && token > 1 => anchor = true,
-            Some(b'!') if tags && !tag => tag = true,
-            _ => return end,
+/// Libyaml anchor and alias names use ASCII letters, digits, underscores,
+/// and hyphens.
+fn anchor_name_end(source: &str, range: &Range<usize>) -> Option<usize> {
+    let start = range.start + 1;
+    let len = source[start..range.end]
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        .count();
+    (len > 0).then_some(start + len)
+}
+
+fn locate_alias(source: &str, range: Range<usize>) -> Result<LocatedValue, SchemaError> {
+    let end = anchor_name_end(source, &range).ok_or_else(projection_error)?;
+    Ok(LocatedValue { span: range.start..end, kind: LocatedKind::Alias })
+}
+
+/// The end of one leading YAML anchor or tag.
+fn node_property_end(source: &str, range: &Range<usize>) -> Option<usize> {
+    let raw = &source[range.clone()];
+    match raw.as_bytes().first()? {
+        b'&' => anchor_name_end(source, range),
+        b'!' if raw.starts_with("!<") => raw.find('>').map(|end| range.start + end + 1),
+        b'!' => {
+            let len = raw.bytes().take_while(|byte| !byte.is_ascii_whitespace() && *byte != b',').count();
+            Some(range.start + len)
         }
-        end = Some(pos + token);
-        pos += token;
-        pos += source[pos..range.end]
-            .bytes()
-            .take_while(u8::is_ascii_whitespace)
-            .count();
+        _ => None,
     }
+}
+
+/// The end of the leading properties, including when a flow comment lies
+/// between them.
+fn node_properties_end(source: &str, range: &Range<usize>) -> Option<usize> {
+    let mut remaining = range.clone();
+    let mut end = None;
+    while let Some(at) = node_property_end(source, &remaining) {
+        end = Some(at);
+        remaining = past_leading_comments(source, at..range.end);
+    }
+    end
 }
 
 /// Checks that a strictly located tree describes `value`, the YAML parser's
@@ -1695,7 +1745,7 @@ fn node_properties_end(source: &str, range: &Range<usize>, tags: bool) -> Option
 /// scalar (number, boolean, null) carries no expression to project.
 fn verify_located(located: &LocatedValue, value: &YamlValue) -> Result<(), SchemaError> {
     let agrees = match (&located.kind, value) {
-        (LocatedKind::Scalar(scalar), _) if scalar.decoded().starts_with('*') => true,
+        (LocatedKind::Alias, _) => true,
         (LocatedKind::Scalar(scalar), YamlValue::String(text)) => scalar.decoded() == text,
         (LocatedKind::Scalar(_), YamlValue::Null | YamlValue::Bool(_) | YamlValue::Number(_)) => {
             true
@@ -1736,38 +1786,44 @@ fn locate_inline(
     range: Range<usize>,
     grammar: LocatorGrammar,
 ) -> Result<LocatedValue, SchemaError> {
+    let range = past_leading_comments(source, range);
+    if let Some(end) = node_properties_end(source, &range) {
+        let remainder = past_leading_comments(source, end..range.end);
+        let mut node = locate_inline(source, remainder, grammar)?;
+        node.span.start = range.start;
+        return Ok(node);
+    }
     let range = match grammar {
         LocatorGrammar::Strict => trim_range(source, range),
         LocatorGrammar::Tolerant => node_without_comments(source, range),
     };
     let raw = &source[range.clone()];
+    if raw.starts_with('*') {
+        return locate_alias(source, range);
+    }
     if is_block_scalar_header(raw) {
         return Err(projection_error());
     }
     if raw.starts_with('[') {
-        let end = flow_collection_end(source, range.start)
-            .filter(|end| *end + 1 == range.end)
-            .ok_or_else(projection_error)?;
+        let end = inline_flow_end(source, &range)?;
         // An empty flow collection (`[]`) splits into one empty item; it has
         // no child node, and is itself the smallest authored node there is.
         let items = split_flow_entries(source, range.start + 1..end)
             .into_iter()
-            .map(|item| flow_entry(source, item, grammar))
+            .map(|item| trim_range(source, past_leading_comments(source, item)))
             .filter(|item| item.start < item.end)
             .map(|item| locate_inline(source, item, grammar))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(LocatedValue {
-            span: range,
+            span: range.start..end + 1,
             kind: LocatedKind::Sequence(items),
         });
     }
     if raw.starts_with('{') {
-        let end = flow_collection_end(source, range.start)
-            .filter(|end| *end + 1 == range.end)
-            .ok_or_else(projection_error)?;
+        let end = inline_flow_end(source, &range)?;
         let mut pairs = Vec::new();
         for pair in split_flow_entries(source, range.start + 1..end) {
-            let pair = flow_entry(source, pair, grammar);
+            let pair = trim_range(source, past_leading_comments(source, pair));
             if pair.start == pair.end {
                 continue;
             }
@@ -1785,7 +1841,7 @@ fn locate_inline(
             });
         }
         return Ok(LocatedValue {
-            span: range,
+            span: range.start..end + 1,
             kind: LocatedKind::Mapping(pairs),
         });
     }
@@ -1802,28 +1858,22 @@ fn locate_inline(
     })
 }
 
+fn inline_flow_end(source: &str, range: &Range<usize>) -> Result<usize, SchemaError> {
+    flow_collection_end(source, range.start)
+        .filter(|end| {
+            *end < range.end && past_leading_comments(source, *end + 1..range.end).start == range.end
+        })
+        .ok_or_else(projection_error)
+}
+
 /// The scalar authored as the whole of `range`, an entry of a flow
 /// collection that crosses a line break, folded the way YAML folds a flow
-/// scalar. `None` for node properties or an alias, which the single-line
-/// form does not model either, and when the decoded scalar does not end at
-/// `range.end`.
+/// scalar. Returns no range if content besides trailing comments remains.
 fn flow_scalar_across_lines(source: &str, range: Range<usize>) -> Option<(DecodedScalar, usize)> {
-    if source[range.clone()].starts_with(['!', '&', '*']) {
-        return None;
-    }
     // Bounded at the entry's end, a plain scalar stops at the flow indicator
     // after it. Parent column `0` only rejects a continuation at column zero.
     let (scalar, end) = yaml_scalar::decode_scalar_node(&source[..range.end], range.start, 0)?;
-    (end == range.end).then_some((scalar, end))
-}
-
-/// One entry of a flow collection, past the comments the tolerant grammar reads
-/// before it. An entry holding only comments is empty.
-fn flow_entry(source: &str, entry: Range<usize>, grammar: LocatorGrammar) -> Range<usize> {
-    match grammar {
-        LocatorGrammar::Strict => trim_range(source, entry),
-        LocatorGrammar::Tolerant => trim_range(source, past_leading_comments(source, entry)),
-    }
+    (past_leading_comments(source, end..range.end).start == range.end).then_some((scalar, end))
 }
 
 fn past_leading_comments(source: &str, range: Range<usize>) -> Range<usize> {
@@ -1851,8 +1901,7 @@ fn node_without_comments(source: &str, range: Range<usize>) -> Range<usize> {
     let end = match bytes[range.clone()].first() {
         Some(b'[' | b'{') => flow_collection_end(source, range.start).map(|end| end + 1),
         Some(b'\'' | b'"') => quoted_flow_scalar_end(bytes, range.start, range.end),
-        _ => (range.start..range.end)
-            .find(|index| bytes[*index] == b'#' && *index > range.start && bytes[*index - 1].is_ascii_whitespace()),
+        _ => yaml_scalar::plain_comment_start(&source[range.clone()]).map(|offset| range.start + offset),
     };
     trim_range(source, range.start..end.map_or(range.end, |end| end.min(range.end)))
 }
@@ -1942,8 +1991,8 @@ pub(super) fn scan_flow_yaml(
 ///
 /// A quote opens a quoted scalar only where a scalar begins: at the start of
 /// `range`, or after `[`, `{`, `,`, or a mapping value indicator, with
-/// optional whitespace between. Scanning stops at an unterminated one. A `#`
-/// after whitespace starts a comment that runs to the end of its line.
+/// optional whitespace or node properties before the opening quote. Scanning
+/// stops at an unterminated one. A `#` after whitespace starts a comment that runs to the end of its line.
 ///
 /// A `:` is a mapping value indicator when whitespace or the end of `range`
 /// follows it, and in flow context also when a flow indicator follows it or
@@ -1966,6 +2015,13 @@ fn scan_raw_yaml(
     let mut index = range.start;
     while index < range.end {
         let byte = bytes[index];
+        if scalar_start && matches!(byte, b'&' | b'!')
+            && let Some(end) = node_property_end(source, &(index..range.end))
+        {
+            index = end;
+            after_blank = false;
+            continue;
+        }
         if scalar_start && matches!(byte, b'\'' | b'"') {
             let Some(end) = quoted_flow_scalar_end(bytes, index, range.end) else {
                 return;
@@ -2159,7 +2215,7 @@ fn project_schema_source(
             }
             Ok(())
         }
-        (_, LocatedKind::Scalar(scalar)) if scalar.decoded().starts_with('*') => Ok(()),
+        (_, LocatedKind::Alias) => Ok(()),
         _ => Err(projection_error()),
     }
 }
@@ -2171,6 +2227,9 @@ fn project_shape_source(
     source_offset: usize,
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
+    if matches!(located.kind, LocatedKind::Alias) {
+        return Ok(());
+    }
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
     };
@@ -2196,6 +2255,11 @@ fn project_shape_source(
             project_extends_source(extends, &pair.value, &property_path, source_offset, source_map)?;
             continue;
         }
+        // A removed key and the advice opt-in have no type to locate inside;
+        // the key span recorded above is their whole source.
+        if is_key_metadata(shape, &pair.key) {
+            continue;
+        }
         let definition = shape.properties.get(&pair.key).or_else(|| {
             super::PatternKey::parse(&pair.key).ok().and_then(|key| {
                 shape
@@ -2217,6 +2281,12 @@ fn project_shape_source(
     Ok(())
 }
 
+/// Whether `key` of `shape`'s mapping is a `removed(…)` declaration or the
+/// `$advise-unknown-keys` opt-in rather than a typed member.
+fn is_key_metadata(shape: &SchemaShape, key: &str) -> bool {
+    shape.removed().contains_key(key) || (key == super::ADVISE_UNKNOWN_KEYS && shape.advise_unknown_keys().is_some())
+}
+
 /// Whether `key` of `shape`'s mapping is its `$extends` directive rather
 /// than a member (a `types` table keeps `$extends` as a type name).
 fn is_extends_directive(shape: &SchemaShape, key: &str) -> bool {
@@ -2235,8 +2305,8 @@ fn project_extends_source(
 ) -> Result<(), SchemaError> {
     source_map.insert(path, SchemaSpanKind::Definition, offset_span(&located.span, source_offset));
     match (extends, &located.kind) {
-        (Extends::Scalar(_), LocatedKind::Scalar(scalar)) => {
-            project_operand_scalar(scalar, &located.span, path, source_offset, source_map)
+        (Extends::Scalar(_), _) | (_, LocatedKind::Alias) => {
+            project_operand_node(located, path, source_offset, source_map)
         }
         (Extends::Sequence(operands), LocatedKind::Sequence(items)) if operands.len() == items.len() => {
             for (index, item) in items.iter().enumerate() {
@@ -2244,10 +2314,7 @@ fn project_extends_source(
                 let span = offset_span(&item.span, source_offset);
                 source_map.insert(&item_path, SchemaSpanKind::UnionArm, span.clone());
                 source_map.insert(&item_path, SchemaSpanKind::Definition, span);
-                let LocatedKind::Scalar(scalar) = &item.kind else {
-                    return Err(projection_error());
-                };
-                project_operand_scalar(scalar, &item.span, &item_path, source_offset, source_map)?;
+                project_operand_node(item, &item_path, source_offset, source_map)?;
             }
             Ok(())
         }
@@ -2255,20 +2322,23 @@ fn project_extends_source(
     }
 }
 
-/// Records the operand written as the whole of `scalar`. An alias names its
-/// anchor's text, not this node's, so only its own span is the operand.
-fn project_operand_scalar(
-    scalar: &DecodedScalar,
-    span: &Range<usize>,
+/// An alias keeps the range of its own operand token.
+fn project_operand_node(
+    located: &LocatedValue,
     path: &SchemaSourcePath,
     source_offset: usize,
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
-    if scalar.decoded().starts_with('*') {
-        source_map.insert(path, SchemaSpanKind::CompositionOperand, offset_span(span, source_offset));
-        return Ok(());
+    match &located.kind {
+        LocatedKind::Alias => {
+            source_map.insert(path, SchemaSpanKind::CompositionOperand, offset_span(&located.span, source_offset));
+            Ok(())
+        }
+        LocatedKind::Scalar(scalar) => {
+            project_operand_range(scalar, path, 0..scalar.decoded().len(), source_offset, source_map)
+        }
+        _ => Err(projection_error()),
     }
-    project_operand_range(scalar, path, 0..scalar.decoded().len(), source_offset, source_map)
 }
 
 /// Records the composition operand written in `range` of `scalar`: the whole
@@ -2299,6 +2369,10 @@ fn project_mapping_constraints_source(
     source_offset: usize,
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
+    if matches!(located.kind, LocatedKind::Alias) {
+        source_map.insert(path, SchemaSpanKind::Definition, offset_span(&located.span, source_offset));
+        return Ok(());
+    }
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
     };
@@ -2342,9 +2416,7 @@ fn project_property_source(
         SchemaSpanKind::Definition,
         offset_span(&located.span, source_offset),
     );
-    if let LocatedKind::Scalar(scalar) = &located.kind
-        && scalar.decoded().starts_with('*')
-    {
+    if matches!(located.kind, LocatedKind::Alias) {
         source_map.insert(
             path,
             SchemaSpanKind::Atom,
@@ -2388,7 +2460,7 @@ fn record_atom_span(
 ) -> Result<(), SchemaError> {
     match &located.kind {
         LocatedKind::Scalar(_) => Ok(()),
-        LocatedKind::Mapping(_) | LocatedKind::Sequence(_) => {
+        LocatedKind::Alias | LocatedKind::Mapping(_) | LocatedKind::Sequence(_) => {
             source_map.insert(
                 path,
                 SchemaSpanKind::Atom,
@@ -2407,6 +2479,7 @@ fn project_atom_source(
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
     match (&atom.ty, &located.kind) {
+        (_, LocatedKind::Alias) => Ok(()),
         (TypeExpr::InlineObject(shape), LocatedKind::Mapping(_)) =>
             project_shape_source(shape, located, path, source_offset, source_map),
         (TypeExpr::InlineObject(shape), LocatedKind::Scalar(scalar)) => {
@@ -2442,12 +2515,13 @@ fn record_scalar_content(
     source_offset: usize,
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
-    let LocatedKind::Scalar(scalar) = &located.kind else {
-        return Err(projection_error());
+    let span = match &located.kind {
+        LocatedKind::Alias => located.span.clone(),
+        LocatedKind::Scalar(scalar) => scalar
+            .project(0..scalar.decoded().len())
+            .ok_or_else(projection_error)?,
+        _ => return Err(projection_error()),
     };
-    let span = scalar
-        .project(0..scalar.decoded().len())
-        .ok_or_else(projection_error)?;
     source_map.insert(path, kind, offset_span(&span, source_offset));
     Ok(())
 }
@@ -2614,9 +2688,7 @@ fn project_inline_shape_range(
 
 /// Records the spans of the definition written in `range` of `scalar`: one
 /// type expression, or a `|` union whose options are recorded as union arms.
-/// A union whose written options do not line up with its parsed ones (a
-/// parenthesized group joins its options to the union) records only its
-/// whole span.
+/// The grammar locates flattened options inside parenthesized groups.
 fn scan_definition_range(
     definition: &PropertyDef,
     scalar: &DecodedScalar,
@@ -2632,7 +2704,12 @@ fn scan_definition_range(
         }
         PropertyDef::Union(atoms) => atoms,
     };
-    let arms = split_top_level(source, range.clone(), ExpressionContext::Expression, b'|');
+    let mut arms = split_top_level(source, range.clone(), ExpressionContext::Expression, b'|');
+    if arms.len() != atoms.len()
+        && let Some(flattened) = grammar::definition_arm_spans(&source[range.clone()])
+    {
+        arms = flattened.into_iter().map(|arm| arm.start + range.start..arm.end + range.start).collect();
+    }
     if arms.len() != atoms.len() {
         return insert_projected(
             scalar,

@@ -60,11 +60,11 @@ pub fn check_provider(
     slug: &str,
     context: &FileResolutionContext,
 ) -> Result<SteeringValidation, GenError> {
-    let path = area.join(format!("docs/research/{TOPIC}/{slug}.md"));
+    let path = area.join(format!("docs/research/providers/{TOPIC}/{slug}.md"));
     let document = inputs::load_validated_frontmatter(&path, context)?;
     let mut result = evaluate(slug, &document);
     let execution_path = area.join(format!(
-        "docs/research/non-interactive-sessions/{slug}.md"
+        "docs/research/providers/non-interactive-sessions/{slug}.md"
     ));
     if execution_path.is_file() {
         let execution = inputs::load_validated_frontmatter(&execution_path, context)?;

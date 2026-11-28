@@ -321,6 +321,16 @@ pub(crate) fn alias_canonical(name: &str) -> Option<&'static str> {
     bindings().find(|binding| binding.aliases.contains(&name)).map(|binding| binding.canonical)
 }
 
+/// The built-in canonical name a lowercased `name` reserves: its own, when
+/// it is a canonical name, or the one it is an alias of. Reads only the
+/// static binding tables, so an authored catalog is checked without
+/// building the registry (which loads the built-in catalog).
+pub(crate) fn reserved_builtin_name(name: &str) -> Option<&'static str> {
+    bindings()
+        .find(|binding| binding.canonical == name || binding.aliases.contains(&name))
+        .map(|binding| binding.canonical)
+}
+
 /// The aliases registered for `canonical`; empty for an unregistered name.
 pub(crate) fn registered_aliases(canonical: &str) -> &'static [&'static str] {
     bindings().find(|binding| binding.canonical == canonical).map_or(&[], |binding| binding.aliases)
@@ -893,11 +903,6 @@ pub(crate) fn input_reading_functions() -> Vec<&'static str> {
     bindings().filter(|binding| binding.reads.is_some()).map(|binding| binding.canonical).collect()
 }
 
-/// Whether the lowercased `name` is a built-in's canonical name or alias.
-pub(crate) fn is_builtin_name(name: &str) -> bool {
-    find_binding(name).is_some()
-}
-
 /// Runs `inspect` on the registration a call to `name` binds against, for
 /// passive design-time checks, resolved as dispatch resolves it: a thread's
 /// test function, then host functions ([`super::host`]: the thread's entered
@@ -1006,6 +1011,9 @@ pub(crate) fn call_function(
         return Some(call_host(&entry, &name, args));
     }
     let entry = find_binding(&name)?;
+    if let Some(reason) = passive_refusal(entry.binding.slot_class, entry.binding.canonical, ctx) {
+        return Some(Err(ExpressionError::Unavailable(Box::new(reason))));
+    }
     let answer = call_entry(entry, &name, args, ctx);
     // A schema slot's cached resolution must be re-checked against what a
     // captured or volatile call answered (`schemas::slots::dependencies`).
@@ -1017,6 +1025,30 @@ pub(crate) fn call_function(
         &answer,
     );
     Some(answer)
+}
+
+/// Why a dry run does not call `canonical`, whose slot class is `class`: a
+/// function never allowed in a slot has an effect (a login shell, an ICMP
+/// probe, a provider API), except nested composition, which composes under
+/// the same passive session. `None` outside a dry run.
+fn passive_refusal(
+    class: Option<SlotClass>,
+    canonical: &str,
+    ctx: Option<&ResolutionContext>,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    use crate::markdown::compose::passive::DeferralReason;
+    ctx?.passive.as_ref()?;
+    if class != Some(SlotClass::Rejected) || canonical == "as_markdown" {
+        return None;
+    }
+    let function = canonical.to_string();
+    Some(match canonical {
+        "has_alias" | "has_builtin_function" | "has_user_function" | "can_execute" => {
+            DeferralReason::ShellProbe { function }
+        }
+        "ping" | "ping_under" => DeferralReason::NetworkProbe { function },
+        _ => DeferralReason::ProviderQuery { function },
+    })
 }
 
 /// Calls a host function through the same steps as a built-in pure handler:
@@ -1033,13 +1065,13 @@ fn call_host(entry: &host::HostEntry, name: &str, args: &[Value]) -> Result<Valu
         } => (registration, handler),
         host::FunctionState::Complete { handler: None, .. } => {
             return Err(failure(format!(
-                "host function {}() has no implementation in this process",
+                "host function {}() requires the host runtime",
                 entry.canonical()
             )));
         }
         host::FunctionState::Incomplete { reason } => {
             return Err(failure(format!(
-                "host function {}() has no implementation in this process, and its analysis is incomplete: {reason}",
+                "host function {}() requires the host runtime, and its analysis is incomplete: {reason}",
                 entry.canonical()
             )));
         }

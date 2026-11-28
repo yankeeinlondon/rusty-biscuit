@@ -11,7 +11,8 @@
 //! back into the original source (line numbers, and the literal text a call
 //! site passed).
 //!
-//! [`production_sources`] applies the production-scope rule on top: every
+//! [`production_sources`] (and [`production_sources_where`], which keeps only
+//! the files a raw-text test accepts) applies the production-scope rule on top: every
 //! `#[cfg(test)]` / `#[cfg(all(test, ..))]` item is blanked, and every file
 //! such an item declares with `mod name;` (honoring `#[path]`) is dropped
 //! along with everything below that module. [`module_tree_sources`] applies
@@ -178,6 +179,19 @@ pub fn ident_offsets(text: &str, ident: &str) -> Vec<usize> {
 /// Production source per `/`-separated path relative to `src`, with comments,
 /// literals, and test-only code blanked (byte offsets preserved).
 pub fn production_sources(src: &Path) -> BTreeMap<String, String> {
+    production_sources_where(src, |_| true)
+}
+
+/// [`production_sources`] for only the files whose unsanitized text `keep`
+/// accepts, under the same production-scope rule.
+///
+/// Blanking only turns bytes into spaces and never joins or splits an
+/// identifier, so a `keep` that accepts every file whose raw text holds an
+/// identifier a gate searches for loses no hit. Only the kept files and those
+/// that could declare one of them test-only are sanitized: a file with a
+/// test-only annotation whose module directory holds a kept file at any
+/// depth, or one with a `#[path]` attribute, which can point anywhere.
+pub fn production_sources_where(src: &Path, keep: impl Fn(&str) -> bool) -> BTreeMap<String, String> {
     let mut files = Vec::new();
     let mut pending = vec![src.to_path_buf()];
     while let Some(dir) = pending.pop() {
@@ -186,20 +200,37 @@ pub fn production_sources(src: &Path) -> BTreeMap<String, String> {
             if path.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|extension| extension == "rs") {
-                files.push(path);
+                let text =
+                    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                let kept = keep(&text);
+                files.push((path, text, kept));
             }
         }
     }
+    let kept_directories: BTreeSet<PathBuf> = files
+        .iter()
+        .filter(|(_, _, kept)| *kept)
+        .map(|(path, _, _)| path.parent().expect("a file has a parent").to_path_buf())
+        .collect();
 
     let mut blanked = BTreeMap::new();
     let mut test_modules = BTreeSet::new();
-    for path in files {
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    for (path, text, kept) in files {
+        let may_declare = || {
+            let module_directory = module_directory(&path);
+            (kept_directories.iter().any(|kept| kept.starts_with(&module_directory)) || text.contains("#[path"))
+                && (text.contains("#[cfg(test)]") || text.contains("#[cfg(all(test"))
+        };
+        if !kept && !may_declare() {
+            continue;
+        }
         let mut bytes = sanitize(&text);
         for declared in blank_test_items(&text, &mut bytes) {
             test_modules.insert(test_module_path(&path, &declared));
         }
-        blanked.insert(path, String::from_utf8(bytes).expect("blanking keeps UTF-8"));
+        if kept {
+            blanked.insert(path, String::from_utf8(bytes).expect("blanking keeps UTF-8"));
+        }
     }
 
     blanked
@@ -299,19 +330,23 @@ fn path_attribute(item: &str) -> Option<String> {
 
 /// The file (or directory) a test-only `mod` declaration in `declaring` names.
 fn test_module_path(declaring: &Path, declared: &DeclaredModule) -> PathBuf {
-    let directory = declaring.parent().expect("a file has a parent");
     if let Some(path) = &declared.path_attribute {
-        return directory.join(path);
+        return declaring.parent().expect("a file has a parent").join(path);
     }
+    module_directory(declaring).join(&declared.name)
+}
+
+/// The directory a `mod name;` in `declaring` (without `#[path]`) looks in.
+fn module_directory(declaring: &Path) -> PathBuf {
+    let directory = declaring.parent().expect("a file has a parent");
     let owns_directory = declaring
         .file_name()
         .is_some_and(|name| name == "mod.rs" || name == "lib.rs" || name == "main.rs");
-    let module_directory = if owns_directory {
+    if owns_directory {
         directory.to_path_buf()
     } else {
         directory.join(declaring.file_stem().expect("a file has a stem"))
-    };
-    module_directory.join(&declared.name)
+    }
 }
 
 /// Whether `path` is the test module `module` (`module.rs`, a `#[path]`

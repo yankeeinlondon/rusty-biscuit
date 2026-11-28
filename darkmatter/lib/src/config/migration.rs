@@ -138,6 +138,7 @@ impl LegacyScope {
             line: Some(line),
             column: Some(1),
             message,
+            reference_target: None,
         }
     }
 
@@ -524,11 +525,11 @@ fn set(property: &str, value: Value) -> YamlEdit {
 fn rule_lines<'a>(
     scope: &LegacyScope,
     source: &'a Source,
-) -> Result<Vec<(usize, &'a str)>, ConfigProblem> {
+) -> Result<Vec<(usize, &'a str)>, Box<ConfigProblem>> {
     let bytes = source.bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&source.bytes);
     let text = std::str::from_utf8(bytes).map_err(|error| {
         let line = bytes[..error.valid_up_to()].iter().filter(|byte| **byte == b'\n').count() + 1;
-        scope.line_problem(&source.path, line, "the legacy policy file is not valid UTF-8".to_string())
+        Box::new(scope.line_problem(&source.path, line, "the legacy policy file is not valid UTF-8".to_string()))
     })?;
     Ok(text
         .lines()
@@ -551,7 +552,7 @@ fn shell_entries(
     let lines = match rule_lines(scope, source) {
         Ok(lines) => lines,
         Err(problem) => {
-            problems.push(problem);
+            problems.push(*problem);
             return Vec::new();
         }
     };
@@ -592,7 +593,7 @@ fn grant_entries(
     home: &Path,
     notices: &mut Vec<ConfigDiagnostic>,
 ) -> Result<Vec<String>, ConfigError> {
-    let lines = rule_lines(scope, source).map_err(|problem| ConfigError::new(ConfigErrorKind::Migration, vec![problem]))?;
+    let lines = rule_lines(scope, source).map_err(|problem| ConfigError::new(ConfigErrorKind::Migration, vec![*problem]))?;
     let mut problems = Vec::new();
     let mut converted = Vec::new();
     let mut dropped = Vec::new();

@@ -9,14 +9,15 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-// Darkmatter's registered-host fixtures (the `acme` and `relay` installs);
-// only their texts and artifact writers are used here.
-#[allow(dead_code)]
+// Darkmatter's registered-host fixtures (the `acme` and `relay` format 3
+// bundles and the temporary install fixture).
 #[path = "../../../lib/tests/host_fixtures/mod.rs"]
 mod host_fixtures;
 
 mod bench_index;
 mod claudine_editor_parity;
+mod claudine_schema_key_parity;
+mod claudine_host;
 mod collection_editor;
 mod config_contracts;
 mod claudine_schema_discovery;
@@ -35,6 +36,7 @@ mod file_interpolate_option;
 mod formatting_transaction;
 mod frontmatter_response_contracts;
 mod full_index_removal_guard;
+mod host_catalog_reload;
 mod host_function_diagnostics;
 mod host_globals;
 mod incremental_graph_equivalence;
@@ -67,10 +69,15 @@ mod referenced_targets;
 mod host_registration_watches;
 mod registered_host_editor_agreement;
 mod registered_host_views;
+mod registered_trigger_conflict;
+mod registered_yaml_kinds;
+mod registration_reload_scheduling;
 mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;
 mod required_defaults;
+mod review_cycle_schema;
+mod schema_key_diagnostics;
 mod schema_reference_parity;
 mod schema_reference_sessions;
 mod schema_roots_parity;
@@ -99,6 +106,7 @@ mod wiki_universe_equivalence;
 mod workspace_file_list;
 mod workspace_formatting_settings;
 mod workspace_schema_scopes;
+mod yaml_document_catalog_editor;
 mod yaml_document_editor;
 mod yaml_document_session;
 mod yaml_serializer_guard;

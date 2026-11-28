@@ -503,11 +503,11 @@ fn detailed_no_match_preserves_probe_order_and_diagnostic_shape() {
     assert_eq!(detail["effective_kind"], serde_json::json!("implicit_relative"));
     assert_eq!(
         detail["base_dir"],
-        serde_json::json!(biscuit_file::to_portable_string(&launch))
+        serde_json::json!(biscuit_file::to_forward_slash_string(&launch))
     );
     assert_eq!(
         detail["repository_root"],
-        serde_json::json!(biscuit_file::to_portable_string(repo.path()))
+        serde_json::json!(biscuit_file::to_forward_slash_string(repo.path()))
     );
     assert_eq!(detail["failure"], serde_json::json!("no_match"));
     assert_eq!(detail["suggestions"], serde_json::json!([]));
@@ -617,7 +617,7 @@ fn magic_no_match_report_lists_search_roots_in_priority_order() {
     ]
     .iter()
     .map(|path| {
-        let line = format!("- `{}`", biscuit_file::to_portable_string(path));
+        let line = format!("- `{}`", biscuit_file::to_forward_slash_string(path));
         let position = rendered.find(&line).unwrap_or_else(|| {
             panic!("root line `{line}` missing from:\n{rendered}");
         });
@@ -657,7 +657,7 @@ fn magic_no_match_report_lists_search_roots_in_priority_order() {
     // The joined probes the human report omits stay concrete in the record,
     // including the legitimate nonmatching join through a `prompts` root.
     let candidate_provenance = |path: PathBuf| {
-        let path = biscuit_file::to_portable_string(&path);
+        let path = biscuit_file::to_forward_slash_string(&path);
         candidates
             .iter()
             .find(|candidate| candidate["path"] == path.as_str())
@@ -693,10 +693,10 @@ fn magic_no_match_without_repository_lists_the_launch_directory_without_marker()
 
     // The request directory is the intrinsic local root: listed, first, and
     // unmarked, unlike the configured convention rows under it.
-    let launch_line = format!("- `{}`", biscuit_file::to_portable_string(&scratch));
+    let launch_line = format!("- `{}`", biscuit_file::to_forward_slash_string(&scratch));
     assert!(rendered.contains(&launch_line), "got:\n{rendered}");
     let launch_position = rendered.find(&launch_line).unwrap();
-    let home_line = format!("- `{}`", biscuit_file::to_portable_string(&home));
+    let home_line = format!("- `{}`", biscuit_file::to_forward_slash_string(&home));
     let home_position = rendered.find(&home_line).unwrap();
     assert!(launch_position < home_position, "got:\n{rendered}");
     let after_launch = &rendered[launch_position + launch_line.len()..];
@@ -1015,7 +1015,7 @@ fn source_context_keeps_its_own_repository_and_the_launch_scope() {
     let derived = derive_request_context_for_source(&launch_context, &prompt).unwrap();
 
     assert_eq!(derived.repository_root(), Some(root.path().join("source").as_path()));
-    assert_eq!(derived.launch_magic_scope(), launch_context.launch_magic_scope());
+    assert_eq!(derived.launch_scope(), launch_context.launch_scope());
     derived.validate().unwrap();
 }
 
@@ -1092,7 +1092,7 @@ fn magic_no_match_lists_each_search_root_on_its_own_row() {
         .collect();
     assert_eq!(listed.len(), roots, "one row per root: {rows:#?}");
     for (row, root) in listed.iter().zip(resolution.magic_search_roots()) {
-        let path = format!("- `{}`", biscuit_file::to_portable_string(root.path()));
+        let path = format!("- `{}`", biscuit_file::to_forward_slash_string(root.path()));
         assert!(row == &&path || row == &&format!("{path} (*)"), "{row} vs {path}");
     }
 }
@@ -1118,7 +1118,7 @@ fn candidate_no_match_lists_each_tried_path_and_suggestion_on_its_own_row() {
             };
             format!(
                 "- {label}: `{}`",
-                biscuit_file::to_portable_string(probed.candidate().path())
+                biscuit_file::to_forward_slash_string(probed.candidate().path())
             )
         })
         .collect();

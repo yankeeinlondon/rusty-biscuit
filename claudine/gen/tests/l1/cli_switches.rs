@@ -2,7 +2,7 @@
 //! whole-provider gap for older documents, and the input robustness matrix.
 //!
 //! Every case drives the real pipeline ([`claudine_gen::generate_for_area`])
-//! over Codex's real inputs, with `docs/research/agent-cli/codex.md`
+//! over Codex's real inputs, with `docs/research/providers/agent-cli/codex.md`
 //! replaced by a revision-2 fixture derived from the committed document
 //! (`tests/fixtures/agent-cli-r2/codex.md`). Each matrix case makes one edit
 //! to that fixture and asserts the generated `cli_switches` value, which is
@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 use crate::pipeline::Fixture;
 
 const FIXTURE: &str = include_str!("../fixtures/agent-cli-r2/codex.md");
-const DOC: &str = "docs/research/agent-cli/codex.md";
-const LEGACY_CONTRACT: &str = "docs/research/agent-cli/_schema.r1.yaml";
+const DOC: &str = "docs/research/providers/agent-cli/codex.md";
+const LEGACY_CONTRACT: &str = "docs/research/providers/agent-cli/_schema.r1.yaml";
 
 /// The `--config` record's typed lines, as the fixture writes them.
 const CONFIG_TYPED: &str = "    value_type: string\n    value_optional: false\n    attachment: [space, equals, short_attached]\n    invocation_scope:\n      - applies_to: global\n";
@@ -558,7 +558,7 @@ fn a_revision_one_document_generates_an_explicit_gap() {
     let fixture = Fixture::for_slug("codex").with_real_overrides();
     fixture.write(DOC, include_str!("../fixtures/agent-cli-r1/codex.md"));
     fixture.write(
-        "docs/research/agent-cli/_schema.r1.yaml",
+        "docs/research/providers/agent-cli/_schema.r1.yaml",
         include_str!("../fixtures/agent-cli-r1/_schema.r1.yaml"),
     );
     let generation = fixture.generate().unwrap();
@@ -567,7 +567,7 @@ fn a_revision_one_document_generates_an_explicit_gap() {
     assert!(generation.data_rs.contains("cli_switches: CliSwitchCatalog::Unknown {"));
 
     // Without the frozen contract the document cannot be validated at all.
-    std::fs::remove_file(fixture.path("docs/research/agent-cli/_schema.r1.yaml")).unwrap();
+    std::fs::remove_file(fixture.path("docs/research/providers/agent-cli/_schema.r1.yaml")).unwrap();
     match fixture.generate() {
         Err(GenError::ResearchRevisionUnsupported { found, current, .. }) => {
             assert_eq!((found, current), (1, 2));
@@ -581,7 +581,7 @@ fn a_revision_one_document_generates_an_explicit_gap() {
 #[test]
 fn the_gate_requires_every_field_the_coercion_reads() {
     let fixture = Fixture::for_slug("codex").with_real_overrides();
-    let types = fixture.path("docs/research/agent-cli/_types.yaml");
+    let types = fixture.path("docs/research/providers/agent-cli/_types.yaml");
     let text = std::fs::read_to_string(&types).unwrap();
     let without_gap: String = text
         .lines()

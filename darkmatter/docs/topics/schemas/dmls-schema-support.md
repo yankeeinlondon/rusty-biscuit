@@ -56,6 +56,7 @@ flowchart TD
     BASE["Darkmatter base baseline"] --> MERGE["combined baseline"]
     EXT["extension baselines<br/>from .dmls.toml [schema.extensions.*]<br/>(globs match the document)"] --> MERGE
     TRIG["trigger envelopes<br/>discovered in the five schema roots<br/>(SCHEMAS_DIR, package, area, tree root, ~/schemas)"] --> REGISTRY["trigger registry"]
+    HOST["registered host's matched triggers<br/>(one checked host layer, below the roots' triggers)"] --> ENGINE
     MERGE --> ENGINE["DarkmatterSchemas::effective_for"]
     REGISTRY --> ENGINE
     DOC["document frontmatter<br/>(including its own $schema)"] --> ENGINE
@@ -93,42 +94,71 @@ DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`
 
 ### Claudine documents
 
-Claudine's trigger bundle consists of eight ordinary disk files in
-`claudine/schemas/`:
+Claudine's schemas reach DMLS as a [host registration](../host-registration.md),
+not as files in a schema root. Claudine's setup publishes its registration
+bundle to `~/.claudine/registrations/darkmatter/` and adds
+`~/.claudine/registrations/darkmatter/manifest.yaml` to the `register` list
+of `~/.darkmatter.yaml`. DMLS then types a Claudine document in any folder,
+with no `$schema` in the document and no configuration. The bundle holds
+the file kinds a registration may carry:
 
-| File | Kind | Holds |
+| Kind | Claudine's files | What they do in the editor |
 |---|---|---|
-| `action.yaml` | library (`kind: schema`) | the lifecycle action types and the dictionary-bundle types |
-| `lifecycle.yaml` | library (`kind: schema`) | the recursive lifecycle stack families and the `loop:` block type |
-| `sequence-types.yaml` | library (`kind: schema`) | recursive sequence tasks and group containers |
-| `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
-| `document.yaml` | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` import |
-| `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
-| `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
-| `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` or `kind: sequence` |
+| `schema-trigger` | `composition.yaml`, `inline-composition.yaml`, `sequence-document.yaml` | select a Claudine document by their `match:` (a lifecycle event, `prompt`, `agent`, `model`, `sequence`, …) and type its frontmatter |
+| `yaml-schema` | `formal-sequence-file.yaml` | judges a whole YAML file with `kind: sequence` |
+| `namespace-schema` | `seq.yaml`, `loop.yaml`, `group.yaml` | declare the `seq`, `loop`, and `group` globals for completion, hover, and expression checks |
+| `schema` (types only) | `action.yaml`, `document.yaml`, `shared.yaml`, … | the types the files above import |
 
-DMLS needs no configuration for them. A document whose package area is
-`claudine/` finds them through the package-area root, so a misspelled verb, a
-malformed long form, or a `shell` action in `initialize` is a diagnostic with
-no `$schema` in the document. Anywhere else, put a complete bundle of regular
-files (all eight, so their relative imports resolve) in the repository root's
-`schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
-symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
-a trigger activates by placement and match, never by reference. Copy the
-companion `globals.yaml` host catalog and `globals.lifecycle.json` artifact too
-for Claudine-specific expression globals and event analysis; they are separate
-from the eight-file trigger bundle.
-
-DMLS reads these files **only from disk**: it has no Claudine dependency and
-registers no embedded bundle. The `claudine` binary carries its own embedded
-copy, so a document outside the Claudine area can pass or fail `claudine
-compose` while the editor, with no disk bundle in reach, says nothing about
-it. When the bundle is reachable, its triggers drive completion and hover as
-well as diagnostics, with no `$schema` in the document: `start:` items complete
-to the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
+The bundle's `globals.lifecycle.json` supplies Claudine's events and verbs
+(see [Host Lifecycle Artifacts](../lifecycle/host-artifact.md)). With the
+registration installed, a misspelled verb, a malformed long form, or a
+`shell` action in `initialize` is a diagnostic; `start:` items complete to
+the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
 describes it.
-[Claudine's Schemas](../../../../claudine/docs/topics/schemas.md) describes
-what the files check and how the CLI resolves them.
+
+A document is Claudine's only when one of these triggers matches it. A
+document with only keys `md` shares with every host (`initialize:` alone,
+say) stays an `md` document, and a document two registered hosts both match
+is analyzed as `md` with a `dm.host.ambiguous` warning.
+
+- **Nothing to copy.** A copy of a Claudine trigger in a schema root is an
+  ordinary trigger layered on top of the registered one, never a
+  replacement, and a `globals.yaml` or lifecycle artifact copied into a
+  schema root supplies nothing. Remove such copies left from older
+  instructions.
+- **An old install is reported.** A `register` entry naming an older
+  Claudine's `~/.claudine/darkmatter-host.yaml` (a format 1 manifest) gets
+  a `dm.host.registration` warning asking you to run `claudine setup`,
+  which publishes the current bundle and rewrites the entry.
+- **The view follows upgrades.** When the installed files change, DMLS
+  waits until they have been quiet for 300 ms, keeps serving the last
+  loaded view meanwhile, then reloads (see
+  [Changes are followed without a restart](../host-registration.md#changes-are-followed-without-a-restart)).
+- **`inline-composition.yaml` completes and hovers like any trigger.** Its
+  payload is a root union (`prompt` or `sections`). The editor sees every
+  key either arm declares: a key both arms share (`agent`, `mode`, the
+  lifecycle events) has its one declaration, so it hovers and completes as
+  it does in an agent-only document, and both `prompt` and `sections` are
+  offered as keys. Once a branch key holds a value, the arms that refuse it
+  drop out of the view, so in a `prompt: hi` document `prompt` hovers with
+  the prompt's own description, never the other arm's `null`:
+
+  ```yaml
+  ---
+  prompt: hi
+  agent: claude    # hover: "the agent (provider) to run"
+  sec              # completes `sections`
+  ---
+  ```
+
+  Validation is unchanged: the document must still match exactly one arm.
+
+DMLS has no Claudine dependency and runs nothing of Claudine's: it reads
+the published files through Darkmatter's library. The `claudine` binary
+loads the same files from its compiled-in copy, so once the registration is
+installed the editor and `claudine compose` judge a document's frontmatter
+with the same definitions. [Claudine's Schemas](../../../../claudine/docs/topics/schemas.md)
+describes what the files check.
 
 ### Templates (schemas with slots)
 
@@ -166,9 +196,10 @@ does, through the same library entry point, and then projects the result:
   [Configuration files](#configuration-files)). Their `kind` and `$schema`
   select nothing.
 - **By `kind`.** A top-level `kind` claimed by a `kind: yaml-schema`
-  definition (one of the shipped ones, or one in the document's
-  [schema roots](./definition.md#schema-roots)) selects that definition, and
-  only that definition. The document's own `$schema`, if any, is then
+  definition (one of the shipped ones, one in the document's
+  [schema roots](./definition.md#schema-roots), or, below both, one a
+  [registered host](../host-registration.md#whole-yaml-documents) ships)
+  selects that definition, and only that definition. The document's own `$schema`, if any, is then
   ordinary data.
 - **By a root `$schema`.** With no claimed `kind`, a root `$schema` is the
   contract, resolved as frontmatter resolves it. `$schema` itself is never an
@@ -200,8 +231,8 @@ repository root DMLS captured for the document, are configuration files:
 |---|---|
 | `~/.darkmatter.yaml` | `user-config` in `darkmatter/schemas/darkmatter-config.yaml` |
 | `<repo-root>/.darkmatter.yaml` | `repository-config` in `darkmatter/schemas/darkmatter-config.yaml` |
-| `~/.claudine/config.yaml` | `user-config` in `claudine/schemas/claudine-config.yaml` |
-| `<repo-root>/.claudine/config.yaml` | `repository-config` in `claudine/schemas/claudine-config.yaml` |
+| `~/.claudine/config.yaml` | `user-config` in `claudine/registration/claudine-config.yaml` |
+| `<repo-root>/.claudine/config.yaml` | `repository-config` in `claudine/registration/claudine-config.yaml` |
 
 Both schemas are compiled into DMLS, so a Claudine configuration is checked
 even where Claudine is not installed or registered. The contract is the
@@ -250,6 +281,7 @@ a host manifest, or runs anything. See
 | The root `$schema` does not resolve, or names a definition that fails | `dm.schema.prepare` (or the declaration's own code) on the `$schema` value; a failure inside the referenced file is related information in that file |
 | The document does not meet its schema | the frontmatter codes, ranged the same way: a missing key on its parent mapping, an undeclared key on the key, a type or constraint failure on the value. A missing required key and an undeclared key are **errors** in either strict mode or not, since no compose step can supply or strip them |
 | A Darkmatter kind's own checks (`schema`, `schema-trigger`, `yaml-schema`) | `dm.schema.kind_check` errors, located where the library located them (for a trigger, on the bad `$path` glob) |
+| A callable catalog (`kind: expression-schema` or `kind: mutation-schema`) whose callables fail the catalog reader (a folded-name collision, a reused built-in name, a missing or disagreeing category, `narrows(...)` in a mutation; a duplicate overload is a type-definition error at the later overload) | one `dm.schema.callable_catalog` error per failure at the failing declaration, with the conflicting declaration as related information; the file stays claimed by its kind and never falls back to a root `$schema`. The editor and `md schema validate` run the same reader, so both report the same errors |
 
 Each problem is published once, and the selected definition is the only
 judge of the file's shape. In a `kind: schema` or `kind: yaml-schema` file,
@@ -368,6 +400,11 @@ are refreshed, when:
   reads it as if it were saved, and forgets it when it closes unsaved;
 - a server rescan, a configuration change, or a package-manifest change
   marks every registry stale.
+- the installed [host registrations](../host-registration.md#whole-yaml-documents)
+  of the document's configuration change: after their files have been quiet
+  for 300 ms and the reload completes, a contract a registered `yaml-schema`
+  supplied is prepared again. A reload that finds the same registrations
+  leaves every contract alone.
 
 The schema the document selects, its **contract**, is resolved and
 compiled on the same worker, once per declaration: editing only the
@@ -421,7 +458,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.constraint`                                         | a non-type constraint failed (range, length, pattern, enum, …)                                        |
 | `dm.schema.missing_required`                                   | a required key is absent — **strict mode only**                                                       |
 | `dm.schema.unknown_key`                                        | a key the schema does not declare is present                                                          |
-| `dm.schema.deprecated_key`                                     | a deprecated key is present                                                                           |
+| `dm.schema.removed_key`                                        | a key declared `removed(<replacement>)` is present; the message carries the replacement                |
+| `dm.schema.near_miss_key`                                      | **warning**: an undeclared key on an object that opts in with `$advise-unknown-keys` is near one declared key |
 | `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse or resolve (a well-formed reference to a file that does not exist is not reported in the editor; `md` still rejects a missing `file(eager)` target) |
 | `dm.schema.invalid_suggestion`                                 | a `suggest(...)` candidate is invalid metadata for its target schema                                  |
 | `dm.schema.missing_simplified_envelope`                        | reserved: a referenced bare property map lacking an envelope; the loader now rejects such a file instead |

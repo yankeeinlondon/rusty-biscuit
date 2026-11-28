@@ -103,16 +103,13 @@ impl DocumentContext<'_> {
     /// The host this document is analyzed as: the view its overlay's schema
     /// preparation selected, else the one the server selected for a
     /// document without frontmatter ([`Self::host`]). With neither (a
-    /// context built outside a server) a document is given its schema
-    /// roots' legacy view, read now; one with no context, the `md` host.
+    /// context built outside a server, which has no installed
+    /// registrations) it is the `md` host.
     pub fn host_view(&self) -> Arc<crate::overlay::hosts::HostView> {
         if let Some(view) = self.overlay.and_then(|overlay| overlay.host.as_ref()).or(self.host.as_ref()) {
             return Arc::clone(view);
         }
-        Arc::new(match self.file_context() {
-            Ok(context) => crate::overlay::hosts::HostView::unregistered(context),
-            Err(_) => crate::overlay::hosts::HostView::md(),
-        })
+        Arc::new(crate::overlay::hosts::HostView::md())
     }
 }
 
@@ -418,17 +415,6 @@ impl Provider for DslProvider {
         }
         dsl::diagnostics(ctx)
     }
-
-    fn reads_lifecycle_host(&self) -> bool {
-        true
-    }
-
-    fn diagnostics_with_host(&self, ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
-        if is_yaml_document(ctx) {
-            return Vec::new();
-        }
-        dsl::diagnostics_with_host(ctx, host)
-    }
 }
 
 /// Whether `ctx` is a whole YAML document, which has no Markdown body: the
@@ -579,7 +565,7 @@ impl ProviderRegistry {
 
 /// The lifecycle host of one diagnostics pass. Only a document with
 /// frontmatter has lifecycle stacks to check, so one without is given the
-/// `md` host and no legacy view is read for it.
+/// `md` host.
 fn pass_lifecycle_host(ctx: &DocumentContext) -> LifecycleHost {
     if ctx.overlay.is_none() {
         return LifecycleHost::md();

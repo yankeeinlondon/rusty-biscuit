@@ -113,6 +113,7 @@ pub mod schema;
 pub mod test_runner;
 pub mod test_runner_spec;
 pub mod types;
+pub mod windows_shells;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_apps;
 

@@ -2,9 +2,11 @@
 //! pinned exactly: hover text and ranges, completion order and edits,
 //! diagnostic codes, ranges, messages, and severities, definition targets,
 //! and document links. The document and Claudine's schema bundle are the
-//! frozen A3 benchmark inputs, driven in-process through the provider
-//! registry as the benchmark drives them, so a change to how the frontmatter
-//! walk owns or caches schema shapes cannot change what an editor receives.
+//! frozen A3 benchmark inputs, with Claudine's lifecycle and globals from an
+//! explicitly registered format 3 bundle ([`crate::claudine_host`], with
+//! its A3 trigger), driven in-process through the provider registry as the
+//! benchmark drives them, so a change to how the frontmatter walk owns or
+//! caches schema shapes cannot change what an editor receives.
 //!
 //! Regenerate a golden with `DMLS_UPDATE_GOLDEN=1` only for an intended
 //! response change.
@@ -36,8 +38,6 @@ const CLAUDINE_SCHEMAS: [(&str, &str); 9] = [
     ("sequence.yaml", include_str!("../../../lib/benches/fixtures/claudine-schemas/sequence.yaml")),
 ];
 
-const CLAUDINE_LIFECYCLE_ARTIFACT: &str =
-    include_str!("../../../lib/benches/fixtures/pipeline-work/globals.lifecycle.json");
 
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("a parent")).expect("create directory");
@@ -45,7 +45,8 @@ fn write(path: &Path, text: &str) {
 }
 
 /// The benchmark's repository: `claudine/schemas/` holds the frozen bundle
-/// and the document sits in Claudine's `tasks/`, with an empty home.
+/// and the document sits in Claudine's `tasks/`; the home registers the
+/// Claudine-shaped host.
 struct Session {
     _dir: tempfile::TempDir,
     root: PathBuf,
@@ -74,8 +75,8 @@ impl Session {
         for (name, text) in CLAUDINE_SCHEMAS {
             write(&repo.join("claudine/schemas").join(name), text);
         }
-        write(&repo.join("claudine/schemas/globals.lifecycle.json"), CLAUDINE_LIFECYCLE_ARTIFACT);
         std::fs::create_dir_all(root.join("home")).expect("home");
+        crate::claudine_host::register(&root.join("home"), &crate::claudine_host::a3_bundle());
         let path = repo.join("claudine/lib/tasks/implement-plan.md");
         let uri: Uri = url::Url::from_file_path(&path).expect("file URL").to_string().parse().expect("URI");
         let snapshot = RequestSnapshot::new(&root).with_home(Some(root.join("home")));

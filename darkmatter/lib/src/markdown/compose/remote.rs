@@ -171,6 +171,17 @@ pub enum RemoteReadError {
         /// The rejected host.
         host: String,
     },
+    /// The host needs an approval this run did not give: the captured
+    /// `permissions.network` is `ask`, and a composition read has no prompt
+    /// to ask with.
+    #[error(
+        "remote read of host '{host}' needs approval: `permissions.network` is `ask`, and a composition does not ask; {}",
+        crate::config::network::network_remedy().when_approval_needed(host)
+    )]
+    ApprovalRequired {
+        /// The host that needs approval.
+        host: String,
+    },
     /// The configuration's `permissions` block is invalid, so no host may
     /// be fetched, not even one the run allows.
     #[error("remote read denied for host '{host}': the `network` permission cannot be decided because the configuration is invalid: {message}")]

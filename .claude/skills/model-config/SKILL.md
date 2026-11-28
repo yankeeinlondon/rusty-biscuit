@@ -94,5 +94,5 @@ tables, API-standard sites, a concrete local-runner example, a cloud-bridge exam
 the env vars that redirect endpoints or selection.
 
 Authoritative research (full body + validated frontmatter):
-`claudine/docs/research/model-config/<provider>.md`. Runner-side ground truth:
-`claudine/docs/research/local_runners/<runner>.md` and the **local-llm-runners** skill.
+`claudine/docs/research/providers/model-config/<provider>.md`. Runner-side ground truth:
+`claudine/docs/research/local-ai/local_runners/<runner>.md` and the **local-llm-runners** skill.

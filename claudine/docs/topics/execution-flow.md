@@ -431,10 +431,11 @@ This is the raw provider-wrapper dry-run seam: it renders the planned command
 using the profile's executable name and exits with code 0 without resolving
 that executable on `PATH`.
 
-Composition commands return at their earlier post-composition seam, immediately
-after provider/model resolution. They do not enter the provider/env wiring
-steps above, validate or resolve the selected executable, construct MCP/argv/
-system-prompt launch state, or build the lifecycle runtime.
+A composition command's `--dry-run` never reaches this executor: `main.rs`
+dispatches it to the passive check before configuration setup, so it enters
+none of the provider/env wiring steps above, resolves no executable, and
+builds no launch state or lifecycle runtime. See
+[Composition — Dry Run](composition.md#dry-run).
 
 ##### 6j. Preflight Checks
 
@@ -741,11 +742,11 @@ The command reports task outcomes and returns `0` on success, `1` on an
 unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
 `--silent` suppresses per-step status messages.
 
-`--dry-run` performs preflight and composes against initial state without
-provider launches, lifecycle dispatch, or inline write-back. `shell:` and
-`side_effect:` tasks are rendered, not run (`--dry-run-shell` runs the
-`shell:` tasks once); composition shell expansions still run with real
-effects.
+`--dry-run` never reaches this executor: it is the passive check, which
+reads the tree as preflight does, composes each prompt against the state
+before the run (a value the run writes first is left unchecked) with every
+command withheld, and runs no task, lifecycle event, or provider.
+See [Sequences — Dry run](flow-control/sequences.md#dry-run).
 
 ### Per-step runtime bindings
 
@@ -796,7 +797,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way without printing the warning.
 
 ### Model Resolution
 

@@ -966,7 +966,9 @@ fn direct_composition_empty_body_returns_composed_body_empty() {
             source_path,
             mode,
             provided_overrides,
+            cause,
         } => {
+            assert_eq!(cause, darkmatter::findings::EmptyBodyCause::Whitespace);
             assert_eq!(source_path, source.resolved_path);
             assert_eq!(mode, CompositionMode::ChainedDocument);
             let keys: std::collections::HashSet<String> =
@@ -999,6 +1001,7 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
     let CompositionError::ComposedBodyEmpty {
         mode,
         provided_overrides,
+        cause,
         ..
     } = err
     else {
@@ -1006,6 +1009,13 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
     };
     assert_eq!(mode, CompositionMode::ChainedDocument);
     assert_eq!(provided_overrides, vec!["spec".to_string()]);
+    // The cause is the proven one: the block left out because `review` was
+    // false, not a guess.
+    let darkmatter::findings::EmptyBodyCause::ExcludedBlocks { blocks } = cause else {
+        panic!("expected excluded blocks, got {cause:?}");
+    };
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].condition, "review");
 }
 
 /// Regression: a `@`-resolved prompt physically lives outside the repo
@@ -1021,7 +1031,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     };
     let source_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
-    let executable = biscuit_file::to_portable_string(&probe_executable);
+    let executable = biscuit_file::to_forward_slash_string(&probe_executable);
     let command = format!("\"{executable}\"");
     let source = make_source(
         &source_dir,
@@ -2081,7 +2091,11 @@ fn inline_shell_execution_failure_in_a_child_keeps_the_child_origin() {
     let CompositionError::ShellExpansionFailed { error: shell, .. } = &error else {
         panic!("expected a shell failure, got {error:?}");
     };
-    assert_eq!(shell.origin(), Some(&darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 3 }), "{shell:?}");
+    // The child's own line, placed where the child wrote it.
+    let Some(darkmatter::markdown::compose::ShellCommandOrigin::Authored { site, .. }) = shell.origin() else {
+        panic!("the child's body origin, placed: {shell:?}");
+    };
+    assert_eq!(**site, darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 3 }, "{shell:?}");
     assert!(same_file(&shell.context().unwrap().absolute, &dir.path().join("child.md")), "{shell:?}");
 }
 

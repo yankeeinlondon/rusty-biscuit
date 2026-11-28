@@ -73,19 +73,31 @@ pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
 /// starts the shell at most once per name, and "not an alias" is recorded as
 /// well as a hit. It is never process-wide: a long-lived host must see alias
 /// edits, so a fresh `ComposeOptions` starts with an empty record.
+///
+/// A dry run's record ([`Self::passive`]) starts no shell: every name reads
+/// as not an alias, so a passive check judges commands as authored.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AliasResolutions {
     outcomes: Arc<Mutex<HashMap<AliasLookup, Option<ResolvedAlias>>>>,
+    passive: bool,
 }
 
 /// `(login shell, name)`: the same name can be an alias in one shell only.
 type AliasLookup = (String, String);
 
 impl AliasResolutions {
+    /// The record of a dry run, which never starts a shell.
+    pub(crate) fn passive() -> Self {
+        Self { outcomes: Arc::default(), passive: true }
+    }
+
     /// [`resolve_alias`] against `login_shell`, the request's
     /// [`login_shell`](super::probe::login_shell). With no shell, none is
     /// started and the name is not an alias.
     pub(crate) fn resolve(&self, login_shell: Option<&str>, name: &str) -> Option<ResolvedAlias> {
+        if self.passive {
+            return None;
+        }
         let shell = login_shell?;
         let key = (shell.to_string(), name.to_string());
         if let Some(outcome) = lock(&self.outcomes).get(&key) {
@@ -339,6 +351,24 @@ mod tests {
         let shell = stub_shell(dir.path(), "exit 1");
 
         assert!(query_alias(shell.to_str().unwrap(), "ll", Duration::from_secs(10)).is_none());
+    }
+
+    /// A dry run's options never start the login shell to look up an alias,
+    /// even when the request names one that would answer.
+    #[cfg(unix)]
+    #[test]
+    fn a_dry_run_starts_no_shell_for_an_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("shell-started");
+        let shell = stub_shell(dir.path(), &format!("touch '{}'\necho \"ll='ls -l'\"", marker.display()));
+        let environment =
+            std::collections::HashMap::from([("SHELL".to_string(), shell.to_string_lossy().into_owned())]);
+        let options = crate::markdown::compose::ComposeOptions::new().with_dry_run();
+
+        let resolved = options.alias_resolutions.resolve(super::super::probe::login_shell(&environment), "ll");
+
+        assert!(resolved.is_none(), "a dry run reads every name as not an alias");
+        assert!(!marker.exists(), "a dry run started the login shell");
     }
 
     /// Composition asks the shell its request names; a request whose

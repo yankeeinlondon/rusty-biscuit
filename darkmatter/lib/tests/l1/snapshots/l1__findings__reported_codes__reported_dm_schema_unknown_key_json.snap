@@ -1,0 +1,29 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.schema.unknown_key",
+      "severity": "error",
+      "message": "Additional properties are not allowed ('nmae' was unexpected)",
+      "source": {
+        "file": "[ROOT]/work/doc.md",
+        "line": 5,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "did you mean `name`?"
+    }
+  ],
+  "counts": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

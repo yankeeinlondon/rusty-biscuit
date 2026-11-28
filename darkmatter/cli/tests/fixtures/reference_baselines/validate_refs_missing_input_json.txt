@@ -1,0 +1,21 @@
+exit: 1
+--- stdout
+{
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.input.read_failure",
+      "severity": "error",
+      "message": "Failed to load file: \"<WS>/cwd/docs/missing.md\"",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "reference": "<WS>/cwd/docs/missing.md",
+      "failure": "no-match"
+    }
+  ],
+  "value": null
+}
+--- stderr

@@ -434,7 +434,7 @@ fn write_json(
 ) -> io::Result<()> {
     let full = matches!(scan.format, ReportFormat::JsonFull);
     let entries = if full { Entries::Indexes } else { Entries::Files };
-    let root_dir = biscuit_file::to_portable_string(&scan.scan_root);
+    let root_dir = biscuit_file::to_forward_slash_string(&scan.scan_root);
     let Sink {
         out,
         errors,
@@ -645,8 +645,8 @@ fn write_tally(
     let tally = tally(scan, files, work, catalog, sink);
     match scan.format {
         ReportFormat::Stats(None) => {
-            let root_dir = biscuit_file::to_portable_string(&scan.scan_root);
-            let package_root_dir = biscuit_file::to_portable_string(&catalog.expect("stats captures a catalog").root);
+            let root_dir = biscuit_file::to_forward_slash_string(&scan.scan_root);
+            let package_root_dir = biscuit_file::to_forward_slash_string(&catalog.expect("stats captures a catalog").root);
             tally.stats.write_json(&mut *sink.out, &root_dir, &package_root_dir, &tally.groups, sink.errors)
         }
         ReportFormat::Stats(Some(render)) => {

@@ -124,8 +124,8 @@ pub struct ConfigFile {
     effective: Value,
     defaults: Vec<AppliedDefault>,
     permissions: Result<PermissionsSetting, ConfigError>,
-    /// The 1-based line and column of the `permissions` value, when written.
-    permissions_at: Option<(usize, usize)>,
+    /// Where the `permissions` value is written, when it is.
+    permissions_at: Option<SourcePosition>,
     registrations: Vec<Registration>,
     findings: Vec<ConfigError>,
 }
@@ -172,6 +172,12 @@ impl ConfigFile {
         self.permissions.as_ref()
     }
 
+    /// Where this file writes its `permissions` value, when it does.
+    #[must_use]
+    pub const fn permissions_position(&self) -> Option<&SourcePosition> {
+        self.permissions_at.as_ref()
+    }
+
     /// This file's valid `register` entries.
     #[must_use]
     pub fn registrations(&self) -> &[Registration] {
@@ -190,15 +196,33 @@ impl ConfigFile {
 pub struct Registration {
     /// The manifest reference as written.
     pub reference: String,
-    /// Its position in the file's `register` list.
+    /// Its zero-based offset in the file's `register` list (a warning
+    /// shows the 1-based ordinal).
     pub index: usize,
     /// The file that lists it.
     pub declared_in: PathBuf,
     #[allow(missing_docs)]
     pub revision: ConfigRevision,
-    /// The 1-based line and character column of the entry in
-    /// [`Self::declared_in`], when known.
-    pub at: Option<(usize, usize)>,
+    /// Where the entry is written in [`Self::declared_in`], when known.
+    pub at: Option<SourcePosition>,
+}
+
+/// A 1-based line and character column in a file that was read.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SourcePosition {
+    #[allow(missing_docs)]
+    pub line: usize,
+    /// Counted in Unicode characters, a leading byte order mark excluded.
+    pub column: usize,
+    /// The line's text before [`Self::column`]: what an editor counts the
+    /// column from in its own unit (UTF-8 bytes, UTF-16 code units) without
+    /// reading the file again.
+    pub line_prefix: String,
+}
+
+impl SourcePosition {
+    /// The first character of a file.
+    pub const START: Self = Self { line: 1, column: 1, line_prefix: String::new() };
 }
 
 /// The valid registrations of the user file and the repository working
@@ -635,7 +659,7 @@ impl Observe<'_> {
                 (text, Some(loaded))
             }
         };
-        let locate = |pointer: &[String]| -> Option<(usize, usize)> {
+        let locate = |pointer: &[String]| -> Option<SourcePosition> {
             let loaded = loaded.as_ref()?;
             byte_range(loaded, pointer).map(|range| line_column(&text, range.start))
         };
@@ -652,7 +676,7 @@ impl Observe<'_> {
                         path,
                         revision,
                         "",
-                        Some((1, 1)),
+                        Some(SourcePosition::START),
                         format!("the configuration {what}; write `{{}}` for one that keeps every default"),
                     ),
                 ));
@@ -670,7 +694,7 @@ impl Observe<'_> {
                         problem.offending_properties.iter().collect()
                     };
                     if keys.is_empty() {
-                        root.push(problem_at(path, revision, "", Some((1, 1)), message(problem)));
+                        root.push(problem_at(path, revision, "", Some(SourcePosition::START), message(problem)));
                     }
                     for key in keys {
                         let at = std::slice::from_ref(key);
@@ -811,8 +835,12 @@ impl Observe<'_> {
         if !problems.is_empty() {
             return Err(ConfigError::new(ConfigErrorKind::InvalidSetting, problems));
         }
-        // The schema admitted only `allow` or `deny`.
-        let network = if value["network"] == "allow" { NetworkAccess::Allow } else { NetworkAccess::Deny };
+        // The schema admitted only `allow`, `ask`, or `deny`.
+        let network = match value["network"].as_str() {
+            Some("allow") => NetworkAccess::Allow,
+            Some("ask") => NetworkAccess::Ask,
+            _ => NetworkAccess::Deny,
+        };
         Ok(PermissionsSetting::Inline(ScopePermissions {
             file_read: Setting { value: file_read, authored: written("file-read") },
             shell_commands: Setting { value: shell_commands, authored: written("shell-commands") },
@@ -875,6 +903,82 @@ pub(crate) fn observe_file(
 ) -> Result<ConfigFile, ConfigError> {
     let portable = context.portable_variables();
     Observe { context, portable: &portable }.file(bytes, path, revision, scope)
+}
+
+/// Where `scope`'s file is: in the context's home or repository root;
+/// `None` when the context has no home or names no repository.
+pub(crate) fn working_path(context: &FileResolutionContext, scope: ConfigScope) -> Option<PathBuf> {
+    match scope {
+        ConfigScope::User => context.home_dir().map(|home| home.join(CONFIG_FILE_NAME)),
+        ConfigScope::Repository => context.repository_root().map(|root| root.join(CONFIG_FILE_NAME)),
+    }
+}
+
+/// The working-copy revision of `scope`'s file.
+pub(crate) const fn working_revision(scope: ConfigScope) -> ConfigRevision {
+    match scope {
+        ConfigScope::User => ConfigRevision::User,
+        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
+    }
+}
+
+/// Reads and judges the working copy of `scope`'s file, as
+/// [`inspect_working_file`] describes, keeping the bytes read (`None` when
+/// the file is absent).
+///
+/// ## Errors
+///
+/// As [`inspect_working_file`].
+pub(crate) fn read_working_file(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+) -> Result<(Option<Vec<u8>>, ConfigFile), ConfigError> {
+    let revision = working_revision(scope);
+    let path = working_path(context, scope).ok_or_else(|| match scope {
+        ConfigScope::User => ConfigError::unlocated(
+            ConfigErrorKind::Read,
+            &PathBuf::from("~").join(CONFIG_FILE_NAME),
+            revision,
+            "there is no home directory, so the user configuration cannot be read".into(),
+        ),
+        ConfigScope::Repository => ConfigError::unlocated(
+            ConfigErrorKind::Read,
+            &context.cwd().join(CONFIG_FILE_NAME),
+            revision,
+            format!("`{}` is not inside a repository, so there is no repository configuration", context.cwd().display()),
+        ),
+    })?;
+    let bytes = read_worktree(&path, revision)?;
+    let file = observe_file(context, bytes.as_deref(), &path, revision, scope)?;
+    Ok((bytes, file))
+}
+
+/// Judges the one working-copy configuration file of `scope` exactly as
+/// [`ConfigSnapshot::load`] judges it, passively: the user file
+/// `~/.darkmatter.yaml` of the context's home, or the repository's
+/// `{repo-root}/.darkmatter.yaml` as in the working copy, against that
+/// scope's schema and defaults.
+///
+/// It reads that one file and nothing else: no committed (`HEAD`) policy,
+/// no `permissions` reference followed (the setting is the reference as
+/// written), no installed registration, and it never writes: a missing file
+/// is not created and a legacy policy file is neither migrated nor deleted.
+///
+/// An absent file is a [`ConfigFile`] whose [`ConfigFile::is_present`] is
+/// `false`. A problem confined to one setting is inside the returned file:
+/// an invalid `permissions` value is [`ConfigFile::permissions`]'s error,
+/// an invalid `register` entry is one of
+/// [`ConfigFile::registration_findings`].
+///
+/// ## Errors
+///
+/// A file that fails as a whole ([`ConfigErrorKind::Syntax`],
+/// [`ConfigErrorKind::NotAMapping`], [`ConfigErrorKind::UnknownKey`]),
+/// located in its file; [`ConfigErrorKind::Read`] when it cannot be read, or
+/// when the context has no home (user scope) or names no repository
+/// (repository scope).
+pub fn inspect_working_file(context: &FileResolutionContext, scope: ConfigScope) -> Result<ConfigFile, ConfigError> {
+    read_working_file(context, scope).map(|(_, file)| file)
 }
 
 /// The repository-scope policy layer of one committed policy file at the
@@ -1016,8 +1120,8 @@ pub(crate) fn check_permissions_text(
     }
 }
 
-/// The 1-based line and column of the value at a path, when it has one.
-type Locate<'a> = dyn Fn(&[String]) -> Option<(usize, usize)> + 'a;
+/// Where the value at a path is written, when it has a position.
+type Locate<'a> = dyn Fn(&[String]) -> Option<SourcePosition> + 'a;
 
 /// Where a setting's problems are located.
 struct SettingContext<'a> {
@@ -1227,10 +1331,17 @@ fn dependency(revision: ConfigRevision, path: &Path, bytes: Option<&[u8]>) -> Co
 
 /// The working-copy bytes at `path`, or `None` when nothing is there.
 fn read_worktree(path: &Path, revision: ConfigRevision) -> Result<Option<Vec<u8>>, ConfigError> {
+    read_working_bytes(path)
+        .map_err(|error| ConfigError::unlocated(ConfigErrorKind::Read, path, revision, format!("cannot be read: {error}")))
+}
+
+/// The working-copy bytes at `path`, or `None` when nothing is there; the
+/// I/O error kept for setup, which reports it as its own read failure.
+pub(crate) fn read_working_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(ConfigError::unlocated(ConfigErrorKind::Read, path, revision, format!("cannot be read: {error}"))),
+        Err(error) => Err(error),
     }
 }
 
@@ -1256,14 +1367,37 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
     loaded.byte_range(&locating_problem(segments))
 }
 
-/// The 1-based line and character column of byte `offset` in `text`.
-pub(super) fn line_column(text: &str, offset: usize) -> (usize, usize) {
+/// The one-based position of byte `offset` in `text`, its column counted in
+/// characters (a leading BOM excluded). Registration, configuration, and the
+/// other authored records built from it publish this column; a frontmatter
+/// schema validation problem (`dm.schema.*`) does not, and keeps the
+/// validator's byte column.
+pub fn line_column(text: &str, offset: usize) -> SourcePosition {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];
     let line = before.matches('\n').count() + 1;
     let line_start = before.rfind('\n').map_or(0, |at| at + 1);
-    let column = before[line_start..].trim_start_matches('\u{feff}').chars().count() + 1;
-    (line, column)
+    let line_prefix = before[line_start..].trim_start_matches('\u{feff}');
+    SourcePosition { line, column: line_prefix.chars().count() + 1, line_prefix: line_prefix.to_string() }
+}
+
+/// The position a parser reported as a 1-based `line` and `column` in
+/// `text`, the column counted in characters (a YAML parser's) or, when
+/// `bytes`, in bytes (`serde_json`'s); `None` past the last line.
+pub(crate) fn reported_position(text: &str, line: usize, column: usize, bytes: bool) -> Option<SourcePosition> {
+    let start = match line {
+        0 | 1 => 0,
+        _ => text.match_indices('\n').nth(line - 2)?.0 + 1,
+    };
+    let rest = &text[start..];
+    let content = &rest[..rest.find('\n').unwrap_or(rest.len())];
+    let skipped = if start == 0 && !bytes { content.len() - content.trim_start_matches('\u{feff}').len() } else { 0 };
+    let within = if bytes {
+        column.saturating_sub(1).min(content.len())
+    } else {
+        content[skipped..].char_indices().nth(column.saturating_sub(1)).map_or(content.len(), |(at, _)| skipped + at)
+    };
+    Some(line_column(text, start + within))
 }
 
 fn pointer_of(segments: &[String]) -> String {
@@ -1274,16 +1408,17 @@ fn problem_at(
     path: &Path,
     revision: ConfigRevision,
     pointer: &str,
-    at: Option<(usize, usize)>,
+    at: Option<SourcePosition>,
     message: String,
 ) -> ConfigProblem {
     ConfigProblem {
         file: path.to_path_buf(),
         revision,
         pointer: pointer.to_string(),
-        line: at.map(|(line, _)| line),
-        column: at.map(|(_, column)| column),
+        line: at.as_ref().map(|at| at.line),
+        column: at.as_ref().map(|at| at.column),
         message,
+        reference_target: None,
     }
 }
 
@@ -1294,8 +1429,22 @@ mod tests {
     #[test]
     fn line_and_column_count_characters_and_skip_a_byte_order_mark() {
         let text = "\u{feff}a: 1\nbé: [x]\n";
-        assert_eq!(line_column(text, 3), (1, 1));
-        assert_eq!(line_column(text, text.find('[').unwrap()), (2, 5));
+        let at = |offset: usize| {
+            let position = line_column(text, offset);
+            (position.line, position.column, position.line_prefix)
+        };
+        assert_eq!(at(3), (1, 1, String::new()));
+        assert_eq!(at(text.find('[').unwrap()), (2, 5, "bé: ".to_string()));
+    }
+
+    #[test]
+    fn a_reported_position_is_read_in_its_parsers_unit() {
+        let text = "\u{feff}é: 1\n🧪 x: [y]\n";
+        let at = |line, column, bytes| reported_position(text, line, column, bytes).map(|position| (position.line, position.column));
+        assert_eq!(at(1, 3, false), Some((1, 3)), "characters, past the byte order mark");
+        assert_eq!(at(2, 6, true), Some((2, 3)), "bytes: `🧪 ` is five");
+        assert_eq!(at(2, 3, false), Some((2, 3)));
+        assert_eq!(at(9, 1, false), None);
     }
 
     #[test]

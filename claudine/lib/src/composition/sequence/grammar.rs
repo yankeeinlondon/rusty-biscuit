@@ -19,7 +19,7 @@
 use serde_json::Value;
 use simplified_schema::expression::scan::scan_plain;
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::json_util::json_type_name;
 use super::super::types::{LoopLocation, LoopOwner};
 
@@ -92,10 +92,10 @@ pub fn classify_source(value: &Value) -> Result<SequenceSourceSpec, CompositionE
     match value {
         Value::Array(items) => Ok(SequenceSourceSpec::Inline(items.clone())),
         Value::String(raw) => classify_string_source(raw),
-        other => Err(CompositionError::SequenceInvalid(format!(
-            "expected a list, a file reference, an expression, or a shell expansion, got {}",
-            json_type_name(other)
-        ))),
+        other => Err(CompositionError::sequence_invalid(
+            format!("expected a list, a file reference, an expression, or a shell expansion, got {}", json_type_name(other)),
+            SequenceSite::unlocated(),
+        )),
     }
 }
 
@@ -110,10 +110,10 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
     // A literal token is stored data. Read as `{{ … }}` it would become an
     // expression, and decoded it would be data choosing the run's steps.
     if crate::composition::closure::opens_stored_token(trimmed) {
-        return Err(CompositionError::SequenceInvalid(
+        return Err(CompositionError::sequence_invalid(
             "`sequence` holds a stored literal token (`{{!data:…}}`), which is data; \
-             author the list, file reference, expression, or shell expansion directly"
-                .to_string(),
+             author the list, file reference, expression, or shell expansion directly",
+            SequenceSite::unlocated(),
         ));
     }
 
@@ -131,10 +131,13 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
         && let Some(suffix) = trimmed.get(shell.close_span.end..)
         && suffix.starts_with("::")
     {
-        return Err(CompositionError::SequenceInvalid(format!(
-            "`sequence` shell source `{trimmed}` takes no suffix: `{suffix}` applies to a \
-             frontmatter value, and a sequence source must produce a list"
-        )));
+        return Err(CompositionError::sequence_invalid(
+            format!(
+                "`sequence` shell source `{trimmed}` takes no suffix: `{suffix}` applies to a \
+                 frontmatter value, and a sequence source must produce a list"
+            ),
+            SequenceSite::unlocated(),
+        ));
     }
 
     Ok(SequenceSourceSpec::Reference(parse_reference(trimmed)?))
@@ -179,6 +182,7 @@ fn parse_reference(input: &str) -> Result<SequenceReference, CompositionError> {
                 return Err(CompositionError::SequenceSourceSyntax {
                     authored: input.to_string(),
                     problem: "`->` must be followed by a dot-notation offset path".to_string(),
+                    site: Box::new(SequenceSite::unlocated()),
                 });
             }
             (head.trim(), Some(offset.to_string()))
@@ -190,6 +194,7 @@ fn parse_reference(input: &str) -> Result<SequenceReference, CompositionError> {
         return Err(CompositionError::SequenceSourceSyntax {
             authored: input.to_string(),
             problem: "missing the file reference before the suffix".to_string(),
+            site: Box::new(SequenceSite::unlocated()),
         });
     }
 
@@ -207,6 +212,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
     let open = tail.find('(').ok_or_else(|| CompositionError::SequenceSourceSyntax {
         authored: full.to_string(),
         problem: "an operator must be written `name(args)`".to_string(),
+        site: Box::new(SequenceSite::unlocated()),
     })?;
     let verb = tail[..open].trim().to_string();
 
@@ -214,6 +220,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
         CompositionError::SequenceSourceSyntax {
             authored: full.to_string(),
             problem: format!("operator `{verb}` is missing its closing `)`"),
+            site: Box::new(SequenceSite::unlocated()),
         }
     })?;
 
@@ -227,6 +234,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
         return Err(CompositionError::SequenceSourceSyntax {
             authored: full.to_string(),
             problem,
+            site: Box::new(SequenceSite::unlocated()),
         });
     }
 
@@ -242,6 +250,7 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
                     operator: "template".to_string(),
                     expected: 1,
                     found: 0,
+                    site: Box::new(SequenceSite::unlocated()),
                 });
             }
             Ok(SourceOperator::Template {
@@ -262,15 +271,20 @@ fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionE
                     operator: "map".to_string(),
                     expected: 2,
                     found,
+                    site: Box::new(SequenceSite::unlocated()),
                 }),
                 (_, found) => Err(CompositionError::SequenceOperatorArity {
                     operator: "name".to_string(),
                     expected: 1,
                     found,
+                    site: Box::new(SequenceSite::unlocated()),
                 }),
             }
         }
-        other => Err(CompositionError::SequenceUnknownOperator(other.to_string())),
+        other => Err(CompositionError::SequenceUnknownOperator {
+            operator: other.to_string(),
+            site: Box::new(SequenceSite::unlocated()),
+        }),
     }
 }
 
@@ -465,11 +479,29 @@ pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "f
 /// `origin` (`sequence[1]`, or empty for a file whose root is the task); it
 /// locates the task `when`/`loop` diagnostics.
 pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
-    for key in ["setup", "teardown", "execution", "fail_fast"] {
-        if let Some(value) = map.get(key) {
-            return Err(removed_task_key(key, value, origin));
-        }
-    }
+    validate_task_grammar_at(map, origin, property, true)
+}
+
+/// [`validate_task_grammar`] for the task alone: its own keys, events,
+/// declarations, guard, inputs, loop, inline group object, and the shape of
+/// its `sequence:` value, but not its group legs or its inline list's items.
+/// A check reads those one by one, so one bad leg or item does not hide its
+/// siblings.
+///
+/// ## Errors
+///
+/// As [`validate_task_grammar`], less those of the legs and items.
+pub fn validate_task_grammar_shallow(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    validate_task_grammar_at(map, origin, property, false)
+}
+
+fn validate_task_grammar_at(
+    map: &serde_json::Map<String, Value>,
+    origin: &std::path::Path,
+    property: &str,
+    descend: bool,
+) -> Result<(), CompositionError> {
+    super::removed::refuse_removed(super::removed::RemovedOwner::Task, map, origin)?;
     let inline = matches!(map.get("sequence"), Some(Value::Array(_)));
     if !inline && let Some(key) = CONTAINER_EVENT_KEYS.iter().find(|key| map.contains_key(**key)) {
         return Err(CompositionError::RemovedGrammar {
@@ -486,7 +518,8 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
         let group_property = child_property(property, "group");
         validate_container_events(group, origin)?;
         group_object_grammar(group, origin, &group_property)?;
-        for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        let legs = if descend { group.get("tasks").and_then(Value::as_array) } else { None };
+        for (index, leg) in legs.into_iter().flatten().enumerate() {
             let Value::Object(leg) = leg else {
                 // Same wording as `build_group`, which judges a group file's
                 // legs; here the file is the one declaring the inline group.
@@ -494,24 +527,36 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
                     group: group.get("name").and_then(Value::as_str).unwrap_or("<inline>").to_string(),
                     origin: origin.to_path_buf(),
                     problem: format!("task {} must be an object, got {}", index + 1, json_type_name(leg)),
+                    site: Box::new(SequenceSite::at(origin, &format!("{group_property}.tasks[{index}]"))),
                 });
             };
             validate_task_grammar(leg, origin, &format!("{group_property}.tasks[{index}]"))?;
         }
     }
     if let Some(value) = map.get("sequence") {
+        let sequence_property = child_property(property, "sequence");
         match value {
-            Value::Array(items) => {
+            Value::Array(items) if descend => {
                 super::normalize::normalize_plan_at(
                     items, super::model::SequenceSource::Inline, origin, true, &child_property(property, "sequence"),
                 )?;
             }
+            Value::Array(_) => {}
             Value::String(_) => {
-                if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
-                    return Err(CompositionError::SequenceInvalid("task `sequence` must be a list or file reference; dynamic sources belong on the sequence document".into()));
+                let spec = classify_source(value).map_err(|error| error.locate_sequence(origin, &sequence_property, None))?;
+                if !matches!(spec, SequenceSourceSpec::Reference(_)) {
+                    return Err(CompositionError::sequence_invalid(
+                        "task `sequence` must be a list or file reference; dynamic sources belong on the sequence document",
+                        SequenceSite::at(origin, &sequence_property),
+                    ));
                 }
             }
-            other => return Err(CompositionError::SequenceInvalid(format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)))),
+            other => {
+                return Err(CompositionError::sequence_invalid(
+                    format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)),
+                    SequenceSite::at(origin, &sequence_property),
+                ));
+            }
         }
     }
     Ok(())
@@ -667,14 +712,3 @@ fn validate_container_events(map: &serde_json::Map<String, Value>, origin: &std:
     Ok(())
 }
 
-pub(crate) fn removed_task_key(key: &str, value: &Value, origin: &std::path::Path) -> CompositionError {
-    let replacement = match key {
-        "setup" => "use a preceding `side_effect:` task for an action or `shell:` task for a command",
-        "teardown" => "use a group's `finalize:`; wrap a single task in a group of one",
-        "execution" if value.as_str() == Some("serial") => "use `sequence: [{name: first, shell: command}]` for ordered work; nest that sequence as a group leg when needed",
-        "execution" => "groups run concurrently; omit `execution:` (including `execution: parallel`)",
-        "fail_fast" => "`fail_fast` belongs on a `group:` object only; use a group of one with `fail_fast: false` to continue after failure",
-        _ => unreachable!(),
-    };
-    CompositionError::RemovedGrammar { source_path: origin.to_path_buf(), path: key.into(), removed: key.into(), replacement: replacement.into() }
-}

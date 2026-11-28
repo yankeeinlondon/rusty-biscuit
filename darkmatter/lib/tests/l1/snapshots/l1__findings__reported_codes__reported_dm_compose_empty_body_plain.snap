@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ⚠ the document has no body
+      in doc.md
+      hint: add the prompt text after the frontmatter

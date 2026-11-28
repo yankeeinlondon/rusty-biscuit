@@ -217,7 +217,13 @@ fn editing_and_deleting_either_side_of_a_cached_recursive_import_is_observed() {
         repo.remove(path);
         let error = api.validate(&document).expect_err("a removed cycle dependency cannot use a cached body");
         let name = path.rsplit('/').next().expect("fixture file name");
-        assert!(matches!(&error, SchemaError::NoMatch { reference, .. } if reference.ends_with(name)), "{path}: {error:?}");
+        // `b.yaml` is named by `a.yaml`, a file the document imports, so its
+        // failure is that file's, where the reference is written.
+        let missing = match &error {
+            SchemaError::ReferencedSchema { path: importer, source } if importer.ends_with("a.yaml") => &**source,
+            other => other,
+        };
+        assert!(matches!(missing, SchemaError::NoMatch { reference, .. } if reference.ends_with(name)), "{path}: {error:?}");
         repo.write(path, original);
         assert!(valid(&api, &document), "{path}: the same cache recovers after recreation");
     }

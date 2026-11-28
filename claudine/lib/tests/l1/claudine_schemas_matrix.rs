@@ -1,37 +1,37 @@
-//! The input robustness matrix for Claudine's schema bundle read from disk
-//! (`2026-10-21-claudine-schemas`, plan "Input robustness matrix" and the
-//! implementation log's finalized table).
+//! The input robustness matrix for Claudine's schema bundle installed as a
+//! registration (`2026-10-21-claudine-schemas`, plan "Input robustness
+//! matrix" and the implementation log's finalized table).
 //!
 //! Each column is one load-bearing field of a bundle file; each row is one
 //! malformed shape of it. A cell starts from the unedited shipped bundle,
 //! makes one edit to that field, writes the bundle in one syntax (block YAML,
 //! or JSON syntax inside the same `.yaml` files), and asserts the public
-//! result: trigger discovery or payload resolution fails visibly, or a pair of
-//! probe documents gets the stated verdicts or trigger selections. Each column
+//! result: the registration or payload resolution fails visibly, or a pair
+//! of probe documents gets the stated verdicts or trigger selections. Each column
 //! in each syntax is a module holding one test per cell (the unedited control
 //! and each shape), so a cell's discovery and validation cost is its own
 //! test's, and the table's growth adds tests rather than time to one;
 //! `matrix_tests_cover_the_table` keeps the generated tests equal to the
 //! table. `claudine_schemas_embedded.rs` walks the same table with the edited
-//! bundle supplied as an embedded bundle.
+//! bundle loaded from its bytes, as the in-process launch loads its compiled
+//! registration.
 
 use biscuit_file::Yaml;
-use claudine::composition::schema::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES};
-use simplified_schema::triggers::TriggerSource;
+use claudine::composition::schema::bundle::CLAUDINE_TRIGGER_FILES;
 use serde_json::{Map, Value, json};
 
-use crate::claudine_schemas::{BundleFile, Discovered, SchemaRepo, embedded_bundle, shipped_bundle};
+use crate::claudine_schemas::{BundleFile, Discovered, SchemaRepo, shipped_bundle};
 
-/// Where a cell's bundle is read from.
+/// Where a cell's bundle is loaded from. A bundle that does not register
+/// is refused whole, by a message naming a trigger file (whose payload
+/// imports the libraries) or the edited file itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Origin {
-    /// The repository's `schemas/` folder.
-    Disk,
-    /// An embedded bundle named like Claudine's, with no disk schema files.
-    /// A skipped trigger must be an embedded finding (never a disk file)
-    /// naming a trigger file, whose payload imports the libraries, or the
-    /// edited file itself: every bundle document is parsed to classify it,
-    /// so a library that is not YAML is named directly.
+    /// Published into the fixture home and loaded through a `register`
+    /// entry ([`SchemaRepo::discover_installed`]).
+    Installed,
+    /// Loaded from its bytes, as the in-process launch loads its compiled
+    /// registration ([`SchemaRepo::discover`]).
     Embedded,
 }
 
@@ -71,8 +71,8 @@ const SHAPES: [Shape; 8] = [
 /// What a cell must observe.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Outcome {
-    /// Discovery skips the edited bundle's trigger with a finding, or
-    /// payload resolution fails visibly; nothing is validated.
+    /// The edited bundle does not register, or payload resolution fails
+    /// visibly; nothing is validated.
     Error,
     /// The bundle loads; the positive and violating probes are valid (`true`)
     /// or invalid (`false`).
@@ -104,7 +104,7 @@ struct Column {
 const ACTION_PROBES: (&str, &str) = ("start: [{ info: hi }]", "start: [{ inf0: hi }]");
 const LIFECYCLE_PROBES: (&str, &str) = (
     "start: [{ when: \"a\", then: [{ when: \"b\", then: [{ when: \"c\", then: [stop] }] }] }]",
-    // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+    // `agent` selects composition.yaml; `initialize` alone is shared with md.
     "agent: claude\ninitialize: [{ shell: x }]",
 );
 
@@ -190,10 +190,10 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: MAPPING_EXPORT,
     },
-    // Every `lifecycle.yaml` export.
+    // Every `lifecycle-events.yaml` export.
     Column {
         name: "lifecycle_stack",
-        file: "lifecycle.yaml",
+        file: "lifecycle-events.yaml",
         pointer: "/types/stack",
         probes: LIFECYCLE_PROBES,
         selection: false,
@@ -203,7 +203,7 @@ const COLUMNS: &[Column] = &[
     // the positive probe's `start` stack does not use it.
     Column {
         name: "lifecycle_initialize_stack",
-        file: "lifecycle.yaml",
+        file: "lifecycle-events.yaml",
         pointer: "/types/initialize-stack",
         probes: LIFECYCLE_PROBES,
         selection: false,
@@ -213,7 +213,7 @@ const COLUMNS: &[Column] = &[
     // loop is typed by the bundle arm, the mapping this column edits.
     Column {
         name: "lifecycle_loop",
-        file: "lifecycle.yaml",
+        file: "lifecycle-events.yaml",
         pointer: "/types/loop-bundle",
         probes: LIFECYCLE_PROBES,
         selection: false,
@@ -228,21 +228,20 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: [Error, NULL_REJECTS_BOTH, Error, Error, Error, Error, Error, Error],
     },
-    // Trigger envelope, through `claudine.yaml`. A file whose `kind` is
-    // absent or another string (the empty string included) is unclassified
-    // and contributes nothing, so the violating probe is no longer judged; a
-    // null or non-string `kind` is a load error, not ordinary data.
+    // Trigger envelope, through `composition.yaml`. A registered member is
+    // classified by its `kind`, so one that is absent, empty, or not
+    // `schema-trigger` refuses the registration like any other defect.
     Column {
         name: "trigger_kind",
-        file: "claudine.yaml",
+        file: "composition.yaml",
         pointer: "/kind",
         probes: ACTION_PROBES,
         selection: false,
-        outcomes: [UNCONSTRAINED, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
+        outcomes: [Error; 8],
     },
     Column {
         name: "trigger_match",
-        file: "claudine.yaml",
+        file: "composition.yaml",
         pointer: "/match",
         probes: ACTION_PROBES,
         selection: false,
@@ -251,7 +250,7 @@ const COLUMNS: &[Column] = &[
     // An absent payload leaves a matcher-only trigger that layers nothing.
     Column {
         name: "trigger_payload",
-        file: "claudine.yaml",
+        file: "composition.yaml",
         pointer: "/$schema",
         probes: ACTION_PROBES,
         selection: false,
@@ -261,11 +260,11 @@ const COLUMNS: &[Column] = &[
         outcomes: [UNCONSTRAINED, UNCONSTRAINED, Error, Error, Error, Error, Error, Error],
     },
     // A trigger condition operand: the `start: string(required)` alternative,
-    // after the five `sequence` alternatives.
+    // after `kind: sequence` and the five `sequence` alternatives.
     Column {
         name: "trigger_condition_operand",
-        file: "claudine.yaml",
-        pointer: "/match/group/5/start",
+        file: "composition.yaml",
+        pointer: "/match/all/1/group/6/start",
         probes: ("start: hi", "start: null"),
         selection: true,
         outcomes: [Error; 8],
@@ -274,7 +273,7 @@ const COLUMNS: &[Column] = &[
     // empty `{}` condition inside `all:`, which the match grammar rejects.
     Column {
         name: "trigger_combinator",
-        file: "inline-compose.yaml",
+        file: "inline-composition.yaml",
         pointer: "/match/all/1/none",
         probes: ("prompt: x", "prompt: x\nsequence: 42"),
         selection: true,
@@ -282,12 +281,13 @@ const COLUMNS: &[Column] = &[
     },
     // A payload property definition. Removing it only removes the
     // constraint; an explicit `{}` payload is likewise an empty mergeable
-    // payload.
+    // payload. `prompt` is the one property `composition.yaml` declares beside
+    // its `$extends`, and only a sequence document selects it with a prompt.
     Column {
         name: "payload_property",
-        file: "claudine.yaml",
-        pointer: "/$schema/timeout",
-        probes: ("start: [stop]\ntimeout: \"30s\"", "start: [stop]\ntimeout: [1]"),
+        file: "composition.yaml",
+        pointer: "/$schema/prompt",
+        probes: ("sequence: [a]\nprompt: hi", "sequence: [a]\nprompt: [1]"),
         selection: false,
         outcomes: [UNCONSTRAINED, NULL_REJECTS_BOTH, Error, Error, Error, Error, Error, Error],
     },
@@ -472,56 +472,68 @@ fn serialize(document: &Value, syntax: Syntax, duplicate: Option<&(String, Value
     text
 }
 
-/// The shipped bundle with one file in `syntax`, unedited: block YAML is the
-/// shipped text itself, and JSON syntax is that text's value as JSON.
+/// The shipped bundle with its trigger and library files in `syntax`,
+/// unedited: block YAML is the shipped text itself, and JSON syntax is that
+/// text's value as JSON. The other members (the namespace files, which the
+/// lifecycle artifact's catalog hash covers, and the YAML kinds) keep their
+/// shipped text: no column edits them.
 fn bundle_in(shipped: &[BundleFile], syntax: Syntax) -> Vec<BundleFile> {
     shipped
         .iter()
         .map(|(name, text)| {
             let text = match syntax {
-                Syntax::Yaml => text.clone(),
-                Syntax::Json => serialize(&as_json(text), Syntax::Json, None, false),
+                Syntax::Json if is_matrix_file(name) => serialize(&as_json(text), Syntax::Json, None, false),
+                Syntax::Yaml | Syntax::Json => text.clone(),
             };
             (*name, text)
         })
         .collect()
 }
 
+/// Whether the bundle file `name` is a trigger or a types-only library: the
+/// files the table's columns live in.
+fn is_matrix_file(name: &str) -> bool {
+    use claudine::composition::inventory::{MemberKind, member};
+    member(name).is_some_and(|member| matches!(member.kind, MemberKind::Trigger | MemberKind::Library))
+}
+
 fn as_json(text: &str) -> Value {
     Yaml::from_str(text).expect("shipped YAML").as_json().expect("JSON-compatible")
 }
 
-/// The bundle's discovery from `origin`, or `None` when it reports a
-/// skipped trigger. Discovery itself never fails for an invalid trigger.
+/// The bundle's registration from `origin`, or `None` when it is refused.
 fn discover_from(bundle: &[BundleFile], edited: &str, origin: Origin) -> (SchemaRepo, Option<Discovered>) {
-    let (repo, discovered) = match origin {
-        Origin::Disk => {
-            let repo = SchemaRepo::new(bundle);
-            let discovered = repo.discover().expect("an invalid trigger never fails discovery");
-            (repo, discovered)
-        }
-        Origin::Embedded => {
-            let repo = SchemaRepo::new(&[]);
-            let discovered =
-                repo.discover_embedded(embedded_bundle(bundle)).expect("an invalid trigger never fails discovery");
-            (repo, discovered)
-        }
+    let repo = SchemaRepo::new(bundle);
+    let discovered = match origin {
+        Origin::Installed => repo.discover_installed(),
+        Origin::Embedded => repo.discover(),
     };
-    let Some(finding) = discovered.schemas.discovery_findings().first() else {
-        return (repo, Some(discovered));
-    };
-    match (origin, finding.source()) {
-        (Origin::Disk, TriggerSource::File(_)) => {}
-        (Origin::Embedded, TriggerSource::Embedded { bundle, name }) => {
-            assert_eq!(bundle, CLAUDINE_SCHEMA_BUNDLE_NAME);
+    match discovered {
+        Ok(discovered) => (repo, Some(discovered)),
+        Err(refusal) => {
+            let position = manifest_position(bundle, edited);
             assert!(
-                CLAUDINE_TRIGGER_FILES.contains(&name.as_str()) || name == edited,
-                "the finding names a trigger or the edited {edited}: {name}"
+                CLAUDINE_TRIGGER_FILES.iter().any(|file| refusal.contains(file))
+                    || refusal.contains(edited)
+                    || refusal.contains(&position),
+                "the refusal names a trigger or the edited {edited} ({position}): {refusal}"
             );
+            (repo, None)
         }
-        (origin, source) => panic!("a {origin:?} bundle reports {source}"),
     }
-    (repo, None)
+}
+
+/// The manifest position (`files[2]`) of the bundle file `name`, which an
+/// installed registration's refusal names in place of the member path.
+fn manifest_position(bundle: &[BundleFile], name: &str) -> String {
+    let inventory = crate::claudine_schemas::inventory_of(bundle);
+    let manifest = std::str::from_utf8(inventory.manifest().bytes()).expect("a UTF-8 manifest");
+    let files = as_json(manifest)["files"].as_array().expect("the manifest lists its files").clone();
+    let index = files
+        .iter()
+        .position(|entry| serde_json::to_string(entry).expect("an entry").contains(&format!("schemas/{name}")))
+        .unwrap_or_else(|| panic!("the manifest lists schemas/{name}"));
+    format!("files[{index}]")
 }
 
 /// The outcome of one bundle, through public discovery and validation.
@@ -530,8 +542,8 @@ fn observe(bundle: &[BundleFile], column: &Column, origin: Origin) -> Outcome {
     let Some(discovered) = discovered else {
         return Error;
     };
-    let claudine = text_of(bundle, "claudine.yaml");
-    let inline = text_of(bundle, "inline-compose.yaml");
+    let claudine = text_of(bundle, "composition.yaml");
+    let inline = text_of(bundle, "inline-composition.yaml");
     let mut results = [false; 2];
     for (index, probe) in [column.probes.0, column.probes.1].into_iter().enumerate() {
         let path = repo.write_document(&format!("probe-{index}.md"), &format!("---\n{probe}\n---\n"));
@@ -539,7 +551,7 @@ fn observe(bundle: &[BundleFile], column: &Column, origin: Origin) -> Outcome {
             return Error;
         };
         results[index] = if column.selection {
-            if column.file == "inline-compose.yaml" { judged.inline } else { judged.claudine }
+            if column.file == "inline-composition.yaml" { judged.inline } else { judged.claudine }
         } else {
             judged.report.valid
         };
@@ -577,7 +589,7 @@ pub(crate) fn walk_control(column_name: &str, syntax: Syntax, shipped: &[BundleF
 pub(crate) fn walk_shape(column_name: &str, syntax: Syntax, shape: Shape, shipped: &[BundleFile], origin: Origin) {
     let column = column(column_name);
     let index = SHAPES.iter().position(|table_shape| *table_shape == shape).expect("a table shape");
-    let expected = unclaimed_trigger(column, shape).unwrap_or(column.outcomes[index]);
+    let expected = column.outcomes[index];
     let control = bundle_in(shipped, syntax);
     let mut document = as_json(text_of(shipped, column.file));
     let duplicate = edit(&mut document, column.pointer, shape);
@@ -587,18 +599,6 @@ pub(crate) fn walk_shape(column_name: &str, syntax: Syntax, shape: Shape, shippe
         .map(|(name, text)| (name, if name == column.file { edited.clone() } else { text }))
         .collect();
     assert_eq!(observe(&bundle, column, origin), expected, "{column_name} ({syntax:?}, {origin:?}): {shape:?}");
-}
-
-/// The outcome of a trigger file that a duplicate key or trailing garbage
-/// makes invalid YAML. Darkmatter claims an unparseable file as a trigger
-/// envelope only through a column-0 `kind: schema-trigger` line with a plain
-/// `kind` key, and this matrix writes every key quoted (`"kind":`, in both
-/// syntaxes), so the file is unclassified: its trigger is gone, the probes are
-/// unconstrained, and nothing is selected.
-fn unclaimed_trigger(column: &Column, shape: Shape) -> Option<Outcome> {
-    let unparseable = matches!(shape, Shape::Duplicate | Shape::Trailing);
-    (unparseable && CLAUDINE_TRIGGER_FILES.contains(&column.file))
-        .then_some(if column.selection { Selects(false, false) } else { UNCONSTRAINED })
 }
 
 /// The body of one column's module in one syntax read from one origin: a
@@ -658,7 +658,7 @@ macro_rules! matrix_tests {
     ($($test:ident => ($column:literal, $syntax:ident);)*) => {
         $(
             mod $test {
-                $crate::claudine_schemas_matrix::matrix_cells!($column, $syntax, Disk);
+                $crate::claudine_schemas_matrix::matrix_cells!($column, $syntax, Installed);
             }
         )*
 
@@ -724,7 +724,7 @@ fn matrix_tests_cover_the_table() {
 fn json_syntax_bundle_is_the_shipped_bundle() {
     // The JSON-syntax control holds the same values as the shipped YAML, so
     // every JSON cell differs from the shipped bundle by its edit alone.
-    for (name, text) in shipped_bundle!() {
+    for (name, text) in shipped_bundle!().into_iter().filter(|(name, _)| is_matrix_file(name)) {
         let json_text = serialize(&as_json(&text), Syntax::Json, None, false);
         assert!(json_text.trim_start().starts_with('{'), "{name} is written in JSON syntax");
         assert_eq!(as_json(&json_text), as_json(&text), "{name}");
@@ -740,7 +740,7 @@ fn json_syntax_bundle_is_the_shipped_bundle() {
 /// already rejects as unknown.
 #[test]
 fn a_non_string_top_level_trigger_key_is_an_error() {
-    assert_non_string_trigger_key_errors(&shipped_bundle!(), Origin::Disk);
+    assert_non_string_trigger_key_errors(&shipped_bundle!(), Origin::Installed);
 }
 
 /// The R3 cell from `origin`: the control, then three non-string keys.
@@ -751,10 +751,10 @@ pub(crate) fn assert_non_string_trigger_key_errors(shipped: &[BundleFile], origi
         let bundle: Vec<BundleFile> = shipped
             .iter()
             .map(|(name, text)| {
-                let text = if *name == "claudine.yaml" { format!("{text}\n{key}: extra\n") } else { text.clone() };
+                let text = if *name == "composition.yaml" { format!("{text}\n{key}: extra\n") } else { text.clone() };
                 (*name, text)
             })
             .collect();
-        assert_eq!(observe(&bundle, column, origin), Error, "`{key}: extra` in claudine.yaml");
+        assert_eq!(observe(&bundle, column, origin), Error, "`{key}: extra` in composition.yaml");
     }
 }

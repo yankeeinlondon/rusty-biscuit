@@ -141,6 +141,7 @@ schema views, and completion read them; a host may read them too.
 | `x-darkmatter-operands` | `operands(<verb>-short)` / `operands(<verb>-long)` | A host that knows the verb (Darkmatter's lifecycle) binds the operands through the verb's registration. |
 | `x-darkmatter-uncounted-keys` | `uncounted-keys` | Conversion reads it in place of the `allOf` conditions that enforce the key count; those conditions are standard and every validator enforces them. |
 | `x-darkmatter-type`, `x-darkmatter-options` | `alphanumeric(...)` | Conversion keeps a native number or boolean from becoming text; the type's `pattern` does the checking. |
+| `x-darkmatter-no-coerce` | `string(no-coerce)` | Conversion keeps a native number or boolean from becoming text; the `string` type does the checking. |
 | `x-darkmatter-generated` | `generated` | Marks a value the host supplies later; the property is left out of the static `required` list. |
 | `x-darkmatter-example` | `example(...)` | The resolved example objects, for documentation and editor hovers. |
 | `x-darkmatter-suggest` | `suggest(...)` | The interpreted suggestion candidates, in order. |

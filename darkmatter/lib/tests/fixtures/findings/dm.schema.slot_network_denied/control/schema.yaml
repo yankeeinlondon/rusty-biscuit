@@ -1,0 +1,3 @@
+kind: schema
+$schema:
+    os: "enum(macOS, Linux)"

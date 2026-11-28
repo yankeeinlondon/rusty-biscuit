@@ -290,4 +290,4 @@ NDJSON omits it.
 - `claudine/lib/src/stream/logs/opencode/state.rs` — `SharedStderrState` and `merge_stderr_state_into_summary`.
 - `claudine/lib/src/stream/providers/opencode.rs` — NDJSON parser; no longer synthesizes `SubagentStart`/`SubagentStop` from `task` tool_use.
 - [`timeouts.md`](topics/timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
-- `claudine/docs/research/agent-cli/opencode.md` — research source for the stderr schema.
+- `claudine/docs/research/providers/agent-cli/opencode.md` — research source for the stderr schema.

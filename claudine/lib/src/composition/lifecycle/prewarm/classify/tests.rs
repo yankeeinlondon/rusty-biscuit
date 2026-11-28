@@ -390,3 +390,39 @@ fn object_spread_operand_reads_are_classified_even_when_overwritten() {
         ],
     );
 }
+
+/// An initializer's templated file operand is resolved before its event
+/// only from the document's own data values; anything only the event can
+/// tell is `None`.
+macro_rules! initializer_destinations {
+    ($($name:ident: $template:expr, $frontmatter:expr, $written:expr => $expected:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            let written: std::collections::HashSet<String> = $written.iter().map(|key: &&str| key.to_string()).collect();
+            let resolved = resolve_initializer_template(
+                $template,
+                &$frontmatter,
+                &written,
+                ComposeContext::capture_for_content(Path::new("."), ""),
+            );
+            assert_eq!(resolved.as_deref(), $expected);
+        }
+    )*};
+}
+
+initializer_destinations! {
+    an_initializer_destination_reading_a_value_resolves:
+        "{{ target }}", json!({ "target": "gen/notes.md" }), [] => Some("gen/notes.md");
+    an_initializer_destination_reading_an_fm_member_resolves:
+        "gen/{{ fm.name }}.md", json!({ "name": "notes" }), [] => Some("gen/notes.md");
+    an_initializer_destination_calling_a_function_is_unresolved:
+        "{{ lower(target) }}", json!({ "target": "X" }), [] => None;
+    an_initializer_destination_reading_a_set_key_is_unresolved:
+        "{{ target }}", json!({ "target": "gen/notes.md" }), ["target"] => None;
+    an_initializer_destination_reading_a_template_value_is_unresolved:
+        "{{ target }}", json!({ "target": "{{ other }}" }), [] => None;
+    an_initializer_destination_reading_an_absent_value_is_unresolved:
+        "{{ target }}", json!({}), [] => None;
+    an_initializer_destination_reading_ctx_is_unresolved:
+        "{{ ctx.repo.root }}/x.md", json!({}), [] => None;
+}

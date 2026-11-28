@@ -74,7 +74,7 @@ slow-tests *args="":
 # genuinely unfeatured, and that the reference and glob grammar work under
 # `file-reference-syntax` alone.
 #
-# `to_portable_string` / `try_portable_string` are documented as available
+# `to_forward_slash_string` / `try_forward_slash_string` are documented as available
 # without `file-reference` and its gix/cargo_metadata/walkdir/dirs/url stack, so
 # a consumer can render a path without paying for a resolver. Nothing about the
 # default-feature suite would notice that guarantee lapsing — the module would

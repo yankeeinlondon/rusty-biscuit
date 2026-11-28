@@ -110,7 +110,7 @@ fn empirical_schema_fixture_loads_and_resolves() {
     let area = gen_root
         .parent()
         .expect("gen crate lives under the claudine package area");
-    let topic = area.join("docs/research/agent-errors");
+    let topic = area.join("docs/research/providers/agent-errors");
     let context = inputs::area_resolution_context(
         area,
         &darkmatter::markdown::compose::RequestSnapshot::new(area),

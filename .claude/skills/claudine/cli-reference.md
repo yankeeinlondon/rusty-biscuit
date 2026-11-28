@@ -9,7 +9,7 @@ Complete command documentation with examples and options.
 ## Contents
 
 - [Global options](#global-options)
-- [`claudine init`](#claudine-init)
+- [`claudine setup`](#claudine-setup)
 - [`claudine hooks`](#claudine-hooks)
 - [`claudine actions`](#claudine-actions)
 - [Wrapped provider commands](#wrapped-provider-commands)
@@ -38,43 +38,29 @@ subcommand or flag.
 
 ---
 
-## `claudine init`
+## `claudine setup`
 
-Interactive setup wizard for initial configuration. Walks through 4 phases:
-
-1. **Agent Discovery** — detects installed agentic CLIs on the system
-2. **Provider Preferences** — rank your favorite installed CLIs for canonical ordering
-3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
-4. **Write & Register** — saves `~/.claudine/config.yaml` and registers hooks with each provider
-
-Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings, from the in-memory bindings; the saved file lists only events that have actions, because the schema refuses an empty event list (`action[](not-empty)`; the test-only `commands/init/mod.rs::write_init_config` filters them the same way).
-
-```bash
-claudine init [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--quick` | Use defaults without prompting |
-| `--repo` | Create project-scoped configuration |
-
-**Quick Mode:**
+Reruns Claudine's setup with Darkmatter on the user's configuration, without
+prompting (`cli/src/commands/setup.rs` → `init_wizard::write_with_darkmatter_setup`
+→ `config/setup.rs::setup_claudine`). Order: publish the registration (failure
+stops, nothing written), the `permissions` handshake with `~/.darkmatter.yaml`
+(conflict is a warning), register `~/.claudine/registrations/darkmatter/manifest.yaml`
+in place of any spelling of `~/.claudine/darkmatter-host.yaml` (even when that
+file is gone), then remove the retired files. An existing Claudine file is
+handed a no-op write, so its settings and comments stay; with none (or a
+pre-2026 file the load backed up) it writes the headless first-run defaults.
+A repository's `.darkmatter.yaml` is never edited. A rerun changes nothing.
+It is the command Darkmatter's format 1 warning names. Tests:
+`cli/tests/l1/setup_command.rs`. User docs: `claudine/docs/cli/setup.md`.
 
 ```bash
-claudine init --quick
+claudine setup
 ```
 
-Creates configuration with sensible defaults:
-- All detected agents enabled
-- `session_start` → SoundEffect (power-up)
-- `turn_complete` → SoundEffect (success)
-- `tool_error` → SoundEffect (error)
-- `permission_request` → SoundEffect (notification)
-- `human_in_the_loop` → SoundEffect (notification)
-
-`--repo` creates `.claudine/config.yaml` in the repository root and can add `.claudine/` to `.gitignore`.
-
-After writing its own file, setup completes the handshake with Darkmatter's configuration of the same scope: an absent `.darkmatter.yaml` is created with `permissions: ~/.claudine/config.yaml`, an inline block there moves into Claudine's file first, a differing block in both files is a conflict that changes neither, and any existing reference is left alone. Outside a repository, `--repo` fails before writing. See `claudine/docs/topics/configuration.md`.
+There is no `claudine init`. A first command that finds no configuration
+runs `init_wizard::run_initialization`: the interactive wizard on a terminal,
+otherwise the headless defaults, both through the same setup. The
+`commands/init` module (with `--quick`/`--repo`) is compiled only for tests.
 
 ---
 
@@ -374,18 +360,25 @@ Full user contract: [Sequences](topics/flow-control/sequences.md).
 
 ### `--dry-run`
 
-Runs composition through provider/model resolution, then emits the composed result before launch wiring begins. Available on all three commands and suitable for CI rehearsal.
+A passive check, available on all three commands and suitable for CI: it
+reads the document (or the whole sequence tree, recovering past each bad
+task), composes each prompt with every effect withheld, and reports every
+problem. Nothing runs or is written, even with `--yolo`: no `$( … )`,
+`::shell`, `shell:`/`side_effect:` task, lifecycle event, proxy, `prep`,
+provider, picker, missing-input prompt, configuration creation or
+migration, cache, or `inline-compose` edit.
 
-- Schema validation, shell-command execution (real side effects), and the shell-audit pre-flight all run normally.
-- Selected-executable availability validation and path resolution do not run;
-  the selected provider need not be installed or present on `PATH`. Claudine
-  may still inventory installed providers when automatic selection or the
-  rendered agent-resolution breakdown requires it.
-- The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
-- **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
-- `--quiet` / `--silent` have **no effect** under `--dry-run`.
-- **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `seq.outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No lifecycle events fire, no `prep` target runs (literal targets are listed), no provider launches, and no inline-compose write-back occurs. `shell:` and `side_effect:` tasks are rendered as `rendered (dry-run): would run …` and publish nothing; loops preview one pass with pass 1's `loop.*`; task guards are shown, not evaluated; the summary reads `Sequence previewed (dry-run): N step(s) rendered, none run`. `$( … )` composition expansions still execute for real. `--dry-run --dry-run-shell` runs each `shell:` task once (mutating; never a provider, never a `side_effect:`); `--dry-run-shell` alone is a usage error.
+- **stderr** = the report (findings per document/task, `not checked` rows,
+  summary line); **stdout** = each composed preview, with withheld
+  constructs marked `[not evaluated in a dry run]`.
+- `--json` (requires `--dry-run`) = one envelope (`file`, `outcome`,
+  `diagnostics`, `summary`) on stdout and nothing on stderr.
+- Exit `2` when any finding is an error or warning, else `0`; never `1`.
+- The provider is chosen by the real selectors and must be on `PATH`; with
+  no terminal, a choice the run would ask for is an error, on a terminal a
+  warning. The finding lists each source consulted.
+- `--quiet` / `--silent` / `--perf` have no effect; `--dry-run-shell` is a
+  usage error with or without `--dry-run`.
 
 See [Composition — Dry Run](topics/composition.md#dry-run) for the full reference.
 

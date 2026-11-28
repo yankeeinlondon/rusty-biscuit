@@ -9,7 +9,7 @@ Source: `biscuit-file/lib/src/`
 | `indentation` | (always) | `Indentation`, `IndentStyle` |
 | `json5` | `json5` | `Json5`, `Json5Error`, `Json5Source` |
 | `pdf` | `extract` / `lopdf` / `pdfium` | `Pdf`, `PdfConfig`, `PdfError`, `PdfMarkdown`, `PdfToc` |
-| `file_reference` | `file-reference-syntax` | `FileReference` (parse, `class`, `payload`, builders), `FileReferenceKind`, `FileReferenceClass`, `FileReferenceError`, `ResolutionFailure`, `ResolutionCandidate`, `RootProvenance`, `PathPosition`, `MagicPathTier`, `GlobReference` (`new`, `patterns`, `escape`), `GlobReferenceError`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`, `home_dir`, `user_cache_dir`; from `file_reference::portable` (`path_identity`, `strategy`): `PathIdentity`, `RelativeRoute`, `PortabilityPreference`, `IntentForms` |
+| `file_reference` | `file-reference-syntax` | `FileReference` (parse, `class`, `payload`, builders), `FileReferenceKind`, `FileReferenceClass`, `FileReferenceError`, `ResolutionFailure`, `ResolutionCandidate`, `RootProvenance`, `PathPosition`, `MagicPathTier`, `GlobReference` (`new`, `patterns`, `escape`), `GlobReferenceError`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchScope`, `home_dir`, `user_cache_dir`; from `file_reference::portable` (`path_identity`, `strategy`): `PathIdentity`, `RelativeRoute`, `PortabilityPreference`, `IntentForms` |
 | `file_reference` (resolution) | `file-reference` | `resolve.rs` and every `resolve*`/`candidate_plan*`/`complete_partial*`/`validate_*_candidate` method, `DetailedResolution`, `PartialCompletion`, `Resolved`, `MagicSearchRoot`, glob listing (`glob/{list,matches,roots}.rs`: `GlobListing`, `SkippedEntry`, `PreparedGlobReference`), `find_git_root`, `FileReferenceError::Git`; from `file_reference::portable` (`env_anchor`, `diagnostics`, `evaluate`, crate-internal `text`): `PortablePath`, `PortableReference`, `PORTABLE_ENV_VARIABLES`, `PortablePathError` and its diagnostics types |
 | `frontmatter` | `yaml` | `extract_frontmatter_block`, `FrontmatterExtraction`, `FrontmatterEnvelopeError`, `line_spans`, `LineSpan`, `detect_near_miss_fence` |
 | `detect` | (always) | `FileType`, `detect_file_type`, `detect_file_type_from_bytes`, `detect_from_extension` |
@@ -18,7 +18,7 @@ Source: `biscuit-file/lib/src/`
 | `data_locations` | (always; `locate_toml` needs `toml`, `locate_json5` and `json5_parse_error_offset` need `json5`) | `locate_json`, `locate_jsonl`, `locate_toml`, `locate_json5`, `json5_parse_error_offset` |
 | `source_position` | (always) | `source_position` |
 | `format` | (always) | `DataFormat` |
-| `path_text` | (always) | `to_portable_string`, `try_portable_string` |
+| `path_text` | (always) | `to_forward_slash_string`, `try_forward_slash_string` |
 | `error` | (always) | `BiscuitFileError` |
 
 ## Feature Flags

@@ -15,7 +15,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::common::{LspFixture, LspWorkspace};
-use crate::host_fixtures::{RELAY_GLOBALS, RELAY_TRIGGER};
+use crate::host_fixtures::{Bundle, RELAY_NAMESPACE, RELAY_TRIGGER};
 use crate::host_registration_watches::{CHANGED, CREATED, DELETED, registration_on, report, start, uri};
 use crate::registered_host_views::{
     MOTIVATING, REGISTRATION, UNAVAILABLE, UNKNOWN_FUNCTION, UNKNOWN_HOST, completion_at, hover_at, install_relay,
@@ -25,12 +25,11 @@ use crate::union_item_editor::{Document, open_text};
 
 /// Every file a relay install, or the configuration registering it, can be
 /// warned on.
-const WARNABLE: [&str; 8] = [
+const WARNABLE: [&str; 7] = [
     "home/.darkmatter.yaml",
     "home/.relay/darkmatter-host.yaml",
-    "home/.relay/schemas/identify.yaml",
     "home/.relay/schemas/relay.yaml",
-    "home/.relay/schemas/globals.yaml",
+    "home/.relay/schemas/seq.yaml",
     "home/.relay/schemas/globals.lifecycle.json",
     "home/.relay/schemas/functions.yaml",
     "home/.relay/schemas/functions.facts.json",
@@ -109,9 +108,9 @@ fn replace_atomically(fixture: &mut LspFixture<'_>, document: &Document, path: &
     report(fixture, document, &[(&temporary, CREATED), (&temporary, DELETED), (path, CHANGED)]);
 }
 
-/// The catalog is atomically replaced with one its lifecycle artifact was
-/// not generated for: neither the old nor the new catalog's facts are
-/// served, by any feature, until the valid catalog is restored.
+/// The `seq` namespace file is atomically replaced with bytes its manifest
+/// does not address: neither the old nor the new namespace's facts are
+/// served, by any feature, until the addressed bytes are restored.
 #[test]
 fn every_feature_drops_the_host_after_an_invalid_atomic_replacement_and_restores_it() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -123,14 +122,14 @@ fn every_feature_drops_the_host_after_an_invalid_atomic_replacement_and_restores
     let (document, diagnostics) = open_text(&mut fixture, &workspace, "notes/relay.md", MOTIVATING);
     assert_eq!(analysis(&mut fixture, &document, &diagnostics), RELAY);
 
-    let catalog = root.join("home/.relay/schemas/globals.yaml");
-    let stale = RELAY_GLOBALS.replace("The current step's name.", "The step's name, renamed.");
-    replace_atomically(&mut fixture, &document, &catalog, &stale);
+    let namespace = root.join("home/.relay/schemas/seq.yaml");
+    let stale = RELAY_NAMESPACE.replace("The current step's name.", "The step's name, renamed.");
+    replace_atomically(&mut fixture, &document, &namespace, &stale);
     assert_eq!(refreshed(&mut fixture, &document), MD, "no last-good or partial host facts");
     let warned = registration_warnings(&mut fixture);
     assert_eq!(warned.len(), 1, "one warning, on the refused install: {warned:?}");
 
-    replace_atomically(&mut fixture, &document, &catalog, RELAY_GLOBALS);
+    replace_atomically(&mut fixture, &document, &namespace, RELAY_NAMESPACE);
     assert_eq!(refreshed(&mut fixture, &document), RELAY);
     assert_eq!(registration_warnings(&mut fixture), [], "the warning is cleared");
     fixture.shutdown();
@@ -181,12 +180,16 @@ macro_rules! refused_install {
             let (document, diagnostics) = open_text(&mut fixture, &workspace, "notes/relay.md", MOTIVATING);
             assert_eq!(analysis(&mut fixture, &document, &diagnostics), MD, "{diagnostics:#?}");
 
+            // One warning per refusal: a broken library is refused for
+            // itself and for each importer, all at the same declaration.
             let warnings = registration_on(&mut fixture, $warned_on).unwrap_or_default();
-            assert_eq!(warnings.len(), 1, "{warnings:#?}");
+            assert!(!warnings.is_empty(), "the file is warned");
             let declaring = std::fs::read_to_string(root.join($warned_on)).unwrap();
             let needle: Option<&str> = $needle;
             let line = needle.map_or(0, |needle| line_containing(&declaring, needle));
-            assert_eq!(warnings[0]["range"]["start"]["line"], json!(line), "{warnings:#?}");
+            for warning in &warnings {
+                assert_eq!(warning["range"]["start"]["line"], json!(line), "{warnings:#?}");
+            }
             assert_eq!(registration_warnings(&mut fixture), [], "no other file is warned");
             fixture.shutdown();
         }
@@ -195,18 +198,87 @@ macro_rules! refused_install {
 
 refused_install! {
     a_stale_lifecycle_artifact_refuses_the_host:
-        |root| write(root, "home/.relay/schemas/globals.yaml", &RELAY_GLOBALS.replace("current step", "present step"))
-        => "home/.relay/schemas/globals.lifecycle.json" at None;
+        |root| Bundle::relay()
+            .with_member("schemas/seq.yaml", &RELAY_NAMESPACE.replace("current step", "present step"))
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/globals.lifecycle.json" at Some("\"catalog_hash\"");
     a_facts_artifact_for_another_catalog_refuses_the_host:
         |root| {
-            let catalog = root.join("home/.relay/schemas/functions.yaml");
-            let text = std::fs::read_to_string(&catalog).unwrap();
-            write(root, "home/.relay/schemas/functions.yaml", &text.replace("The acme label", "The relay label"));
+            let bundle = Bundle::relay();
+            let text = bundle.members["schemas/functions.yaml"].replace("The acme label", "The relay label");
+            bundle.with_member("schemas/functions.yaml", &text).write_to(&root.join("home/.relay"));
         }
-        => "home/.relay/schemas/functions.facts.json" at None;
-    a_manifest_naming_a_missing_member_refuses_the_host:
+        => "home/.relay/schemas/functions.facts.json" at Some("\"catalog_hash\"");
+    an_error_in_an_imported_library_is_warned_in_the_library_at_the_declaration:
+        |root| Bundle::relay()
+            .with_file("schemas/lib.yaml", "kind: schema\ntypes:\n    span: \"numbr -> a duration\"\n")
+            .with_member(
+                "schemas/relay.yaml",
+                &RELAY_TRIGGER.replace("\"string -> the run's timeout, such as 30m\"", "\"span@./lib.yaml -> the run's timeout\""),
+            )
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/lib.yaml" at Some("numbr");
+    a_failing_grouped_match_condition_is_warned_at_the_condition_not_the_payload:
+        |root| Bundle::relay()
+            .with_member("schemas/relay.yaml", &RELAY_TRIGGER.replace("start: \"unknown[](required)\"", "start: \"unknown[](requird)\""))
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/relay.yaml" at Some("unknown[](requird)");
+    an_unlisted_example_repeated_in_prose_is_warned_at_the_reference:
+        |root| {
+            let trigger = RELAY_TRIGGER.replacen(
+                "kind: schema-trigger\n",
+                "kind: schema-trigger\ndescription: Settings may come from ./options.yaml.\n",
+                1,
+            );
+            let trigger = format!("{trigger}types:\n    review-note: string(example(./options.yaml))\n");
+            Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"));
+            std::fs::write(root.join("home/.relay/schemas/options.yaml"), "kind: schema\ntypes:\n    Options: string\n").unwrap();
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("example(./options.yaml)");
+    an_unlisted_import_after_a_sibling_description_is_warned_at_the_reference:
+        |root| {
+            let trigger = format!(
+                "{RELAY_TRIGGER}types:\n    review-setting: 'string -> Read options from ./options.yaml.'\n    review-entry: Options@./options.yaml\n"
+            );
+            Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"));
+            std::fs::write(root.join("home/.relay/schemas/options.yaml"), "kind: schema\ntypes:\n    Options: string\n").unwrap();
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("review-entry: Options@");
+    an_example_beside_a_working_import_of_its_file_is_warned_at_its_declaration:
+        |root| Bundle::relay()
+            .with_file("schemas/lib.yaml", "kind: schema\ntypes:\n    span: string\n")
+            .with_member(
+                "schemas/relay.yaml",
+                &format!("{RELAY_TRIGGER}    span: span@./lib.yaml\n    review-entry: \"string(example(./lib.yaml))\"\n"),
+            )
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/relay.yaml" at Some("review-entry:");
+    an_inherited_example_is_warned_in_the_library_that_wrote_it:
+        |root| Bundle::relay()
+            .with_file("schemas/units.yaml", "kind: schema\ntypes:\n    Unit: string\n")
+            .with_file(
+                "schemas/lib.yaml",
+                "kind: schema\ntypes:\n    span:\n        unit: Unit@./units.yaml\n        last_updated: \"string(example(./units.yaml))\"\n",
+            )
+            .with_member("schemas/relay.yaml", &format!("{RELAY_TRIGGER}    span: span@./lib.yaml\n"))
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/lib.yaml" at Some("last_updated:");
+    a_payload_naming_its_own_trigger_is_warned_at_the_reference:
+        |root| {
+            let head = &RELAY_TRIGGER[..RELAY_TRIGGER.find("$schema:").unwrap()];
+            Bundle::relay().with_member("schemas/relay.yaml", &format!("{head}$schema: ./relay.yaml\n")).write_to(&root.join("home/.relay"))
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("$schema: ./relay.yaml");
+    a_root_union_arm_naming_a_namespace_is_warned_at_the_arm:
+        |root| {
+            let head = &RELAY_TRIGGER[..RELAY_TRIGGER.find("$schema:").unwrap()];
+            let trigger = format!("{head}$schema:\n    - sequence: string\n    - ./seq.yaml\n");
+            Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"))
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("- ./seq.yaml");
+    a_missing_facts_companion_refuses_the_host_at_its_catalogs_files_entry:
         |root| std::fs::remove_file(root.join("home/.relay/schemas/functions.facts.json")).unwrap()
-        => "home/.relay/darkmatter-host.yaml" at Some("facts:");
+        => "home/.relay/darkmatter-host.yaml" at Some("- ./schemas/functions.yaml");
     a_register_entry_naming_a_missing_manifest_applies_no_host:
         |root| std::fs::remove_file(root.join("home/.relay/darkmatter-host.yaml")).unwrap()
         => "home/.darkmatter.yaml" at Some("./.relay/darkmatter-host.yaml");
@@ -304,7 +376,7 @@ fn a_registered_hosts_required_defaults_are_pending_not_missing() {
             "budget: \"number(required) -> the run's budget\"\n    timeout: \"string(required; default(30m)) -> the run's timeout",
         );
     assert_ne!(trigger, RELAY_TRIGGER);
-    write(root, "home/.relay/schemas/relay.yaml", &trigger);
+    Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"));
     let mut fixture = start(&workspace);
 
     let text = "---\nsequence:\n  - name: one\n    prompt: hi\n---\n{{ timeout }} {{ seq.name }}\n";

@@ -293,6 +293,23 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// Like [`LspFixture::start`], on a server timed by `clock` whose changed
+    /// host registrations wait the production settle window
+    /// ([`REGISTRATION_SETTLE`](dmls::overlay::hosts::REGISTRATION_SETTLE))
+    /// before reloading; every other fixture reloads them at once. Advance
+    /// `clock` past the window, then make any round trip: the server queues
+    /// the due reloads before answering it.
+    pub fn start_with_registration_settle(
+        workspace: &'workspace LspWorkspace,
+        clock: Arc<dyn dmls::clock::Clock>,
+    ) -> Self {
+        let hooks = dmls::StartupHooks {
+            registration_settle: Some(dmls::overlay::hosts::REGISTRATION_SETTLE),
+            ..dmls::StartupHooks::default()
+        };
+        Self::spawn_with_clock(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks, Some(clock))
+    }
+
     /// Like [`LspFixture::start_with_snapshot`], but each schema-slot job
     /// waits for [`LspFixture::release_slot_job`] (or
     /// [`LspFixture::open_slot_gate`]) before it resolves anything, so a test
@@ -633,6 +650,10 @@ impl<'workspace> LspFixture<'workspace> {
     ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         hooks.observer = Some(events_tx);
+        // A changed registration reloads on the next preparation, as it did
+        // before reloads waited for quiet, unless the test drives the window
+        // ([`LspFixture::start_with_registration_settle`]).
+        hooks.registration_settle.get_or_insert(Duration::ZERO);
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome_rx) = mpsc::channel();
         let observations = workspace.observations();

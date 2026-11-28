@@ -80,7 +80,7 @@ fn a_load_error_after_a_byte_order_mark_and_crlf_lines_points_into_the_original_
         let duplicate = format!("{prefix}name: api{line_end}port: 1{line_end}nested:{line_end}  a: 1{line_end}  a: 2{line_end}");
         let (message, token) = load_error(&duplicate);
         assert!(message.contains("duplicate entry with key \"a\""), "{label}: {message}");
-        assert_eq!(token, "a: 1", "{label}: located at the mapping holding the key");
+        assert_eq!(token, "a: 2", "{label}: located at the key's second spelling");
 
         let malformed = format!("{prefix}name: api{line_end}port: [1{line_end}");
         let (message, _) = load_error(&malformed);

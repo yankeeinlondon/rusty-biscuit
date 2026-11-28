@@ -272,7 +272,7 @@ inherited `required` value immediately only when it is also `eager`;
 completion requires it after the work finishes. Supplied values, including a
 written `null`, are checked against the type at both phases. See [Universal Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints).
 
-To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
+To share a schema file, put it in one of the five [schema roots](./definition.md#schema-roots). They are searched in this order:
 
 1. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended), so a team or host override outranks every repository copy
 2. in a monorepo, `{package-root}/schemas` of the document's package
@@ -282,15 +282,28 @@ To make an exported schema apply automatically, place its definition in one of t
 
 `{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.
 
-Today two kinds of file in these folders apply automatically: a `kind: schema-trigger` file to the Markdown documents it matches (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)), and a `kind: yaml-schema` file to the YAML documents whose `kind` it claims (see [Defining a YAML Document Kind](#defining-a-yaml-document-kind)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
+Only two kinds of file apply just because they are in a schema root:
 
-Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. The `SCHEMAS_DIR` folder and `~/schemas` are in every document's roots, so their definitions can apply to documents in any repository; they add to the package, package-area, and `{root}` folders rather than replacing them. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
+- a `kind: schema-trigger` file applies to the Markdown documents its `match` selects (see [Schema Triggers](#schema-triggers))
+- a `kind: yaml-schema` file applies to the YAML documents whose `kind` it claims (see [Defining a YAML Document Kind](#defining-a-yaml-document-kind))
 
-Direct, explicitly supplied always-on schemas remain supported independently of automatic discovery.
+Every other schema file in a root is only **available**. It applies to a document that names it, and to no other:
+
+```yaml
+---
+$schema: food.yaml # applies schemas/food.yaml to this document only
+---
+```
+
+A types-only library is used the same way, through an import such as `Name@people.yaml`. A document that neither names a file in `$schema` nor imports from it gets nothing from that file.
+
+A root serves only the documents it is a root for. A package's `schemas/` serves that package's documents and a package area's serves that area, never a sibling. `{root}/schemas` serves the whole tree. `SCHEMAS_DIR` and `~/schemas` serve every document Darkmatter checks, in any repository. See [What each kind of file does in a root](./definition.md#what-each-kind-of-file-does-in-a-root) for a summary.
+
+To give documents a schema in the editor without naming it in each one, use a DMLS [configuration extension](./dmls-schema-support.md#extensibility-through-configuration). It affects the editor only, never `md`.
 
 ### Schema Triggers
 
-Unlike an exported standalone schema, a `schema-trigger` document applies its schema only when its matching conditions pass. The canonical kind is `schema-trigger`; the earlier `schema-target` wording is not a second document kind.
+A `schema-trigger` document applies its schema only to the documents its matching conditions select. The canonical kind is `schema-trigger`; the earlier `schema-target` wording is not a second document kind.
 
 Schema triggers let you choose a schema based on the document and its surroundings. Conditions can check:
 

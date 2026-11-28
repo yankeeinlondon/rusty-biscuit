@@ -293,6 +293,7 @@ impl PreparedTriggerBundle {
                     PreparedEntry::Payload(Box::new(ResolvedPayload {
                         json_schema: Arc::new(payload.json_schema),
                         shape: payload.shape.map(Arc::new),
+                        union_arms: None,
                         definitions: Arc::new(payload.definitions),
                         dependencies: Vec::new(),
                         searched: Vec::new(),

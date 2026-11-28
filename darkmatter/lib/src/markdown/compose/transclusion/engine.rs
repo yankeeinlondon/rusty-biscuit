@@ -174,15 +174,14 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
                 result.push_str(title.trim());
                 result.push_str("**\n\n");
                 cursor = *end;
-                warnings.push(
-                    ComposeWarning::new(
-                        "transclusion",
-                        format!(
-                            "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
-                        ),
-                    )
-                    .at_line(*line),
-                );
+                let mut warning = ComposeWarning::new(
+                    "transclusion",
+                    format!("Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"),
+                )
+                .at_line(*line);
+                warning.code =
+                    Some(crate::markdown::compose::report_diagnostics::TRANSCLUSION_HEADING_OVERFLOW_CODE.to_string());
+                warnings.push(warning);
             }
         }
     }
@@ -279,6 +278,8 @@ pub(crate) enum PreparedTransclusion {
         /// every line of the child's output so it stays inside the list
         /// item the directive was written in. Empty outside a collection.
         indent: String,
+        /// Where the inclusion was written, for a target that cannot be read.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     Code {
         order: usize,
@@ -286,6 +287,8 @@ pub(crate) enum PreparedTransclusion {
         path: PathBuf,
         directive_options: transclusion::BlockOptions,
         line: usize,
+        /// Where the directive was written, for a target that cannot be read.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     RemoteFile {
         order: usize,
@@ -295,6 +298,8 @@ pub(crate) enum PreparedTransclusion {
         insertion_context: Option<(usize, usize)>,
         site: Option<crate::markdown::compose::preflight::ScopedSite>,
         indent: String,
+        /// Where the inclusion was written, for a fetch that fails.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     RemoteCode {
         order: usize,
@@ -302,6 +307,8 @@ pub(crate) enum PreparedTransclusion {
         url: url::Url,
         directive_options: transclusion::BlockOptions,
         language: String,
+        /// Where the directive was written, for a fetch that fails.
+        inclusion: Option<transclusion::InclusionSite>,
     },
     Toc {
         order: usize,
@@ -330,6 +337,10 @@ pub(crate) struct FailureAnchor {
     pub(crate) order: usize,
     pub(crate) target: ApplyTarget,
     pub(crate) notice: String,
+    /// Where the inclusion was written, which a tolerated failure with no
+    /// site of its own (a child's frontmatter that does not parse) is
+    /// reported at.
+    pub(crate) inclusion: Option<transclusion::InclusionSite>,
 }
 
 impl PreparedTransclusion {
@@ -347,6 +358,13 @@ impl PreparedTransclusion {
             format!("_Could not transclude `{name}`_")
         };
 
+        let inclusion = match self {
+            Self::Markdown { inclusion, .. }
+            | Self::Code { inclusion, .. }
+            | Self::RemoteFile { inclusion, .. }
+            | Self::RemoteCode { inclusion, .. } => inclusion.clone(),
+            _ => None,
+        };
         let (order, target, notice) = match self {
             Self::FixedReplace { order, span, .. } => (
                 *order,
@@ -402,6 +420,7 @@ impl PreparedTransclusion {
             order,
             target,
             notice,
+            inclusion,
         }
     }
 }
@@ -438,6 +457,20 @@ pub(crate) struct TransclusionEngine<'a> {
     /// body is immutable for the engine's lifetime, so this replaces the
     /// per-directive full re-parse in `find_preceding_heading_level`.
     heading_starts: std::sync::OnceLock<Vec<(usize, HeadingLevel)>>,
+    /// The map of the body to its loaded file, which places a tolerated
+    /// directive failure on the line it was written on.
+    origin: Option<&'a crate::markdown::compose::body_origin::BodyOrigin>,
+}
+
+/// `warning`, about the directive at `site`, at its authored opener when
+/// that is proven.
+fn placed(warning: ComposeWarning, site: &crate::markdown::compose::site_scope::DirectiveSite) -> ComposeWarning {
+    match site {
+        crate::markdown::compose::site_scope::DirectiveSite::Authored(context, opener) => {
+            warning.at_authored(Some(context.display.clone()), opener)
+        }
+        _ => warning,
+    }
 }
 
 impl<'a> TransclusionEngine<'a> {
@@ -445,7 +478,32 @@ impl<'a> TransclusionEngine<'a> {
         Self {
             markdown,
             heading_starts: std::sync::OnceLock::new(),
+            origin: None,
         }
+    }
+
+    /// Where the directive occupying `span` of this body was written.
+    fn directive_site(&self, span: &std::ops::Range<usize>) -> crate::markdown::compose::site_scope::DirectiveSite {
+        crate::markdown::compose::site_scope::DirectiveSite::of_span(self.markdown, self.origin, span)
+    }
+
+    /// ` at line N` for a message about the directive at `site`, whose line
+    /// in this body is `body_line`: its authored line, or nothing when that
+    /// is unproven or the document counts generated lines.
+    fn line_phrase(&self, site: &crate::markdown::compose::site_scope::DirectiveSite, body_line: usize) -> String {
+        use crate::markdown::compose::site_scope::DirectiveSite;
+        match site {
+            DirectiveSite::Authored(_, opener) => format!(" at line {}", opener.line()),
+            DirectiveSite::Body if self.markdown.generated_identity().is_none() => format!(" at line {body_line}"),
+            DirectiveSite::Body | DirectiveSite::Unproven => String::new(),
+        }
+    }
+
+    /// This engine, whose body `origin` maps to its loaded file.
+    #[must_use]
+    pub(crate) fn with_origin(mut self, origin: Option<&'a crate::markdown::compose::body_origin::BodyOrigin>) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// Nearest preceding heading level before `offset`, using the memoized
@@ -466,13 +524,19 @@ impl<'a> TransclusionEngine<'a> {
     }
 
     /// The target pre-flight discovered for the repeated `directive` at
-    /// `site`, after checking it is what this copy resolves to.
+    /// `site`, after checking it is what this copy resolves to; `None` when
+    /// pre-flight skipped the copy because its target does not resolve and
+    /// composition removes it ([`skips_unresolved`]), so the caller's own
+    /// resolution takes that skip.
     ///
     /// ## Errors
     ///
-    /// [`ShellExpansionError::NotPreApproved`] when discovery found no such
-    /// site, found one with other explicit values, or the copy now resolves
-    /// to another target. Nothing is approved late.
+    /// The copy's own resolution failure when discovery found no such site
+    /// and composition does not remove the copy (remote transclusion
+    /// disabled, for one), as for the directive written out.
+    /// [`ShellExpansionError::NotPreApproved`] when discovery found no site
+    /// for a copy that resolves, found one with other explicit values, or
+    /// the copy now resolves to another target. Nothing is approved late.
     fn scoped_resolution(
         &self,
         directive: &transclusion::BlockDirective,
@@ -480,7 +544,7 @@ impl<'a> TransclusionEngine<'a> {
         graph: &crate::markdown::compose::preflight::PreflightGraphNode,
         options: &crate::markdown::compose::ComposeRequest,
         transclusion_opts: &crate::markdown::compose::context::options::TransclusionOptions,
-    ) -> MarkdownResult<crate::markdown::compose::preflight::PreflightResolvedTarget> {
+    ) -> MarkdownResult<Option<crate::markdown::compose::preflight::PreflightResolvedTarget>> {
         use crate::markdown::compose::preflight::{PreflightResolvedTarget, parameters_identity};
         let refuse = |why: &str| -> crate::markdown::types::MarkdownError {
             crate::markdown::compose::shell_expansion::types::ShellExpansionError::NotPreApproved {
@@ -493,28 +557,37 @@ impl<'a> TransclusionEngine<'a> {
             }
             .into()
         };
-        let (discovered, parameters) = if directive.kind == transclusion::DirectiveKind::Code {
-            let target = graph
-                .scoped_target(site)
-                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
-            (target.resolved_target.clone(), 0)
+        let resolve_now = || {
+            transclusion::resolve_target(
+                directive.kind,
+                &directive.raw_target,
+                transclusion_opts,
+                &options.source,
+                directive.line,
+                self.markdown.source_context_for_errors(),
+            )
+        };
+        let discovered = if directive.kind == transclusion::DirectiveKind::Code {
+            graph.scoped_target(site).map(|target| (target.resolved_target.clone(), 0))
         } else {
-            let edge = graph
-                .scoped_edge(site)
-                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
-            (edge.resolved_target.clone(), edge.parameters)
+            graph.scoped_edge(site).map(|edge| (edge.resolved_target.clone(), edge.parameters))
+        };
+        let Some((discovered, parameters)) = discovered else {
+            // Pre-flight never walks a copy that does not resolve: one
+            // composition removes is left to the caller's own resolution,
+            // and any other fails as the same directive written out does.
+            return match resolve_now() {
+                Err(err) if skips_unresolved(options, self.markdown, &err) || created_before_read(options, &err).is_some() => {
+                    Ok(None)
+                }
+                Err(err) => Err(err.into()),
+                Ok(_) => Err(refuse("this repeated target was not found by pre-flight")),
+            };
         };
         if directive.kind != transclusion::DirectiveKind::Code && parameters != parameters_identity(&directive.options) {
             return Err(refuse("this repeated target's explicit values differ from the ones pre-flight walked"));
         }
-        let now = transclusion::resolve_target(
-            directive.kind,
-            &directive.raw_target,
-            transclusion_opts,
-            &options.source,
-            directive.line,
-            self.markdown.source_context_for_errors(),
-        )?;
+        let now = resolve_now()?;
         let same = match (&discovered, &now) {
             (PreflightResolvedTarget::File { path, .. }, transclusion::ResolvedTarget::File { path: now, .. }) => path == now,
             (PreflightResolvedTarget::Url(url), transclusion::ResolvedTarget::Url { url: now, .. }) => url == now,
@@ -523,7 +596,7 @@ impl<'a> TransclusionEngine<'a> {
         if !same {
             return Err(refuse("this repeated target resolves differently than pre-flight found it"));
         }
-        Ok(discovered)
+        Ok(Some(discovered))
     }
 
     /// Prepares `::file` / `::url` / `::code` transclusions from directives
@@ -708,6 +781,31 @@ impl<'a> TransclusionEngine<'a> {
                         watch.check(report)?;
                     }
                 }
+                // A dry run that cannot decide the condition leaves the
+                // directive as written, its target unread.
+                if let Err(crate::markdown::compose::conditions::ConditionError::Eval { cause, .. }) = &should_include
+                    && let Some(reason) = cause.unavailable_reason()
+                    && let Some(session) = options.passive_session()
+                {
+                    let written = self.markdown.content()[directive.span.clone()].to_string();
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                        reason: reason.clone(),
+                        authored: written.trim_end().to_string(),
+                        key: None,
+                        line: Some(site.located().1),
+                    });
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
+                        span: directive.span.clone(),
+                        replacement: written,
+                        report: fixed_report,
+                    });
+                    *next_order += 1;
+                    continue;
+                }
                 let should_include =
                     should_include.map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 if !should_include {
@@ -724,17 +822,26 @@ impl<'a> TransclusionEngine<'a> {
                 }
             }
 
+            // A target failure names the directive's opener in its file.
+            let inclusion = || {
+                let site = crate::markdown::compose::site_scope::DirectiveSite::of_span(self.markdown, origin, &directive.span);
+                transclusion::InclusionSite::of_directive(self.markdown, &site)
+            };
+            let at_directive = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
             let target = &directive.raw_target;
             // A directive a collection body repeated is matched by its
             // authored site and original item, never by target text: copies
             // of one authored line share a target when they differ in
             // parameters, and a target no copy was discovered for was never
-            // approved.
+            // approved (an absent copy is removed, as pre-flight skipped it).
             let scoped = match (site, options.preflight_graph()) {
-                (Some(site), Some(graph)) if !graph.is_empty() => Some(
-                    self.scoped_resolution(directive, site, graph, options, &transclusion_opts)
-                        .map_err(in_scope)?,
-                ),
+                (Some(site), Some(graph)) if !graph.is_empty() => self
+                    .scoped_resolution(directive, site, graph, options, &transclusion_opts)
+                    .map_err(|error| match error {
+                        crate::markdown::types::MarkdownError::Transclusion(inner) => at_directive(*inner).into(),
+                        other => other,
+                    })
+                    .map_err(in_scope)?,
                 _ => None,
             };
             let cached = match &scoped {
@@ -774,11 +881,38 @@ impl<'a> TransclusionEngine<'a> {
                     self.markdown.source_context_for_errors(),
                 ) {
                     Ok(resolved) => resolved,
-                    Err(err) if ignore_invalid || removes_missing(options, &err) => {
+                    // A target the run creates before composing is left as
+                    // written, unread, and not checked.
+                    Err(err) if let Some(reason) = created_before_read(options, &err) => {
+                        let written = self.markdown.content()[directive.span.clone()].to_string();
+                        if let Some(session) = options.passive_session() {
+                            session.record(crate::markdown::compose::passive::Deferral {
+                                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                                reason,
+                                authored: written.trim_end().to_string(),
+                                key: None,
+                                line: inclusion()
+                                    .as_ref()
+                                    .and_then(transclusion::InclusionSite::authored)
+                                    .map(crate::markdown::types::AuthoredSpan::line),
+                            });
+                        }
+                        let mut fixed_report = ComposeReport::new();
+                        fixed_report.transclusions_skipped = 1;
+                        prepared.push(PreparedTransclusion::FixedReplace {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            replacement: written,
+                            report: fixed_report,
+                        });
+                        *next_order += 1;
+                        continue;
+                    }
+                    Err(err) if skips_unresolved(options, self.markdown, &err) => {
                         let mut fixed_report = ComposeReport::new();
                         fixed_report.transclusions_skipped = 1;
                         fixed_report.add_warning(
-                            skipped_transclusion_warning(&err).at_line(directive.line),
+                            skipped_transclusion_warning(self.markdown, err, inclusion()).at_line(directive.line),
                         );
                         prepared.push(PreparedTransclusion::FixedReplace {
                             order: *next_order,
@@ -789,9 +923,34 @@ impl<'a> TransclusionEngine<'a> {
                         *next_order += 1;
                         continue;
                     }
-                    Err(err) => return Err(in_scope(err.into())),
+                    Err(err) => return Err(in_scope(at_directive(err).into())),
                 }
             };
+            // A file the run's initializer appends to holds other bytes by
+            // then: left as written, unread, and not checked.
+            if let transclusion::ResolvedTarget::File { path, .. } = &resolved
+                && let Some(session) = options.passive_session()
+                && let Some(reason) = session.initializer_changes(path)
+            {
+                let written = self.markdown.content()[directive.span.clone()].to_string();
+                session.record(crate::markdown::compose::passive::Deferral {
+                    construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                    reason,
+                    authored: written.trim_end().to_string(),
+                    key: None,
+                    line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+                });
+                let mut fixed_report = ComposeReport::new();
+                fixed_report.transclusions_skipped = 1;
+                prepared.push(PreparedTransclusion::FixedReplace {
+                    order: *next_order,
+                    span: directive.span.clone(),
+                    replacement: written,
+                    report: fixed_report,
+                });
+                *next_order += 1;
+                continue;
+            }
 
             match resolved {
                 transclusion::ResolvedTarget::File { path, resolved, .. } => {
@@ -802,6 +961,7 @@ impl<'a> TransclusionEngine<'a> {
                             path,
                             directive_options: directive.options.clone(),
                             line: directive.line,
+                            inclusion: inclusion(),
                         }
                     } else {
                         PreparedTransclusion::Markdown {
@@ -813,6 +973,7 @@ impl<'a> TransclusionEngine<'a> {
                             insertion_context: Some((directive.span.start, directive.line)),
                             site: site.clone(),
                             indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
+                            inclusion: inclusion(),
                         }
                     };
                     prepared.push(item);
@@ -838,6 +999,7 @@ impl<'a> TransclusionEngine<'a> {
                             url,
                             directive_options: directive.options.clone(),
                             language,
+                            inclusion: inclusion(),
                         });
                     } else {
                         prepared.push(PreparedTransclusion::RemoteFile {
@@ -848,6 +1010,7 @@ impl<'a> TransclusionEngine<'a> {
                             insertion_context: Some((directive.span.start, directive.line)),
                             site: site.clone(),
                             indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
+                            inclusion: inclusion(),
                         });
                     }
                     *next_order += 1;
@@ -856,12 +1019,10 @@ impl<'a> TransclusionEngine<'a> {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
                     fixed_report.add_warning(
-                        ComposeWarning::new(
-                            "transclusion",
-                            format!(
-                                "Skipping URL transclusion '{}': remote execution disabled",
-                                url
-                            ),
+                        skipped_transclusion_warning(
+                            self.markdown,
+                            transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() },
+                            inclusion(),
                         )
                         .at_line(directive.line),
                     );
@@ -875,7 +1036,8 @@ impl<'a> TransclusionEngine<'a> {
                 }
                 transclusion::ResolvedTarget::Url { url, .. } => {
                     return Err(in_scope(
-                        transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }.into(),
+                        at_directive(transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() })
+                            .into(),
                     ));
                 }
             }
@@ -929,6 +1091,39 @@ impl<'a> TransclusionEngine<'a> {
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
+        // A target failure names the key, or the list entry, that wrote it.
+        let inclusion = || {
+            let (key, index) = match slot {
+                SectionSlot::Prologue(index) => ("prologue", index),
+                SectionSlot::Epilogue(index) => ("epilogue", index),
+            };
+            transclusion::InclusionSite::of_frontmatter_value(self.markdown, key, index, reference)
+        };
+        let at_value = |error: transclusion::TransclusionError| error.at_inclusion(inclusion());
+        // A dry run's value it could not produce (a missing input, a command
+        // it did not run) names no target: the slot contributes nothing and
+        // the session records why.
+        if let Some((session, reason)) = options
+            .passive_session()
+            .and_then(|session| Some((session, session.deferred_reference(reference)?)))
+        {
+            use crate::markdown::compose::passive::{Deferral, DeferredConstruct};
+            session.record(Deferral {
+                construct: DeferredConstruct::Transclusion,
+                reason,
+                authored: reference.to_string(),
+                key: Some(match slot {
+                    SectionSlot::Prologue(_) => "prologue".to_string(),
+                    SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                }),
+                line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+            });
+            let mut report = ComposeReport::new();
+            report.transclusions_skipped = 1;
+            prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+            *next_order += 1;
+            return Ok(());
+        }
         let file_ref = match transclusion::classify_frontmatter_reference(reference) {
             transclusion::FrontmatterReference::Inline => {
                 prepared.push(PreparedTransclusion::FixedSection {
@@ -942,7 +1137,7 @@ impl<'a> TransclusionEngine<'a> {
             }
             transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
             transclusion::FrontmatterReference::ParseError(error) => {
-                return Err(transclusion::TransclusionError::from(error).into());
+                return Err(at_value(transclusion::TransclusionError::from(error)).into());
             }
         };
 
@@ -958,10 +1153,31 @@ impl<'a> TransclusionEngine<'a> {
             self.markdown.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
-            Err(err) if ignore_invalid || removes_missing(options, &err) => {
+            // A target the run creates before composing contributes nothing
+            // here and is not checked.
+            Err(err) if let Some(reason) = created_before_read(options, &err) => {
+                if let Some(session) = options.passive_session() {
+                    session.record(crate::markdown::compose::passive::Deferral {
+                        construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                        reason,
+                        authored: reference.to_string(),
+                        key: Some(match slot {
+                            SectionSlot::Prologue(_) => "prologue".to_string(),
+                            SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                        }),
+                        line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+                    });
+                }
+                let mut report = ComposeReport::new();
+                report.transclusions_skipped = 1;
+                prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+                *next_order += 1;
+                return Ok(());
+            }
+            Err(err) if skips_unresolved(options, self.markdown, &err) => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
-                fixed_report.add_warning(skipped_transclusion_warning(&err));
+                fixed_report.add_warning(skipped_transclusion_warning(self.markdown, err, inclusion()));
                 prepared.push(PreparedTransclusion::FixedSection {
                     order: *next_order,
                     slot,
@@ -971,8 +1187,30 @@ impl<'a> TransclusionEngine<'a> {
                 *next_order += 1;
                 return Ok(());
             }
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(at_value(err).into()),
         };
+        // A file the run's initializer appends to contributes nothing here
+        // and is not checked.
+        if let transclusion::ResolvedTarget::File { path, .. } = &resolved
+            && let Some(session) = options.passive_session()
+            && let Some(reason) = session.initializer_changes(path)
+        {
+            session.record(crate::markdown::compose::passive::Deferral {
+                construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+                reason,
+                authored: reference.to_string(),
+                key: Some(match slot {
+                    SectionSlot::Prologue(_) => "prologue".to_string(),
+                    SectionSlot::Epilogue(_) => "epilogue".to_string(),
+                }),
+                line: inclusion().as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+            });
+            let mut report = ComposeReport::new();
+            report.transclusions_skipped = 1;
+            prepared.push(PreparedTransclusion::FixedSection { order: *next_order, slot, content: None, report });
+            *next_order += 1;
+            return Ok(());
+        }
 
         match resolved {
             transclusion::ResolvedTarget::File { path, resolved, .. } => {
@@ -985,6 +1223,7 @@ impl<'a> TransclusionEngine<'a> {
                     insertion_context: None,
                     site: None,
                     indent: String::new(),
+                    inclusion: inclusion(),
                 });
                 *next_order += 1;
             }
@@ -1006,18 +1245,17 @@ impl<'a> TransclusionEngine<'a> {
                     insertion_context: None,
                     site: None,
                     indent: String::new(),
+                    inclusion: inclusion(),
                 });
                 *next_order += 1;
             }
             transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
-                fixed_report.add_warning(ComposeWarning::new(
-                    "transclusion",
-                    format!(
-                        "Skipping URL transclusion '{}': remote execution disabled",
-                        url
-                    ),
+                fixed_report.add_warning(skipped_transclusion_warning(
+                    self.markdown,
+                    transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() },
+                    inclusion(),
                 ));
                 prepared.push(PreparedTransclusion::FixedSection {
                     order: *next_order,
@@ -1028,10 +1266,7 @@ impl<'a> TransclusionEngine<'a> {
                 *next_order += 1;
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
-                return Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                    url: url.to_string(),
-                }
-                .into());
+                return Err(at_value(transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }).into());
             }
         }
 
@@ -1073,6 +1308,41 @@ impl<'a> TransclusionEngine<'a> {
             });
             *next_order += 1;
         }
+    }
+
+    /// In a dry run, the inclusion of `url` left as written instead of
+    /// fetched when the captured `network: ask` leaves it needing an
+    /// approval the dry run never asks for: a directive keeps its text, a
+    /// `prologue`/`epilogue` contributes nothing, and the session records
+    /// why. `None` outside a dry run or when the URL needs no approval.
+    fn defer_unapproved_fetch(
+        &self,
+        options: &crate::markdown::compose::ComposeRequest,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+        url: &url::Url,
+        order: usize,
+        target: &ApplyTarget,
+        inclusion: Option<&transclusion::InclusionSite>,
+    ) -> Option<ResolvedTransclusion> {
+        use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
+        let session = options.passive_session()?;
+        if !remote_fetch.needs_approval(url) {
+            return None;
+        }
+        let written = match target {
+            ApplyTarget::Replace(span) => self.markdown.content().get(span.clone()).map(str::to_string),
+            _ => None,
+        };
+        session.record(Deferral {
+            construct: DeferredConstruct::Transclusion,
+            reason: DeferralReason::NetworkNeedsApproval { url: url.to_string() },
+            authored: written.as_deref().map_or_else(|| url.to_string(), |text| text.trim_end().to_string()),
+            key: None,
+            line: inclusion.and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+        });
+        let mut report = ComposeReport::new();
+        report.transclusions_skipped = 1;
+        Some(ResolvedTransclusion { order, target: target.clone(), content: written, report, source_file: None })
     }
 
     pub(crate) fn resolve_prepared_transclusion(
@@ -1117,6 +1387,7 @@ impl<'a> TransclusionEngine<'a> {
                 insertion_context,
                 site,
                 indent,
+                inclusion,
             } => {
                 let mut child_runtime = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -1126,6 +1397,7 @@ impl<'a> TransclusionEngine<'a> {
                 let content = self.render_markdown_transclusion(
                     &path,
                     opening.as_ref(),
+                    inclusion,
                     insertion_context,
                     site.as_ref(),
                     &directive_options,
@@ -1155,18 +1427,16 @@ impl<'a> TransclusionEngine<'a> {
                 path,
                 directive_options,
                 line: _line,
+                inclusion,
             } => {
                 let cache_handle = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.cache.clone()
                 };
-                let content = self.render_code_transclusion(
-                    &path,
-                    &directive_options,
-                    state,
-                    options,
-                    &cache_handle,
-                )?;
+                // Every failure here is the directive's own target's.
+                let content = self
+                    .render_code_transclusion(&path, &directive_options, state, options, &cache_handle)
+                    .map_err(|error| transclusion::target_failure_at(error, &path, inclusion))?;
                 let mut code_report = ComposeReport::new();
                 code_report.transclusions_applied = 1;
                 Ok(ResolvedTransclusion {
@@ -1185,32 +1455,20 @@ impl<'a> TransclusionEngine<'a> {
                 insertion_context,
                 site,
                 indent,
+                inclusion,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
-                let body_text = remote_fetch
-                    .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
-                    })?
-                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
-                        url: url.to_string(),
-                        reason: "URL was not registered for fetching".to_string(),
-                    })?;
+                if let Some(deferred) = self.defer_unapproved_fetch(options, &remote_fetch, &url, order, &target, inclusion.as_ref()) {
+                    return Ok(deferred);
+                }
+                let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 // Parse the fetched body as Markdown and recursively compose it.
-                let mut child =
-                    crate::markdown::Markdown::try_from_content(body_text).map_err(|e| {
-                        crate::markdown::types::MarkdownError::Transform(format!(
-                            "failed to parse fetched Markdown from '{}': {e}",
-                            url
-                        ))
-                    })?;
+                // A frontmatter error keeps its own code and names the URL.
+                let mut child = crate::markdown::Markdown::try_from_named_content(body_text, url.as_str())?;
 
                 // The directive's `set` values reach a remote child exactly as
                 // they reach a local one: written over its authored
@@ -1328,23 +1586,17 @@ impl<'a> TransclusionEngine<'a> {
                 url,
                 directive_options,
                 language,
+                inclusion,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.remote_fetch.clone()
                 };
-                let body_text = remote_fetch
-                    .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
-                    })?
-                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
-                        url: url.to_string(),
-                        reason: "URL was not registered for fetching".to_string(),
-                    })?;
+                let target = ApplyTarget::Replace(span.clone());
+                if let Some(deferred) = self.defer_unapproved_fetch(options, &remote_fetch, &url, order, &target, inclusion.as_ref()) {
+                    return Ok(deferred);
+                }
+                let body_text = fetched_body(&remote_fetch, &url, inclusion)?;
 
                 let fenced = transclusion::wrap_in_code_block(&body_text, &language);
                 let spaced = transclusion::ensure_vertical_spacing(&fenced);
@@ -1365,6 +1617,17 @@ impl<'a> TransclusionEngine<'a> {
                 directive,
             } => {
                 let transclusion_opts = options.transclusion_options();
+                if let Some(session) = options.passive_session()
+                    && let Some(reason) = toc_linking::changed_at_launch(
+                        &directive,
+                        &options.source,
+                        &transclusion_opts,
+                        self.markdown.source_context_for_errors(),
+                        session,
+                    )
+                {
+                    return Ok(self.left_unchecked(order, span, reason, session));
+                }
                 let replacement = if let Some((display_target, path)) =
                     toc_linking::resolve_target_chain(
                         &directive,
@@ -1385,6 +1648,10 @@ impl<'a> TransclusionEngine<'a> {
                     let display_clone = display_target.clone();
                     let path_clone = path.clone();
                     let document = self.markdown.error_document();
+                    // A selected target that cannot be read is reported at
+                    // the directive that selected it, as a child that cannot
+                    // be loaded is.
+                    let inclusion = || transclusion::InclusionSite::of_directive(self.markdown, &self.directive_site(&span));
 
                     let cached = cache_handle.get_or_compute_operation(
                         &cache_key,
@@ -1393,7 +1660,7 @@ impl<'a> TransclusionEngine<'a> {
                                 let runtime = runtime_mutex.lock().unwrap();
                                 runtime
                                     .load_toc_headings(&path_clone)
-                                    .map_err(toc_linking::TocLinkingError::Io)?
+                                    .map_err(|error| transclusion::read_failure_at(error, &path_clone, inclusion()))?
                             };
                             // Render with no indentation so the cache entry is
                             // indent-independent. Indentation is caller-local
@@ -1447,6 +1714,31 @@ impl<'a> TransclusionEngine<'a> {
         }
     }
 
+    /// A dry run's directive at `span` whose result the run's initializer
+    /// changes first: recorded as a [`Transclusion`](crate::markdown::compose::passive::DeferredConstruct::Transclusion)
+    /// deferral and left as written, unread and not checked, as an
+    /// inclusion of a changed file is.
+    fn left_unchecked(
+        &self,
+        order: usize,
+        span: std::ops::Range<usize>,
+        reason: crate::markdown::compose::passive::DeferralReason,
+        session: &crate::markdown::compose::passive::PassiveSession,
+    ) -> ResolvedTransclusion {
+        let written = self.markdown.content()[span.clone()].to_string();
+        let inclusion = transclusion::InclusionSite::of_directive(self.markdown, &self.directive_site(&span));
+        session.record(crate::markdown::compose::passive::Deferral {
+            construct: crate::markdown::compose::passive::DeferredConstruct::Transclusion,
+            reason,
+            authored: written.trim_end().to_string(),
+            key: None,
+            line: inclusion.as_ref().and_then(transclusion::InclusionSite::authored).map(crate::markdown::types::AuthoredSpan::line),
+        });
+        let mut report = ComposeReport::new();
+        report.transclusions_skipped = 1;
+        ResolvedTransclusion { order, target: ApplyTarget::Replace(span), content: Some(written), report, source_file: None }
+    }
+
     /// Resolves a single `::file-links` directive in the concurrent stage.
     ///
     /// Discovery runs here (not during preparation) so directives parallelize.
@@ -1463,6 +1755,12 @@ impl<'a> TransclusionEngine<'a> {
         directive: file_links::FileLinksDirective,
         options: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ResolvedTransclusion> {
+        if let Some(session) = options.passive_session()
+            && let Some(reason) =
+                file_links::changes_at_launch(&directive, &options.source, &options.source_file_resolution_context(), session)
+        {
+            return Ok(self.left_unchecked(order, span, reason, session));
+        }
         let skipped_replace = |replacement: String, report: ComposeReport| {
             Ok(ResolvedTransclusion {
                 order,
@@ -1495,23 +1793,25 @@ impl<'a> TransclusionEngine<'a> {
                     if options.fail_fast {
                         return skipped_replace("_No matching files_".to_string(), report);
                     }
-                    // A document counting generated lines names no line.
-                    let message = match self.markdown.generated_identity() {
-                        Some(_) => "No matching files for ::file-links directive".to_string(),
-                        None => format!("No matching files for ::file-links directive at line {}", directive.line),
-                    };
-                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
+                    let site = self.directive_site(&span);
+                    let message =
+                        format!("No matching files for ::file-links directive{}", self.line_phrase(&site, directive.line));
+                    report.add_warning(placed(ComposeWarning::new("file_links", message).at_line(directive.line), &site));
                     return skipped_replace(String::new(), report);
                 }
             },
             Err(err) => {
                 if self.resolve_ignore_invalid(options) {
                     report.transclusions_skipped = 1;
+                    let site = self.directive_site(&span);
+                    let err = err.at_site(&site);
                     let message = match self.markdown.generated_identity() {
                         Some(_) => err.reason(),
                         None => err.to_string(),
                     };
-                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
+                    let code = Some(crate::markdown::compose::report_diagnostics::file_links_code(&err).to_string());
+                    let warning = ComposeWarning { code, ..ComposeWarning::new("file_links", message) }.at_line(directive.line);
+                    report.add_warning(placed(warning, &site));
                     return skipped_replace(String::new(), report);
                 }
                 return Err(err.with_document(self.markdown.error_document()).into());
@@ -1524,10 +1824,7 @@ impl<'a> TransclusionEngine<'a> {
         let mut fs =
             biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
                 .map_err(|e| {
-                    let at = match self.markdown.generated_identity() {
-                        Some(_) => String::new(),
-                        None => format!(" at line {}", directive.line),
-                    };
+                    let at = self.line_phrase(&self.directive_site(&span), directive.line);
                     crate::markdown::types::MarkdownError::Transform(format!(
                         "failed to create FileSystem for ::file-links{at}: {e}"
                     ))
@@ -1591,6 +1888,7 @@ impl<'a> TransclusionEngine<'a> {
         &self,
         path: &Path,
         opening: Option<&SourceOpening>,
+        inclusion: Option<transclusion::InclusionSite>,
         insertion_context: Option<(usize, usize)>,
         site: Option<&crate::markdown::compose::preflight::ScopedSite>,
         directive_options: &transclusion::BlockOptions,
@@ -1608,7 +1906,9 @@ impl<'a> TransclusionEngine<'a> {
         // The overlay is applied to the child's authored frontmatter only; it
         // does NOT propagate through `child_options`, so grandchildren do not
         // inherit it.
-        let mut child = runtime.load_markdown(path)?;
+        // A child that cannot be read is the inclusion's failure; one that
+        // loads names its own failures (its frontmatter's, say).
+        let mut child = runtime.load_markdown(path).map_err(|error| transclusion::target_failure_at(error, path, inclusion))?;
         apply_directive_set_overlay(&mut child, directive_options);
         let child_prose_enabled = effective_prose_interpolation(options.prose_interpolation, directive_options)
             == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
@@ -1787,7 +2087,7 @@ impl<'a> TransclusionEngine<'a> {
         let language = transclusion::infer_language(path, &options.code_fallback_language);
         let canonical_source = cache::compose_cache_key_for_path(path);
         let source_id = cache::hashing::source_id_hash(&canonical_source);
-        let source_bytes = std::fs::read(path)?;
+        let source_bytes = crate::markdown::compose::passive::read_local_source(options.passive_session(), path)?.bytes.to_vec();
 
         let op = cache::CodeOperation;
         let mut buckets = op.split_params(directive_options);
@@ -1866,20 +2166,7 @@ impl<'a> TransclusionEngine<'a> {
     }
 
     fn resolve_ignore_invalid(&self, options: &crate::markdown::compose::ComposeRequest) -> bool {
-        if let Some(value) = options.ignore_invalid_references {
-            return value;
-        }
-
-        if let Ok(Some(value)) = self.markdown.fm_get::<bool>("ignore_invalid") {
-            return value;
-        }
-
-        options
-            .context()
-            .env()
-            .get("IGNORE_INVALID")
-            .and_then(|raw| parse_bool(raw))
-            .unwrap_or(false)
+        ignores_invalid(options, self.markdown)
     }
 }
 
@@ -2050,18 +2337,97 @@ fn parse_bool(raw: &str) -> Option<bool> {
     }
 }
 
-/// Whether `options` removes the transclusion `err` failed to resolve: its
-/// target does not exist and the missing-transclusion recovery is on.
-fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
-    options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
+/// The fetched body of `url`, or its failure at the inclusion `site` that
+/// named it.
+fn fetched_body(
+    remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    url: &url::Url,
+    site: Option<transclusion::InclusionSite>,
+) -> Result<String, transclusion::TransclusionError> {
+    let failed = |reason: String| transclusion::TransclusionError::RemoteFetchFailed { url: url.to_string(), reason };
+    match remote_fetch.get_content(url) {
+        Ok(Some(body)) => Ok(body),
+        Ok(None) => Err(failed("URL was not registered for fetching".to_string()).at_inclusion(site)),
+        Err(_) if remote_fetch.needs_approval(url) => Err(transclusion::TransclusionError::RemoteNeedsApproval {
+            url: url.to_string(),
+            host: url.host_str().unwrap_or_default().to_string(),
+        }
+        .at_inclusion(site)),
+        Err(reason) => Err(failed(reason).at_inclusion(site)),
+    }
 }
 
-/// The warning of a transclusion removed because it did not resolve; a
-/// missing target carries the code its recovery governs.
-fn skipped_transclusion_warning(err: &transclusion::TransclusionError) -> ComposeWarning {
-    let code = (err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch))
-        .then(|| crate::markdown::compose::policy::MISSING_TRANSCLUSION_CODE.to_string());
-    ComposeWarning { code, ..ComposeWarning::new("transclusion", err.to_string()) }
+/// Whether `markdown` tolerates invalid references: the request's
+/// `ignore_invalid_references` when set, else the document's own
+/// frontmatter `ignore_invalid`, else the context's `IGNORE_INVALID`.
+pub(crate) fn ignores_invalid(options: &crate::markdown::compose::ComposeRequest, markdown: &crate::markdown::Markdown) -> bool {
+    if let Some(value) = options.ignore_invalid_references {
+        return value;
+    }
+
+    if let Ok(Some(value)) = markdown.fm_get::<bool>("ignore_invalid") {
+        return value;
+    }
+
+    options
+        .context()
+        .env()
+        .get("IGNORE_INVALID")
+        .and_then(|raw| parse_bool(raw))
+        .unwrap_or(false)
+}
+
+/// Whether composition removes, with a warning, the inclusion `markdown`
+/// wrote whose target failed to resolve with `err`: every resolution failure
+/// when `markdown` tolerates invalid references ([`ignores_invalid`]), else
+/// only an absent target (class `NoMatch`) under the missing-transclusion
+/// recovery, never a malformed, unreadable, or unsupported one. A
+/// frontmatter value that does not parse as a reference fails before it is
+/// resolved and is never asked about. Pre-flight asks the same question for
+/// every body and frontmatter target, and the repeated-copy check for a copy
+/// pre-flight did not discover, so every walk makes one decision.
+pub(crate) fn skips_unresolved(
+    options: &crate::markdown::compose::ComposeRequest,
+    markdown: &crate::markdown::Markdown,
+    err: &transclusion::TransclusionError,
+) -> bool {
+    ignores_invalid(options, markdown)
+        || (options.allow_missing_transclusions
+            && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch))
+}
+
+/// In a dry run, why the inclusion whose target failed with `err` is not
+/// checked instead of missing: no candidate exists, and one it probed is a
+/// file the run creates before this composition
+/// ([`PassiveSession::created_among`](crate::markdown::compose::passive::PassiveSession::created_among)).
+/// `None` outside a dry run and for every other failure.
+pub(crate) fn created_before_read(
+    options: &crate::markdown::compose::ComposeRequest,
+    err: &transclusion::TransclusionError,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    let session = options.passive_session()?;
+    let resolution = err.target_not_found_details()?.resolution.as_deref()?;
+    session.created_among(resolution.probed_paths())
+}
+
+/// In a dry run, whether the resolved inclusion `path` holds other bytes
+/// when the run reads it: the run's initializer appends to it first
+/// ([`PassiveSession::initializer_changes`](crate::markdown::compose::passive::PassiveSession::initializer_changes)).
+pub(crate) fn changed_before_read(options: &crate::markdown::compose::ComposeRequest, path: &std::path::Path) -> bool {
+    options.passive_session().is_some_and(|session| session.initializer_changes(path).is_some())
+}
+
+/// The warning of an inclusion `markdown` wrote that composition removed
+/// because its target failed with `err`: the failure placed at the
+/// inclusion `site`, projected as a tolerated child's failure is, so it keeps
+/// its typed code and authored position.
+fn skipped_transclusion_warning(
+    markdown: &crate::markdown::Markdown,
+    err: transclusion::TransclusionError,
+    site: Option<transclusion::InclusionSite>,
+) -> ComposeWarning {
+    let error = crate::markdown::MarkdownError::from(err.at_inclusion(site));
+    crate::markdown::compose::pipeline::phases::tolerated_failure_warning(&error, markdown.generated_identity(), None)
 }
 
 #[cfg(test)]
@@ -2248,15 +2614,19 @@ mod tests {
                     } => {
                         let bold_block = format!("\n\n**{}**\n\n", title.trim());
                         result = format!("{}{}{}", &result[..start], bold_block, &result[end..]);
-                        warnings.push(
-                            ComposeWarning::new(
+                        warnings.push(ComposeWarning {
+                            code: Some(
+                                crate::markdown::compose::report_diagnostics::TRANSCLUSION_HEADING_OVERFLOW_CODE
+                                    .to_string(),
+                            ),
+                            ..ComposeWarning::new(
                                 "transclusion",
                                 format!(
                                     "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
                                 ),
                             )
-                            .at_line(line),
-                        );
+                            .at_line(line)
+                        });
                     }
                 }
             }

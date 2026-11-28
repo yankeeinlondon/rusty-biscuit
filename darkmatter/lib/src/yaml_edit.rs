@@ -19,7 +19,6 @@ use crate::markdown::hash::{FrontmatterPathSegment, PathEdit, PathEditRefusal};
 use biscuit_file::{Indentation, serde_yaml_ng};
 use serde_json::Value;
 use simplified_schema::completion::PathStep;
-use simplified_schema::span::line_col_of_offset;
 use simplified_schema::{PathEditError, PropertyPath, RemovalPlan, set_at};
 use std::ops::Range;
 
@@ -426,11 +425,11 @@ impl Locator<'_> {
         reason: impl Into<String>,
     ) -> YamlEditError {
         let offset = (working_offset + self.bom).min(self.source.len());
-        let (line, column) = line_col_of_offset(self.source, offset);
+        let position = crate::config::load::line_column(self.source, offset);
         YamlEditError {
             kind,
             path,
-            location: YamlLocation { offset, line, column },
+            location: YamlLocation { offset, line: position.line, column: position.column },
             reason: reason.into(),
         }
     }

@@ -31,6 +31,19 @@ pub(in crate::composition) fn schema_error_to_composition_error(
             message: message.clone(),
             span: None,
         },
+        Some(error @ SchemaError::SlotResolution(_)) => {
+            let slots = darkmatter::markdown::compose::report_diagnostics::template_diagnostics(error, source_path)
+                .unwrap_or_default();
+            CompositionError::SchemaSlotFailed {
+                source_path: source_path.to_path_buf(),
+                slot_code: slots.first().map_or_else(
+                    || darkmatter::markdown::schemas::slots::codes::SLOT_FAILED_CODE.to_string(),
+                    |record| record.code.clone(),
+                ),
+                message: fallback_message,
+                slots,
+            }
+        }
         Some(SchemaError::FrontmatterShape { message }) => CompositionError::SchemaParse {
             source_path: source_path.to_path_buf(),
             property: None,
@@ -42,6 +55,27 @@ pub(in crate::composition) fn schema_error_to_composition_error(
             message: fallback_message,
         },
     }
+}
+
+/// The session a failed composition's schema is reloaded through, to
+/// classify its problems: the launch's, else one deciding by the same
+/// configuration (the composition's own was its request's), so a `$schema`
+/// template resolves here as it did there instead of reading as unresolved.
+fn classification_slot_session(
+    options: &PrepareOptions,
+) -> Option<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>> {
+    options.slot_session.clone().or_else(|| {
+        // A dry run's classification reads the slot sources its passes
+        // already read.
+        let passive = options.passive.clone().or_else(crate::composition::passive_scope::current);
+        crate::composition::slot_session_observing(
+            options.invocation_context.as_ref(),
+            &options.file_resolution_context,
+            None,
+            passive.as_ref().map(darkmatter::markdown::compose::passive::PassiveSession::observations),
+        )
+        .ok()
+    })
 }
 
 pub(super) fn handle_compose_error(
@@ -122,6 +156,7 @@ pub(super) fn translate_schema_failure(
     // be the document's directory; report the caller's instead (R4).
     rebase_caller_file_problems(&mut problems, &options.compose_caller_records());
     let snapshot = build_effective_instance(source, options.set_overrides.as_ref());
+    let slot_session = classification_slot_session(&options);
     let effective = load_effective_schema(
         source,
         Some(&snapshot),
@@ -129,7 +164,7 @@ pub(super) fn translate_schema_failure(
         &options.file_resolution_context,
         &options.schema_caller_records(),
         &options.trigger_findings(),
-        None,
+        slot_session.as_ref(),
     )?;
     let phase = mode.is_inline().then_some(SchemaPhase::Launch);
     let mut categorized = categorize_problems(&problems, effective.as_ref(), phase);
@@ -187,6 +222,7 @@ pub(super) fn translate_schema_failure(
                     &options.compose_caller_records(),
                     phase,
                     &options.trigger_findings(),
+                    slot_session.as_ref(),
                 )
             }
         };
@@ -211,6 +247,48 @@ pub(super) fn translate_schema_failure(
     })
 }
 
+/// For a dry run, what a refusal of `problems` for an invalid required value
+/// leaves of them: the paths of the required problems the run's error lists,
+/// and a drop for each invalid optional beside them that the run drops once
+/// the required value is fixed ([`translate_schema_failure`] refuses before
+/// it drops). `None` when no invalid required value refuses them.
+pub(super) fn refusal_beside_optionals(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: &PrepareMode<'_>,
+    problems: &[ValidationProblem],
+) -> Option<(Vec<String>, Vec<DroppedOptional>)> {
+    if problems.iter().any(|problem| problem.caller_file.is_some()) {
+        return None;
+    }
+    let snapshot = build_effective_instance(source, options.set_overrides.as_ref());
+    let slot_session = classification_slot_session(options);
+    let effective = load_effective_schema(
+        source,
+        Some(&snapshot),
+        options.file_ref_fallback_dir.as_deref(),
+        &options.file_resolution_context,
+        &options.schema_caller_records(),
+        &options.trigger_findings(),
+        slot_session.as_ref(),
+    )
+    .ok()?;
+    let phase = mode.is_inline().then_some(SchemaPhase::Launch);
+    let mut categorized = categorize_problems(problems, effective.as_ref(), phase);
+    if !mode.is_inline() {
+        promote_null_required_to_missing(&mut categorized, effective.as_ref(), None);
+    }
+    if categorized.invalid_required.is_empty() {
+        return None;
+    }
+    let droppable = filter_droppable_invalid_optionals(&categorized.invalid_optional, effective.as_ref());
+    let (_, mut drops) = source_with_dropped_optionals(source, &droppable);
+    let (_, override_drops) = options_with_dropped_optionals(options.clone(), &droppable);
+    drops.extend(override_drops);
+    Some((categorized.invalid_required.iter().map(|problem| problem.path.clone()).collect(), drops))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
@@ -219,6 +297,7 @@ pub(super) fn handle_retry_error(
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     phase: Option<SchemaPhase>,
     trigger_findings: &super::TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
         mut problems,
@@ -237,7 +316,7 @@ pub(super) fn handle_retry_error(
         file_resolution_context,
         caller_input_records,
         trigger_findings,
-        None,
+        slot_session,
     )?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 

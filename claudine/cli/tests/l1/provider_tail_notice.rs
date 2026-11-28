@@ -467,15 +467,24 @@ fn dry_run_and_debug_traces_redact_tail_secrets() {
     let log = recording_codex(&fixture);
     let file = prompt_file(&fixture);
 
-    // Composition dry run: the "Provider args" row is redacted.
-    let (code, stderr) = run(
-        &fixture,
-        &["compose", "--codex", "--dry-run", &file, "--api-key", SECRET, "--token=sk-ant-other99"],
-    );
-    assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert!(stderr.contains("Provider args"), "stderr:\n{stderr}");
-    assert!(stderr.contains("--api-key **** --token=****"), "stderr:\n{stderr}");
-    assert!(!stderr.contains(SECRET) && !stderr.contains("sk-ant-other99"), "{stderr}");
+    // Composition dry run: the passive check, in either report format, shows
+    // no tail secret and launches nothing.
+    for json in [false, true] {
+        let mut args = vec!["compose", "--codex", "--dry-run"];
+        if json {
+            args.push("--json");
+        }
+        args.extend([file.as_str(), "--api-key", SECRET, "--token=sk-ant-other99"]);
+        let output = fixture.command().args(&args).output().unwrap();
+        let shown = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.status.code(), Some(0), "{args:?}:\n{shown}");
+        assert!(!shown.contains(SECRET) && !shown.contains("sk-ant-other99"), "{args:?}:\n{shown}");
+    }
+    assert!(launches(&log).is_empty(), "a dry run launches nothing");
 
     // Direct-wrapper dry run: the full command line is redacted. The
     // attached form keeps the secret from being read as the prompt.

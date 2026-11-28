@@ -436,9 +436,10 @@ pub struct KittyInstance {
 }
 
 impl KittyInstance {
-    /// `true` on macOS when `kitty` and `screencapture` are on `$PATH`.
+    /// `true` on macOS when `kitty`, `open`, and `screencapture` are on
+    /// `$PATH` and the process runs in the logged-in GUI session.
     pub fn can_launch() -> bool {
-        cfg!(target_os = "macos") && which("kitty") && which("screencapture") && which("open")
+        cfg!(target_os = "macos") && which("kitty") && which("screencapture") && which("open") && in_gui_session()
     }
 
     /// Starts kitty with one `columns` × `lines` cell window running the
@@ -598,6 +599,20 @@ fn cleanup_stale_kitty_instances() {
         }
         let _ = std::fs::remove_dir_all(entry.path());
     }
+}
+
+/// A process started over SSH runs in launchd's `Background` session, where
+/// `open` shows no window, so a private instance would never answer on its
+/// socket; only the desktop login's `Aqua` session can host one.
+fn in_gui_session() -> bool {
+    static AQUA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AQUA.get_or_init(|| {
+        Command::new("launchctl")
+            .arg("managername")
+            .stderr(Stdio::null())
+            .output()
+            .is_ok_and(|output| output.status.success() && output.stdout.trim_ascii() == b"Aqua")
+    })
 }
 
 fn which(bin: &str) -> bool {

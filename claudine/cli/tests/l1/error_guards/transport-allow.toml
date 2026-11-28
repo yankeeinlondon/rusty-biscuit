@@ -85,6 +85,14 @@ Config-load failure is rendered with `log::error` and the function returns `Ok((
 
 [[allow]]
 shape = "format_context"
+file = "cli/src/commands/document_check/choice.rs"
+symbol = "Check::root_choice"
+tag = "retained"
+reason = """
+The passive document check attaches the root picker's refusal (`AutocompleteNotInteractive`, `AutocompleteNoMatches`, `AutocompleteOverCap`) as a note on the located missing-document finding, saying why the real run would stop there. The refusal is never returned; this is the final render into the dry-run report, and the finding's own code and reference details carry the miss."""
+
+[[allow]]
+shape = "format_context"
 file = "cli/src/commands/config_tui/mod.rs"
 symbol = "run_tui"
 tag = "retained"
@@ -98,14 +106,6 @@ symbol = "write_with_darkmatter_setup"
 tag = "retained"
 reason = """
 The Darkmatter half of first-run setup (the `permissions` handshake) is deliberately non-fatal: Claudine's own configuration was already written, and a conflict or failed handshake leaves the original Darkmatter block in force. The `SetupError` is rendered once with `log::warn` and the function returns the Claudine path; the typed error is never returned, so this line is the final render."""
-
-[[allow]]
-shape = "format_context"
-file = "cli/src/main.rs"
-symbol = "refresh_host_registration"
-tag = "retained"
-reason = """
-The launch refresh of Claudine's Darkmatter host registration is deliberately non-fatal: the last published revision stays in use and the command runs on. The `PublishError` is rendered once with `log::warn` and the function returns nothing; the typed error is never returned, so this line is the final render."""
 
 [[allow]]
 shape = "format_context"
@@ -324,17 +324,57 @@ reason = """
 Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
 
 [[allow]]
-shape = "to_string_collapse"
-file = "lib/src/composition/schema/shipped.rs"
-symbol = "prepare_payload"
-tag = "retained"
-reason = """
-Artifact generation for the `shipped_schemas` developer command. The shared shipped-artifact mechanism's generation contract is String-carrying across all three owners (`simplified_schema::shipped::generate`, `FreshLower::prepare`, and Darkmatter's `FreshDarkmatter::prepare`/`prepare_payload` all return `Result<_, String>`), and the message is printed to stderr by the generator and never reaches the error walker, a lifecycle `err`, or a runtime path: a run-time refusal falls back to ordinary preparation instead."""
-
-[[allow]]
 shape = "format_context"
 file = "lib/src/composition/schema/shipped.rs"
 symbol = "prepare_payload"
 tag = "retained"
 reason = """
-The host catalog rebuild check during artifact generation. `GlobalCatalog::from_record` returns a `simplified_schema::shipped::RecordError` (a pointer and message, no typed source), and the shared generation contract is String-carrying across all three owners (see the `to_string_collapse` entry for this symbol). The message is printed by the `shipped_schemas` developer command only."""
+The host catalog rebuild check during artifact generation. `GlobalCatalog::from_record` returns a `simplified_schema::shipped::RecordError` (a pointer and message, no typed source), and the shared generation contract is String-carrying across all three owners (`simplified_schema::shipped::generate`, `FreshLower::prepare`, and Darkmatter's `FreshDarkmatter::prepare`/`prepare_payload` all return `Result<_, String>`). The message is printed by the `shipped_schemas` developer command only."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/schema/shipped.rs"
+symbol = "prepare_registered"
+tag = "retained"
+reason = """
+The registered trigger payloads during artifact generation. The snapshot refusal, envelope error, and registration error are named with the trigger's bundle path into the shared generation contract, which is String-carrying across all three owners (see the `prepare_payload` entry); the message is printed by the `shipped_schemas` developer command only, and a run-time refusal falls back to ordinary preparation instead."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/schema/shipped.rs"
+symbol = "prepare_kinds"
+tag = "retained"
+reason = """
+The YAML kind definitions during artifact generation and the once-per-process fallback that panics on failure. It follows the shared generation contract, which is String-carrying across all three owners (see the `prepare_payload` entries); the message is printed by the `shipped_schemas` developer command or carried by a build-defect panic, and never reaches the error walker, a lifecycle `err`, or a runtime refusal."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/inventory/walk.rs"
+symbol = "walk"
+tag = "retained"
+reason = """
+The registration inventory walk is compiled into `build.rs`, which has no error walker: every refusal is one line of the build's panic message. Its only dependencies are std and `serde_yaml_ng`, so it cannot name Claudine's typed errors, and the library calls it only from tests."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/inventory/walk.rs"
+symbol = "visit"
+tag = "retained"
+reason = """
+One folder level of the build-time inventory walk; its refusals become lines of the build's panic message (see the `walk` entry for this file)."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/inventory/walk.rs"
+symbol = "check_member"
+tag = "retained"
+reason = """
+The build-time member envelope check; its refusal becomes a line of the build's panic message (see the `walk` entry for this file)."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/document_check/mod.rs"
+symbol = "Check::run"
+tag = "retained"
+reason = """
+The passive document check records a refused command-line argument (a malformed setter or `--set` value from `parse_composition_positionals`/`merge_set_overrides`, both `eyre` reports with no typed cause) as one `composition.invalid_arguments` finding whose message is that report's text. This is the final render into the dry-run report; nothing is returned."""

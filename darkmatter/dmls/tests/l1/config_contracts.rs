@@ -166,8 +166,8 @@ fn each_configuration_path_selects_its_host_and_scope_contract() {
     for (name, definition) in [
         (USER_DARKMATTER, "`user-config` in darkmatter/schemas/darkmatter-config.yaml"),
         (REPOSITORY_DARKMATTER, "`repository-config` in darkmatter/schemas/darkmatter-config.yaml"),
-        (USER_CLAUDINE, "`user-config` in claudine/schemas/claudine-config.yaml"),
-        (REPOSITORY_CLAUDINE, "`repository-config` in claudine/schemas/claudine-config.yaml"),
+        (USER_CLAUDINE, "`user-config` in claudine/registration/claudine-config.yaml"),
+        (REPOSITORY_CLAUDINE, "`repository-config` in claudine/registration/claudine-config.yaml"),
     ] {
         let text = "permissions:\n    network: deny\n";
         assert_eq!(probe.route(name, text), Some((Route::Configuration, definition.to_string())), "{name}");
@@ -242,7 +242,7 @@ fn a_configuration_buffer_whose_folder_does_not_exist_yet_is_routed() {
     match &overlay.yaml_document.as_deref().expect("a YAML judgment").outcome {
         YamlDocumentOutcome::Validated(validation) => {
             assert_eq!(validation.route, Route::Configuration);
-            assert_eq!(validation.definition, "`user-config` in claudine/schemas/claudine-config.yaml");
+            assert_eq!(validation.definition, "`user-config` in claudine/registration/claudine-config.yaml");
         }
         _ => panic!("the buffer was not judged by a configuration contract"),
     }
@@ -292,7 +292,7 @@ fn a_configuration_error_is_located_at_the_offending_value() {
 /// configuration contract prepares from it with its `darkmatter:` import.
 #[test]
 fn every_compiled_in_configuration_schema_prepares() {
-    assert_eq!(CLAUDINE_CONFIG_SCHEMA_SOURCE, include_str!("../../../../claudine/schemas/claudine-config.yaml"));
+    assert_eq!(CLAUDINE_CONFIG_SCHEMA_SOURCE, include_str!("../../../../claudine/registration/claudine-config.yaml"));
     for host in [ConfigHost::Darkmatter, ConfigHost::Claudine] {
         for scope in [ConfigScope::User, ConfigScope::Repository] {
             let resolved = ConfigurationFile { host, scope }.resolved().unwrap_or_else(|error| panic!("{host:?} {scope:?}: {error}"));

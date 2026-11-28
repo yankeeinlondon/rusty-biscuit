@@ -101,8 +101,41 @@ pub(crate) fn resolve_target_chain(
             failure,
             glob_hint: failure.zip(directive.targets.first()).and_then(|(failure, target)| failure.glob_hint(target)),
             document: None,
+            authored: None,
         }),
     }
+}
+
+/// In a dry run, why the target [`resolve_target_chain`] selects, or the
+/// headings it reads there, may differ when the run reads them: walking the
+/// chain in order, an alternative that is absent now but that the run's
+/// initializer may create (so it would be chosen first), or the first
+/// existing alternative when the initializer changes its content. `None`
+/// when the selection and its headings are what the run sees.
+pub(crate) fn changed_at_launch(
+    directive: &TocLinkingDirective,
+    source: &ComposeSource,
+    transclusion_options: &TransclusionOptions,
+    ctx: SourceContext,
+    session: &crate::markdown::compose::passive::PassiveSession,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    for target in &directive.targets {
+        match resolve_path(target, DirectiveKind::File, transclusion_options, source, directive.line, ctx.clone()) {
+            Ok(path) if path.exists() => return session.initializer_changes(&path),
+            Ok(path) => {
+                if let Some(reason) = session.created_file(&path) {
+                    return Some(reason);
+                }
+            }
+            Err(error) => {
+                let probed = error.target_not_found_details().and_then(|details| details.resolution.as_deref());
+                if let Some(reason) = probed.and_then(|resolution| session.created_among(resolution.probed_paths())) {
+                    return Some(reason);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Renders the markdown replacement for one resolved toc-linking directive.

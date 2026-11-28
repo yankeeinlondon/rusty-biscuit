@@ -194,7 +194,7 @@ fn glob_match_value(fixture: &ParityFixture, cell: &GlobValueCell) -> Observed {
         .glob_candidates()
         .into_iter()
         .map(|candidate| {
-            let value = biscuit_file::to_portable_string(&candidate);
+            let value = biscuit_file::to_forward_slash_string(&candidate);
             let options = ComposeOptions::new()
                 .with_source_file(&document)
                 .with_set_overrides(serde_json::json!({ "spec": value }));

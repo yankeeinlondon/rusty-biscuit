@@ -34,7 +34,7 @@ use simplified_schema::yaml_documents::load_yaml_document;
 pub use darkmatter::yaml_edit::YamlEdit;
 pub use simplified_schema::PropertyPath;
 
-use super::load::{ConfigProblem, document_from_bytes, project_value};
+use super::load::{ConfigProblem, ConfigProblemKind, document_from_bytes, project_value};
 use super::schema::ConfigScope;
 use super::{ClaudineConfig, RepoOverrideConfig};
 use crate::error::{ClaudineError, ConfigCause, Result};
@@ -245,7 +245,7 @@ pub fn validate_config_text(text: &str, path: &Path, scope: ConfigScope) -> Resu
 fn check_text(text: &str, path: &Path, scope: ConfigScope) -> std::result::Result<(), Vec<ConfigProblem>> {
     let as_problems = |error: ClaudineError| match error {
         ClaudineError::ConfigInvalid { problems } => problems,
-        other => vec![ConfigProblem::whole(Some(path), other.to_string())],
+        other => vec![ConfigProblem::whole(Some(path), ConfigProblemKind::InvalidSetting, other.to_string())],
     };
     let document = document_from_bytes(text.as_bytes(), path, scope).map_err(as_problems)?;
     match scope {
@@ -371,7 +371,7 @@ fn commit(path: &Path, scope: ConfigScope, change: TargetChange) -> Result<SaveO
         Err(ConfigWriteError::ValidationFailed { refusal, .. }) => {
             let mut problems = refused.into_inner();
             if problems.is_empty() {
-                problems.push(ConfigProblem::whole(Some(path), refusal.message));
+                problems.push(ConfigProblem::whole(Some(path), ConfigProblemKind::InvalidSetting, refusal.message));
             }
             Err(ClaudineError::ConfigEditRefused { path: path.to_path_buf(), problems })
         }

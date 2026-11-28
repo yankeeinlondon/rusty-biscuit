@@ -11,6 +11,7 @@ use super::diagnostics::{
 };
 use super::env_anchor::{self, PortableNames};
 use super::path_identity::PathIdentity;
+use super::shadow::ShadowCache;
 use super::strategy::{IntentForms, PortabilityPreference};
 use super::text::{self, Lead};
 use crate::file_reference::{
@@ -47,6 +48,8 @@ pub struct PortablePath {
     base_dir: Option<PathBuf>,
     strategy: Vec<PortabilityPreference>,
     portable_env: Vec<String>,
+    shadow_cache: Option<ShadowCache>,
+    foreign_checkouts: Vec<PathIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +80,8 @@ impl PortablePath {
             base_dir: None,
             strategy: PortabilityPreference::DEFAULT_STRATEGY.to_vec(),
             portable_env: Vec::new(),
+            shadow_cache: None,
+            foreign_checkouts: Vec::new(),
         }
     }
 
@@ -116,6 +121,20 @@ impl PortablePath {
         self
     }
 
+    /// Reuse the first-component observations of this launch request.
+    #[must_use]
+    pub fn with_shadow_cache(mut self, cache: &ShadowCache) -> Self {
+        self.shadow_cache = Some(cache.clone());
+        self
+    }
+
+    /// Skip launch-relative spellings for targets in these other checkouts.
+    #[must_use]
+    pub fn with_foreign_checkouts(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.foreign_checkouts = roots.into_iter().map(|root| PathIdentity::new(&root)).collect();
+        self
+    }
+
     /// Declare more portable variable names, in addition to
     /// [`PORTABLE_ENV_VARIABLES`](super::PORTABLE_ENV_VARIABLES). Names
     /// accumulate across calls; values always come from the evaluation's
@@ -140,8 +159,8 @@ impl PortablePath {
     /// Despite the getter-like name this does real work: without a context it
     /// captures the working directory, home, and environment and discovers
     /// the repository once; it resolves a reference input, probes the
-    /// filesystem, and resolves every candidate back to the target before
-    /// accepting it.
+    /// filesystem, and verifies candidate spellings. Launch-relative
+    /// spellings are checked for shadows instead of resolving them back.
     ///
     /// ## Errors
     ///
@@ -174,6 +193,8 @@ impl PortablePath {
             attempts: Vec::new(),
             findings,
             target: None,
+            shadow_cache: self.shadow_cache.as_ref(),
+            foreign_checkouts: &self.foreign_checkouts,
         }
         .run(&self.strategy)
     }
@@ -402,6 +423,8 @@ struct Evaluation<'a> {
     /// Established on first use, so an input that only `AuthoredIntent`
     /// decides is never resolved twice.
     target: Option<Target>,
+    shadow_cache: Option<&'a ShadowCache>,
+    foreign_checkouts: &'a [PathIdentity],
 }
 
 impl Evaluation<'_> {
@@ -419,15 +442,14 @@ impl Evaluation<'_> {
             };
             let attempt = Attempt::from_outcomes(preference.clone(), outcomes);
             let failed = match &attempt.outcome {
-                AttemptOutcome::ProbeFailed(error) => Some(error.clone()),
+                AttemptOutcome::ProbeFailed(error)
+                    if *preference != PortabilityPreference::LaunchRelative => Some(error.clone()),
                 _ => None,
             };
             let matched = attempt.matched().cloned();
             self.attempts.push(attempt);
             if let Some(error) = failed {
-                // Every preference's probe failure ends evaluation here, after
-                // its attempt is recorded. Only target preferences probe, so
-                // the target is already established.
+                // Only target preferences probe, so the target is established.
                 let target = self.target.take().map_or_else(|| error.path.clone(), |target| target.path);
                 return Err(PortablePathError::ProbeFailed {
                     target,
@@ -658,6 +680,7 @@ impl Evaluation<'_> {
             // Decided in `run` without a target.
             PortabilityPreference::AuthoredIntent(_) => not_applicable(NotApplicable::NoCandidate),
             PortabilityPreference::TreeRootRelative => self.tree_root_relative(target),
+            PortabilityPreference::LaunchRelative => self.launch_relative(target),
             PortabilityPreference::SameDirRelative
             | PortabilityPreference::ChildDir
             | PortabilityPreference::ImmediateParentDir
@@ -673,6 +696,91 @@ impl Evaluation<'_> {
             PortabilityPreference::HomeDir => self.home(target),
             PortabilityPreference::AbsolutePath => self.absolute(target),
         }
+    }
+
+    fn launch_relative(&self, target: &Target) -> Outcomes {
+        let scope = self.ctx.launch_scope();
+        let Some(repository) = scope.repository_root() else {
+            return not_applicable(NotApplicable::NoRepository);
+        };
+        let repository = PathIdentity::new(repository);
+        let Some(names) = target.identity.strip_prefix(&repository) else {
+            return not_applicable(NotApplicable::OutsideRepository);
+        };
+        let Some(first) = names.first() else {
+            return not_applicable(NotApplicable::LaunchRepositoryRoot);
+        };
+        if self.foreign_checkouts.iter().any(|root| target.identity.starts_with(root)) {
+            return not_applicable(NotApplicable::ForeignCheckout);
+        }
+        let text = match text::render_reference(Lead::Bare, names) {
+            Ok(text) => text,
+            Err(rejection) => return not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
+        };
+        let Ok(reference) = FileReference::new(&text) else {
+            return not_applicable(NotApplicable::UnsafeSpelling(SpellingProblem::GrammarMismatch));
+        };
+        let suffix: PathBuf = names.iter().collect();
+        let missing = target.state == TargetState::Missing;
+        let boundary = self.ctx.launch_boundary().map(|base_dir| resolve::Boundary::Tree { base_dir });
+
+        let private_cache;
+        let cache = match self.shadow_cache {
+            Some(cache) => cache,
+            None => {
+                private_cache = ShadowCache::default();
+                &private_cache
+            }
+        };
+        let probe = cache.probe();
+        for base in scope.bases().into_iter().take_while(|base| PathIdentity::new(base) != repository) {
+            let candidate = base.join(&suffix);
+            let first_exists = match cache.first_exists(&base, first, boundary) {
+                Ok(exists) => exists,
+                Err(error) => return vec![AttemptOutcome::ProbeFailed(error)],
+            };
+            if !first_exists && (!missing || names.len() > 1) {
+                continue;
+            }
+            let checked_path = if missing { candidate.parent().unwrap_or(&base) } else { &candidate };
+            if (missing || names.len() > 1) && let Err(error) = probe.admit(checked_path) {
+                return vec![AttemptOutcome::ProbeFailed(error)];
+            }
+            if let Some(boundary) = boundary
+                && let Err(error) = resolve::validate_containment(boundary, &text, checked_path)
+            {
+                return shadow_containment_failure(&error);
+            }
+            let shadow = if missing {
+                // A one-component missing path can be planned in an earlier
+                // base even when that component does not exist there.
+                probe.is_dir(checked_path)
+            } else if names.len() == 1 {
+                Ok(true)
+            } else {
+                probe.exists(&candidate)
+            };
+            match shadow {
+                Ok(true) => return vec![AttemptOutcome::Shadowed { reference, resolves_to: candidate }],
+                Ok(false) => {}
+                Err(error) => return vec![AttemptOutcome::ProbeFailed(error)],
+            }
+        }
+        if let Some(boundary) = boundary
+            && let Err(error) = resolve::validate_containment(boundary, &text, &target.path)
+        {
+            return shadow_containment_failure(&error);
+        }
+        if missing && PathIdentity::new(scope.request_dir()) != repository
+            && let Some(parent) = target.path.parent()
+        {
+            match resolve::parent_directory_exists(parent) {
+                Ok(true) => {}
+                Ok(false) => return not_applicable(NotApplicable::UnplannedTarget),
+                Err(error) => return shadow_containment_failure(&error),
+            }
+        }
+        vec![AttemptOutcome::Matched(reference)]
     }
 
     fn tree_root_relative(&self, target: &Target) -> Outcomes {
@@ -925,6 +1033,13 @@ impl Evaluation<'_> {
             Ok(text) => vec![verify(&text, target, Form::Single, &self.ctx).into_outcome()],
             Err(rejection) => not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
         }
+    }
+}
+
+fn shadow_containment_failure(error: &crate::FileReferenceError) -> Outcomes {
+    match ResolutionProblem::from_error(error) {
+        ResolutionProblem::Probe(error) => vec![AttemptOutcome::ProbeFailed(error)],
+        rejection => not_applicable(NotApplicable::Rejected(rejection)),
     }
 }
 

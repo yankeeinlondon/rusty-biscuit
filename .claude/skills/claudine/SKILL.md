@@ -77,7 +77,7 @@ audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#spe
 
 **Configuration loading** (`config/{schema,load,json_conversion}.rs`,
 `dispatch/loader.rs`): both files are YAML judged strictly by
-`claudine/schemas/claudine-config.yaml` (`include_str!`, prepared with
+`claudine/registration/claudine-config.yaml` (`include_str!`, prepared with
 Darkmatter's shipped sources so `permissions@darkmatter:config` resolves; not
 part of the trigger bundle or shipped artifact). Schema defaults are inserted,
 replacing an absent or `null` value alike, before serde reads `ClaudineConfig`
@@ -90,9 +90,16 @@ one-key mappings in the file (`- bash: { command: … }`,
 the `actions` and `configurations` fields turn them into the internally tagged
 `HookAction`/`MessengerProviderConfig`, which keep their tagged serialization
 everywhere else. A flat (`type:`/`provider:`) entry is refused by `load.rs`
-with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`). Errors are
+with its keyed spelling; the document's other problems come from judging its
+`wire::upgrade_flat` view, mapped back to the keys the file wrote
+(`FlatEntry::authored`), so a typo inside a flat entry is still a located
+`UnknownKey`. `json_conversion` rewrites flat entries with the same function. Errors are
 `ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
-JSON pointer. A legacy `config.json` beside a canonical
+JSON pointer; each `ConfigProblem` carries a `ConfigProblemKind`
+(`UnknownKey`, whose pointer names the key and whose position is the key
+token; `Syntax`; `InvalidSetting`), which `claudine doctor`
+(`lib/src/doctor/`) reports without the message, since messages can quote
+authored values. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
 `json_conversion` module through Darkmatter's `ConfigTransaction` and
 migration receipt. Event and provider maps list their keys explicitly; the
@@ -125,12 +132,14 @@ are dropped, so an unchanged save starts no transaction. A user file spelling
 
 **Setup handshake** (`config/setup.rs::setup_with_darkmatter`): first-run
 initialization (`init_wizard::write_with_darkmatter_setup`, used by the
-headless and interactive wizard and the test-only `commands/init`) passes its
-own config write as a closure; the service refuses a missing home or
+headless and interactive wizard, `claudine setup`, and the test-only
+`commands/init`) passes its own config write as a closure (`claudine setup`
+on an existing config passes a no-op write); the service refuses a missing home or
 repository before calling it, records Claudine's pre-existing `permissions`,
 then moves an inline `~/.darkmatter.yaml` block into Claudine's file (only
 when Claudine had none or a semantically equal one, compared through
-`darkmatter::config::init::effective_permissions`) and rewrites
+`darkmatter::config::init::effective_permissions`; `null` on either side
+is no block, as both loaders read it, so setup never copies `null`) and rewrites
 `.darkmatter.yaml` to `~/.claudine/config.yaml` (`./.claudine/config.yaml`
 at repository scope) in one two-target transaction with the Darkmatter file
 `published_last`. Differing blocks are `SetupError::Conflict`; a reference
@@ -143,11 +152,134 @@ feature). A first claudine run in a fixture with no Claudine config therefore
 rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
 `~/.claudine/config.yaml` there. The full setup order is
 `config/setup.rs::setup_claudine`: `composition::registration::publish` the
-immutable host revision (failure aborts setup), then this handshake, then
-`darkmatter::config::init::register_manifest` adds
-`~/.claudine/darkmatter-host.yaml` to the user `~/.darkmatter.yaml` (failure
-is a warning). User docs:
+fixed format 3 tree using `RegistrationInventory::claudine`, which verifies the
+compiled inventory through Darkmatter's embedded bundle preparation.
+`RegistrationInventory::from_embedded_sources` uses the same encoder and
+verifies supplied YAML and facts companions. Fresh generation takes the
+encoded inventory through `compiled_claudine` and verifies the snapshot
+before preparing trigger payloads from source, without consulting Claudine's
+runtime payload cache. A successful publish is followed by the permissions
+handshake and then `darkmatter::config::init::replace_manifest_registration`.
+That edit puts `registration::MANIFEST_REFERENCE` in the user `~/.darkmatter.yaml`
+in place of any spelling of the retired `~/.claudine/darkmatter-host.yaml`
+(even after a handshake `Conflict`; failure is a warning), then, only after
+that succeeded, `registration::remove_legacy_registration` deletes exactly
+the retired manifest and `~/.claudine/darkmatter-host/` after a no-follow
+preflight of the whole tree (a link is `CleanupError::Obstructed`, nothing
+removed). `ClaudineSetup.{registration, cleanup}` carry both results (a
+partial cleanup is `CleanupFailure { removed, error }`, outermost removed
+entries only; a failed publish is `SetupError::Publish { error, changes }`;
+every removal of `composition/registration/` goes through
+`registration.rs::remove_entry`, whose `#[cfg(test)]` seam
+`fail_removals` makes chosen paths fail on every OS); a name that is not the inventory's spelling is matched to an inventory path by `registration.rs::one_entry` (no-follow file identity plus a listing check), never by string, in the extras scan, the publisher's retirement and empty-folder removal, and the digest-mismatch lookup, so a case-only alias on APFS/NTFS is the member, not an extra; the CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
+`lib/tests/l1/installed_registration.rs` (migration section). User docs:
 [Schemas → published host registration](topics/schemas.md#the-published-host-registration).
+`setup_claudine` holds the publisher lock for the whole sequence
+(`composition::registration::Publisher`: `acquire`, `publish`,
+`finalize_legacy`; plain `publish` is one acquire plus one publish), lock
+order publisher then each configuration transaction's own locks. The
+`permissions` decision is shared with doctor: `config/setup.rs::
+plan_permissions_handoff(context, scope, HandoffMode::{Setup, Doctor}, …)`
+and `commit_permissions_handoff`; setup mode keeps setup's create-and-complete
+behavior through `init::setup_change`, doctor mode edits only `permissions`
+of existing valid files against their observed bytes (Claudine's block
+judged also by `darkmatter::config::init::check_referenced_permissions`;
+`doctor/permissions.rs::assess` makes an edit of a `.darkmatter.yaml`
+whose `ConfigFile::registration_findings()` is non-empty manual, since the
+writer's whole-file check refuses it, and a plan failing
+`HandoffPlan::reference_in_scope` manual, the same rule the committer checks
+again before its transaction, and a plan whose `HandoffPlan::layout_obstacle`
+is `Some` manual, both files unchanged).
+Repair eligibility also follows the format-preserving editor's layout
+rules, never schema validity alone: `TargetChange::edit_refusal` (Darkmatter)
+dry-runs a planned change's edits on the bytes it expects, and
+`registration/inspect.rs::edit_layout` maps a refusal other than parse or
+path to `EditLayout::{Root, Setting}`; registration uses
+`inspect::entry_layout` (`init::replace_manifest_refusal`, planned before
+publication with a missing manifest identified by location) as
+`EntryPrecondition::Layout` in both doctor's check and the repair's
+`editable`, so an inline `register` list or root the edit reaches makes the
+whole repair manual and nothing is published. An inline collection the
+planned edit does not reach is no obstacle. Tests:
+`doctor/{registration,permissions}_tests.rs` (`layout_cases!`).
+A broken reference target is never the handoff's to report alone:
+`doctor/config.rs::observe` follows every valid working-copy `permissions`
+reference through `darkmatter::config::init::observe` whatever state the
+scope's Claudine file is in (`DarkmatterState::Valid(file, Some(BrokenReference))`),
+`config` reports it located by `ConfigFile::permissions_position`, and the
+handoff's `ManualReason::BrokenReference` finding keeps its `error` but
+refers to `config` (tests: `doctor/config_tests.rs::broken_target_cases!`).
+Doctor's registration repair is `composition/registration/repair.rs::
+repair_registration` (requires a valid existing user `.darkmatter.yaml`
+whose entry edit the editor can make in place; preflight with the no-follow guard, publish, delete extras deepest first,
+verify, `init::replace_manifest_registration_existing`, verify both entry
+conditions (`entry_registered` and no `inspect::retired_entries`), then legacy
+cleanup, all under one `Publisher`). A user `register` entry naming the
+retired manifest, by Darkmatter's `registration::entry_names_location` (the
+writer's own match, so any spelling, file present or gone), is its own
+fixable `warn` located by entry position and line/column, routed through the
+same precondition and `entry_layout` as the missing-entry finding, with read-only inspection in
+`registration/inspect.rs` (`inspect_installation`; `config_target_blockers`
+is the no-follow guard both doctor writers use for a destination and its
+`LOCK_SUFFIX` sidecar). Claudine source may not call Darkmatter's
+installed-bundle loaders (`registrations_command.rs` guard), so
+`inspect_installation` only compares bytes and doctor then calls
+`Installation::judge_manifest(home, context)`: it locates the members with
+Darkmatter's installed-member resolution (`bundle::admit_installed_manifest`,
+confined to the bundle folder, so `../darkmatter/schemas/x.yaml` is the member
+`schemas/x.yaml` and `../x.yaml` is refused, as the loader does), sets
+`ExpectedFile::digest_mismatch` (a changed member's note alleges a digest
+mismatch only then) from those locations, and for a changed manifest reads
+the bundle itself without following links and hands the bytes to
+`bundle::verify_read` then `registration::load_verified`, the loader's own
+digest checks and preparation (byte integrity alone never counts as loading).
+Repair never judges: it verifies by byte equality with the inventory.
+Retirement (`previous_member_paths`) keeps the stricter lexical
+`bundle::admit_manifest`, so an old manifest spelled any other way retires
+nothing. Tests: `doctor/registration_tests.rs`
+(`publish_with_edited_member`, `member_spelling_cases!`).
+Doctor's two host rows never build an engine or run `claudine`:
+`doctor/tts.rs::assess(user_config, candidates)` reads enablement and the
+provider through `bridge_tts_settings` and judges biscuit-speaks' detected
+providers (a recognized name pins to that one, as `SpecificProvider` does);
+`doctor/path.rs::assess(current, shells)` judges
+`ExecutableIndex::build_path_only().find("claudine")` plus, on native
+Windows only, `sniff::programs::windows_shells::{detect, probe}` (a miss
+there is `warn`). Tests inject both slices; library tests of the file rows
+run `doctor::file_checks()` (the registry without `tts`/`path`) so no test
+starts a shell. The CLI adapter `cli/src/commands/doctor.rs` only renders
+`claudine::doctor::run(request::snapshot(), fix)`: `main.rs::dispatch`
+returns it right after `registrations`, before `request::darkmatter_config()`
+and `ensure_config_exists`, so a broken home is diagnosed with no setup,
+conversion, created `~/.darkmatter.yaml`, or refresh (its `Commands` arm is
+`unreachable!`). It writes stdout directly (not `log::data`, which drops
+errors) so a failed write is a top-level error, exit 1; report exit is 1 on
+any `error` row, else 0. Human output turns plain when stdout is not a
+terminal (`log::set_plain`). Tests: `cli/tests/l1/doctor.rs` (the held-lock
+repair case waits out Darkmatter's 2 s `LOCK_DEADLINE`; the `/dev/full`
+write-error case is Linux-only; every spawned case but the healthy home sets
+the `test-fixtures` seam `CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES`, read in
+`doctor/path.rs`, so a Windows child starts no real shell); user docs
+`claudine/docs/cli/doctor.md`.
+`claudine setup` (`cli/src/commands/setup.rs`, outside `needs_config`, never
+prompts) is the repeatable route to all of this for a configured home, and
+the command Darkmatter's format 1 warning names; tests
+`cli/tests/l1/setup_command.rs`. Besides `doctor --fix` (`repair_registration`), the only other publisher is the hidden `claudine registrations [<filepath>|publish]`
+(`cli/src/commands/registrations.rs`, dispatched before configuration
+loads): listing and detail read only `RegistrationInventory::claudine()`
+(XXH64 seed 0 as 16 hex digits), `publish` calls the same
+`registration::publish` and never edits `~/.darkmatter.yaml`, and
+`just install` runs it via `just publish-registrations` with the release
+binary it built. No per-command refresh exists, and no other command reads
+the tree: in a `test-fixtures` build every file-system call of
+`composition/registration/` appends a line to the file the
+`CLAUDINE_TEST_REGISTRATION_ACCESS` seam names (`access_log.rs`; a new call
+there goes through `access_log::note`), which ordinary commands must leave
+empty, and a source scan keeps Darkmatter's installed-bundle loader
+(`load_snapshot`, `load_registrations`, `RegisteredHosts::load`) and the
+tree's locators out of every other Claudine file. Tests:
+`cli/tests/l1/registrations_command.rs`. Maintainer docs:
+[`claudine registrations`](../../../claudine/docs/cli/registrations.md).
 
 **`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
@@ -195,9 +327,11 @@ twins of `LifecycleError`. Event names come from the host registry:
 Darkmatter's `composed`/`failed` to `start`/`blocked` (the Darkmatter spelling
 is `LifecycleRenamedEvent`) and registers `success`/`failure` and `loop`;
 derive event keys from `authored_event_keys()`, never a hand list. The host
-globals `seq`, `loop`, and `group` are declared once in the host catalog
-`claudine/schemas/globals.yaml` (embedded by `composition/schema/globals.rs`,
-`claudine_globals()`/`host_global()`; never a trigger or document schema), and
+globals `seq`, `loop`, and `group` are declared once, by the namespace files
+`claudine/registration/{group,loop,seq}.yaml`, prepared into the host catalog
+by `composition/schema/globals.rs` (`prepare_namespace_catalog` over the
+embedded inventory, `claudine_globals()`/`host_global()`; never a trigger or
+document schema), and
 `bindings.rs` and the registry take their names from it; Darkmatter's own
 globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
 `darkmatter/schemas/darkmatter.yaml`, whose resolved `fm` is the built-in
@@ -346,11 +480,370 @@ chain `enter_call`, one cycle domain with proxies); the CLI runner
 re-enters `run_composition_inner`/`run_sequence_target` in process with the
 overlay as data setters. A failed call is `LifecyclePrepFailed` (a dispatch
 failure `no_error` tolerates). Not built: `kind: group` targets and static
-approval inventory of `prep` targets. `--dry-run` renders `shell:` and
-`side_effect:` tasks (`PrimaryOutcome::withheld`), shows guards unevaluated,
-previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
-literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
-`--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
+approval inventory of `prep` targets.
+**Dry run.** `--dry-run` on compose/inline-compose/sequence is the passive
+document check in `cli/src/commands/document_check/`; no other dry-run path
+exists for them (the old sequence and compose previews, their seam, and
+`--dry-run-shell` are gone; `--dry-run-shell` is declared hidden only so
+`main.rs::dispatch` can refuse it with `DRY_RUN_SHELL_REMOVED`, exit 2, with or
+without `--dry-run`). Provider wrappers keep their own `--dry-run`
+(`wrap/mod.rs`, `output::log_dry_run`). `dispatch` runs the check (unless
+help) right after the `--output` refusal, before tracing, telemetry,
+`request::darkmatter_config()`, migration, registration refresh, and
+`ensure_config_exists`; `--json` (`SharedComposeArgs`, clap `requires =
+"dry_run"`) selects one envelope on stdout, else the human report on stderr
+then previews on stdout; exit 0 or `EXIT_USAGE` (2), never 1. Configuration
+is read with `dispatch::loader::load_claudine_config_passive` (YAML, else the
+legacy `config.json` projected by `json_conversion::project_legacy`, else
+defaults with a note; never writes, converts, or backs up); a load error is a
+root finding and the check continues on defaults. Invocation-wide
+prerequisites are one root row each, reported by `Check::report_configuration`
+after the root is read (so the subject names it, never "command line"): the
+Claudine load error, the Darkmatter config (`darkmatter_config_for` the
+root's context: a load error, or in `Purpose::DryRun` the captured
+`ConfigSnapshot::policy()` error, so `network: aswk` is an error for a local
+prompt), and a failed launch discovery (`lifecycle_mutation_root`). Their
+`(file, line, column)` are `config_rows`; `push_error_in` drops a later
+`dm.config.*` record at one of them (or in a file Claudine's load reported;
+a Darkmatter `ConfigProblem::reference_target` naming Claudine's file is not
+reported twice) and returns the held id, so a task's preview is
+`not checked (the configuration does not load)` (`blocked_reason`). A
+refusal whose text holds the invalid verdict's error gets `related` to it
+(`relate_to_permissions`; Darkmatter flattens the typed cause to text).
+Skipped triggers (`report_trigger_findings`, from `trigger_findings()`) and
+the retired-guardrails warning (`RETIRED_GUARDRAILS_STAGE`, `path` = the
+file) are root rows too; an unreadable launch directory or failed
+`request::initialize` is `run_unprepared`'s one `io.read_failed` row
+(`main.rs::unprepared_dry_run`). Tests:
+`cli/tests/l1/dry_run_invocation_prerequisites.rs`. Provider findings come from
+the real selectors: `wrap/sequence/providers.rs::select_traced` for sequence
+sites (`SelectionSite.consulted` lists every enclosing document, so the trace
+names one with no `agent`) and `wrap/composition/target.rs::decide_target`
+(`TargetDecision::{Chosen, Picker, Refused}`) for compose; each pushes a
+`wrap/selection_trace.rs` link in the branch that consults a source, and the
+check renders `SelectionTrace::lines()` (values through `mask_secrets`) as the
+finding's notes. The check's own codes (`composition.provider_*`,
+`no_executable`, `model_required`, …) are rows of
+`lib/src/diagnostics/registry.rs`. It reads the tree through the library's
+recovering walk, `composition::check_sequence_tree`
+(`sequence/preflight/check.rs`), and reports each `CheckedTask` as its own
+subject in `document_check/tasks.rs` into a
+`darkmatter::findings::FindingSink`. It previews each prompt through the
+canonical preparer (`prepare_direct` / `prepare_inline`, so the inline
+baseline rehearsal and lifecycle refusals are the real ones) with
+`PrepareOptions.passive = Some(PassiveSession)`; `canonical_compose_options`
+turns that into Darkmatter's `with_passive_session` (no command, shell probe,
+packet, provider query, approval, or cache), and the inline guardrails are
+read with `guardrails::load_guardrails_passively` (never created).
+Every pass of one check shares one observation of each source: `Check::session()`
+is `Check::observations.sharing_observations()` (Darkmatter's
+`PassiveObservations`: one `load_data` memo and one remote runtime per fetch
+policy), used by the input check, `reference_rows`, both preview
+preparations, and the walk (`SequenceCheckRequest::session`); a failed
+verdict's classification session reads through it too
+(`composition::slot_session_observing`). Local files are observed once
+too: `PassiveObservations::local_reads()` (a `simplified_schema::resolve::buffers::SharedReads`)
+is put in force on the check's thread by `document_check::run` and on the
+walk's by `passive_scope::enter`, and Darkmatter reads through it in every
+passive composition; Claudine's readers call `composition::read_local_source`/
+`read_local_text` (the root and prompt loads in `resolve.rs`, the graph's
+`capture_source` and `load_prompt`, whose one read is both the captured
+bytes and the parse, `data.rs::load_document`, `NestedSources`, `keys.rs`,
+`tasks.rs::locate_in`), and `Markdown::try_from` reads through the scope in
+force. A real run holds no scope, so its reads and freshness checks
+(`sources_unchanged`, `PreparedDeclaration::current`) are unchanged. The
+walk reads each prompt once
+(`preflight::PromptMemo`, shared by both discovery passes and the walk,
+check-only) and hands it over as `SequenceCheck::prompts`, which
+`tasks.rs::load_document` consults before reading (other documents are read
+once per check, `Check::loaded`). `Work::CompositionSourceRead` counts each
+open `read_local_source` makes (a shared hit is none). Effective schemas are
+prepared once per distinct input for the whole check too: Darkmatter's
+`DarkmatterSchemas::site_schema_with_override` consults a
+`schemas/preparation_memo.rs` memo carried by the `SharedReads` in force
+(`SharedReads::memo`, only under `buffers::shared_reads_alone`), keyed by the
+`$schema` value, document path/folder, context, caller origins, baseline,
+matched registered/root triggers, and checked against the xxHash of every
+schema file the preparation read; a template preparation (slot session) is
+never kept, and verdicts stay per occurrence (`Work::EffectivePreparation`/
+`EffectivePreparationReuse`; seam `CLAUDINE_TEST_SCHEMA_PREPARATIONS`,
+`dry_run_shared_observations.rs::one_preparation_per_schema`;
+`darkmatter/lib/tests/l1/shared_schema_preparation.rs`). Tests:
+`cli/tests/l1/dry_run_shared_observations.rs` (requests per URL, repeats
+counted; `one_open_per_source` counts opens through the `test-fixtures`
+seam `CLAUDINE_TEST_SOURCE_OPENS`, `composition/source_open_log.rs`),
+`check_tree.rs::a_prompt_two_tasks_compose_is_read_once_and_handed_to_the_check`,
+`distinct_prompts_are_each_opened_once`,
+`referenced_data_documents_are_opened_once_for_each_occurrence_count`
+(`simplified_schema::work_counters::source_opens`).
+`document_check/preview.rs` turns each `session.deferrals()` entry into a
+`not checked` row and marks the construct in the human preview
+(`[not evaluated in a dry run]`); `ComposedBodyEmpty { cause }` becomes
+`dm.compose.empty_body` with `EmptyBodyCause::phrase`/`hint`. The input
+check (`tasks.rs::prompt_inputs`) prepares passively too. The walk itself
+holds a `PassiveSession` for its thread (`composition/passive_scope.rs`,
+entered by `check_sequence_tree`), which `document_expression_resolution_context`
+and `canonical_compose_options` attach, so source expressions, `::template(…)`,
+formal `template:` defaults, `with:` values, and owner preparation refuse an
+effectful function (`has_alias`, `ping`, …); `CompositionError::deferral_reason`
+turns that failure into a `not checked` row (`RootList::Deferred` for the root
+list). Tests: `cli/tests/l1/dry_run_source_effects.rs`. A prompt task's
+`with:` reaches the preview as `CheckedTask::with_evaluated` (data, beneath
+the setters), recorded by `Loader::note_prepared_with` from the walk's own
+`record_prompt_reference`; `with_late` keys (including a `with:` value whose
+evaluation recorded a deferral in the walk's session) are not input-checked
+and are declared absent in the preview. The preview and input check also
+read launch-time values as launch-time: `SequenceCheck::runtime_written` is
+`Loader::runtime_written_keys` (the rule `defer_runtime_written` uses), and
+`check_sequence_tree` moves a `with:` value whose step-view closure
+(`providers::with_value_scope`, recorded per task by `note_prepared_with`)
+reaches one into `with_late`. `tasks.rs::written_before` adds
+`LAUNCH_TIME_SEQ_MEMBERS` (`seq.outputs` except for a first step outside a
+loop, `seq.run_id`); `preview.rs::preview_session` declares each with
+Darkmatter's `PassiveSession::defer_written` (`DeferralReason::WrittenAtLaunch`;
+a read of it or below it is unavailable whatever it holds, and a schema
+problem with it is a `DeferredConstruct::SchemaCheck` deferral), plus `loop`
+inside a looping container (`Check::looping`, placeholder `loop_values`) or
+a loop document. Inside a group (`CheckedTask::in_group`: the graph's
+`PromptReference::in_group`, else an enclosing `group:` frame; a nested
+sequence in a leg included) `written_before` adds the whole `group` root,
+so the input check and both previews defer it, and
+`passive_prepare_options` binds an empty placeholder `lifecycle_group` so
+the host global is in scope; outside every group a read stays
+`claudine.outside-group` (`cli/tests/l1/dry_run_group_scope.rs`).
+`reference_rows` uses `preflight_session` without them,
+and clears `sequence_binding`, `loop_values`, and `lifecycle_group`, since a real run's
+preflight resolves inclusions first, with no step position, loop pass, or
+group bound (its compose options declare no `seq` global): giving the walk the
+step's overlay made `seq.index == 2 ? 'a' : 'missing'` pass a walk the real
+run refuses. The same holds for the two passes that compose a prompt before
+any task (`PromptTask::earlier`, `preview.rs::earlier_rows`): a `prompt:`
+task's approval discovery is `composition::discover_prompt_document` (shared
+with `resolve_graph_shell_approvals`) over the CLI's
+`wrap/sequence::approval_compose_request` made passive, with the walk's
+`CheckedTask::reference`; a root body step's Phase 1c probe is the preview
+with only the root `initialize` keys and `seq.run_id` deferred. Either runs
+when the preview deferred a `WrittenAtLaunch` read; discovery also runs when
+`composition::reads_sequence_late_root` (Darkmatter's
+`static_access_reads`/`static_callback_reads` over frontmatter values, body
+spans, and `::map`/`::filter` headers) finds a `seq`/`loop`/`group` read,
+since it binds none, so a static `seq.index + 1` in frontmatter fails there
+while the preview composes it. A prompt reading no host root gets no extra
+pass (`reads_sequence_late_root` also counts any inclusion, whose reads it
+cannot see). Its refusal is the row (exit 2), while the preview's own
+deferral rows stay. `compose`/`inline-compose` (`EarlierCheck::Approval`)
+and a root body step (`Probe`) also make, unconditionally, the approval
+discovery `approve_document_shell` makes, through
+`composition::discover_document_shell` (same request and text, schema
+verdict deferred since the route drops invalid optionals first; shared
+`preflight::discover_document_surface` error mapping): it refuses a shape
+discovery cannot approve whatever the value (`collect.rs`'s
+`detect_unevaluated_dependency_shape`/`detect_dynamic_command_shape`: a
+target or `::shell` built from a shell probe, lazy `current`, pending
+`$(…)`, or a key reading one; a caller override makes it observable, so a
+`with:` value is only unknown). Its refusal suppresses the preview's
+`warning_rows` (the run never composes). Tests:
+`cli/tests/l1/dry_run_discovery_shapes.rs`. A standalone
+document's own `initialize` writes do not reach its composition, so
+compose/inline-compose declare nothing. Files are different: the root's
+`initialize` (the document's own for compose/inline-compose) runs before
+any read, so `document_check/mod.rs::declare_initialized_files` (called
+after the setters are merged) lists its `ensure_file`/`append_line`/
+`append_jsonl` writes (`darkmatter::lifecycle::created_files`, literal and
+`template: true` operands; `CreatedFile::change()` is
+`InitializerChange::CreatesIfAbsent` or `CreatesOrAppends`). A literal
+resolves with `CreatedFile::target`, a template through
+`prewarm::resolve_initializer_template` (root frontmatter under the
+setters; no call, `ctx`/`env`, `set`-written key, or `{{`/`$(` value) then
+`target_as`, all under `lifecycle_mutation_root` (a target the effect refuses
+as outside it is not declared); each is
+`PassiveSession::declare_initializer_write(path, change, reason)`. An
+unresolvable template is `declare_unresolved_write(CreatedFile::pattern(…))`:
+its literal text with wildcards, the whole mutation root when it starts
+with a span (an unresolved append then defers content of every existing
+file there). The passes that compose before any task (`earlier_rows`:
+approval discovery through Darkmatter's `compose_preflight`, the Phase 1c
+probe) read the same unknown values as deferred: `compose_preflight` sets
+aside a directive or `prologue`/`epilogue` naming one, and
+`prepare.rs::section_deferred` keeps a passive composition whose section
+was set aside from being `ComposedBodyEmpty`. Readers share one rule on the
+session: `initializer_changes(path)` (content: an absent file it may
+create, or an existing one an append targets → `ChangedAtLaunch`),
+`created_file`/`created_among` (existence: absent only; an existing file
+always exists), `changes_listing(folders, matches)` (a `find_files`
+listing). Darkmatter's transclusion engine (`::file`/`::code`,
+prologue/epilogue, on a miss via `created_before_read` and on a hit via
+`initializer_changes`), pre-flight collect
+(`transclusion::changed_before_read`), the reference graph
+(`load_inclusion`), reference validation, `load_data`, `load_markdown`
+(`frontmatter`, `try_frontmatter`, `markdown_title`, `markdown_body_empty`,
+`validate_schema`'s document), `validate_schema`'s schema files and imports
+(`observed.read`/`searched`), `file_exists`, `find_files`; Claudine's
+sequence `Loader` (`source.rs::created_reference` on a miss,
+`changed_reference` on a hit in `resolve_reference` and the root list,
+`CheckState.pending_created` → `CheckFailure.pending`, `RootList::Deferred`)
+and `inputs.rs::schema_created_later` for `$schema` (asked before the input
+check and the preview prepare). A prompt's own `initialize` and earlier
+tasks never count (they run after pre-flight). Tests:
+`cli/tests/l1/dry_run_initialized_files.rs`,
+`darkmatter/lib/tests/l1/lifecycle_created_files.rs`. Tests:
+`cli/tests/l1/dry_run_later_state.rs`,
+`preflight/tests/check_tree.rs::a_with_value_reading_a_runtime_write_*`.
+A missing input never gates the rest:
+the preview session declares each missing name with Darkmatter's
+`PassiveSession::defer_absent` (`DeferralReason::MissingInput`), so a read of
+it stays as written (marked `[missing input]`, no `not checked` row) and the
+schema stage does not report it again; the input check
+(`tasks.rs::prompt_inputs`, judged in the mode the task composes in, so an
+inline completion-only `required` may stay absent) is the one finding. A
+prompt or body whose owner misses an input (`waiting_prompts`,
+`owner_missing`, `root_absent`) previews with the owner's names absent and
+does not report them again. `check_sequence_tree` reruns discovery with every
+owner's missing names absent in its scope session, so an owner's derived
+value is deferred instead of computed from nothing. A preview that fails is
+retried once with `PrepareOptions::allow_missing_transclusions` (dry run
+only), so the text beside a missing inclusion is still previewed, and the
+retry's own other failure is a finding too. Both success branches project
+the preparation through the one `preview.rs::warning_rows` (deferrals,
+warnings, prompt), so a tolerated child's warning survives the retry; the
+retry's warning for the inclusion it left out is the walk's refusal
+(`refused_by_walk`: same code and file, line where both carry one, since an
+inline prompt's body inclusions carry none). Tests:
+`cli/tests/l1/dry_run_missing_inputs.rs`, `dry_run_recovered_warnings.rs`. Inclusion references never
+depend on the preview: `preview.rs::reference_rows` runs
+`composition::unresolved_inclusions` (the canonical request with
+`for_reference_check`, no call check, deferred schema verdict, and
+`PageBlocks` disabled, so condition-blind like the real pre-flight walk;
+transclusion-kind errors only; an issue is dropped when the copy that writes
+it tolerates invalid references, read from Darkmatter's
+`ReferenceReportDocument::tolerates_invalid_references`, which the graph sets
+with composition's own `transclusion::ignores_invalid` on the prepared copy,
+so a child's `ignore_invalid` (own or passed down) decides for its
+inclusions; an inline prompt's generated body is given the source path)
+before preparing. `prepare.rs::document_for_mode` names the source file's
+text as the generated document's frontmatter (Darkmatter's
+`Markdown::with_frontmatter_authored_in`), so an inline `prologue:`/`epilogue:`
+failure is the section's, at its authored value, in the walk and the
+preparation alike, and and `reported_by_walk` keeps the preview's own failure on
+the same reference (code, reference, resolved target, line when both have
+one) from being a second row, as `refused_by_walk` does for a tolerated-child
+warning at a reference the walk refused. A preview error naming no file is
+given the prompt's (`push_error_in`), so Darkmatter's `FindingSink` holds it
+once beside the input check's located copy (a file-only finding equal to one
+located in that file is that finding). A directive or `prologue`/`epilogue`
+whose target reads a deferred value (Darkmatter: `PassiveSession::deferred_span_in`/
+`deferred_reference`, set aside by `transclusion::parse_directives_deferring`
+in the transclusion phase and the reference graph) is a
+`DeferredConstruct::Transclusion` deferral: left as written, one mark, and a
+`not checked` row even for a missing input. Tests:
+`cli/tests/l1/dry_run_independent_references.rs`.
+A `::map`/`::filter` whose gate, source, callback, or option meets an
+unavailable value is one `DeferredConstruct::Collection` deferral (`authored`
+is the whole region): `check_name` gives "`::map`/`::filter` collection",
+`marked` marks its opening line, and a missing-input reason only marks it,
+as for a `::block` condition. Tests: `cli/tests/l1/dry_run_collection_deferrals.rs`
+(every option site, direct/inline/sequence-inline effectful callbacks).
+The walk is the real preflight `Loader` with `check: Some(CheckState)`:
+`check_task` records a task before its children and turns its failure into a
+record instead of an early return; lists normalize through
+`normalize_plan_recovering_at` / `formal::normalize_formal_plan_recovering` /
+`source::plan_referenced_sequence_recovering` (an unreadable item keeps its
+authored position); an inline group's legs are judged one by one with
+`grammar::validate_task_grammar_shallow`; `resolve_reference` takes the
+`ExecutableField` so a no-match becomes a `findings::reference` finding
+(`source::reference_finding`, through Darkmatter's `check_document` with an
+admit-all callback: `file-read` governs only schema slots; the real-run
+resolvers `resolve_composition_source_in_context` and
+`commands/sequence.rs::resolve_sequence_source` use its `resolve_document`,
+and `recover_operation_file`'s same-name suggestions are Darkmatter's
+`basename_matches` with `walker::name_passes_filters`); discovery runs
+`InputDiscoveryOptions::recovering()`, which skips what it cannot read. A
+check-mode root property is `sequence[i]` (the authored key), a real run's
+stays `tasks[i]`. A root with no `sequence` key is
+`CompositionError::SequenceUndefined` (`composition.sequence_undefined`) in
+both: the real run raises it from `phase1c.rs`'s plan, the check records it as
+a root failure and reads no task (`RootList::Unread`). `check.rs::check_root` makes the refusals
+`commands/sequence.rs` makes before any list is read (declaration setters,
+root grammar, lifecycle, removed `seq.*` reads), so a `$( … )` root list
+still reports them, and the walk skips them in check mode; after the walk
+each prompt task's document is judged by `validate_lifecycle_literals`, the
+per-document half of `PreflightGraph::validate_prompt_lifecycle_literals`. A real run never sets `check`, so its fail-fast order and
+errors are unchanged (`cli/tests/l1/sequence_preflight_baselines.rs` pins
+them). Missing inputs are one `composition.missing_properties` row per value,
+graded by `tasks.rs::missing_input_severity` (Rule 10's cohort) with the
+configuration's `prompt_for_missing`. A file the real command would ask the
+caller to choose (`document_check/choice.rs`: the root picker, through
+`operation_file::{attempts_autocomplete, picker_can_ask,
+candidate_references}`, and the `compose`/`inline-compose` supplied
+eager-file chooser, through `schema_interactive::supplied_file_candidates`)
+is a `composition.file_choice_pending` warning where it would ask and find
+files, else the route's refusal; a sequence root's supplied file is always
+its refusal. The `test-fixtures` seam `CLAUDINE_TEST_DRY_RUN_TERMINAL`
+(`stdin,stderr`) injects the terminal the check grades against
+(`cli/tests/l1/dry_run_file_choices.rs`, a code fixture's `terminal.txt`). Tests: `cli/tests/l1/dry_run_check.rs`,
+`lib/src/composition/sequence/preflight/tests/check_tree.rs`, fixtures
+`cli/tests/fixtures/check/`.
+
+**Real-run preflight report.** A real `claudine sequence` that fails before
+`start` (`root.started` false in `wrap/sequence/mod.rs::execute_sequence`)
+keeps its typed error and wraps it, at that one point, as
+`CompositionError::CheckFailed { report, cause }` when
+`document_check::preflight_failure_report` (the passive check, `Purpose::Failure`,
+over the caller's values plus every runtime write; errors and warnings only)
+finds anything. The wrapper is `Semantic` and every facet, `Display`, severity,
+`variant`, and `diagnostic_source` come from `render::checked_diagnostic(cause)`
+(the cause's own selection), so `err.*`, snapshots, and `finalize` see exactly
+the old failure; `error_walker::try_render_block_report` prints the report once
+in place of the block (`render_preflight_report`, last line "The run stopped
+at: …", left out when a row's message already is the cause's or its suffix
+after `…: `). Rows must say what the replaced block said: a missing input
+carries its schema description, and a selection failure the typed
+`SequenceTaskProviderProblem::remedy()` the block also shows. On the first attempt whose preflight passes, `preflight_advisories`
+(`Purpose::Advisory`: walk and schema-key checks only; no selection, inputs, or
+preview) prints its warnings once before task one unless `--silent`. Tests:
+`cli/tests/l1/sequence_preflight_baselines.rs` (`boundaries::*` is the mapping
+guard, one case per boundary), `lib/src/composition/error/tests.rs::check_failed`.
+The scope guards (`error_guards/sequence_scope.rs`, allowlist
+`sequence-scope-allow.toml`: site, noun, catch-all, own arm; only
+`outside-scope` entries, never a `Sequence…` variant) and the code snapshot guard
+(`dry_run_check::codes`) are listed in [Error Architecture](topics/error-architecture.md#the-lossy-boundary-audit).
+Every `Sequence…` variant carries `site: Box<SequenceSite>` (`error/site.rs`:
+optional file, property, task, and a parser-proven `position`, 1-based line
+and column in the file's frame, set by `sequence/data.rs::at_offset` for YAML,
+JSON/JSON5, and JSONL load failures; `None` stays file-only) or
+`source_path` + `property`; display wrappers (`WithFrontmatter`,
+`LifecycleEvaluationAlreadyEmitted`, `CheckFailed`) are peeled by
+`CompositionError::presented()`, which `sequence_site`, `resolution_failure`,
+the hint, and `document_check::push_error` all read. A preflight
+`TaskSite::row` names the data file and row that wrote a selected data-file
+row (`SequenceSource::data_row`), and `TaskSite::authored()` is the location
+every `locate_in` call uses; a deep layer
+raises an unlocated site and the first caller that knows it calls
+`CompositionError::locate_sequence` (innermost wins; `referenced_as` fills the
+construct noun). A referenced file's failure is `SequenceReferenceResolution`,
+`SequenceSourceRead`, or `SequenceSourceParse` (with its parse stage); each
+variant has its own arm in `render/sequence.rs`, and its passive-check row
+carries the same hint. Wording changes keep the old facets
+(`cli/tests/l1/sequence_error_blocks.rs`). The dry-run preview reports the
+preparation's `warnings` (a tolerated transclusion failure) as warning rows
+(`document_check/preview.rs`). A schema problem takes its route's severity
+from the real classifier, never a second one: where the real route drops an
+invalid optional (`compose`, `inline-compose`, a root step composing the root,
+`PromptTask::drops_invalid_optionals`), the preview runs
+`composition::drop_invalid_optionals` then `prepare_passive_with_schema` (the
+composition-stage `translate_schema_failure`, no post-shell pass; a refusal
+keeps the composition's located error, narrowed by
+`translate::refusal_beside_optionals` to the invalid required problems when
+an invalid optional sits beside them, which becomes the drop the run makes
+once the required value is fixed), and `check_sequence` runs the root's
+`drop_invalid_optionals` as `commands/sequence.rs` does; each drop is one
+`composition.optional_dropped` warning per `(document, property)`
+(`DroppedOptional::message`, the run's own warning; dry run only, never in a
+preflight failure report). A `prompt:` task, or a nested or referenced body
+step, stays strict, since the real run's barrier
+(`task_run.rs::validate` → `validate_document_shell_late_values`) refuses before
+its JIT pre-validation could drop. Tests:
+`cli/tests/l1/dry_run_dropped_optionals.rs`.
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,
@@ -391,7 +884,7 @@ home.
 
 Every lifecycle `EffectEngine` in `cli/src` takes its mutation root from
 `claudine::invocation_context::lifecycle_mutation_root(invocation, context)`,
-never `launch_magic_scope().local_root()` directly: it refuses a retained
+never `launch_scope().local_root()` directly: it refuses a retained
 failed launch discovery (`CompositionError::LaunchRepositoryUnreadable`,
 `io.read_failed`) so the launch-directory fallback is used only after a
 successful observation of no working tree. A direct wrapper's memory-file
@@ -418,7 +911,29 @@ it switches on Darkmatter's remote transclusion, as `md compose` does, so
 the captured `network` permission alone decides whether a `::file`/`::code`/
 `prologue`/`epilogue` URL is fetched. A bare `ComposeOptions::new_with_context`
 leaves those targets failing even under `network: allow`. Tests:
-`lib/tests/l1/network_transclusion.rs` (loopback responder).
+`lib/tests/l1/network_transclusion.rs` (loopback responder). A dry run's
+remote reads under each `network` setting (`allow` fetches, `ask` is one
+`NetworkNeedsApproval` not-checked row with no request, `deny` the real
+refusal) are pinned per reader in `cli/tests/l1/dry_run_network_approval.rs`;
+`prepare.rs::dry_run_deferred_schema` keeps a slot template the dry run
+deferred from being judged again as `composition.schema_load`.
+A real run's pre-launch schema check resolves a `$schema` template through
+`composition::launch_slot_session` (the invocation's config snapshot plus the
+CLI's terminal approval handler, `wrap::launch_slot_session`), and hands that
+session to the first run's preparation through `PrepareOptions::slot_session`
+(compose, inline-compose, and a sequence step's JIT compose; a later loop pass
+resolves afresh). A slot refusal is `composition.schema_slot_failed` with the
+slot's code in `detail.slot_code`; its `slots` field keeps Darkmatter's typed,
+located record of each failed slot, which the dry run's `push_error_in`
+reports in its place. Tests: `cli/tests/l1/launch_network_slots.rs`.
+**One row per cause.** The dry run's passes (walk, input check, preview and
+retry, owner verdict) each can meet one cause; ownership is fixed: a schema
+validation verdict is the preview's (located problems), a `$schema` that
+cannot be prepared (`SchemaLoad`/`SchemaParse`/`SchemaSlotFailed`) the input
+check's (`Check::schema_reported`; `error_source` locates it at `$schema`),
+an inclusion the walk's, and a sequence document's own failed verdict its
+owner row: a body step composing that document (`check_prompt_task`) is
+`not checked: preview`. Tests: `cli/tests/l1/dry_run_one_row_per_cause.rs`.
 
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
@@ -556,8 +1071,32 @@ keys. Nested inline and referenced sequences execute recursively; group legs
 may themselves be containers. Groups reject `execution:` (concurrency is implicit), require
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
-Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. Sequence declarations live in `composition/sequence/declarations.rs`:
+Task `setup:`/`teardown:`/`execution:`/`fail_fast:`, group `execution:`, and
+the root `fail_fast:` are removed grammar, declared `removed(<replacement>)`
+in the shipped schemas (`sequence.yaml`'s `task-fields` and `group`,
+`sequence-document.yaml`, `formal-sequence-file.yaml`); the parser reads
+each replacement from there through `composition/sequence/removed.rs`
+(`RemovedOwner`, `refuse_removed`, `removed_key`), never a hand list, and
+keeps its typed `RemovedGrammar` at the boundary where it always refused the
+key (a guard allowlists `removed.rs::removed_key` as the ParserTwin). A
+step `task` is open with `$advise-unknown-keys: [agent, model]`; a group leg
+is the closed `leg`. `task-file.yaml`, `group-file.yaml`, and
+`group-catalog-file.yaml` are the `kind: task`/`group`/`group-catalog`
+definitions. The passive dry run (`document_check::tasks.rs::judge_keys`)
+judges the root and every file the walk read (`SequenceCheck::files`, YAML
+or Markdown) once for removed/unknown keys and near-miss advice, from the same
+schemas, and `key_owners` attaches each verdict to every occurrence of the
+innermost task its file authors above the key, else to each task whose
+reference read that part (`CheckedTask::loaded`, a `LoadedDocument` with the
+selected catalog entry's `groups[i]` or the offset as its property); a verdict
+no occurrence uses (an unselected catalog entry) is dropped. The parser's
+`RemovedGrammar`/`SequenceUnknownTaskField` for the same `(file, key)`, and a
+formal file's aggregate `SchemaValidation` made only of reported key paths,
+are not second rows (`push_failure`). Task rows, `not checked` included
+(`Check::not_checked`, Darkmatter's `FindingSink::not_checked_within`), carry
+the occurrence's trail. `tests/fixtures/schema_keys/` is shared with DMLS's
+`claudine_schema_key_parity.rs` and the CLI's
+`dry_run_schema_key_occurrences.rs`. Sequence declarations live in `composition/sequence/declarations.rs`:
 a root's `$state`/`template` and an inline container task's
 `$schema`/`$state`/`template` are judged by key presence (null included) for
 placement (only beside that owner's inline `sequence: [ … ]`; never on a
@@ -615,13 +1154,16 @@ and hands `RootSequence` to `execute_sequence`; the first attempt's
 collects with a shared `asked` set (progress-bounded, Phase 1c too), fills
 the plan (`with_sequence_id`), and `RootRun::{plan, collected_overrides}`
 keep it for retries. Discovery runs `leaving_verdicts()`: an owner's own
-non-missing preparation failure is recorded (`failed_owners`), not raised, so
-graph, provider, and Phase 1c errors keep their order; the root's is left to
+non-missing preparation failure is recorded (`failed_owners`, each a
+`FailedOwner` with its error), not raised, so
+graph, provider, and Phase 1c errors keep their order (the dry run reports each
+as `SequenceCheck::owner_failures`, at the root or at the `sequence:` task that
+reached it, and leaves that owner's tasks' inputs and preview `not checked`); the root's is left to
 Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
 after provider selection. The root's own missing inputs are left to Phase 1c
 (step headings) unless another owner is missing, a reference is pending, or
 the root is empty. Phase 1c's per-step probes compose against the root's
-`RuntimeState` snapshot (its `initialize` writes; `None` in a dry run), as
+`RuntimeState` snapshot (its `initialize` writes), as
 the first step does at its turn, so an `initialize` write satisfies a
 required root input on every route. An inline container's `$schema` is judged in
 `TaskExecution::run_validated` (`task/sequence.rs::admit_inline_container`;
@@ -633,7 +1175,7 @@ and again at each `start` reread (including the first, after `initialize`);
 a container proxy judges the approved check (a whole-document target has
 none); a refusal at admission is an unstarted
 failure (no container event runs), one at a `start` reread blocks the started
-container, and a dry run only names it. User docs:
+container. User docs:
 [Sequences → Sequence documents](topics/flow-control/sequences.md#sequence-documents-schema-state-and-template).
 A whole referenced document is prepared at run time, never read as authored:
 `task/sequence.rs::referenced_owner_values` (its events' and children's base
@@ -644,7 +1186,7 @@ by `build_preflight_graph_after_discovery`; bare `user_setters` otherwise)
 plus runtime writes as data. Before `initialize` the verdict is deferred; at
 each `start` reread (nested, leg, task file, loop pass, retry, container
 proxy) the document's `$schema` judges, and a refusal blocks the started
-container; a dry run only prepares. A root `sequence: child.yaml` is judged
+container. A root `sequence: child.yaml` is judged
 at each root step after the step composes
 (`cli/.../iterate.rs::judge_referenced_root_document`, the step's
 `input_layers` and `compose_context`), where the direct control is judged;
@@ -743,46 +1285,65 @@ Atomic failed groups withhold all leg mutations; tolerant groups merge failed
 leg mutations in declaration order. Body-only steps mask source lifecycle keys
 through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
-The canonical shipped trigger schema lives in `claudine/schemas/`, not
-Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
-warning and still shadows the embedded copy; there is no fallback to it
-(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). The embedded
-bundle's triggers and the host catalog are served prepared from the checked-in
+The canonical shipped trigger schemas live in `claudine/registration/`, not
+Darkmatter's docs tree. In process they are Claudine's registered host:
+`composition/schema/bundle.rs::claudine_hosts()` (one `OnceLock` per process)
+verifies the compiled inventory with Darkmatter's
+`VerifiedSnapshot::from_embedded` and loads it with
+`registration::load_embedded`, and `discover_schema_owner` passes it through
+`with_claudine_registration` before root trigger discovery, so registered
+payloads (root unions included, `inline-composition.yaml`) form the lowest
+trigger layer and every schema-root trigger, a same-name disk copy included,
+layers above it. A malformed disk `composition.yaml` is skipped with a
+warning and hides nothing registered (`claudine_schemas_embedded.rs`,
+`launch_trigger_schemas.rs`). Registered origins are
+`TriggerSource::Embedded { bundle: "claudine", name: "schemas/<file>" }`
+(never call the disk-only `RegisteredTrigger::path()`), and
+`is_claudine_owned` means the winning origin is a trigger of the registered
+`claudine` host layer, compiled in or installed. The registered payloads, the
+host catalog, and the YAML kinds are served prepared from the checked-in
 `claudine/lib/generated/shipped.json` (`composition/schema/shipped.rs`,
 prepared over Simplified Schema's and Darkmatter's artifacts;
-`claudine_schema_bundle()` attaches `shipped::BUNDLE`, `claudine_globals()` is
+`shipped::registered_payload` feeds `profile_of_with`, `claudine_globals()` is
 a registry view). A refused artifact or section falls back to preparing the
-text; disk shadowing happens before the prepared lookup and is unchanged.
-After editing `claudine/schemas/` (or a lower artifact changes), run the
-root `just shipped-schemas`; `shipped_artifacts::shipped_artifact_is_fresh`
-fails with that command, and a code-only change to preparation bumps
-`shipped::PREPARATION_REVISION`. Do not shadow `claudine.yaml` with a
-reduced schema (such as a copy of `inline-compose.yaml`) to speed a test up:
-preparation is precompiled, and shadowing only stops the test checking the
-shipped schemas. Shadow only when shadowing or a custom definition is the
-subject. Action shapes are Darkmatter's: `action.yaml`'s
+text; an edited inventory (`bundle::profile_of`, tests) is always prepared
+from its own text. After editing `claudine/registration/` (or a lower artifact
+changes), run the root `just shipped-schemas`;
+`shipped_artifacts::shipped_artifact_is_fresh` fails with that command, and a
+code-only change to preparation bumps `shipped::PREPARATION_REVISION`. Do not
+replace a shipped trigger with a reduced schema in a test to speed it up:
+preparation is precompiled, and a reduced registration only stops the test
+checking the shipped schemas. Edit the inventory only when a custom
+definition is the subject. Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the
 bundle stays self-contained); `claudine/lib/tests/l1/claudine_schema_parity.rs`
-derives event/action parity from `claudine_registry()`. `claudine.yaml`
+derives event/action parity from `claudine_registry()`. `shared.yaml::common-attributes`
+(extended by `composition.yaml` and both `inline-composition.yaml` arms)
 declares `composed`/`failed` as `null` with descriptions naming `start`/`blocked`. See [Sequences](topics/flow-control/sequences.md).
-The sequence trigger is `schemas/sequence.yaml` (matches any non-null
-`sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
-`fail_fast` is reported by name), and it is the only declaration of
-`sequence`: `claudine.yaml` does not declare it but selects on it (its
-selectors equal the identifying trigger's nine keys, pinned by
-`claudine_identification.rs`), so a sequence document gets the whole main
-contract. The
+`composition.yaml` and `inline-composition.yaml` are mutually exclusive:
+inline matches `kind: inline-compose` or a non-null `prompt`/`sections` with
+no `sequence`/`kind: sequence`, and composition repeats that condition under
+`none:`. Inline's payload is a registered root union (`prompt` arm,
+`sections` arm, each `null`-only for the other); `sections` is
+schema-validated only, and the inline launch then reports
+`PromptPropertyMissing` (running sections is not built). A registered root
+union has no editor shape, so DMLS completion/hover sees nothing from it.
+The sequence trigger is `sequence-document.yaml` (matches `kind: sequence` or
+any non-null `sequence`; payload `sequence` (required), `template`, `$state`,
+and the removed root `fail_fast`, reported by name with its replacement), and it is
+the only declaration of `sequence`: `composition.yaml` does not declare it
+but selects on it, so a sequence document gets the whole main contract. The
 shared Darkmatter events `initialize`, `cancelled`, and `finalize` never
-select `claudine.yaml` alone (it still types them once selected), so a probe
+select a Claudine trigger alone (the selected one still types them), so a probe
 of their Claudine types adds a Claudine key (`claudine_schemas.rs::CLAUDINE_SELECTOR`,
-`agent: claude`). `schemas/claudine-document.yaml` is the identifying trigger
-(the nine keys `sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`,
-empty payload) named only by the published `darkmatter-host` manifest; it is
-not in `CLAUDINE_SCHEMA_FILES`, so Claudine's runtime never applies it
+`agent: claude`). There is no identify-only trigger: every inventory trigger
+identifies, and together they identify the nine keys
+`sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`
+plus `sections`, `kind: inline-compose`, and `kind: sequence`
 (`lib/tests/l1/claudine_identification.rs`). The
-container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
+container types live in `registration/sequence.yaml`, not `lifecycle-events.yaml`.
 The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
 `cancelled-*`, literal `then`/`else` keys) and the containers (`task`
 reached from `sequence:` items and `group` `tasks:` legs) are recursive
@@ -798,15 +1359,24 @@ each, inside `entry`) into both `stack` and `item`. Never unroll a family by han
 again (the typed unroll measured 11 MB). The schema encodes no
 conditional-depth limit: depth 6 is schema-valid and parser-invalid.
 `claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_one_megabyte`
-pins the payload under a fixed 1,000,000-byte limit (measured 572 kB
-`claudine.yaml`, 569 kB `sequence.yaml`, 768 kB for both, plus 25% headroom)
+pins the payload under a fixed 1,000,000-byte limit (cases `composition.yaml`,
+`sequence-document.yaml`, and both; sizes measured when the limit was set
+were 572/569/768 kB under the old trigger names, plus 25% headroom)
 and asserts the families by `DefKey`, never by `$defs` key; criterion-10
 container cells are `lib/tests/l1/container_schema_recursion.rs` over the
 `tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
 [Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
 union with a file reference, so `execution`/`max_paralel` are reported at
-`/…/group` with the value in the message; a top-level `sequence: 42` is
-coerced to the string arm (schema valid; the parser rejects it).
+`/…/group` as unknown keys by name (SimplifiedSchema names a key every
+type-applicable union arm rejects; a key another arm declares is never
+called stray); a `sequence`, task `prompt`,
+or `group` reference is `string(no-coerce)`, so `sequence: 42` or
+`prompt: true` is a schema error, as the parser's refusal is. So are the
+top-level texts whose runtime reader refuses a non-string (`prompt`,
+`agent`/`model` and their list items, the four timeouts, `exit_expressions`
+`pattern`/`patterns`/`scope`); a text the runtime reads leniently (`title`,
+`description`, `argv`, a task `timeout`) stays a converting `string`
+([Schemas → Text that must be written as text](topics/schemas.md#text-that-must-be-written-as-text)).
 
 ## Per-task provider selection
 
@@ -823,7 +1393,10 @@ over the document under the setters, where an un-set `with:` key has no
 value), plus a `feeds` closure in step scope for each `with:` key a document
 closure reads. Names never cross owners, so a prompt's literal `choice` is
 not a sequence's derived `choice`. `defer_runtime_written` moves both
-`agent` and `model` to launch when either reaches a runtime-written key;
+`agent` and `model` to launch when either reaches a runtime-written key
+(`Loader::runtime_written_keys`, applied by the graph's `finish` and by
+`check_sequence_tree` to every `CheckedTask.provider`, so the dry run's
+provider and model rows read the same launch-time decision);
 `preflight/tests/provider_dependencies.rs` covers the placements) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
@@ -968,13 +1541,32 @@ fails (see `darkmatter/docs/topics/host-functions.md`; user docs:
 [Schemas → What Claudine adds to expression checking](topics/schemas.md#what-claudine-adds-to-expression-checking)).
 DMLS types Claudine lifecycle stacks (its events, renames, per-event `err`,
 and verbs such as `say`/`retry`/`proxy`) from the generated
-`claudine/schemas/globals.lifecycle.json` beside `globals.yaml`
-(`composition::lifecycle::lifecycle_artifact()`, Darkmatter's
-`lifecycle::host_profile`): after changing `claudine_registry()`,
-`claudine_parse_options`, `globals.yaml`, or the Playa effect catalog, run
-`just regen-lifecycle-artifact` in `claudine/`;
+`claudine/lib/generated/globals.lifecycle.json`
+(`composition::lifecycle::lifecycle_artifact()`, versioned by the namespace
+files' `catalog_hash`; `inventory::LIFECYCLE_ARTIFACT` embeds it for
+publication): after changing `claudine_registry()`, `claudine_parse_options`,
+a namespace file, or the Playa effect catalog, run the root
+`just shipped-schemas` (the generator's `--lifecycle-output` stages it and
+`check_lifecycle_artifact` loads it before anything is replaced);
 `host_catalog.rs::lifecycle_artifact` fails while it is stale and proves the
 rebuilt registry equals `claudine_registry()`.
+**Registration inventory** (`composition/inventory.rs`, `lib/build.rs`):
+`claudine/registration/` is compiled in by `build.rs`, which walks it with
+`inventory/walk.rs` (std + `serde_yaml_ng` only, `#[path]`-included by the
+build script) and fails the build listing every nonportable name, non-`.yaml`
+file, symlink/junction, case collision, non-UTF-8 text, or an envelope the
+shared structural member admission refuses (`simplified-schema/lib/src/member_envelope.rs`,
+`#[path]`-included by `build.rs`, `super::member_envelope` in `walk.rs`;
+the same check Darkmatter's registration classifies members with). `inventory::members()` is the sorted table (`InventoryMember {path,
+text, kind, name}`; `bundle_path()` is `schemas/<path>`), `bundle_sources()`
+the embedded `<claudine>` bundle and `bundle_context()` its one detached
+context. `bundle.rs`'s registered profile, `shipped.rs::sources()`, the namespace catalog
+(`globals.rs`), the YAML kinds (`shipped::formal_sequence_kind()`), and the
+publisher (`registration::RegistrationInventory::claudine()`) all derive from it; `tests/l1/registration_inventory.rs`
+proves the table equals a fresh walk. A YAML file declaring `kind: sequence`
+with an inline list is judged against `formal_sequence_kind()` in
+`sequence/mod.rs::resolve_sequence_plan_with`, after the formal parser
+accepts it (its errors are more precise), as `SchemaValidation`.
 A new host site adds an entry with its reason. Runtime `is_null` checks are not
 restricted. The guard/site conformance matrix is
 `composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
@@ -1152,9 +1744,9 @@ authoritative docs, not copies. Edit them there; never add a skill-local copy
 of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
-- [Configuration](topics/configuration.md) — the YAML `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`, validated against `claudine/schemas/claudine-config.yaml`, and the automatic conversion of a legacy JSON5 `config.json`
+- [Configuration](topics/configuration.md) — the YAML `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`, validated against `claudine/registration/claudine-config.yaml`, and the automatic conversion of a legacy JSON5 `config.json`
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
-- [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
+- [Schemas](topics/schemas.md) — the `claudine/registration/` folder (its file kinds, the three triggers, the inline `prompt`/`sections` union and what it validates), the authored vs published layout, setup order, hand edits and recovery, event/action-type permissions, what only the parser checks, the registered layer below disk triggers, and DMLS's registration-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards

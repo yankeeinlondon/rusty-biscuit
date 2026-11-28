@@ -1,68 +1,127 @@
 //! The sequence *source* matrix, exercised through the real
 //! `claudine sequence` invocation path.
 //!
-//! Every case runs under `--dry-run`, which performs the full preflight and
-//! composes each step but launches no provider. That is what lets one fixture
-//! prove "this source produced these steps" without a provider stub — and
-//! therefore without a `unix` gate. The library owns the same matrix at unit
-//! level (`composition::sequence::tests`); this binary proves the shipped
-//! artifact and the normal invocation path agree with it.
+//! A case that proves "this source produced these steps" runs the sequence
+//! for real on the compiled `claudine-fake-goose`, which records each
+//! launch's prompt, so the steps are read from what each provider launch
+//! received, on every OS. A case about a problem the passive check finds
+//! before anything runs reads the check's `--json` report instead. The
+//! library owns the same matrix at unit level (`composition::sequence::tests`);
+//! this binary proves the shipped artifact and the normal invocation path
+//! agree with it.
 //!
 //! Not duplicated here: `@` magic and `&`/`^` repository references have a
 //! repo-aware home in `sequence_magic_reference.rs`; typed rejections live in
 //! `sequence_errors_cli.rs`.
+
+// The fake provider is a `test-fixtures` binary.
+#![cfg(feature = "test-fixtures")]
 
 use std::fs;
 use std::path::Path;
 use crate::common;
 use common::{CliProcessFixture, strip_ansi};
 
-/// Dry-run `file` and return the composed step bodies, in order.
+/// A real run of `claudine sequence --goose`.
+struct Launched {
+    success: bool,
+    stdout: String,
+    stderr: String,
+    /// Each provider launch's prompt, in launch order.
+    prompts: Vec<String>,
+}
+
+/// Runs `file` for real with `extra_args` on the fake Goose and returns what
+/// each launch received.
 ///
-/// A step body is emitted on stdout; status framing goes to stderr. Reading
-/// only stdout is therefore both the assertion and a standing check that the
-/// stream split holds.
-fn composed_steps(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> Vec<String> {
-    let (stdout, _) = dry_run(workspace, file, extra_args, true);
-    stdout
-        .lines()
+/// With `edit_root`, the first launch appends a line to `file`: a document
+/// with a document-level `prompt:` is inline-composed, and a step whose agent
+/// left the document unchanged fails.
+fn launch_command(
+    workspace: &CliProcessFixture,
+    mut command: assert_cmd::Command,
+    file: &Path,
+    extra_args: &[&str],
+    edit_root: bool,
+) -> Launched {
+    install_goose(workspace);
+    let launches = workspace.home().join("fake-goose");
+    let _ = fs::remove_dir_all(&launches);
+    command.env("FAKE_DIR", &launches);
+    if edit_root {
+        let edited = workspace.home().join("edited-root");
+        let addition = if file.extension().is_some_and(|extension| extension == "md") { "\nEdited.\n" } else { "\nedited: true\n" };
+        fs::write(&edited, format!("{}{addition}", fs::read_to_string(file).unwrap())).unwrap();
+        command.env("FAKE_FIRST_REWRITE_PATH", file).env("FAKE_FIRST_REWRITE_FROM", &edited);
+    }
+    let output = command
+        .args(["sequence", "--goose", "--yolo", "--silent"])
+        .args(extra_args)
+        .arg(file)
+        .output()
+        .unwrap();
+    assert!(!workspace.audio_spool().exists());
+    Launched {
+        success: output.status.success(),
+        stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+        stderr: strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        prompts: (1..).map_while(|n| fs::read_to_string(launches.join(format!("launch-{n}.txt"))).ok()).collect(),
+    }
+}
+
+/// The compiled fake Goose as the fixture's `goose`.
+fn install_goose(workspace: &CliProcessFixture) {
+    let goose = workspace.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX));
+    if !goose.exists() {
+        fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-goose"), &goose)
+            .expect("the fake provider is built with `test-fixtures`");
+    }
+}
+
+/// [`launch_command`] on the fixture's default command, asserting success.
+fn launch(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str], edit_root: bool) -> Launched {
+    let launched = launch_command(workspace, workspace.command(), file, extra_args, edit_root);
+    assert!(launched.success, "stdout:\n{}\nstderr:\n{}", launched.stdout, launched.stderr);
+    launched
+}
+
+/// The `Step …` lines of every launch's prompt, in launch order, with the
+/// `Step ` prefix and the trailing `.` removed.
+fn step_lines(launched: &Launched) -> Vec<String> {
+    launched
+        .prompts
+        .iter()
+        .flat_map(|prompt| prompt.lines())
         .map(str::trim)
         .filter(|line| line.starts_with("Step "))
         .map(|line| line.trim_start_matches("Step ").trim_end_matches('.').to_string())
         .collect()
 }
 
-/// Dry-run `file`, returning `(stdout, stderr)` with ANSI stripped.
-fn dry_run(
-    workspace: &CliProcessFixture,
-    file: &Path,
-    extra_args: &[&str],
-    expect_success: bool,
-) -> (String, String) {
-    dry_run_command(workspace.command(), file, extra_args, expect_success)
+/// Runs `file` for real and returns each launch's composed step, in order.
+fn composed_steps(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> Vec<String> {
+    step_lines(&launch(workspace, file, extra_args, false))
 }
 
-/// [`dry_run`] over a command the caller has already shaped, for the one
-/// case whose subject needs something other than the fixture's default PATH.
-fn dry_run_command(
-    mut command: assert_cmd::Command,
-    file: &Path,
-    extra_args: &[&str],
-    expect_success: bool,
-) -> (String, String) {
-    let mut args: Vec<&str> = vec!["sequence", "--dry-run"];
-    args.extend_from_slice(extra_args);
-    let file_arg = file.to_str().unwrap();
-    args.push(file_arg);
+/// The passive check's `--json` report on `file`, and its exit code. The
+/// fake Goose is installed, so `--goose` names an installed provider.
+fn check(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> (i32, serde_json::Value) {
+    install_goose(workspace);
+    let output = workspace
+        .command()
+        .args(["sequence", "--dry-run", "--json"])
+        .args(extra_args)
+        .arg(file)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
+    (output.status.code().unwrap_or(-1), report)
+}
 
-    let assert = command.args(&args).assert();
-    let assert = if expect_success { assert.success() } else { assert.failure() };
-    let output = assert.get_output().clone();
-
-    (
-        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
-        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
-    )
+/// The report's error diagnostics.
+fn errors(report: &serde_json::Value) -> Vec<&serde_json::Value> {
+    report["diagnostics"].as_array().unwrap().iter().filter(|diagnostic| diagnostic["severity"] == "error").collect()
 }
 
 fn write(workspace: &CliProcessFixture, name: &str, body: &str) -> std::path::PathBuf {
@@ -453,21 +512,12 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
     // with the same surface everywhere — but on Windows it exists only as
     // Git's echo.exe outside System32, so this case declares the host PATH
     // rather than a platform gate. `--yolo` stands in for the approval the
-    // preflight would otherwise ask for.
+    // preflight would otherwise ask for. The passive check never runs the
+    // command, so this is a real run.
     let doc = source_doc(&workspace, "shell.md", "\"$(echo alpha,beta)\"");
-    let (stdout, _) = dry_run_command(
-        workspace.command_builder().host_path().build(),
-        &doc,
-        &["--yolo"],
-        true,
-    );
-    let steps: Vec<String> = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("Step "))
-        .map(|line| line.trim_start_matches("Step ").trim_end_matches('.').to_string())
-        .collect();
-    assert_eq!(steps, ["alpha", "beta"]);
+    let launched = launch_command(&workspace, workspace.command_builder().host_path().build(), &doc, &[], false);
+    assert!(launched.success, "stderr:\n{}", launched.stderr);
+    assert_eq!(step_lines(&launched), ["alpha", "beta"]);
 }
 
 // ============================================================================
@@ -610,13 +660,14 @@ fn a_referenced_formal_documents_state_declaration_validates_the_step_state() {
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["blue/5"]);
 
     write(&workspace, "formal.yaml", &FORMAL.replace("rank: 5", "rank: not-a-number"));
-    let (stdout, stderr) = dry_run(&workspace, &doc, &[], false);
-    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let (code, report) = check(&workspace, &doc, &["--goose"]);
+    assert_eq!(code, 2, "{report:#}");
+    let errors = errors(&report);
+    assert_eq!(errors.len(), 1, "{report:#}");
     assert!(
-        flat.contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
-        "the violation must name the step index, its id, and the failing property; stderr:\n{flat}"
+        errors[0]["message"].as_str().unwrap().contains("step 1 (`blue`) failed schema validation at `/rank`"),
+        "the violation must name the step index, its id, and the failing property: {report:#}"
     );
-    assert!(!stdout.contains("Step blue"), "no step composed: {stdout}");
 }
 
 /// The whole formal-document contract in one fixture, reached both ways.
@@ -629,28 +680,20 @@ fn a_referenced_formal_documents_state_declaration_validates_the_step_state() {
 /// default an item overrides, and generated fields, all of which the root
 /// `$state` must then accept as step state.
 ///
-/// The two entry modes differ in exactly one respect: a directly invoked YAML
-/// has no Markdown body, so its steps render through a document-level `prompt`
-/// the referencing document supplies as its body instead. Both strings are
-/// therefore identical, and so are both results.
+/// A directly invoked YAML has no Markdown body, so the template gives every
+/// step a `prompt:` executable; the referencing document's body is therefore
+/// never sent, and both routes launch the same prompts.
 fn write_parity_fixture(workspace: &CliProcessFixture) -> (std::path::PathBuf, std::path::PathBuf) {
-    const STEP_BODY: &str = "Step {{ seq.name }}/{{ seq.desc }}/{{ seq.rank }}.";
-
+    write(workspace, "step.md", "Step {{ seq.name }}/{{ seq.desc }}/{{ seq.rank }}.\n");
     let direct = write(
         workspace,
         "formal.yaml",
-        &format!(
-            "kind: sequence\nprompt: \"{STEP_BODY}\"\n\
-             sequence:\n  - blue\n  - name: red\n    rank: 3\n\
-             template:\n  desc: \"{{{{ name }}}}!\"\n  rank: 5\n\
-             $state:\n  desc: string(required)\n  rank: number(required)\n"
-        ),
+        "kind: sequence\n\
+         sequence:\n  - blue\n  - name: red\n    rank: 3\n\
+         template:\n  prompt: ./step.md\n  desc: \"{{ name }}!\"\n  rank: 5\n\
+         $state:\n  desc: string(required)\n  rank: number(required)\n",
     );
-    let referenced = write(
-        workspace,
-        "ref.md",
-        &format!("---\nsequence: formal.yaml\n---\n{STEP_BODY}\n"),
-    );
+    let referenced = write(workspace, "ref.md", "---\nsequence: formal.yaml\n---\nUnused body\n");
     (direct, referenced)
 }
 
@@ -675,32 +718,32 @@ fn a_formal_document_normalizes_identically_through_both_entry_paths() {
 /// The counterpart to
 /// [`a_referenced_formal_documents_state_declaration_validates_the_step_state`]: a
 /// directly invoked document's root `$state` types the step state the same
-/// way: a conforming step composes the document's `prompt` with the typed
-/// value. Its root `$schema` would describe the document instead.
+/// way: a conforming step composes its prompt with the typed value. Its root
+/// `$schema` would describe the document instead.
 #[test]
 fn a_directly_invoked_documents_state_declaration_validates_the_step_state() {
-    const FORMAL: &str = "kind: sequence\nprompt: \"Step {{ seq.name }}/{{ seq.rank }}.\"\nsequence:\n  - name: blue\n    rank: 5\n$state:\n  rank: number(required)\n";
+    const FORMAL: &str = "kind: sequence\nsequence:\n  - name: blue\n    prompt: ./step.md\n    rank: 5\n$state:\n  rank: number(required)\n";
     let workspace = CliProcessFixture::named("sequence-sources-cli");
+    write(&workspace, "step.md", "Step {{ seq.name }}/{{ seq.rank }}.\n");
     let doc = write(&workspace, "formal.yaml", FORMAL);
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["blue/5"]);
 
     write(&workspace, "formal.yaml", &FORMAL.replace("rank: 5", "rank: not-a-number"));
-    let (stdout, stderr) = dry_run(&workspace, &doc, &[], false);
-    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let (code, report) = check(&workspace, &doc, &["--goose"]);
+    assert_eq!(code, 2, "{report:#}");
+    let errors = errors(&report);
+    assert_eq!(errors.len(), 1, "{report:#}");
     assert!(
-        flat.contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
-        "the direct mode must report the same step-state violation the referenced mode does; \
-         stderr:\n{flat}"
+        errors[0]["message"].as_str().unwrap().contains("step 1 (`blue`) failed schema validation at `/rank`"),
+        "the direct mode must report the same step-state violation the referenced mode does: {report:#}"
     );
-    assert!(!stdout.contains("Step blue"), "no step composed: {stdout}");
 }
 
 /// A setter supplies a value, never the sequence's plan: a `template=`
 /// setter (before or after the file) or a `--set` key naming `$state` or
 /// `template`, or a path under one, is refused before any step runs. (A
 /// setter name holds no `.` or `$`, so only `--set` can spell those.)
-#[test]
-fn a_setter_cannot_write_a_sequence_declaration() {
+fn assert_setter_refused(args: &[&str]) {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     let doc = write(
         &workspace,
@@ -708,18 +751,34 @@ fn a_setter_cannot_write_a_sequence_declaration() {
         "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\ntemplate:\n  desc: x\nsequence:\n  - blue\n",
     );
     let file = doc.to_str().unwrap();
-    for args in [
-        vec!["sequence", "--dry-run", file, "template={}"],
-        vec!["sequence", "--dry-run", "template=y", file],
-        vec!["sequence", "--dry-run", "--set", "{\"$state\": {}}", file],
-        vec!["sequence", "--dry-run", file, "--set", "{\"template.desc\": \"y\"}"],
-    ] {
-        let output = workspace.command().args(&args).assert().failure().get_output().clone();
-        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(flat.contains("is not accepted here"), "{args:?}: {flat}");
-        assert!(flat.contains("a setter supplies values, not declarations"), "{args:?}: {flat}");
-        assert!(!flat.contains("Handle blue"), "{args:?}: no step composed: {flat}");
+    let args: Vec<&str> = args.iter().map(|arg| if *arg == "FILE" { file } else { arg }).collect();
+    let output = workspace.command().args(&args).assert().failure().get_output().clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("is not accepted here"), "{args:?}: {flat}");
+    assert!(flat.contains("a setter supplies values, not declarations"), "{args:?}: {flat}");
+    assert!(!flat.contains("Handle blue"), "{args:?}: no step composed: {flat}");
+}
+
+mod a_setter_cannot_write_a_sequence_declaration {
+    #[test]
+    fn as_a_setter_after_the_file() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "FILE", "template={}"]);
+    }
+
+    #[test]
+    fn as_a_setter_before_the_file() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "template=y", "FILE"]);
+    }
+
+    #[test]
+    fn as_a_set_key() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "--set", "{\"$state\": {}}", "FILE"]);
+    }
+
+    #[test]
+    fn as_a_set_path_under_one() {
+        super::assert_setter_refused(&["sequence", "--dry-run", "FILE", "--set", "{\"template.desc\": \"y\"}"]);
     }
 }
 
@@ -743,16 +802,17 @@ fn a_directly_invoked_yaml_runs_executable_steps_without_a_body() {
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["alpha", "beta"]);
 }
 
-/// The second step is the one that proves the fix: it composes against the
-/// re-read source, so a reload that lost the YAML frontmatter would drop
-/// `topic` even though the first step rendered it.
+/// The second step is the one that proves the fix: its `with:` is read
+/// against the re-read source, so a reload that lost the YAML frontmatter
+/// would drop `topic` even though the first step received it.
 #[test]
 fn a_directly_invoked_yaml_keeps_its_frontmatter_across_step_boundaries() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
+    write(&workspace, "p.md", "Step {{ seq.name }}/{{ topic }}.\n");
     let doc = write(
         &workspace,
         "headless.yaml",
-        "kind: sequence\ntopic: from-document\nprompt: \"Step {{ seq.name }}/{{ topic }}.\"\nsequence:\n  - alpha\n  - beta\n",
+        "kind: sequence\ntopic: from-document\nsequence:\n  - { name: alpha, prompt: p.md, with: { topic: \"{{ topic }}\" } }\n  - { name: beta, prompt: p.md, with: { topic: \"{{ topic }}\" } }\n",
     );
 
     assert_eq!(
@@ -768,10 +828,13 @@ fn a_bodyless_step_that_declares_no_executable_is_still_rejected() {
     // that would send an empty prompt to a provider must still say so.
     let doc = write(&workspace, "empty.md", "---\nsequence:\n  - alpha\n---\n");
 
-    let (_, stderr) = dry_run(&workspace, &doc, &[], false);
-    assert!(
-        stderr.contains("empty prompt body"),
-        "a step with neither body nor executable has nothing to run; stderr:\n{stderr}"
+    let (code, report) = check(&workspace, &doc, &["--goose"]);
+    assert_eq!(code, 2, "{report:#}");
+    let errors = errors(&report);
+    assert_eq!(errors.len(), 1, "{report:#}");
+    assert_eq!(
+        errors[0]["code"], "composition.no_executable",
+        "a step with neither body nor executable has nothing to run: {report:#}"
     );
 }
 
@@ -791,14 +854,17 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
         "doc-level.md",
         "---\nprompt: \"Step {{ seq.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n",
     );
-    let (stdout, _) = dry_run(&workspace, &document_level, &[], true);
+    let launched = launch(&workspace, &document_level, &[], true);
+    assert_eq!(launched.prompts.len(), 1, "stderr:\n{}", launched.stderr);
     assert!(
-        stdout.contains("Step alpha."),
-        "the composed `prompt` is what runs; stdout:\n{stdout}"
+        launched.prompts[0].contains("Step alpha."),
+        "the composed `prompt` is what runs; prompt:\n{}",
+        launched.prompts[0]
     );
     assert!(
-        !stdout.contains("Original body"),
-        "the body is replaced, not sent; stdout:\n{stdout}"
+        !launched.prompts[0].contains("Original body"),
+        "the body is replaced, not sent; prompt:\n{}",
+        launched.prompts[0]
     );
 
     write(&workspace, "referenced.md", "---\ntitle: r\n---\nStep {{ seq.name }}.\n");
@@ -807,14 +873,17 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
         "task-level.md",
         "---\nsequence:\n  - name: alpha\n    prompt: referenced.md\n---\nUnused body\n",
     );
-    let (stdout, _) = dry_run(&workspace, &task_level, &[], true);
+    let launched = launch(&workspace, &task_level, &[], false);
+    assert_eq!(launched.prompts.len(), 1, "stderr:\n{}", launched.stderr);
     assert!(
-        stdout.contains("Step alpha."),
-        "the referenced document composes in place of the body; stdout:\n{stdout}"
+        launched.prompts[0].contains("Step alpha."),
+        "the referenced document composes in place of the body; prompt:\n{}",
+        launched.prompts[0]
     );
     assert!(
-        !stdout.contains("Unused body"),
-        "a step with an executable does not run the source body; stdout:\n{stdout}"
+        !launched.prompts[0].contains("Unused body"),
+        "a step with an executable does not run the source body; prompt:\n{}",
+        launched.prompts[0]
     );
 }
 
@@ -825,7 +894,8 @@ fn a_dry_run_leaves_an_inline_compose_source_untouched() {
         "---\nprompt: \"Step {{ seq.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n";
     let doc = write(&workspace, "inline.md", original);
 
-    dry_run(&workspace, &doc, &[], true);
+    let (code, report) = check(&workspace, &doc, &["--goose"]);
+    assert_eq!(code, 0, "{report:#}");
     assert_eq!(
         fs::read_to_string(&doc).unwrap(),
         original,
@@ -884,35 +954,53 @@ fn a_reference_inside_an_external_task_resolves_from_that_tasks_directory() {
 /// A sequence document in `sub/` resolves the four executable references of
 /// its rows beside itself, however it is reached: invoked directly, named by
 /// a root `sequence:`, or nested as a task. Nothing it references exists in
-/// the launch folder, so a wrong base fails the run.
-#[test]
-fn a_sequence_documents_relative_references_resolve_beside_it_on_every_route() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    for (name, body) in [("p.md", "prompt"), ("tp.md", "task"), ("sp.md", "sequence"), ("gp.md", "group")] {
-        write(&workspace, &format!("sub/{name}"), &format!("---\ntitle: {body}\n---\nStep {body}.\n"));
-    }
-    write(&workspace, "sub/t.yaml", "kind: task\nprompt: ./tp.md\n");
-    write(&workspace, "sub/s.yaml", "kind: sequence\nsequence:\n  - name: inner\n    prompt: ./sp.md\n");
-    write(&workspace, "sub/g.yaml", "kind: group\nname: G\ntasks:\n  - name: leg\n    prompt: ./gp.md\n");
-    let child = write(
-        &workspace,
-        "sub/child.yaml",
-        "kind: sequence\nsequence:\n  - name: a\n    prompt: ./p.md\n  - name: b\n    task: ./t.yaml\n  - name: c\n    sequence: ./s.yaml\n  - name: d\n    group: ./g.yaml\n",
-    );
-    let root = write(&workspace, "root.yaml", "kind: sequence\nsequence: sub/child.yaml\n");
-    let nested = write(&workspace, "nested.yaml", "kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n");
+/// the launch folder, so a wrong base fails the run. One test per route keeps
+/// each real run its own.
+mod a_sequence_documents_relative_references_resolve_beside_it_on_every_route {
+    use super::*;
 
-    for document in [&child, &root, &nested] {
-        let (stdout, stderr) = dry_run(&workspace, document, &["--yolo"], true);
-        let steps: Vec<&str> = stdout.lines().map(str::trim).filter(|line| line.starts_with("Step ")).collect();
-        assert_eq!(
-            steps,
-            ["Step prompt.", "Step task.", "Step sequence.", "Step group."],
-            "{}: stdout:\n{stdout}\nstderr:\n{stderr}",
-            document.display(),
-        );
+    const ROUTES: [(&str, Option<&str>); 3] = [
+        ("sub/child.yaml", None),
+        ("root.yaml", Some("kind: sequence\nsequence: sub/child.yaml\n")),
+        ("nested.yaml", Some("kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n")),
+    ];
+
+    #[test]
+    fn invoked_directly() {
+        assert_route_resolves(0);
     }
-    assert!(!workspace.audio_spool().exists());
+
+    #[test]
+    fn named_by_a_root_sequence() {
+        assert_route_resolves(1);
+    }
+
+    #[test]
+    fn nested_as_a_task() {
+        assert_route_resolves(2);
+    }
+
+    fn assert_route_resolves(route: usize) {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        for (name, body) in [("p.md", "prompt"), ("tp.md", "task"), ("sp.md", "sequence"), ("gp.md", "group")] {
+            write(&workspace, &format!("sub/{name}"), &format!("---\ntitle: {body}\n---\nStep {body}.\n"));
+        }
+        write(&workspace, "sub/t.yaml", "kind: task\nprompt: ./tp.md\n");
+        write(&workspace, "sub/s.yaml", "kind: sequence\nsequence:\n  - name: inner\n    prompt: ./sp.md\n");
+        write(&workspace, "sub/g.yaml", "kind: group\nname: G\ntasks:\n  - name: leg\n    prompt: ./gp.md\n");
+        write(
+            &workspace,
+            "sub/child.yaml",
+            "kind: sequence\nsequence:\n  - name: a\n    prompt: ./p.md\n  - name: b\n    task: ./t.yaml\n  - name: c\n    sequence: ./s.yaml\n  - name: d\n    group: ./g.yaml\n",
+        );
+        let (name, root) = ROUTES[route];
+        if let Some(root) = root {
+            write(&workspace, name, root);
+        }
+
+        let launched = launch(&workspace, &workspace.cwd().join(name), &[], false);
+        assert_eq!(step_lines(&launched), ["prompt", "task", "sequence", "group"], "{name}: stderr:\n{}", launched.stderr);
+    }
 }
 
 /// A nested sequence document rereads its rows when it starts, and resolves
@@ -988,12 +1076,13 @@ mod document_inputs {
         write(&workspace, "nested/child.yaml", CHILD);
         let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ./nested/child.yaml\n");
 
-        let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
-        assert!(stderr.contains("missing properties"), "{stderr}");
-        assert!(stderr.contains("Document") && stderr.contains("child.yaml"), "{stderr}");
-        assert!(stderr.contains("sequence[0].sequence"), "the container path names the reference: {stderr}");
-        assert!(stderr.contains("reviewer"), "{stderr}");
-        assert!(!stderr.contains("Step 1"), "a document input is not a step's: {stderr}");
+        let (code, report) = check(&workspace, &root, &[]);
+        assert_eq!(code, 2, "{report:#}");
+        let missing: Vec<_> = errors(&report).into_iter().filter(|error| error["code"] == "composition.missing_properties").collect();
+        assert_eq!(missing.len(), 1, "{report:#}");
+        assert!(missing[0]["message"].as_str().unwrap().contains("`reviewer`"), "{report:#}");
+        assert!(missing[0]["source"]["file"].as_str().unwrap().ends_with("child.yaml"), "the owning document is named: {report:#}");
+        assert_eq!(missing[0]["trail"][0]["property"], "sequence[0]", "the referencing task is named: {report:#}");
     }
 
     /// A schema-aware setter belongs to the sequence wherever it sits.
@@ -1004,11 +1093,13 @@ mod document_inputs {
         let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ./nested/child.yaml\n");
         let file = root.to_str().unwrap();
         for args in [
-            vec!["sequence", "--dry-run", "--yolo", file, "reviewer=ada"],
-            vec!["sequence", "--dry-run", "--yolo", "reviewer=ada", file],
+            vec!["sequence", "--dry-run", "--json", file, "reviewer=ada"],
+            vec!["sequence", "--dry-run", "--json", "reviewer=ada", file],
         ] {
-            let stderr = run(&workspace, &args, true);
-            assert!(stderr.contains("echo signed by ada"), "{args:?}: {stderr}");
+            let output = workspace.command().args(&args).output().unwrap();
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(output.status.code(), Some(0), "{args:?}: {report:#}");
+            assert!(errors(&report).is_empty(), "{args:?}: {report:#}");
         }
     }
 
@@ -1018,9 +1109,12 @@ mod document_inputs {
         let root = write(&workspace, "empty.yaml", "kind: sequence\n$schema:\n  reviewer: string(required)\nsequence: []\n");
         let file = root.to_str().unwrap();
 
-        let stderr = run(&workspace, &["sequence", "--dry-run", file], false);
-        assert!(stderr.contains("missing properties") && stderr.contains("Document"), "{stderr}");
-        assert!(stderr.contains("reviewer"), "{stderr}");
+        let (code, report) = check(&workspace, &root, &[]);
+        assert_eq!(code, 2, "{report:#}");
+        let errors = errors(&report);
+        assert_eq!(errors.len(), 1, "{report:#}");
+        assert_eq!(errors[0]["code"], "composition.missing_properties", "{report:#}");
+        assert!(errors[0]["message"].as_str().unwrap().contains("`reviewer`"), "{report:#}");
         run(&workspace, &["sequence", "--dry-run", file, "reviewer=ada"], true);
     }
 
@@ -1030,9 +1124,13 @@ mod document_inputs {
         write(&workspace, "lists/empty.yaml", "kind: sequence\n$schema:\n  reviewer: string(required)\nsequence: []\n");
         let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence: ./lists/empty.yaml\n");
 
-        let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
-        assert!(stderr.contains("missing properties") && stderr.contains("empty.yaml"), "{stderr}");
-        assert!(stderr.contains("reviewer"), "{stderr}");
+        let (code, report) = check(&workspace, &root, &[]);
+        assert_eq!(code, 2, "{report:#}");
+        let errors = errors(&report);
+        assert_eq!(errors.len(), 1, "{report:#}");
+        assert_eq!(errors[0]["code"], "composition.missing_properties", "{report:#}");
+        assert!(errors[0]["message"].as_str().unwrap().contains("`reviewer`"), "{report:#}");
+        assert!(errors[0]["source"]["file"].as_str().unwrap().ends_with("empty.yaml"), "{report:#}");
     }
 
     /// The report comes before the root starts: no event action or task runs.
@@ -1047,7 +1145,7 @@ mod document_inputs {
         );
 
         let stderr = run(&workspace, &["sequence", root.to_str().unwrap()], false);
-        assert!(stderr.contains("missing properties"), "{stderr}");
+        assert!(stderr.contains("missing required properties"), "{stderr}");
         assert!(!workspace.cwd().join("events.log").exists(), "nothing started: {stderr}");
     }
 
@@ -1062,12 +1160,13 @@ mod document_inputs {
         );
 
         let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
-        assert!(stderr.contains("sequence step 0 (`blue`) failed schema validation at `color`"), "{stderr}");
+        assert!(stderr.contains("step 1 (`blue`) failed schema validation at `color`"), "{stderr}");
         assert!(!stderr.contains("missing properties"), "{stderr}");
     }
 
-    /// An inline container's `$schema` is checked at its turn: a preview
-    /// names it, and a run refuses the container, never asking for input.
+    /// An inline container's `$schema` is checked at its turn: the dry run
+    /// never reports it as a missing input, and a run refuses the container,
+    /// never asking for input.
     #[test]
     fn an_inline_check_is_never_an_input_and_refuses_its_container_at_its_turn() {
         let workspace = CliProcessFixture::named("sequence-sources-cli");
@@ -1078,8 +1177,11 @@ mod document_inputs {
         );
         let file = root.to_str().unwrap();
 
-        let preview = run(&workspace, &["sequence", "--dry-run", "--yolo", file], true);
-        assert!(preview.contains("checks its `$schema` at its turn"), "{preview}");
+        let (_, report) = check(&workspace, &root, &[]);
+        assert!(
+            !report["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["code"] == "composition.missing_properties"),
+            "{report:#}"
+        );
 
         let stderr = run(&workspace, &["sequence", "--yolo", file], false);
         assert!(stderr.contains("failed its `$schema` check at `reviewer`"), "{stderr}");
@@ -1134,8 +1236,9 @@ mod document_inputs {
         let root = write(&workspace, "caller/flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ../nested/child.yaml\n");
         assert!(!workspace.cwd().join("caller/work/spec.md").exists());
 
-        let (stdout, stderr) = dry_run(&workspace, &root, &["--yolo"], true);
-        assert!(stdout.contains("the nested spec text"), "stdout: {stdout}\nstderr: {stderr}");
+        let launched = launch(&workspace, &root, &[], false);
+        assert_eq!(launched.prompts.len(), 1, "stderr: {}", launched.stderr);
+        assert!(launched.prompts[0].contains("the nested spec text"), "prompt: {}", launched.prompts[0]);
     }
 }
 
@@ -1264,8 +1367,8 @@ mod frozen_complete_reproduction {
         assert_eq!(repro.launches(), 0, "stderr:\n{stderr}");
     }
 
-    /// Without the setter a non-interactive run reports `spec` as a missing
-    /// input of the sequence, composes nothing, and launches nothing.
+    /// Without the setter the dry run reports `spec` as a missing input of
+    /// the sequence, previews nothing, and launches nothing.
     #[test]
     fn a_missing_spec_is_reported_as_a_missing_input_without_composing() {
         let repro = Reproduction::new(
@@ -1274,15 +1377,16 @@ mod frozen_complete_reproduction {
             include_str!("../fixtures/frozen_prompts/sequence-state-schema/spec.md"),
         );
 
-        let (status, stdout, stderr) = repro.run(&["flow/complete.yaml", "--dry-run"]);
+        let (status, stdout, _) = repro.run(&["flow/complete.yaml", "--dry-run", "--json"]);
 
-        assert!(!status.success(), "stdout:\n{stdout}");
-        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(flat.contains("sequence missing properties"), "{flat}");
-        assert!(flat.contains("`spec`: file — the specification to complete"), "{flat}");
-        assert!(!flat.contains("failed schema validation"), "not a step-state verdict: {flat}");
-        assert!(!stdout.contains("Plan target"), "no prompt was composed: {stdout}");
-        assert_eq!(repro.launches(), 0, "{flat}");
+        assert_eq!(status.code(), Some(2), "stdout:\n{stdout}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        let errors = errors(&report);
+        assert_eq!(errors.len(), 1, "{report:#}");
+        assert_eq!(errors[0]["code"], "composition.missing_properties", "not a step-state verdict: {report:#}");
+        assert!(errors[0]["message"].as_str().unwrap().contains("`spec` (file — the specification to complete)"), "{report:#}");
+        assert!(errors[0]["source"]["file"].as_str().unwrap().ends_with("complete.yaml"), "{report:#}");
+        assert_eq!(repro.launches(), 0, "{report:#}");
     }
 
     /// Outside a dry run, the step's guard reads the derived `plan`: the step
@@ -1313,12 +1417,13 @@ mod frozen_complete_reproduction {
 
 /// `$state` and `template:` reach the declaration judge through both loaders
 /// the CLI invokes directly: Markdown frontmatter and YAML. Each loader has a
-/// dry-run control whose step composes with its template-filled, typed state,
-/// and invalid edits that fail a real run with the file and declaration
-/// named, launching nothing. Every declaration and
+/// real-run control whose step composes with its template-filled, typed
+/// state, and invalid edits that fail a real run with the file and
+/// declaration named, launching nothing. Every declaration and
 /// loader shape is the library's (`composition::sequence::tests`); these
 /// prove the route only. The provider is the compiled `claudine-fake-goose`
-/// in marker mode, so these run on every OS.
+/// (recording its prompts for a control, in marker mode otherwise), so these
+/// run on every OS.
 #[cfg(feature = "test-fixtures")]
 mod declaration_routes {
     use super::*;
@@ -1351,10 +1456,12 @@ mod declaration_routes {
         ($name:ident, $file:literal, $contents:expr, composes) => {
             #[test]
             fn $name() {
-                let (success, stdout, stderr, launches) = launch($file, &$contents, &["--dry-run"]);
-                assert!(success, "{stderr}");
-                assert!(stdout.lines().any(|line| line.trim() == "Step blue-5."), "stdout:\n{stdout}\nstderr: {stderr}");
-                assert_eq!(launches, 0, "{stderr}");
+                let workspace = CliProcessFixture::named("sequence-declaration-routes");
+                let path = write(&workspace, $file, &$contents);
+                // The YAML route's document-level `prompt` is inline-composed,
+                // so its one step must edit the document.
+                let launched = super::launch(&workspace, &path, &[], $file.ends_with(".yaml"));
+                assert_eq!(step_lines(&launched), ["blue-5"], "stderr: {}", launched.stderr);
             }
         };
         ($name:ident, $file:literal, $contents:expr, refuses: [$($needle:expr),+ $(,)?]) => {
@@ -1445,8 +1552,8 @@ mod derived_provider_reads {
             &[("reads.md", "---\nchoice: claude\nagent: \"{{ choice }}\"\n---\nRead.\n")],
         );
         assert!(!success, "{stderr}");
-        assert!(stderr.contains("Agent Not Installed:(Claude)"), "{stderr}");
-        assert!(stderr.contains("No task has started"), "{stderr}");
+        assert!(stderr.contains("the Claude provider (reads.md frontmatter agent) is not installed"), "{stderr}");
+        assert!(stderr.contains("no task ran"), "{stderr}");
         assert_eq!(launches, 0, "{stderr}");
     }
 }

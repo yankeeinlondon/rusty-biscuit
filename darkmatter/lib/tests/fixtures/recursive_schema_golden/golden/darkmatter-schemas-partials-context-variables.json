@@ -3,6 +3,20 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "recent-commits": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ],
+      "description": "Recent commits, newest first, each rendered exactly as\n`sniff repo recent-commits --plain` renders it (a multi-line block).\nThe result of `recent_commits(count)` and the type of\n`ctx.recent_commits`."
+    },
     "context": {
       "anyOf": [
         {

@@ -584,11 +584,11 @@ fn worktree_path_link_absolute(path: &std::path::Path) -> String {
 
 fn worktree_link_markup(path: &Path, label: &str) -> String {
     let label = if label == path.to_string_lossy() {
-        biscuit_file::to_portable_string(path)
+        biscuit_file::to_forward_slash_string(path)
     } else {
         label.to_string()
     };
-    match biscuit_file::try_portable_string(path)
+    match biscuit_file::try_forward_slash_string(path)
         .and_then(|path| url::Url::from_file_path(path).ok())
     {
         Some(href) => format!("<blue><a href=\"{href}\">{label}</a></blue>"),
@@ -1874,7 +1874,7 @@ mod tests {
             // Main worktree is a sibling directory, so its visible label is
             // `../project`. The current worktree shows its own absolute path —
             // a label relative to itself (`.`) would tell the reader nothing.
-            let main_href = biscuit_file::try_portable_string(&main_dir)
+            let main_href = biscuit_file::try_forward_slash_string(&main_dir)
                 .and_then(|path| url::Url::from_file_path(path).ok())
                 .expect("main worktree file URL");
             let main_markup = worktree_path_link(&main_dir, &wt_dir);
@@ -1887,7 +1887,7 @@ mod tests {
             );
             // Rendering may wrap a long URL, so verify its intact value before
             // the terminal renderer applies line wrapping.
-            let current_href = biscuit_file::try_portable_string(&wt_dir)
+            let current_href = biscuit_file::try_forward_slash_string(&wt_dir)
                 .and_then(|path| url::Url::from_file_path(path).ok())
                 .expect("current worktree file URL");
             let current_markup = worktree_path_link_absolute(&wt_dir);

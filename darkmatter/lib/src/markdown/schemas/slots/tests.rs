@@ -260,7 +260,7 @@ mod evaluation {
         let (slot, evaluation) = &evaluations[0];
         assert_eq!(slot.origin.as_deref(), Some(root.join("schemas/sandbox.yaml").as_path()));
         let read = evaluation.observations.iter().find(|observation| observation.kind == ObservationKind::File).unwrap();
-        assert_eq!(read.entry, biscuit_file::to_portable_string(&root.join("os.yaml")));
+        assert_eq!(read.entry, biscuit_file::to_forward_slash_string(&root.join("os.yaml")));
         assert_eq!(read.hash, Some(biscuit_hash::blake3_hash_bytes(OS_LIST.as_bytes())));
     }
 
@@ -295,7 +295,7 @@ mod evaluation {
         let data = DataRuntime::new();
         let host = DarkmatterSlotHost::new(SlotEvaluator::new(data.clone()).with_gate(Arc::new(AllowAll)));
         resolve(&root, "schemas/sandbox.yaml", &host).unwrap();
-        assert_eq!(data.read_set(), [biscuit_file::to_portable_string(&root.join("os.yaml"))]);
+        assert_eq!(data.read_set(), [biscuit_file::to_forward_slash_string(&root.join("os.yaml"))]);
     }
 
     #[test]
@@ -371,7 +371,8 @@ mod failures {
     }
 
     fn slot_position(text: &str) -> (usize, usize) {
-        crate::markdown::span::line_col_of_offset(text, text.find("{{").unwrap())
+        let position = crate::config::load::line_column(text, text.find("{{").unwrap());
+        (position.line, position.column)
     }
 
     #[test]
@@ -392,7 +393,7 @@ mod failures {
         let (line, column) = slot_position(SANDBOX);
         assert_eq!((source.line, source.column), (Some(line), Some(column)));
         let location = record.data_location.as_ref().expect("the data file position stays secondary");
-        assert_eq!(location.file, biscuit_file::to_portable_string(&root.join("os.yaml")));
+        assert_eq!(location.file, biscuit_file::to_forward_slash_string(&root.join("os.yaml")));
         assert!(location.line.is_some() && location.column.is_some(), "{location:?}");
     }
 
@@ -420,9 +421,9 @@ mod failures {
         assert!(host.evaluations().is_empty());
         let record = &slot_resolution_diagnostics(&error, &texts(&root))[0];
         assert_eq!(record.code, SLOT_FORBIDDEN_BINDING_CODE);
-        let expected = crate::markdown::span::line_col_of_offset(schema, schema.find("fm.platforms").unwrap());
+        let expected = crate::config::load::line_column(schema, schema.find("fm.platforms").unwrap());
         let source = record.source.as_ref().unwrap();
-        assert_eq!((source.line, source.column), (Some(expected.0), Some(expected.1)));
+        assert_eq!((source.line, source.column), (Some(expected.line), Some(expected.column)));
     }
 
     #[test]

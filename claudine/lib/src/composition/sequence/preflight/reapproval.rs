@@ -117,6 +117,7 @@ impl PreflightApproval {
         Err(CompositionError::SequenceShellApprovalChanged {
             command: basis.authored.clone(),
             task: basis.label.clone(),
+            site: Box::new(crate::composition::SequenceSite::file(&basis.origin).in_task(basis.label.clone())),
             approved: self.approved.clone(),
             resolved,
             changed: changed_variables(
@@ -215,6 +216,7 @@ pub(super) fn shell_resolution_failure(
         task: label.to_string(),
         message: error.to_string(),
         source: Some(Box::new(error)),
+        site: Box::new(crate::composition::SequenceSite::unlocated().in_task(label)),
     }
 }
 

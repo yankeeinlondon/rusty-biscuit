@@ -202,7 +202,7 @@ impl SimplifiedSchema {
         if let Target::Reference(reference) = &source.target
             && reference.class().kind == FileReferenceKind::Url
         {
-            return Err(SchemaError::RemoteUnsupported { reference: reference.raw().to_string() }.into());
+            return Err(SchemaError::RemoteUnsupported { reference: reference.raw().to_string(), site: None }.into());
         }
         let context = source.context()?;
         let path = resolve_target(&source.target, &context, source.text.is_some())?;

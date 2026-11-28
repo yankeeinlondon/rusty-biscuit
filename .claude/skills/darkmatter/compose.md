@@ -241,8 +241,9 @@ no group: each reached call walks history from the file-resolution
 `repository_root` and renders through the capture's `render_recent_commits`.
 It is the lazy half of the first variable/function pair (R29): `ctx.recent_commits`
 is the eager snapshot in the same rendering. Both use the catalog's one
-`recent-commits` named type (the function returns it; `context-variables.yaml`
-imports it as `recent-commits(generated; required)@darkmatter:functions`), and
+`recent-commits` shape (the function returns the catalog's helper;
+`context-variables.yaml` declares an equal local helper, since a callable
+catalog is not importable, and a test pins the two equal), and
 each side's description names the other; there is no shared descriptor entry.
 
 `has_agentic_cli(agent)` demands `Agent`; the capture retains a lazily scanned
@@ -1492,6 +1493,79 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   loaded file as `ctx`, the authored `line`, and the opener as `authored`
   (`site_scope::authored_opener`); without a proven opener `ctx` is the current
   body and `authored` is `None`, which reports no diagnostic `source`.
+- **Directive parse and resolution failures.** A parser or resolver counts
+  lines in the body it reads (prepared, or the raw body for the local
+  query), so every reader places its failure with
+  `site_scope::DirectiveSite` (`of_line` from a parser's line, `of_span` from
+  a directive's span) before returning it:
+  `TransclusionError::at_authored_directive`, `TocLinkingError`/`FileLinksError`
+  `at_authored_line`/`at_site`, and `ShellExpansionError::at_authored_directive`/
+  `at_site` (shell carries the proof in its origin: a placed body or block
+  origin becomes `ShellCommandOrigin::Authored { site, at }`, which
+  `report_diagnostics::shell_source` publishes; `ShellBlockError::at_authored_lines`
+  places a block command's lines, excerpt, and inner origin, and a block
+  `Parse`/`Unterminated` failure's line and `authored`; every shell-block
+  failure leaves the stage counted past the header, so a body-relative parser
+  error goes through `shell_blocks::split_block_commands` or
+  `ShellBlockError::shifted`), and `PageBlockError::at_authored_lines` (the
+  page-block scan in `inline/page_blocks.rs` and `inline/collection_blocks.rs`;
+  `ParseDirective`/`UnmatchedEnd`/`UnterminatedBlock` carry `authored`). A
+  pairing note's line (`BlockPairError::note_with`) is moved by rescanning
+  (`site_scope::scan_note`, `CollectionError::with_file_note`) through
+  `DirectiveSite::file_line`, and dropped when unproven. A file document gets the authored line and opener
+  (`authored`, which the projection publishes as `source.line`/`column`) or,
+  unproven, line `0` (no line in the message, file-only source); a document
+  with no file keeps its body line. Sites: `pipeline/phases.rs` (parse, and
+  the resolve closure for this document's own TOC/file-links items),
+  `transclusion/engine.rs` (tolerated file-links warnings, via
+  `TransclusionEngine::with_origin`), `reference/graph.rs`,
+  `reference/mod.rs` (`BodyOrigin::capture` of the raw body),
+  `preflight/collect.rs`, and `inline/shell_expansion.rs` (parse, site,
+  prepare, and execute failures), and the shell-block stage's `map_err` in
+  `pipeline/phases.rs`. Pre-flight discovery moves only a command's line
+  (`Body`/`ShellBlock`, never `Authored`): its error contexts are the root's,
+  so a placed child origin would publish the child's line against the root.
+  Nothing compares origins (membership is by normalized command), so placing
+  changes no approval. A malformed block found by discovery is the stage's own
+  typed `ShellBlockError`, placed like the stage's (its `source_file` is the
+  walked document's, so its line is published), and a remote child discovery
+  cannot fetch is `TransclusionError::RemoteFetchFailed`; never wrap either in
+  `MarkdownError::Transform`. A new reader that parses directives places its failure
+  the same way.
+- **Inclusion target failures.** A directive that parses but whose target
+  fails (an invalid `@`, no match, an unreadable file, a refused fetch, an
+  unsupported type) is wrapped in `TransclusionError::Located { site, source }`
+  with a public `InclusionSite` (file + optional `AuthoredSpan`), built where
+  the inclusion is known: `InclusionSite::of_directive` over the same
+  `DirectiveSite::of_span`, or `InclusionSite::of_frontmatter_value` (key,
+  list index, value; `transclusion::frontmatter_value_range`, which
+  `AuthoredLocator::frontmatter_location` shares). `at_inclusion` never
+  replaces an existing site, so a nested child's survives its parents. Sites:
+  `transclusion/engine.rs` (block and frontmatter prepare, the `inclusion`
+  field of `PreparedTransclusion::{Markdown, Code, RemoteFile, RemoteCode}`
+  for load, read, and fetch failures via `target_failure_at`/`fetched_body`),
+  `preflight/collect.rs` (resolve, child load, remote fetch), and the graph
+  readers, where `reference::at_inclusion` turns a `ReferenceError::{FileReference, Io}`
+  into `ReferenceError::Compose(Transclusion(Located))` (`graph.rs` resolve and
+  `load_inclusion(…, site)`, `mod.rs` local query, `validate.rs::inclusion_site`
+  for `Transclusion` records only). Matchers read the cause with
+  `without_site()` (`transclusion_failure_is_fatal`, `skips_unresolved` runs
+  before wrapping, `report_diagnostics::transclusion_code`, Claudine's
+  `is_missing_include`); the projection publishes the site as `source` and a
+  `failure` in `reference_details`, and `tolerated_failure_warning` puts it,
+  and a registered code, on a tolerated child's warning, and on the warning
+  of an inclusion the engine removes because it did not resolve
+  (`engine.rs::skipped_transclusion_warning`: the body and frontmatter
+  `skips_unresolved` arms and both remote-disabled `ignore_invalid` arms
+  place the error at the directive's or value's `InclusionSite` first; never
+  build that warning from the message or `directive.line`). Its status block
+  leads the cause's own block with `File:`/`Line:` rows
+  (`StatusBlock::prepend_body_line`, `site_scope::line_row`). A link or
+  image target whose `FileReference` fails (`[x](@)`) is never a
+  `ReferenceError`: `validate.rs::invalid_local_target` makes it an error
+  `InvalidReference` issue (`UnreadableTarget` for an I/O class) with the
+  class in `ReferenceIssue::failure`, so every validator reports it at the
+  record's authored origin.
 - **Frontmatter.** `interpolate_frontmatter_located` records the failing
   string's key/index path and the construct's span in it; the pipeline walks
   the crate-private `locate_frontmatter_value` (the schema locator's tolerant
@@ -1705,6 +1779,14 @@ darkmatter/lib/src/
   compose stage, the transclusion engine, and the pre-flight walk, and
   `reason()` is its line-free message, which a tolerated failure's warning
   uses for a document with an identity (`Markdown::generated_identity`).
+  That warning keeps the error's own code
+  (`report_diagnostics::directive_failure_code`, at both tolerating sites:
+  `pipeline/phases.rs::tolerated_failure_warning` and the engine's
+  `ignore_invalid` file-links skip), and each such code is in
+  `COMPOSE_DIAGNOSTIC_CODES` so `--deny` takes it; never let a tolerated
+  failure fall back to `dm.compose.warning`. `error_diagnostics` also
+  classifies a bare `ReferenceError` in a source chain (a
+  `FileTreeError::Reference` from `md graph`) as `dm.reference.failure`.
   Block-pair reasons are line-free too; the secondary line (`BlockPairError::note`)
   rides in the consumers' `note` field and their `Display`. Recovery: `with_allow_untyped_{map,filter}_variables`.
   Budget counters stay context-free (`CollectionError::budget`); the stage

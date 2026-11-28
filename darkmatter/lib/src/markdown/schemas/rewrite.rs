@@ -784,7 +784,7 @@ mod tests {
         assert!(outcome.changed);
         assert_eq!(
             outcome.value["spec"],
-            json!(biscuit_file::to_portable_string(&request_target))
+            json!(biscuit_file::to_forward_slash_string(&request_target))
         );
     }
 
@@ -1480,7 +1480,7 @@ mod tests {
                 ]}
             }
         });
-        let launch_file = biscuit_file::to_portable_string(&launch.join("a.md"));
+        let launch_file = biscuit_file::to_forward_slash_string(&launch.join("a.md"));
         let instance = json!({"other": "./a.md", "spec": launch_file});
         let context = biscuit_file::FileResolutionContext::new(&root);
         let cache = ValidatorCache::new().with_caller_origins(CallerOrigins::new([(

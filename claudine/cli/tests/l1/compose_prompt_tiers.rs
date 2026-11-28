@@ -40,12 +40,25 @@ fn stage_at(prefix: &str, segments: &[&str], repository: bool) -> (CliProcessFix
     (fixture, launch)
 }
 
+/// The composed preview of `claudine compose --dry-run --provider claude
+/// <reference>`, which must pass its check.
 fn compose_dry_run(fixture: &CliProcessFixture, launch: &Path, reference: &str) -> String {
+    // The check judges provider selection: a clean preview needs a chosen
+    // provider on `PATH`, which it only looks up.
+    let claude = fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    if !claude.exists() {
+        std::fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
     let output = fixture
         .command_builder()
         .ambient_context(launch)
         .build()
-        .args(["compose", "--dry-run", reference])
+        .args(["compose", "--dry-run", "--provider", "claude", reference])
         .assert()
         .success()
         .get_output()
@@ -53,15 +66,21 @@ fn compose_dry_run(fixture: &CliProcessFixture, launch: &Path, reference: &str) 
     strip_ansi(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Run a `compose --dry-run` expected to fail and return its plain stderr.
-fn compose_dry_run_failure(fixture: &CliProcessFixture, launch: &Path, reference: &str) -> String {
+/// Run a `claudine compose` whose source reference misses and return its
+/// plain stderr.
+///
+/// This is a real run: the miss fails it before any provider, shell, or
+/// lifecycle event, and its report lists the `@` search roots. The dry-run
+/// check reports the same miss under its own code and format.
+fn compose_failure(fixture: &CliProcessFixture, launch: &Path, reference: &str) -> String {
     let output = fixture
         .command_builder()
         .ambient_context(launch)
         .build()
         // A wide terminal keeps each search root on one line.
         .env("COLUMNS", "500")
-        .args(["compose", "--dry-run", reference])
+        .args(["compose", reference])
+        .write_stdin("")
         .assert()
         .failure()
         .get_output()
@@ -322,7 +341,20 @@ fn magic_miss_lists_ordered_search_roots_instead_of_joined_candidates() {
     // Defect 3, the reported input: the human-readable miss names the payload
     // once and lists the directories `@` searched, local before home.
     let (fixture, launch) = stage("prompt-tiers-magic-miss", true);
-    let stderr = compose_dry_run_failure(&fixture, &launch, "@prompts/missing.md");
+    let stderr = compose_failure(&fixture, &launch, "@prompts/missing.md");
+
+    // The dry-run check reports the same miss by code.
+    let output = fixture
+        .command_builder()
+        .ambient_context(&launch)
+        .build()
+        .args(["compose", "--dry-run", "--json", "@prompts/missing.md"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["diagnostics"][0]["code"], "dm.reference.missing_document", "{report:#}");
+    assert_eq!(report["diagnostics"][0]["failure"], "no-match", "{report:#}");
 
     assert!(
         stderr.contains("`prompts/missing.md` was not found under any directory an `@` reference searches:"),
@@ -379,7 +411,7 @@ fn magic_miss_lists_ordered_search_roots_instead_of_joined_candidates() {
 #[test]
 fn magic_miss_outside_any_repository_lists_the_launch_directory_first() {
     let (fixture, launch) = stage_at("prompt-tiers-scratch-miss", &["scratch"], false);
-    let stderr = compose_dry_run_failure(&fixture, &launch, "@prompts/missing.md");
+    let stderr = compose_failure(&fixture, &launch, "@prompts/missing.md");
     let roots = rendered_search_roots(&stderr, &fixture);
     let unmarked: Vec<&str> = roots
         .iter()
@@ -395,7 +427,7 @@ fn separated_magic_miss_names_the_payload_without_the_separator() {
     // Review-1 Medium: `@/<x>` is the same payload as `@<x>`, so the miss
     // line must not echo the optional `/` separator.
     let (fixture, launch) = stage("prompt-tiers-separated-miss", true);
-    let stderr = compose_dry_run_failure(&fixture, &launch, "@/absent-payload-probe.md");
+    let stderr = compose_failure(&fixture, &launch, "@/absent-payload-probe.md");
 
     assert!(
         stderr.contains(
@@ -411,14 +443,14 @@ fn separated_magic_miss_names_the_payload_without_the_separator() {
 fn absolute_and_bare_misses_keep_their_existing_reports() {
     let (fixture, launch) = stage("prompt-tiers-other-miss", true);
     let absolute = fixture.home().join("missing.md");
-    let stderr = compose_dry_run_failure(&fixture, &launch, absolute.to_str().unwrap());
+    let stderr = compose_failure(&fixture, &launch, absolute.to_str().unwrap());
     assert!(stderr.contains("Cannot resolve `"), "{stderr}");
     assert!(stderr.contains("Tried:"), "{stderr}");
     assert!(stderr.contains("- absolute: `"), "{stderr}");
     assert!(!stderr.contains("an `@` reference searches"), "{stderr}");
 
     // A bare miss still reaches the non-interactive autocomplete gate.
-    let stderr = compose_dry_run_failure(&fixture, &launch, "missing.md");
+    let stderr = compose_failure(&fixture, &launch, "missing.md");
     assert!(stderr.contains("autocomplete not available"), "{stderr}");
     assert!(!stderr.contains("an `@` reference searches"), "{stderr}");
 }

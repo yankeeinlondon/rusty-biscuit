@@ -104,7 +104,7 @@ fn pending(observations: &PropertyObservations, key: &str) -> PendingReason {
 
 /// Whether any observation names `path`.
 fn names(observations: &PropertyObservations, path: &Path) -> bool {
-    let entry = biscuit_file::to_portable_string(path);
+    let entry = biscuit_file::to_forward_slash_string(path);
     observations.observations.iter().any(|observation| observation.entry == entry)
 }
 
@@ -167,7 +167,7 @@ fn an_approved_missing_file_is_missing_and_its_candidate_is_watched() {
     let observations = fixture.observe(&session, seed, &sites);
     assert!(matches!(observations.get("direct"), Some(PropertyOutcome::Missing(_))), "{:?}", observations.get("direct"));
     assert_eq!(observed(&observations, "conditional"), json!("foobar"));
-    let missing = biscuit_file::to_portable_string(&fixture.root.join("data.yaml"));
+    let missing = biscuit_file::to_forward_slash_string(&fixture.root.join("data.yaml"));
     assert!(
         observations
             .observations
@@ -499,7 +499,7 @@ fn rows() -> Value {
 /// Whether every observation is of `data.yaml`'s bytes: nothing was listed,
 /// probed, or read besides the selected load.
 fn read_only_the_data(fixture: &Fixture, observations: &PropertyObservations) -> bool {
-    let data = biscuit_file::to_portable_string(&fixture.root.join("data.yaml"));
+    let data = biscuit_file::to_forward_slash_string(&fixture.root.join("data.yaml"));
     observations.observations.iter().all(|observation| observation.entry == data && observation.kind == ObservationKind::File)
 }
 

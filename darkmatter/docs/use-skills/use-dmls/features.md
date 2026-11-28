@@ -61,9 +61,9 @@ globs match the file, matching trigger files, and the document's own
 - **Lifecycle stacks** (`initialize`, `composed`, `failed`, `cancelled`,
   `finalize`) are typed. Their actions complete and validate, and
   expressions inside a stack are checked against that event's globals.
-- **Claudine documents** are checked against Claudine's trigger schemas when
-  those are in the document's schema roots. See
-  [schemas.md](schemas.md#claudine).
+- **Claudine documents** are checked against Claudine's schemas, globals,
+  and lifecycle events once Claudine's setup has registered them in
+  `~/.darkmatter.yaml`. See [schemas.md](schemas.md#claudine).
 
 ## Layer 3: the Darkmatter DSL
 

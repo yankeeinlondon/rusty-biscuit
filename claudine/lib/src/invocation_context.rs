@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use biscuit_file::{FileResolutionContext, LaunchMagicScope, PackageAreaFallback, RepositoryScopeCatalog};
+use biscuit_file::{FileResolutionContext, LaunchScope, PackageAreaFallback, RepositoryScopeCatalog};
 use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{FileChange, GitInfo, RecentCommits};
@@ -1472,7 +1472,7 @@ impl InvocationContext {
             Some(&source_path),
             repository_root.as_deref(),
             entry.repo_info(),
-            Some(self.document.file_resolution.launch_magic_scope()),
+            Some(self.document.file_resolution.launch_scope()),
         )?;
         let package_area_root = file_resolution.package_area().map(Path::to_path_buf);
         let package_root = file_resolution.package_root().map(Path::to_path_buf);
@@ -2344,7 +2344,7 @@ pub fn lifecycle_mutation_root<'c>(
             source: source.clone(),
         });
     }
-    Ok(context.launch_magic_scope().local_root())
+    Ok(context.launch_scope().local_root())
 }
 
 fn observe_repository(
@@ -2523,7 +2523,7 @@ pub(crate) fn build_file_resolution_context(
     source_path: Option<&Path>,
     repository_root: Option<&Path>,
     repo_info: Option<&RepoInfo>,
-    launch_scope: Option<&LaunchMagicScope>,
+    launch_scope: Option<&LaunchScope>,
 ) -> Result<FileResolutionContext, ContextBuildError> {
     let base_dir = snapshot.request_dir();
     let catalog = repository_root.map(|root| match repo_info {
@@ -2559,7 +2559,7 @@ pub(crate) fn build_file_resolution_context(
         context = context.with_source_path(source_path);
     }
     if let Some(scope) = launch_scope {
-        context = context.with_launch_magic_scope(scope.clone());
+        context = context.with_launch_scope(scope.clone());
     }
     Ok(context)
 }

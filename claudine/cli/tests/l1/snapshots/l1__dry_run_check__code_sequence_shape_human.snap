@@ -1,0 +1,13 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: human.stderr
+---
+Dry run of seq.yaml (no commands run)
+
+seq.yaml
+  ✗ `sequence` is a number, not a list of tasks or a file reference
+      at seq.yaml:1:11
+      hint: write `sequence:` as a list of tasks
+  ℹ not checked: tasks (`sequence` is not a list)
+
+Dry run found 1 error and 0 warnings; 1 check not run. Previewed 0 of 0 tasks.

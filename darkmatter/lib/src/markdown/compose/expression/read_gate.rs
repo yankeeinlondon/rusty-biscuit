@@ -73,7 +73,7 @@ pub enum ReadLocation {
 impl fmt::Display for ReadLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Local(path) => f.write_str(&biscuit_file::to_portable_string(path)),
+            Self::Local(path) => f.write_str(&biscuit_file::to_forward_slash_string(path)),
             Self::Remote(url) => f.write_str(url.as_str()),
             Self::Glob(pattern) => f.write_str(pattern),
         }
@@ -140,6 +140,9 @@ pub enum GateRefusal {
     /// The configuration's `permissions` block is invalid, so no read is
     /// decided; the error carries its own `dm.config.*` code.
     InvalidPermissions(crate::config::load::ConfigError),
+    /// A URL the captured `permissions.network: deny` refuses: no per-run
+    /// host or approval allows it, and `deny` never asks.
+    NetworkDenied,
 }
 
 impl GateRefusal {
@@ -155,6 +158,9 @@ impl fmt::Display for GateRefusal {
             Self::Denied => f.write_str("the read is denied for this run"),
             Self::ApprovalRequired { .. } => f.write_str("the read needs approval"),
             Self::InvalidPermissions(error) => write!(f, "the configured permissions are invalid: {error}"),
+            Self::NetworkDenied => {
+                write!(f, "`permissions.network` is `deny`; {}", crate::config::network::network_remedy().when_denied())
+            }
         }
     }
 }

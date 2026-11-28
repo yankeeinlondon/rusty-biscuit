@@ -26,9 +26,12 @@
     { "name": "no entry", "target": "~/elsewhere/os.yaml", "decision": "approval-required" }
   ],
   "url_reads": [
-    { "name": "network deny", "network": "deny", "allow_hosts": [], "decision": "approval-required" },
+    { "name": "network deny", "network": "deny", "allow_hosts": [], "decision": "refused" },
+    { "name": "network ask", "network": "ask", "allow_hosts": [], "decision": "approval-required" },
     { "name": "network allow", "network": "allow", "allow_hosts": [], "decision": "preapproved" },
     { "name": "the exact host allowed for the run", "network": "deny", "allow_hosts": ["127.0.0.1"], "decision": "preapproved" },
-    { "name": "another host allowed for the run", "network": "deny", "allow_hosts": ["localhost"], "decision": "approval-required" }
+    { "name": "the exact host allowed for the run under ask", "network": "ask", "allow_hosts": ["127.0.0.1"], "decision": "preapproved" },
+    { "name": "another host allowed for the run", "network": "deny", "allow_hosts": ["localhost"], "decision": "refused" },
+    { "name": "another host allowed for the run under ask", "network": "ask", "allow_hosts": ["localhost"], "decision": "approval-required" }
   ]
 }

@@ -146,7 +146,7 @@ impl RepositoryScope {
     }
 }
 
-/// The immutable, request-scoped launch scope `@` (magic) references search.
+/// The frozen roots for `@` and opt-in implicit launch lookup.
 ///
 /// Captured once from the directory a request was launched from: that
 /// directory plus the repository, package, and package-area roots selected
@@ -154,21 +154,46 @@ impl RepositoryScope {
 /// [`for_cwd`](FileResolutionContext::for_cwd), and the trusted-external
 /// forms) preserve this snapshot unchanged, so a nested `@` reference keeps
 /// searching the launch tree even when the authoring source lives in another
-/// repository or an external prompt directory, while `./`, bare, `&`, and `^`
-/// references keep their source-specific anchors.
+/// repository or an external prompt directory. Opt-in implicit relative
+/// lookup uses these same frozen anchors.
 ///
 /// The [`local_root`](Self::local_root) — the repository root when one was
 /// selected for the request directory, else the request directory itself —
 /// anchors the local tier of the `@` root chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LaunchMagicScope {
+pub struct LaunchScope {
     request_dir: PathBuf,
     repository_root: Option<PathBuf>,
     package_root: Option<PathBuf>,
     package_area: Option<PathBuf>,
 }
 
-impl LaunchMagicScope {
+impl LaunchScope {
+    /// Implicit launch lookup bases in precedence order, with duplicate paths
+    /// removed. Outside a repository only the launch directory participates.
+    pub fn bases(&self) -> Vec<PathBuf> {
+        self.bases_with_provenance().into_iter().map(|(path, _)| path).collect()
+    }
+
+    pub(crate) fn bases_with_provenance(&self) -> Vec<(PathBuf, super::RootProvenance)> {
+        use super::RootProvenance;
+
+        let launch = (self.request_dir.clone(), RootProvenance::LocalRoot);
+        let Some(repository) = &self.repository_root else {
+            return vec![launch];
+        };
+        let bases = [
+            Some(launch),
+            self.package_root.clone().map(|path| (path, RootProvenance::PackageRoot)),
+            self.package_area.clone().map(|path| (path, RootProvenance::PackageArea)),
+            Some((repository.clone(), RootProvenance::Repository)),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        bases.into_iter().flatten()
+            .filter(|(path, _)| seen.insert(super::PathIdentity::new(path)))
+            .collect()
+    }
+
     /// The request directory the scope was captured from.
     pub fn request_dir(&self) -> &Path {
         &self.request_dir
@@ -265,7 +290,7 @@ pub enum ContextAnchor {
     /// The directory the request was captured in
     /// ([`request_cwd`](FileResolutionContext::request_cwd)), or the request
     /// directory of the launch `@` scope
-    /// ([`LaunchMagicScope::request_dir`]).
+    /// ([`LaunchScope::request_dir`]).
     RequestDirectory,
     /// The current authoring directory ([`cwd`](FileResolutionContext::cwd)).
     WorkingDirectory,
@@ -467,6 +492,16 @@ fn most_specific_containing(roots: &[PathBuf], base: &Path) -> Option<PathBuf> {
         .cloned()
 }
 
+/// The anchors used for implicit relative references.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ImplicitBases {
+    /// Search the authoring directory, then its repository root.
+    #[default]
+    Authoring,
+    /// Search the frozen launch directory, package, area, and repository.
+    Launch,
+}
+
 /// Runtime state captured for file reference resolution.
 #[cfg(feature = "file-reference")]
 pub(crate) struct ResolutionContext {
@@ -491,12 +526,14 @@ pub(crate) struct ResolutionContext {
     /// is authoritative (D2/D10), so a missing anchor is consumed as absent
     /// rather than re-probed from the filesystem after construction.
     pub allow_ambient_discovery: bool,
-    /// The immutable launch `@` scope captured by the originating
+    /// The immutable launch scope captured by the originating
     /// [`FileResolutionContext`]. `None` for the ambient compatibility
     /// methods, whose live anchors *are* the launch scope. `@` resolution
     /// reads the local-root anchors from here rather than from the
     /// source-derived anchors above.
-    pub launch_magic_scope: Option<LaunchMagicScope>,
+    pub launch_scope: Option<LaunchScope>,
+    pub implicit_bases: ImplicitBases,
+    pub launch_boundary: Option<PathBuf>,
     /// The tree root relative references must stay inside, as written and
     /// where they land. `None` when no boundary applies: the ambient
     /// compatibility methods, a fallback tree root, or a reader that opted in
@@ -527,7 +564,9 @@ impl ResolutionContext {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         })
     }
@@ -556,7 +595,9 @@ impl ResolutionContext {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         })
     }
@@ -576,7 +617,9 @@ impl ResolutionContext {
             package_root: ctx.package_root.clone(),
             package_area: ctx.package_area.clone(),
             allow_ambient_discovery: false,
-            launch_magic_scope: Some(ctx.launch_magic_scope.clone()),
+            launch_scope: Some(ctx.launch_scope.clone()),
+            implicit_bases: ctx.implicit_bases,
+            launch_boundary: ctx.launch_boundary().map(Path::to_path_buf),
             relative_boundary: (ctx.base_dir_is_boundary() && !ctx.allow_external_relative)
                 .then(|| ctx.tree.path.clone()),
         }
@@ -601,7 +644,8 @@ impl ResolutionContext {
 /// ## Notes
 ///
 /// `cwd` is a directory: for a file-backed source, pass the source
-/// file's parent. It is where `./`, `../`, and bare references start.
+/// file's parent. Explicit relative references start here, as do implicit
+/// relative references in the default authoring policy.
 ///
 /// [`base_dir`](Self::base_dir) is the root of the whole file tree and the
 /// boundary relative references must stay inside. It is selected, in order,
@@ -624,11 +668,11 @@ impl ResolutionContext {
 /// [`for_trusted_external_cwd`](Self::for_trusted_external_cwd), which select
 /// a new tree for the external document.
 ///
-/// The context also captures an immutable launch `@` scope (see
-/// [`LaunchMagicScope`]): the construction directory plus the repository,
-/// package, and package-area roots selected for it. `@` resolution anchors on
-/// that snapshot across every derivation, so a nested `@` reference keeps
-/// searching the launch tree; the direct builder methods
+/// The context also captures an immutable launch scope (see
+/// [`LaunchScope`]): the construction directory plus the repository,
+/// package, and package-area roots selected for it. Magic references and
+/// implicit launch lookup use the same snapshot in derived contexts. The
+/// direct builder methods
 /// ([`with_repository_root`](Self::with_repository_root),
 /// [`with_repository_scope_catalog`](Self::with_repository_scope_catalog),
 /// [`with_package_root`](Self::with_package_root),
@@ -655,8 +699,9 @@ pub struct FileResolutionContext {
     /// Whether the current authoring `cwd` intentionally crosses the request
     /// repository boundary.
     trusted_external_authoring_cwd: bool,
-    /// The immutable launch `@` scope; see the struct documentation.
-    launch_magic_scope: LaunchMagicScope,
+    /// The immutable launch scope; see the struct documentation.
+    launch_scope: LaunchScope,
+    implicit_bases: ImplicitBases,
     explicit_base_dir: Option<PathBuf>,
     /// The `~`/`{{VAR}}` tree root supplied by the reference that opened the
     /// current document, kept so a later builder call can reselect the tree.
@@ -690,7 +735,7 @@ impl FileResolutionContext {
         env: HashMap<String, String>,
     ) -> Self {
         let cwd = cwd.into();
-        let launch_magic_scope = LaunchMagicScope {
+        let launch_scope = LaunchScope {
             request_dir: cwd.clone(),
             repository_root: None,
             package_root: None,
@@ -710,7 +755,8 @@ impl FileResolutionContext {
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
             trusted_external_authoring_cwd: false,
-            launch_magic_scope,
+            launch_scope,
+            implicit_bases: ImplicitBases::Authoring,
             explicit_base_dir: None,
             opening_anchor: None,
             request_tree: tree.clone(),
@@ -740,7 +786,7 @@ impl FileResolutionContext {
     /// cloned from the captured request without reading process state or
     /// performing discovery. The tree root, its origin, and the reader opt-in
     /// carry over unchanged. The launch `@` scope
-    /// ([`launch_magic_scope`](Self::launch_magic_scope)) is likewise
+    /// ([`launch_scope`](Self::launch_scope)) is likewise
     /// preserved verbatim: a nested `@` reference keeps searching the launch
     /// tree while the source-relative kinds re-anchor on the new `cwd`.
     ///
@@ -910,7 +956,7 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_repository_root(mut self, repository_root: impl Into<PathBuf>) -> Self {
         self.repository_root = Some(repository_root.into());
-        self.sync_launch_magic_scope();
+        self.sync_launch_scope();
         self.reselect_tree();
         self
     }
@@ -923,7 +969,7 @@ impl FileResolutionContext {
     pub fn with_repository_scope_catalog(mut self, catalog: RepositoryScopeCatalog) -> Self {
         self.repository_scope_catalog = Some(catalog);
         self.recompute_repository_scopes();
-        self.sync_launch_magic_scope();
+        self.sync_launch_scope();
         self.reselect_tree();
         self
     }
@@ -961,7 +1007,7 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_package_root(mut self, package_root: impl Into<PathBuf>) -> Self {
         self.package_root = Some(package_root.into());
-        self.sync_launch_magic_scope();
+        self.sync_launch_scope();
         self
     }
 
@@ -972,7 +1018,7 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_package_area(mut self, package_area: impl Into<PathBuf>) -> Self {
         self.package_area = Some(package_area.into());
-        self.sync_launch_magic_scope();
+        self.sync_launch_scope();
         self
     }
 
@@ -1008,7 +1054,7 @@ impl FileResolutionContext {
     /// inferred from containment in the local root.
     ///
     /// Tier is decided at resolution time against the launch `@` scope's
-    /// local root (see [`LaunchMagicScope::local_root`]): a configured root
+    /// local root (see [`LaunchScope::local_root`]): a configured root
     /// that lexically lies inside it — compared after `.`/`..` and Windows
     /// verbatim normalization — joins the local tier searched before every
     /// home-based root; every other root (including one under `$HOME` but
@@ -1155,35 +1201,48 @@ impl FileResolutionContext {
         self.trusted_external_authoring_cwd
     }
 
-    /// The immutable launch `@` scope captured at construction: the request
+    /// The immutable launch scope captured at construction: the request
     /// directory plus the repository, package, and package-area roots
     /// selected for it.
     ///
-    /// `@` resolution, recursive `%@` traversal, and `@` completion all read
-    /// their local-root anchors from this snapshot, which derivations never
-    /// rewrite. It is also a cache-identity input: two contexts differing
-    /// only in this scope can resolve the same `@` reference to different
-    /// files.
-    pub fn launch_magic_scope(&self) -> &LaunchMagicScope {
-        &self.launch_magic_scope
+    /// Used by `@` and [`ImplicitBases::Launch`], including recursive search
+    /// and completion. Callers that cache lookup results include this scope
+    /// in the cache key.
+    pub fn launch_scope(&self) -> &LaunchScope {
+        &self.launch_scope
     }
 
-    /// Replace the launch `@` scope with an explicitly captured one.
+    /// Replace the launch scope with an explicitly captured one.
     ///
     /// Every directory the scope carries, its request directory included,
     /// must be absolute or [`validate`](Self::validate) fails.
     ///
-    /// For requests that rebuild their resolution context around a source in
-    /// another repository or an external prompt directory: the context's own
-    /// anchors may then be re-anchored on that source (giving `./`, bare,
-    /// `&`, and `^` references their source-specific meanings) while `@`
-    /// keeps searching the invocation's launch tree. The natural source is
-    /// [`launch_magic_scope`](Self::launch_magic_scope) on the launch
-    /// context, captured before derivation.
+    /// A caller rebuilding a context around an external source can carry
+    /// over the roots used by `@`. For implicit launch lookup, derive from
+    /// the launch context to preserve its tree boundary as well.
     #[must_use]
-    pub fn with_launch_magic_scope(mut self, scope: LaunchMagicScope) -> Self {
-        self.launch_magic_scope = scope;
+    pub fn with_launch_scope(mut self, scope: LaunchScope) -> Self {
+        self.launch_scope = scope;
         self
+    }
+
+    /// Select the lookup policy for implicit relative paths. Derived contexts
+    /// retain this setting.
+    #[must_use]
+    pub fn with_implicit_bases(mut self, bases: ImplicitBases) -> Self {
+        self.implicit_bases = bases;
+        self
+    }
+
+    /// The lookup policy applied to implicit relative paths.
+    pub fn implicit_bases(&self) -> ImplicitBases {
+        self.implicit_bases
+    }
+
+    #[cfg(feature = "file-reference")]
+    pub(crate) fn launch_boundary(&self) -> Option<&Path> {
+        (self.request_tree.origin.is_boundary() && !self.allow_external_relative)
+            .then_some(self.request_tree.path.as_path())
     }
 
     /// Magic roots registered at [`PathPosition::Start`](super::PathPosition::Start),
@@ -1335,10 +1394,10 @@ impl FileResolutionContext {
     /// `for_source`/`for_cwd` derivations: those re-anchor the
     /// source-relative kinds through `recompute_repository_scopes` while the
     /// launch `@` scope stays frozen at what the request captured.
-    fn sync_launch_magic_scope(&mut self) {
-        self.launch_magic_scope.repository_root = self.repository_root.clone();
-        self.launch_magic_scope.package_root = self.package_root.clone();
-        self.launch_magic_scope.package_area = self.package_area.clone();
+    fn sync_launch_scope(&mut self) {
+        self.launch_scope.repository_root = self.repository_root.clone();
+        self.launch_scope.package_root = self.package_root.clone();
+        self.launch_scope.package_area = self.package_area.clone();
     }
 
     /// Validate the absolute-anchor invariant and tree containment for the
@@ -1417,10 +1476,10 @@ impl FileResolutionContext {
     /// or not a later resolution reads it. Trusted derivations are not exempt.
     /// The launch `@` scope is checked separately: a trusted derivation can
     /// drop the current repository anchors while that scope keeps them, and
-    /// [`with_launch_magic_scope`](Self::with_launch_magic_scope) replaces it
+    /// [`with_launch_scope`](Self::with_launch_scope) replaces it
     /// wholesale, request directory included.
     fn validate_absolute_anchors(&self) -> Result<(), ContextFailure> {
-        let scope = &self.launch_magic_scope;
+        let scope = &self.launch_scope;
         let anchors = [
             (ContextAnchor::RequestDirectory, Some(&self.request_cwd)),
             (ContextAnchor::RequestDirectory, Some(&scope.request_dir)),

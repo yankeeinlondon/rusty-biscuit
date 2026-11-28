@@ -1,6 +1,6 @@
 //! Sidecar↔Rust enum mirror test for the signals research topic.
 //!
-//! `docs/research/signals/_schema.yaml` embeds the signal-taxonomy member
+//! `docs/research/providers/signals/_schema.yaml` embeds the signal-taxonomy member
 //! lists inside its `records`/`extractions` quoted inline-object type
 //! strings; the canonical definitions live in `claudine-catalog-types`
 //! (`signal.rs` / `vocab.rs`). Per
@@ -66,7 +66,7 @@ fn enum_members<'a>(type_string: &'a str, list: &str, field: &str) -> Vec<&'a st
 
 #[test]
 fn signals_sidecar_enums_mirror_rust_variants() {
-    let path = area().join("docs/research/signals/_schema.yaml");
+    let path = area().join("docs/research/providers/signals/_schema.yaml");
     let sidecar = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
 

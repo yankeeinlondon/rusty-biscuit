@@ -95,11 +95,23 @@ pub(crate) enum ProseInterpolation {
     DisabledByInclusion,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// How a file source's context is derived from the request's context.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
+    /// Derived from the request's context, inside the request's tree.
     #[default]
     Ordinary,
+    /// Derived from the request's context across an accepted trust boundary:
+    /// the source lies outside the request's tree and in no repository the
+    /// request has not captured.
     TrustedExternal,
+    /// The source's nearest Git checkout (a nested one included) is a
+    /// repository the request's context does not name. Its context was built at its own directory when it was admitted
+    /// ([`super::request::SourceRepositories`]) and is used as is, whatever
+    /// request context a consumer passes: its own repository decides `&`,
+    /// `^`, the package anchors, and its schema roots, while `@` keeps the
+    /// request's launch scope.
+    OwnRepository(Arc<biscuit_file::FileResolutionContext>),
 }
 
 /// The reference that opened a file source, and the path the opening
@@ -136,10 +148,11 @@ impl Eq for SourceOpening {}
 pub(crate) fn source_file_context(
     snapshot: &biscuit_file::FileResolutionContext,
     path: &Path,
-    derivation: SourceDerivation,
+    derivation: &SourceDerivation,
     opening: Option<&SourceOpening>,
 ) -> biscuit_file::FileResolutionContext {
     match (opening, derivation) {
+        (_, SourceDerivation::OwnRepository(context)) => context.as_ref().clone(),
         (Some(opening), SourceDerivation::Ordinary) => {
             snapshot.for_source_reference(&opening.reference, &opening.resolved)
         }
@@ -151,17 +164,28 @@ pub(crate) fn source_file_context(
     }
 }
 
-/// The derivation a file source at `path` resolves under: `TrustedExternal`
-/// when only that derivation of `context` admits the source (it lies outside
-/// the request's tree), else `Ordinary`.
+/// The derivation a file source at `path` resolves under.
+///
+/// `OwnRepository` when the source's nearest Git checkout (its directory's
+/// closest `.git` directory or file, a checkout nested in the request's tree
+/// included) is not the repository the request's context names;
+/// `repositories` answers that once per directory and discovers each such
+/// repository once for the whole request. Otherwise `TrustedExternal` when
+/// only that derivation of `context` admits the source (it lies outside the
+/// request's tree), else `Ordinary`.
 fn source_derivation_for(
     context: &biscuit_file::FileResolutionContext,
     path: &Path,
     opening: Option<&SourceOpening>,
+    repositories: &super::request::SourceRepositories,
 ) -> SourceDerivation {
-    let derive = |derivation| source_file_context(context, path, derivation, opening);
-    if derive(SourceDerivation::Ordinary).validate().is_err()
-        && derive(SourceDerivation::TrustedExternal).validate().is_ok()
+    let pair = opening.map(|opening| (&opening.reference, opening.resolved.as_path()));
+    if let Some(own) = repositories.own_repository_derivation(context, path, pair) {
+        return own;
+    }
+    let derive = |derivation: &SourceDerivation| source_file_context(context, path, derivation, opening);
+    if derive(&SourceDerivation::Ordinary).validate().is_err()
+        && derive(&SourceDerivation::TrustedExternal).validate().is_ok()
     {
         SourceDerivation::TrustedExternal
     } else {
@@ -311,6 +335,11 @@ pub struct ComposeOptions {
     /// with a warning instead of failing the document. Narrower than
     /// [`Self::ignore_invalid_references`]: every other failure still fails.
     pub(crate) allow_missing_transclusions: bool,
+
+    /// The passive session of a dry run ([`Self::with_dry_run`]); `None` for
+    /// an ordinary composition. Shared by every clone, so children, slots,
+    /// and callbacks defer into one record.
+    pub(crate) passive: Option<crate::markdown::compose::passive::PassiveSession>,
 
     /// When `true`, a `::map` source with no iterable declaration is a
     /// warning instead of an error. Waives only the static source-typing
@@ -539,11 +568,25 @@ pub struct ComposeOptions {
 
     /// When `true`, a body or mixed-text frontmatter expression that cannot be
     /// parsed or evaluated warns and keeps its span instead of failing the
-    /// document. Used only by the shell-command discovery pass, which composes
-    /// without page blocks and so evaluates content a false `::block` removes;
-    /// the terminal pass owns the verdict and is always strict. Default:
-    /// `false`.
+    /// document, and a reference graph skips a directive whose `when=`
+    /// condition fails instead of failing. Used by the shell-command discovery
+    /// pass, which composes without page blocks and so evaluates content a
+    /// false `::block` removes, and by
+    /// [`for_reference_check`](Self::for_reference_check); the terminal pass
+    /// owns the verdict and is always strict. Default: `false`.
     pub(crate) defer_expression_failures: bool,
+
+    /// When `true`, a reference graph leaves out an inclusion whose parser
+    /// fails (a body `::file`/`::code`/`::url`, `::toc-linking`,
+    /// `::file-links`, or `prologue`/`epilogue`) or whose existing target
+    /// cannot be loaded (unreadable, or frontmatter that does not parse),
+    /// instead of failing. Set only by
+    /// [`for_reference_check`](Self::for_reference_check): composition owns
+    /// that verdict, rejecting a parse failure in the root and tolerating a
+    /// child's, and an unloadable target, as a warning. Default: `false`, so
+    /// `md validate refs` and `md graph` refuse a document they could not
+    /// read.
+    pub(crate) defer_inclusion_parse_failures: bool,
 
     /// The operations whose surfaces the passive call check covers, when they
     /// differ from [`Self::enabled_operations`]. Set only by the shell-command
@@ -742,6 +785,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("allow_missing_transclusions", &self.allow_missing_transclusions)
+            .field("dry_run", &self.passive.is_some())
             .field("allow_untyped_map_variables", &self.allow_untyped_map_variables)
             .field("allow_untyped_filter_variables", &self.allow_untyped_filter_variables)
             .field("iteration_limits", &self.iteration_limits)
@@ -948,30 +992,56 @@ impl ComposeOptions {
             .or_else(|| self.context.observations().repository())
     }
 
-    /// The root of the request's one repository observation, which a schema
-    /// slot's automatic read grant is judged against; `None` when the request
-    /// found no repository (never a new discovery).
+    /// Whether the request's repository observation describes the checkout
+    /// `context` resolves in (the one its repository root names, or none),
+    /// so a schema slot may read it; `true` when the request holds none.
+    ///
+    /// `false` for options captured in a parent checkout composing a request
+    /// whose directory is in a checkout nested in it: the observation
+    /// describes the wider parent tree, not the request's own repository.
+    pub(crate) fn slot_repository_describes(&self, context: &biscuit_file::FileResolutionContext) -> bool {
+        let Some(repository) = self.request_repository() else {
+            return true;
+        };
+        match context.repository_root() {
+            Some(root) => !super::request::names_another_repository(root, repository.root.as_deref()),
+            None => repository.root.is_none(),
+        }
+    }
+
+    /// The root of the request's one repository observation, which keys a
+    /// schema slot's cached resolution; `None` when the request found no
+    /// repository (never a new discovery). Used only when
+    /// [`slot_repository_describes`](Self::slot_repository_describes) the
+    /// request's context.
     pub(crate) fn slot_repository_root(&self) -> Option<std::path::PathBuf> {
         self.request_repository().and_then(|repository| repository.root.clone())
     }
 
     /// The request's one repository observation, which a schema slot's
     /// `package()`/`package_area()` read; `None` when the request holds none
-    /// (never a new discovery).
+    /// (never a new discovery). Used only when
+    /// [`slot_repository_describes`](Self::slot_repository_describes) the
+    /// request's context.
     pub(crate) fn slot_repository(&self) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
         self.request_repository().cloned()
     }
 
-    /// The request's repository observation when it found a repository that
-    /// contains `dir`, so the context builder can project it instead of
+    /// The request's repository observation when it observed `dir`'s own
+    /// checkout, so the context builder can project it instead of
     /// discovering the repository a second time.
-    pub(super) fn request_repository_containing(
+    ///
+    /// The checkout is `dir`'s nearest one
+    /// ([`nearest_repository_root`](super::request::nearest_repository_root)),
+    /// never one that merely contains `dir`: options captured in a parent
+    /// checkout do not answer for a request in a checkout nested in it.
+    pub(super) fn request_repository_for(
         &self,
         dir: &Path,
     ) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
-        self.request_repository()
-            .filter(|repository| repository.contains(dir))
-            .cloned()
+        let repository = self.request_repository().filter(|repository| repository.contains(dir))?;
+        let nearest = super::request::nearest_repository_root(dir)?;
+        (!super::request::names_another_repository(&nearest, repository.root.as_deref())).then(|| repository.clone())
     }
 
     /// Makes the context builder's discovery at `dir` the request's
@@ -1049,6 +1119,7 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             allow_missing_transclusions: false,
+            passive: None,
             allow_untyped_map_variables: false,
             allow_untyped_filter_variables: false,
             iteration_limits: Default::default(),
@@ -1091,6 +1162,7 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
+            defer_inclusion_parse_failures: false,
             call_check_operations: None,
             preflight_failure_warnings: Default::default(),
             suppress_shell_probes: false,
@@ -1142,8 +1214,14 @@ impl ComposeOptions {
     }
 
     /// Returns true if the given operation is enabled.
+    ///
+    /// A dry run ([`Self::with_dry_run`]) never runs the body's commands, so
+    /// [`ComposeOperation::ShellExpansion`] and
+    /// [`ComposeOperation::ShellBlocks`] read as disabled under one: their
+    /// directives stay as written and are recorded as deferrals.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
         self.enabled_operations.contains(op)
+            && !(self.passive.is_some() && matches!(op, ComposeOperation::ShellExpansion | ComposeOperation::ShellBlocks))
     }
 
     /// Whether the passive call check covers `op`'s surface: an enabled
@@ -1178,15 +1256,35 @@ impl ComposeOptions {
     /// Body `::shell` directives stay unexpanded. Like the shell-approval
     /// walk, the check does not hold the values a later stage produces, so a
     /// value still waiting on a command and an expression it cannot finish are
-    /// left to the composition that owns their verdict. A failure the check
-    /// can prove on its own (a rejected call, a schema violation, an invalid
-    /// file reference) still fails it.
+    /// left to the composition that owns their verdict. So are a `when=`
+    /// condition that fails, an inclusion whose parser fails (composition
+    /// rejects it in the root and tolerates it in a child), and an included
+    /// file that exists but cannot be loaded (composition tolerates it). A
+    /// failure the check can prove on its own (a rejected call, a schema
+    /// violation, an invalid file reference) still fails it.
     #[must_use]
     pub fn for_reference_check(mut self) -> Self {
         self.enabled_operations.remove(ComposeOperation::ShellExpansion);
         self.defer_shell_pending_schema_problems = true;
         self.defer_missing_runtime_context = true;
         self.defer_expression_failures = true;
+        self.defer_inclusion_parse_failures = true;
+        self
+    }
+
+    /// Leaves out the passive call check on every surface, for a reference
+    /// check that must still list a document's references after the call
+    /// check refused it.
+    ///
+    /// Only `md compose` sets it, beside
+    /// [`for_reference_check`](Self::for_reference_check), which leaves a
+    /// call that then fails to evaluate to the composition that owns its
+    /// verdict, and a dry run ([`Self::with_dry_run`]); the call check's own
+    /// rejection is reported from the first, unchanged check. Never set it on
+    /// a composition that delivers a document.
+    #[must_use]
+    pub fn without_call_check(mut self) -> Self {
+        self.call_check_operations = Some(ComposeOperationSet::empty());
         self
     }
 
@@ -1245,6 +1343,10 @@ impl ComposeOptions {
     }
 
     /// Sets the compose source as a file path.
+    ///
+    /// A relative path names the file under the request directory of the
+    /// [`ComposeRequest`](super::request::ComposeRequest) these options are
+    /// prepared into, never the process directory.
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.source = ComposeSource::File(path.into());
@@ -1259,16 +1361,19 @@ impl ComposeOptions {
     /// resolved to, when the caller has them; the child's context is then
     /// derived from it (see [`SourceOpening`]).
     /// A source outside the request's tree that only a trusted-external
-    /// derivation of `context` admits is marked `TrustedExternal`.
+    /// derivation of `context` admits is marked `TrustedExternal`. A source
+    /// in a Git repository `context` does not name gets a context built in
+    /// that repository, decided here once ([`SourceDerivation::OwnRepository`]).
     #[must_use]
     pub(crate) fn with_accepted_source_file_in(
         mut self,
         path: impl Into<PathBuf>,
         opening: Option<SourceOpening>,
         context: &biscuit_file::FileResolutionContext,
+        repositories: &super::request::SourceRepositories,
     ) -> Self {
         let path = path.into();
-        self.source_derivation = source_derivation_for(context, &path, opening.as_ref());
+        self.source_derivation = source_derivation_for(context, &path, opening.as_ref(), repositories);
         self.source = ComposeSource::File(path);
         self.source_opening = opening;
         self
@@ -1277,10 +1382,22 @@ impl ComposeOptions {
     /// Admits the root file source the way a child source is admitted
     /// ([`Self::with_accepted_source_file_in`]): a source outside the
     /// request's tree that only a trusted-external derivation of `context`
-    /// admits is marked `TrustedExternal`.
-    pub(crate) fn admit_source_in(&mut self, context: &biscuit_file::FileResolutionContext) {
-        if let ComposeSource::File(path) = &self.source {
-            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref());
+    /// admits is marked `TrustedExternal`, and one in a repository `context`
+    /// does not name is derived in that repository.
+    ///
+    /// A relative source path names a file under `context`'s request
+    /// directory and is made absolute there first, so `vendor/review.md`
+    /// and its absolute spelling are one source with one checkout.
+    pub(crate) fn admit_source_in(
+        &mut self,
+        context: &biscuit_file::FileResolutionContext,
+        repositories: &super::request::SourceRepositories,
+    ) {
+        if let ComposeSource::File(path) = &mut self.source {
+            if path.is_relative() {
+                *path = context.request_cwd().join(&*path);
+            }
+            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref(), repositories);
         }
     }
 
@@ -1781,8 +1898,68 @@ impl ComposeOptions {
         self
     }
 
+    /// Makes this composition a passive dry run with a new
+    /// [`PassiveSession`](crate::markdown::compose::passive::PassiveSession).
+    ///
+    /// Nothing with an effect happens: no frontmatter `$( … )` value, body
+    /// `::shell` directive, or `::shell-block` runs, no approval is asked
+    /// for, no login shell is probed, no ICMP packet is sent, and no compose,
+    /// shell, or remote cache is read or written. Each skipped piece of work
+    /// keeps its authored text and is recorded in the session as a
+    /// [`Deferral`](crate::markdown::compose::passive::Deferral); everything
+    /// that does not depend on it still composes. Remote reads follow the
+    /// captured `network` permission: allowed hosts are fetched with no
+    /// persistent cache, and a denied host keeps its typed refusal. The
+    /// built-in shell blacklist still refuses a blacklisted command as
+    /// authored; an alias is not expanded, since that starts the login
+    /// shell. The session survives every child, transclusion,
+    /// slot, and callback composition that inherits these options.
+    #[must_use]
+    pub fn with_dry_run(self) -> Self {
+        self.with_passive_session(crate::markdown::compose::passive::PassiveSession::new())
+    }
+
+    /// [`Self::with_dry_run`] recording into an existing `session`, so a
+    /// host composing several documents of one invocation shares one
+    /// record.
+    ///
+    /// Reads go through the session's
+    /// [`PassiveObservations`](crate::markdown::compose::passive::PassiveObservations):
+    /// its `load_data` memo unless a data runtime is already attached, and
+    /// its remote-fetch runtime for this composition's fetch policy unless a
+    /// remote runtime is already attached, whose fetches it then shares
+    /// without persisting any of its own. Every composition attached to a
+    /// session sharing them observes a source once.
+    #[must_use]
+    pub fn with_passive_session(mut self, session: crate::markdown::compose::passive::PassiveSession) -> Self {
+        if self.data_runtime.is_none() {
+            self.data_runtime = Some(session.observations().data());
+        }
+        // An attached runtime keeps its fetches; what the dry run fetches
+        // through it is not persisted.
+        self.remote_fetch = self.remote_fetch.as_ref().map(RemoteFetchRuntime::without_store);
+        self.passive = Some(session);
+        self.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
+        // Alias lookup starts the login shell, an effect a dry run never has.
+        self.alias_resolutions = crate::markdown::compose::shell_expansion::alias::AliasResolutions::passive();
+        self
+    }
+
+    /// Whether this composition is a passive dry run ([`Self::with_dry_run`]).
+    pub fn is_dry_run(&self) -> bool {
+        self.passive.is_some()
+    }
+
+    /// The dry run's passive session, when this is one.
+    pub fn passive_session(&self) -> Option<&crate::markdown::compose::passive::PassiveSession> {
+        self.passive.as_ref()
+    }
+
     /// Removes a transclusion whose target does not exist, with a warning,
-    /// instead of failing the document.
+    /// instead of failing the document: a `::file` or `::code` directive, or
+    /// one `prologue`/`epilogue` entry (the others are still included). Pre-flight skips the same targets. Only an absent target
+    /// (failure class `NoMatch`) is removed; a malformed, unreadable, or
+    /// unsupported one still fails.
     #[must_use]
     pub fn with_allow_missing_transclusions(mut self, allow: bool) -> Self {
         self.allow_missing_transclusions = allow;
@@ -1834,7 +2011,7 @@ impl ComposeOptions {
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
             file_resolution_context: context.clone(),
-            source_derivation: self.source_derivation,
+            source_derivation: self.source_derivation.clone(),
             source_opening: self.source_opening.clone(),
         }
     }
@@ -1852,7 +2029,7 @@ impl ComposeOptions {
     ) -> biscuit_file::FileResolutionContext {
         match &self.source {
             ComposeSource::File(path) => {
-                source_file_context(context, path, self.source_derivation, self.source_opening.as_ref())
+                source_file_context(context, path, &self.source_derivation, self.source_opening.as_ref())
             }
             _ => context.clone(),
         }
@@ -1894,6 +2071,7 @@ impl ComposeOptions {
         context.nested_compose = self.nested_compose.clone();
         context.host_globals = self.host_globals.clone();
         context.iteration = self.expression_iteration_budget();
+        context.passive = self.passive.clone();
         context
     }
 
@@ -1942,6 +2120,7 @@ impl ComposeOptions {
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.host_globals = self.host_globals.clone();
         context.iteration = self.expression_iteration_budget();
+        context.passive = self.passive.clone();
         context
     }
 
@@ -2089,16 +2268,20 @@ impl ComposeOptions {
     /// caller that configures an allowed host via [`with_remote_read_config`],
     /// or whose configuration says `network: allow`, enables them without
     /// also opting into remote transclusion. Block transclusion keeps its own
-    /// explicit [`with_allow_remote_transclusion`] gate. An empty allowlist
-    /// and a denied `network` with the transclusion flag unset mean remote
-    /// reads stay fully disabled, preserving the deny-all default.
+    /// explicit [`with_allow_remote_transclusion`] gate. A configured
+    /// `network: ask` enables them too, so a URL read reports the approval
+    /// it needs. An empty allowlist and a denied `network` with the
+    /// transclusion flag unset mean remote reads stay fully disabled,
+    /// preserving the deny-all default.
     ///
     /// [`with_remote_read_config`]: Self::with_remote_read_config
     /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
     pub(crate) fn remote_reads_enabled(&self) -> bool {
+        let network = self.network_permission();
         self.allow_remote_transclusion
             || self.remote_read_config.http_hosts().next().is_some()
-            || self.network_permission().allows_every_host()
+            || network.allows_every_host()
+            || network.requires_approval()
     }
 
     /// The request's ICMP authority with its grants derived from the
@@ -2458,6 +2641,20 @@ impl ComposeOptions {
         self
     }
 
+    /// [`Self::with_shared_remote_fetch`] with `config`'s hosts, concurrency,
+    /// and freshness in place of the attached remote-read configuration,
+    /// which is left as it is. A command attaches the runtime its
+    /// composition fetches with before an earlier pass that must not take
+    /// the configuration's other grants (`md compose`'s reference check
+    /// takes no ICMP grant), so both passes fetch each URL once.
+    #[must_use]
+    pub fn with_shared_remote_fetch_under(mut self, config: &crate::markdown::compose::remote::RemoteReadConfig) -> Self {
+        let attached = std::mem::replace(&mut self.remote_read_config, config.clone());
+        self.remote_fetch = Some(self.build_remote_fetch_runtime());
+        self.remote_read_config = attached;
+        self
+    }
+
     /// Attaches a fresh `load_data` runtime that every pass cloned from these
     /// options shares: one memo and one read set for the whole command.
     ///
@@ -2605,8 +2802,7 @@ impl ComposeOptions {
 
     /// The host `source` is analyzed as, judged in `context` (the source's
     /// own context): [`select`](crate::config::registration::select) over the
-    /// attached registered hosts, then the legacy root catalogs only when no
-    /// registered host identifies it. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
+    /// attached registered hosts. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
     /// when the caller supplied its own host globals. Passive; the selection's
     /// warnings are returned with it.
     pub fn host_selection_for(
@@ -2615,10 +2811,7 @@ impl ComposeOptions {
         context: &biscuit_file::FileResolutionContext,
     ) -> crate::config::registration::Selected {
         if self.has_caller_host_globals() {
-            return crate::config::registration::Selected {
-                selection: crate::config::registration::HostSelection::Md,
-                diagnostics: Vec::new(),
-            };
+            return crate::config::registration::Selected::md();
         }
         let document = match source.source() {
             Some(crate::markdown::compose::ComposeSource::File(path)) => Some(path.as_path()),
@@ -2670,13 +2863,21 @@ impl ComposeOptions {
     /// cache). Performs no filesystem I/O: the store creates its directories
     /// on the first remote body it writes.
     fn build_remote_fetch_runtime(&self) -> RemoteFetchRuntime {
-        let remote_store = self.cache_root.as_ref().map(|root| {
+        // A dry run fetches what the policy allows but persists nothing.
+        let remote_store = self.cache_root.as_ref().filter(|_| self.passive.is_none()).map(|root| {
             Arc::new(FileStore::at(FileStore::resolve_cache_root(
                 root,
                 self.cache_namespace.as_deref(),
             )))
         });
-        RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission())
+        let runtime =
+            RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission());
+        // A dry run's passes share one runtime per fetch policy, so a URL
+        // they all read is fetched once.
+        match &self.passive {
+            Some(session) => session.observations().remote(runtime),
+            None => runtime,
+        }
     }
 
     // ── Getters ────────────────────────────────────────────────────
@@ -3182,8 +3383,8 @@ fn encode_file_resolution_context(
     }
     enc.bool(context.is_trusted_external_authoring_cwd());
 
-    let scope = context.launch_magic_scope();
-    enc.field("launch_magic_scope");
+    let scope = context.launch_scope();
+    enc.field("launch_scope");
     for path in [
         Some(scope.request_dir()),
         scope.repository_root(),
@@ -3252,6 +3453,19 @@ fn encode_file_resolution_context(
     enc.bool(context.external_relative_allowed());
 }
 
+/// An own-repository source context decides what the source's references
+/// resolve to, so the whole context is identity.
+fn encode_source_derivation(enc: &mut GraphIdentityEncoder, derivation: &SourceDerivation) {
+    match derivation {
+        SourceDerivation::Ordinary => enc.tag(0),
+        SourceDerivation::TrustedExternal => enc.tag(1),
+        SourceDerivation::OwnRepository(context) => {
+            enc.tag(2);
+            encode_file_resolution_context(enc, context);
+        }
+    }
+}
+
 fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<SourceOpening>) {
     match opening {
         Some(opening) => {
@@ -3287,6 +3501,7 @@ fn encode_network_permission(enc: &mut GraphIdentityEncoder, network: &crate::co
     match network {
         NetworkPermission::Deny => enc.tag(0),
         NetworkPermission::Allow => enc.tag(1),
+        NetworkPermission::Ask => enc.tag(3),
         NetworkPermission::Invalid(error) => {
             enc.tag(2);
             enc.str(&error.to_string());
@@ -3357,6 +3572,7 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             allow_missing_transclusions,
+            passive,
             allow_untyped_map_variables,
             allow_untyped_filter_variables,
             iteration_limits,
@@ -3398,6 +3614,7 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
+            defer_inclusion_parse_failures,
             call_check_operations,
             // A warning sink: it changes the report, never a composed result.
             preflight_failure_warnings: _,
@@ -3575,6 +3792,8 @@ impl ComposeOptions {
 
         enc.field("allow_missing_transclusions");
         enc.bool(*allow_missing_transclusions);
+        enc.field("dry_run");
+        enc.bool(passive.is_some());
         enc.field("allow_untyped_map_variables");
         enc.bool(*allow_untyped_map_variables);
         enc.field("allow_untyped_filter_variables");
@@ -3590,10 +3809,7 @@ impl ComposeOptions {
         enc.field("file_resolution_context");
         encode_file_resolution_context(&mut enc, file_resolution_context);
         enc.field("source_derivation");
-        enc.tag(match source_derivation {
-            SourceDerivation::Ordinary => 0,
-            SourceDerivation::TrustedExternal => 1,
-        });
+        encode_source_derivation(&mut enc, source_derivation);
         enc.field("source_opening");
         encode_source_opening(&mut enc, source_opening);
 
@@ -3818,6 +4034,8 @@ impl ComposeOptions {
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
         enc.bool(*defer_expression_failures);
+        enc.field("defer_inclusion_parse_failures");
+        enc.bool(*defer_inclusion_parse_failures);
         enc.field("call_check_operations");
         match call_check_operations {
             Some(operations) => {
@@ -3962,6 +4180,8 @@ impl ComposeOptions {
 
         cenc.field("allow_missing_transclusions");
         cenc.bool(*allow_missing_transclusions);
+        cenc.field("dry_run");
+        cenc.bool(passive.is_some());
         cenc.field("allow_untyped_map_variables");
         cenc.bool(*allow_untyped_map_variables);
         cenc.field("allow_untyped_filter_variables");
@@ -3981,10 +4201,7 @@ impl ComposeOptions {
         cenc.field("file_resolution_context");
         encode_file_resolution_context(&mut cenc, file_resolution_context);
         cenc.field("source_derivation");
-        cenc.tag(match source_derivation {
-            SourceDerivation::Ordinary => 0,
-            SourceDerivation::TrustedExternal => 1,
-        });
+        encode_source_derivation(&mut cenc, source_derivation);
         // The opening anchor can change the source's tree root, and with it
         // what the source's relative references resolve to.
         cenc.field("source_opening");
@@ -4300,7 +4517,7 @@ mod tests {
         assert_eq!(request.context.anchor(), expected);
         assert_eq!(
             request.context.get("cwd"),
-            Some(&serde_json::json!(biscuit_file::to_portable_string(&expected))),
+            Some(&serde_json::json!(biscuit_file::to_forward_slash_string(&expected))),
         );
     }
 
@@ -4725,7 +4942,7 @@ mod tests {
     /// differ only in that scope can resolve the same `@` reference to
     /// different files, so both identity products must distinguish them.
     #[test]
-    fn identities_distinguish_launch_magic_scope() {
+    fn identities_distinguish_launch_scope() {
         let launch_a = biscuit_file::FileResolutionContext::from_snapshot(
             fixture_root("repo/area-a"),
             None,
@@ -4739,8 +4956,8 @@ mod tests {
         )
         .with_repository_root(fixture_root("repo"));
         assert_ne!(
-            launch_a.launch_magic_scope(),
-            launch_b.launch_magic_scope(),
+            launch_a.launch_scope(),
+            launch_b.launch_scope(),
             "fixture must vary only the launch scope"
         );
 
@@ -4749,13 +4966,13 @@ mod tests {
             fixed_opts(),
             source
                 .clone()
-                .with_launch_magic_scope(launch_a.launch_magic_scope().clone()),
+                .with_launch_scope(launch_a.launch_scope().clone()),
         );
         let b = req_in(
             fixed_opts(),
             source
                 .clone()
-                .with_launch_magic_scope(launch_b.launch_magic_scope().clone()),
+                .with_launch_scope(launch_b.launch_scope().clone()),
         );
 
         assert_ne!(rid(&a), rid(&b));

@@ -194,7 +194,7 @@ static PATTERN_CACHE: LazyLock<Mutex<HashMap<String, Option<Arc<TextPattern>>>>>
 /// starts over.
 const CHECKED_CAPACITY: usize = 256;
 
-/// The canonical content hashes of documents [`check_declarations`] has
+/// The [`written_digest`]s of documents [`check_declarations`] has
 /// accepted: hosts lower one baseline again and again, and the check reads
 /// the whole lowered document. A refusal is not remembered.
 static CHECKED: LazyLock<Mutex<std::collections::HashSet<u64>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
@@ -956,7 +956,7 @@ impl<'s> Compiler<'s> {
 ///
 /// As [`DefaultPlan::compile`].
 pub(crate) fn check_declarations(schema: &Value) -> Result<(), SchemaError> {
-    let digest = biscuit_hash::xx_hash_json(schema);
+    let digest = written_digest(schema);
     if CHECKED.lock().expect("checked declarations poisoned").contains(&digest) {
         return Ok(());
     }
@@ -978,6 +978,29 @@ pub(crate) fn check_declarations(schema: &Value) -> Result<(), SchemaError> {
     }
     checked.insert(digest);
     Ok(())
+}
+
+/// XXH64 of `schema`'s JSON text in its own key order, streamed into the
+/// hasher: [`CHECKED`]'s key. A memo key needs no key-order-insensitive
+/// identity, so it neither sorts keys nor builds the text as a canonical
+/// rendering does; an equal schema written in another key order only misses
+/// and is checked again. Every lowering pays this hash, a large registered
+/// trigger payload included, even when the check itself runs.
+fn written_digest(schema: &Value) -> u64 {
+    use std::hash::Hasher as _;
+    struct Feed(biscuit_hash::XxHasher);
+    impl std::io::Write for Feed {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.write(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut feed = Feed(biscuit_hash::XxHasher::new());
+    serde_json::to_writer(&mut feed, schema).expect("serializing a JSON value into a hasher cannot fail");
+    feed.0.finish()
 }
 
 // ── Application ───────────────────────────────────────────────────────────

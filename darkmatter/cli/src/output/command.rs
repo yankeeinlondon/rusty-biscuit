@@ -12,7 +12,7 @@
 
 use biscuit_terminal::output::{OutputTarget, WidthRequest, render_output};
 use color_eyre::eyre::{Report, Result};
-use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+use darkmatter::markdown::compose::expression::{Diagnostic, LegacyTrailProjection, Severity};
 use darkmatter::markdown::compose::report_diagnostics::with_document_fallback;
 use darkmatter::markdown::output::command::empty_document;
 use renderable::CommandOutput;
@@ -49,6 +49,10 @@ impl DataShape {
 
     fn status(&self, value: Option<Value>, success: bool, diagnostics: Vec<Diagnostic>) -> Value {
         let outcome = if success { "success" } else { "failure" };
+        // These commands published their records before `trail` existed: a
+        // trail of only transclusions and `::map` / `::filter` items stays
+        // `included_via` and `iteration_path` alone.
+        let diagnostics: Vec<_> = diagnostics.iter().map(LegacyTrailProjection).collect();
         let diagnostics = serde_json::to_value(diagnostics).expect("a diagnostic is JSON");
         // `md clean`'s value already has a `diagnostics` field, whose rows are
         // positions in the document; its meaning is a published contract.

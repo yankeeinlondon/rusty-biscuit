@@ -286,6 +286,15 @@ pub(crate) fn prepare_resolved(
     // The built-in blacklist judges the complete chain before anything else
     // can authorize it.
     check_builtin_chain(&effective, &display_command)?;
+    // A dry run asks for no approval and runs nothing; the blacklist above
+    // is the real run's refusal and is still reported.
+    if options.is_dry_run() {
+        return Err(ShellExpansionError::SkippedInDryRun {
+            ctx: Box::new(effective.ctx.clone()),
+            command: display_command,
+            origin: effective.origin.clone(),
+        });
+    }
 
     // ── Pre-approved fast path ───────────────────────────────────────
     // Resolved-byte membership only: every segment's freshly resolved bytes
@@ -640,6 +649,7 @@ fn locate_warning(warning: ComposeWarning, origin: &ShellCommandOrigin) -> Compo
         ShellCommandOrigin::Body { line } => warning.at_line(*line),
         ShellCommandOrigin::Frontmatter { .. } => warning,
         ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(*command_line),
+        ShellCommandOrigin::Authored { site, .. } => locate_warning(warning, site),
     }
 }
 
@@ -667,6 +677,16 @@ pub(crate) fn execute_prepared_outcome(
     options: &crate::markdown::compose::ComposeRequest,
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
+    // A dry run spawns nothing and reads no cached outcome. Preparation
+    // already skips it before approval; this guard keeps any caller that
+    // prepared outside a dry run from executing under one.
+    if options.is_dry_run() {
+        return Err(ShellExpansionError::SkippedInDryRun {
+            ctx: Box::new(prepared.effective.ctx.clone()),
+            command: prepared.display_command.clone(),
+            origin: prepared.effective.origin.clone(),
+        });
+    }
     let shell_opts = options.shell_options();
     let run = || {
         let outcome = executor::execute_directive_outcome(

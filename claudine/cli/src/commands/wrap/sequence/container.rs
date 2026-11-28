@@ -303,7 +303,7 @@ pub(super) fn run_proxy(
         let (outcome, _) = prepare_and_run_active_document(shared, CompositionKind::Direct, target_source, &target_file,
             &overlay, Some(Box::new(committed)), false, &mut None, &shared.system_prompt_args(), &mut caller_overrides,
             &mut records, composition::InteractiveSchemaOptions::default(), &Some(resolution.request_cwd().to_path_buf()),
-            &cache, &ledger, verbose, None, Vec::new(), std::time::Instant::now(), document, context, Some(&scope))?;
+            &cache, &ledger, verbose, None, Vec::new(), std::time::Instant::now(), document, context, Some(&scope), None)?;
         match outcome {
             ActiveDocumentOutcome::Done { exit_code, .. } => return Ok(exit_code),
             ActiveDocumentOutcome::Handoff(next) => handoff = next,

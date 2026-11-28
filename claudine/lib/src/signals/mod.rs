@@ -1,5 +1,5 @@
 //! Signal-detection tables compiled by `claudine-gen` from the signals
-//! research corpus (`docs/research/signals/`).
+//! research corpus (`docs/research/providers/signals/`).
 //!
 //! Alongside the compiled tables this module hosts the generic detection
 //! engine ([`SignalEngine`]), the typed-event builder, the dedup sink

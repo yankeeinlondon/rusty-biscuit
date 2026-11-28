@@ -333,7 +333,7 @@ impl<'a> NamedTypeScope<'a> {
             SchemaError::NoMatch { reference, .. }
             | SchemaError::Unresolved { reference, .. }
             | SchemaError::BareNameSiblingExists { reference, .. }
-            | SchemaError::RemoteUnsupported { reference } => reference.trim(),
+            | SchemaError::RemoteUnsupported { reference, .. } => reference.trim(),
             _ => return None,
         };
         let declaration = self.declaration.as_ref()?;

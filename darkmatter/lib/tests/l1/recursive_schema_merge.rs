@@ -455,7 +455,7 @@ fn raw_yaml_baseline_file_is_refused_before_merge_ingress() {
     let path = write(dir.path(), "control.yaml", &control);
     let outcome = DarkmatterSchemas::new(FileResolutionContext::new(dir.path())).with_baseline_from_file(&path);
     assert!(
-        matches!(&outcome, Err(SchemaError::NotASchemaDocument { path: refused, reason: NotSchemaReason::NoSchemaProperty })
+        matches!(&outcome, Err(SchemaError::NotASchemaDocument { path: refused, reason: NotSchemaReason::NoSchemaProperty, .. })
             if refused.ends_with("control.yaml")),
         "{:?}",
         outcome.map(|_| ())

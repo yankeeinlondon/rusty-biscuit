@@ -827,7 +827,7 @@ mod fn_phase5 {
             result,
             format!(
                 "[My Doc]({})",
-                biscuit_file::to_portable_string(&dir.path().join("doc.md"))
+                biscuit_file::to_forward_slash_string(&dir.path().join("doc.md"))
             )
         );
     }
@@ -1093,7 +1093,7 @@ mod fn_phase5 {
             code_link(&[json!("plans/foo.md")], &ctx),
             format!(
                 "[`plans/foo.md`]({})",
-                biscuit_file::to_portable_string(&dir.path().join("plans/foo.md"))
+                biscuit_file::to_forward_slash_string(&dir.path().join("plans/foo.md"))
             )
         );
     }

@@ -17,6 +17,8 @@ start:
     stderr: "{{basename(review)}} of `{{parent_dir(spec)}}` needs your rulings before the review/fix cycle can continue."
     say: "A review needs your rulings. Please stand by while the questions are prepared."
 success:
+    # The spec's `human-review` says whether rulings are waiting on the author.
+    - set_frontmatter: ["{{spec}}", "human-review", "{{ frontmatter(review, 'human-resolved') != true }}"]
     - when: "frontmatter(review, 'human-resolved') == true"
       then:
           - message: "the rulings for {{basename(review)}} of `{{parent_dir(spec)}}` are recorded; the review/fix cycle continues ({{ctx.agent}}/{{ctx.model}})"
@@ -31,7 +33,7 @@ success:
   decisions an unattended review/fix cycle could not make on its own.
 - The review that stopped for a human: {{review}}
 - The specification it is based on: {{spec}}
-- The implementation log and earlier reviews are in `{{dir}}`.
+- Earlier reviews are in `{{dir}}`.
 
 Every minute this session takes keeps the pipeline stopped. Be thorough in
 the context you give and brief in everything else.
@@ -61,8 +63,8 @@ the context you give and brief in everything else.
 1. **Contemplate**
 
     Read the review's `human-in-the-loop` items, the findings that wait on
-    them, the parts of the spec they touch, and the implementation log's
-    evidence for them. For each item, establish what is decided, what
+    them, the parts of the spec they touch, and the evidence the review
+    records for them. For each item, establish what is decided, what
     evidence exists, and what changes depending on the answer.
 
 2. **Report**

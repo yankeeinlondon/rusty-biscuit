@@ -491,6 +491,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         }
         Constraint::Eager => out.push_str("eager"),
         Constraint::NotEmpty => out.push_str("not-empty"),
+        Constraint::NoCoerce => out.push_str("no-coerce"),
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
         Constraint::Generated => out.push_str("generated"),

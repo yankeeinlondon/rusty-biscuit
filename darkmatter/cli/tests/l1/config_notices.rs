@@ -91,7 +91,7 @@ fn a_composing_data_output_carries_the_notice_in_its_diagnostics() {
     assert_eq!(created[0]["severity"], "info");
     assert_eq!(
         created[0]["source"]["file"].as_str(),
-        Some(fixture.home().join(".darkmatter.yaml").to_str().unwrap())
+        Some(biscuit_file::to_forward_slash_string(&fixture.home().join(".darkmatter.yaml")).as_str())
     );
     assert_created(&fixture);
 }
@@ -159,7 +159,7 @@ fn a_user_file_that_does_not_load_stops_a_command_that_reads_it() {
     let error = &value["diagnostics"][0];
     assert_eq!(error["code"], "dm.config.invalid", "{value:#}");
     assert_eq!(error["severity"], "error");
-    assert_eq!(error["source"]["file"].as_str(), Some(config.to_str().unwrap()));
+    assert_eq!(error["source"]["file"].as_str(), Some(biscuit_file::to_forward_slash_string(&config).as_str()));
     assert_eq!(error["source"]["line"], 2, "{value:#}");
     assert!(error["source"]["column"].is_u64(), "{value:#}");
     assert!(unread.status.success(), "a command that reads no configuration runs: {}", stderr_of(&unread));
@@ -213,6 +213,35 @@ fn a_missing_permissions_reference_outranks_an_exact_host() {
     assert_refused_naming("config-reference-missing-host", "permissions: ./missing.yaml\n", |home| {
         vec![home.join("missing.yaml").display().to_string()]
     });
+}
+
+/// `md init` writes only the user file, so a broken repository reference
+/// is reported with its direct correction and no `md init` remedy.
+#[test]
+fn a_broken_repository_reference_names_a_direct_correction_not_md_init() {
+    let fixture = CliProcessFixture::named("config-reference-repository-remedy");
+    assert!(fixture.initialize_repository(), "git must be available");
+    std::fs::write(fixture.home().join(".darkmatter.yaml"), "permissions: {}\n").unwrap();
+    fixture.write_file("cwd/.darkmatter.yaml", "permissions: ./policy.yaml\n");
+    fixture.write_file("cwd/doc.md", "# Doc\n\n::file https://127.0.0.1:9/child.md\n");
+    let output = run(&fixture, &["compose", "doc.md", "--allow", "host=127.0.0.1", "--output", "json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stdout));
+    let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
+    // The repository's configuration is named at its canonical path (macOS
+    // `/private/var` for the fixture's `/var`).
+    let declared_in =
+        biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join(".darkmatter.yaml").display().to_string();
+    let message = value["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .filter(|record| record["severity"] == "error")
+        .filter_map(|record| record["message"].as_str())
+        .find(|message| message.contains("`./policy.yaml`"))
+        .unwrap_or_else(|| panic!("a reference error: {value:#}"));
+    assert!(message.contains("which does not exist; create it"), "{message}");
+    assert!(message.contains(&format!("point `permissions` in `{declared_in}` at another file")), "{message}");
+    assert!(!message.contains("md init"), "{message}");
 }
 
 #[test]

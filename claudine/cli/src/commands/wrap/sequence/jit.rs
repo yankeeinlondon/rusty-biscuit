@@ -106,7 +106,7 @@ pub(super) struct StepComposition {
 /// Fold user setters and runtime mutations over the live document's frontmatter.
 /// The step's `seq` binding travels separately from those frontmatter layers.
 /// Passing `runtime: None` yields the initial view with empty `seq.outputs`
-/// and no mutations, used by validation and `--dry-run`.
+/// and no mutations, used by validation.
 pub(super) fn step_set_overrides(
     plan: &SequencePlan,
     step_index: usize,
@@ -137,9 +137,8 @@ pub(super) fn step_env_overrides(
     target: Option<&ResolvedExecutionTarget>,
 ) -> BTreeMap<String, String> {
     let mut env = step_owned_env(effective_fail_fast);
-    // A `--dry-run` step with an unresolved agent state has no target; leaving
-    // `AGENT` unset makes `{{env.AGENT}}` resolve empty exactly as the direct
-    // compose `--dry-run` path does.
+    // A step without a target leaves `AGENT` unset, so `{{env.AGENT}}`
+    // resolves empty.
     if let Some(target) = target {
         env.insert("AGENT".to_string(), target.provider.as_slug().to_string());
         if let Some(model) = &target.model {
@@ -222,7 +221,10 @@ pub(super) fn compose_step_selecting(
     // Schema pre-validation before the shell pass. A step whose effective
     // frontmatter is missing required values must report that rather than let
     // Darkmatter's compose surface a raw `SchemaValidationFailed`, which would
-    // hide the property names the caller needs to collect or report.
+    // hide the property names the caller needs to collect or report. A
+    // `$schema` template resolves through the session the step's composition
+    // then takes.
+    let slot_session = super::super::launch_slot_session(ctx.invocation, ctx.file_resolution_context)?;
     let pre = composition::pre_validate_layered_for_mode(
         source,
         set_overrides,
@@ -234,6 +236,7 @@ pub(super) fn compose_step_selecting(
             composition::CompositionMode::ChainedDocument
         },
         ctx.invocation.trigger_findings(),
+        Some(&slot_session),
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
     crate::commands::compose::emit_trigger_warnings(ctx.invocation.trigger_findings(), ctx.shared.silent);
@@ -248,7 +251,6 @@ pub(super) fn compose_step_selecting(
             claudine::harness::CapturedPermissions::for_source(ctx.invocation, ctx.file_resolution_context),
             Some(Arc::clone(&ctx.approval_cache)),
         ),
-        ctx.shared.dry_run,
         ctx.shared.yolo,
     );
 
@@ -256,6 +258,7 @@ pub(super) fn compose_step_selecting(
     // document here would grant new bytes or shapes after the sequence starts.
     let mut prepare_options =
         step_prepare_options(&step_source, ctx, step_overrides, env_overrides, allow_empty_body);
+    prepare_options.slot_session = Some(slot_session);
     let mode = if ctx.inline_mode {
         composition::CompositionMode::InlineFrontmatterPrompt
     } else {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, trace};
 
 use crate::file_reference::context::{
-    FileResolutionContext, ResolutionContext, find_git_root, home_dir,
+    FileResolutionContext, ImplicitBases, ResolutionContext, find_git_root, home_dir,
 };
 use crate::file_reference::error::{FileReferenceError, classify_error};
 pub(crate) use crate::file_reference::lexical::normalize_components;
@@ -11,7 +11,7 @@ use crate::file_reference::lexical::simplify_root;
 use crate::file_reference::parse;
 use crate::file_reference::portable::{PathIdentity, first_seen_by_identity};
 use crate::file_reference::{
-    CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
+    CompletionEntryForm, DetailedOutcome, EntryKind, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
     ResolutionCandidate, ResolutionFailure, RootProvenance, TemplateSegment, make_candidate,
     make_partial_completion, make_probed,
@@ -67,7 +67,7 @@ pub(crate) fn resolve(
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
-    match resolve_core(parsed, magic_paths, vault_roots, ctx, &mut |_| true, &mut |_| false).outcome {
+    match resolve_core(parsed, magic_paths, vault_roots, ctx, EntryKind::File, &mut |_| true, &mut |_| false).outcome {
         CoreOutcome::Matched(p) => Ok(Some(p)),
         CoreOutcome::NoMatch => Ok(None),
         CoreOutcome::Failed(_, e) => Err(e),
@@ -97,6 +97,7 @@ pub(crate) fn resolve_core(
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
+    kind: EntryKind,
     admit: &mut dyn FnMut(&Path) -> bool,
     present: &mut dyn FnMut(&Path) -> bool,
 ) -> CoreResolution {
@@ -130,6 +131,14 @@ pub(crate) fn resolve_core(
     };
 
     if parsed.recursive {
+        if kind == EntryKind::Directory {
+            return failed_core(
+                ResolutionFailure::InvalidReference,
+                FileReferenceError::InvalidSyntax(format!(
+                    "recursive reference `{}` searches for files", parsed.authored
+                )),
+            );
+        }
         resolve_recursive_core(
             parsed,
             &interpolated,
@@ -151,6 +160,7 @@ pub(crate) fn resolve_core(
             ctx,
             repository_root,
             effective_kind,
+            kind,
             admit,
             present,
         )
@@ -317,9 +327,9 @@ fn kind_uses_repository_root(kind: &ReferenceKind) -> bool {
 enum ProbeStep {
     /// The path does not exist (`NotFound`) -- advance the search.
     Missing,
-    /// The path exists but is not a regular file -- advance the search.
-    NonFile,
-    /// The path is a regular file (following a symlink) -- the winner.
+    /// The path has a different entry kind.
+    WrongKind,
+    /// Metadata matches the requested entry kind.
     Matched,
     /// A permission or other I/O failure -- stop the search.
     Io(std::io::Error),
@@ -328,19 +338,30 @@ enum ProbeStep {
 /// Probe a candidate with `fs::metadata`, distinguishing absence from I/O
 /// failure. `Path::is_file()` is insufficient because it collapses permission
 /// and other I/O errors into `false`. Metadata follows symlinks, so a symlink
-/// to a regular file still matches.
+/// to a file or directory matches the target kind.
 ///
 /// A name the OS cannot hold (Windows rejects `*` and `?`) cannot exist, so it
 /// is absent rather than an I/O failure: `docs/*.md` is a plain miss on every
 /// OS.
-fn probe_candidate(path: &Path) -> ProbeStep {
+fn probe_candidate(path: &Path, kind: EntryKind) -> ProbeStep {
     match std::fs::metadata(path) {
-        Ok(meta) if meta.is_file() => ProbeStep::Matched,
-        Ok(_) => ProbeStep::NonFile,
+        Ok(meta) if match kind {
+            EntryKind::File => meta.is_file(),
+            EntryKind::Directory => meta.is_dir(),
+        } => ProbeStep::Matched,
+        Ok(_) => ProbeStep::WrongKind,
         Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidFilename) => {
             ProbeStep::Missing
         }
         Err(e) => ProbeStep::Io(e),
+    }
+}
+
+pub(crate) fn parent_directory_exists(path: &Path) -> Result<bool, FileReferenceError> {
+    match probe_candidate(path, EntryKind::Directory) {
+        ProbeStep::Matched => Ok(true),
+        ProbeStep::Missing | ProbeStep::WrongKind => Ok(false),
+        ProbeStep::Io(source) => Err(FileReferenceError::Io { path: path.to_path_buf(), source }),
     }
 }
 
@@ -406,6 +427,7 @@ fn resolve_direct_core(
     ctx: &ResolutionContext,
     repository_root: Option<PathBuf>,
     effective_kind: FileReferenceKind,
+    kind: EntryKind,
     admit: &mut dyn FnMut(&Path) -> bool,
     present: &mut dyn FnMut(&Path) -> bool,
 ) -> CoreResolution {
@@ -452,7 +474,7 @@ fn resolve_direct_core(
                 outcome: CoreOutcome::Failed(classify_error(&error), error),
             };
         }
-        match probe_candidate(candidate.path()) {
+        match probe_candidate(candidate.path(), kind) {
             ProbeStep::Matched => {
                 let resolved = normalize_absolute(candidate.path(), &ctx.cwd);
                 debug!(?resolved, "resolved file reference");
@@ -478,8 +500,8 @@ fn resolve_direct_core(
                 trace!(candidate = ?candidate.path(), "candidate missing");
                 probed.push(make_probed(candidate, ProbeDisposition::Missing));
             }
-            ProbeStep::NonFile => {
-                trace!(candidate = ?candidate.path(), "candidate is not a regular file");
+            ProbeStep::WrongKind => {
+                trace!(candidate = ?candidate.path(), "candidate has the wrong entry kind");
                 probed.push(make_probed(candidate, ProbeDisposition::NonFile));
             }
             ProbeStep::Io(err) => {
@@ -630,10 +652,16 @@ fn anchored_repository_root(
     anchoring: Option<EffectiveAnchoring>,
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
+    if anchoring == Some(EffectiveAnchoring::ImplicitRelative)
+        && ctx.implicit_bases == ImplicitBases::Launch
+        && let Some(scope) = &ctx.launch_scope
+    {
+        return Ok(scope.repository_root().map(Path::to_path_buf));
+    }
     if !resolution_uses_repository_root(parsed, anchoring) {
         return Ok(ctx.repository_root.clone());
     }
-    if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
+    if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_scope) {
         // `@` anchors on the immutable launch scope (ruling 2): the
         // snapshot's repository root — or its absence — is authoritative,
         // never the source-derived anchors or a fresh discovery.
@@ -795,7 +823,7 @@ fn build_magic_chain(inputs: &MagicChainInputs) -> Vec<RootEntry> {
 pub(crate) fn magic_root_chain_for_context(
     ctx: &FileResolutionContext,
 ) -> Vec<super::MagicSearchRoot> {
-    let scope = ctx.launch_magic_scope();
+    let scope = ctx.launch_scope();
     let inputs = MagicChainInputs {
         repository_root: scope.repository_root(),
         request_dir: scope.request_dir(),
@@ -818,7 +846,7 @@ fn magic_chain_inputs<'a>(
     ctx: &'a ResolutionContext,
     repository_root: Option<&'a Path>,
 ) -> MagicChainInputs<'a> {
-    match &ctx.launch_magic_scope {
+    match &ctx.launch_scope {
         Some(scope) => MagicChainInputs {
             repository_root: scope.repository_root(),
             request_dir: scope.request_dir(),
@@ -855,7 +883,7 @@ fn collect_roots(
     match kind {
         ReferenceKind::Relative(_) => Ok(vec![source(ctx.cwd.clone())]),
         ReferenceKind::ImplicitRelative(_) => {
-            Ok(implicit_relative_roots(&ctx.cwd, repository_root))
+            Ok(implicit_relative_roots(ctx, repository_root))
         }
         ReferenceKind::Absolute(_) => Ok(vec![RootEntry {
             path: PathBuf::from("/"),
@@ -934,13 +962,19 @@ fn collect_roots(
     }
 }
 
-/// The ordered implicit-relative roots: `cwd` first, then repository root.
+/// The ordered implicit-relative roots under the selected lookup policy.
 ///
-/// When `cwd` equals the repository root the two collapse to a single
+/// In authoring mode, when `cwd` equals the repository root they collapse to a single
 /// source-provenance candidate; when no repository root is available
 /// `cwd` is the only candidate. It is the single authority for implicit
 /// ordering -- both direct and recursive resolution route through it.
-fn implicit_relative_roots(cwd: &Path, repository_root: Option<&Path>) -> Vec<RootEntry> {
+fn implicit_relative_roots(ctx: &ResolutionContext, repository_root: Option<&Path>) -> Vec<RootEntry> {
+    if ctx.implicit_bases == ImplicitBases::Launch && let Some(scope) = &ctx.launch_scope {
+        return scope.bases_with_provenance().into_iter()
+            .map(|(path, provenance)| RootEntry { path, provenance })
+            .collect();
+    }
+    let cwd = &ctx.cwd;
     match repository_root {
         Some(git_root) => {
             let mut roots = vec![RootEntry {
@@ -1028,8 +1062,7 @@ fn build_candidates(
 /// Build candidates for a local reference from its effective anchoring.
 ///
 /// `Absolute` yields the payload verbatim; `ExplicitRelative` yields exactly one
-/// `cwd`-relative candidate with no fallback; `ImplicitRelative` yields the
-/// `cwd`-then-repository plan.
+/// `cwd`-relative candidate. `ImplicitRelative` uses the configured lookup policy.
 fn build_anchoring_candidates(
     anchoring: EffectiveAnchoring,
     interpolated: &str,
@@ -1047,7 +1080,7 @@ fn build_anchoring_candidates(
             )]
         }
         EffectiveAnchoring::ImplicitRelative => {
-            let candidates = implicit_relative_roots(&ctx.cwd, repository_root)
+            let candidates = implicit_relative_roots(ctx, repository_root)
                 .into_iter()
                 .map(|root| {
                     make_candidate(simplify_root(&root.path).join(interpolated), root.provenance)
@@ -1125,7 +1158,7 @@ fn collect_anchoring_roots(
             provenance: RootProvenance::Source,
         }],
         EffectiveAnchoring::ImplicitRelative => {
-            implicit_relative_roots(&ctx.cwd, repository_root)
+            implicit_relative_roots(ctx, repository_root)
         }
     }
 }
@@ -1355,6 +1388,10 @@ fn relative_boundary<'a>(
     ctx: &'a ResolutionContext,
 ) -> Option<Boundary<'a>> {
     match anchoring {
+        Some(EffectiveAnchoring::ImplicitRelative) if ctx.implicit_bases == ImplicitBases::Launch => ctx
+            .launch_boundary
+            .as_deref()
+            .map(|base_dir| Boundary::Tree { base_dir }),
         Some(EffectiveAnchoring::ExplicitRelative | EffectiveAnchoring::ImplicitRelative) => ctx
             .relative_boundary
             .as_deref()
@@ -1579,6 +1616,7 @@ pub(crate) fn complete_partial(
         package_area: None,
         magic_root_paths: &magic_roots,
         relative_boundary: None,
+        launch_bases: None,
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1605,14 +1643,20 @@ pub(crate) fn complete_partial_in_context(
         .iter()
         .map(|root| root.path().to_path_buf())
         .collect();
+    let launch_bases = (ctx.implicit_bases() == ImplicitBases::Launch)
+        .then(|| ctx.launch_scope().bases());
     let anchors = CompletionAnchors {
         cwd: ctx.cwd(),
         repository_root: ctx.repository_root(),
         package_root: ctx.package_root(),
         package_area: ctx.package_area(),
         magic_root_paths: &magic_roots,
-        relative_boundary: (ctx.base_dir_is_boundary() && !ctx.external_relative_allowed())
-            .then(|| ctx.base_dir()),
+        relative_boundary: if launch_bases.is_some() {
+            ctx.launch_boundary()
+        } else {
+            (ctx.base_dir_is_boundary() && !ctx.external_relative_allowed()).then(|| ctx.base_dir())
+        },
+        launch_bases: launch_bases.as_deref(),
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1633,6 +1677,7 @@ struct CompletionAnchors<'a> {
     package_root: Option<&'a Path>,
     package_area: Option<&'a Path>,
     magic_root_paths: &'a [PathBuf],
+    launch_bases: Option<&'a [PathBuf]>,
     /// The tree root implicit-relative completion roots must stay inside;
     /// `None` under the same conditions as
     /// [`ResolutionContext::relative_boundary`].
@@ -1696,8 +1741,8 @@ fn expand_completion(
 /// same roots execution probes — appending the typed scope segment only
 /// after root selection (R3). `RepositoryRoot` uses only the repository root;
 /// `RepositoryScoped` walks package root, package-area root, then repository
-/// root; `ImplicitRelative` walks `cwd` then the repository
-/// root. Lexically duplicate roots collapse, keeping first-seen order.
+/// root. `ImplicitRelative` uses the configured lookup policy. Duplicate
+/// roots collapse, keeping first-seen order.
 fn completion_roots(
     form: CompletionEntryForm,
     scope: &str,
@@ -1708,6 +1753,11 @@ fn completion_roots(
         CompletionEntryForm::Magic => {
             for root in anchors.magic_root_paths {
                 push_unique(&mut roots, append_scope(root, scope));
+            }
+        }
+        CompletionEntryForm::ImplicitRelative if let Some(bases) = anchors.launch_bases => {
+            for base in bases {
+                push_unique(&mut roots, append_scope(base, scope));
             }
         }
         CompletionEntryForm::ImplicitRelative => {
@@ -1959,7 +2009,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let template = PathTemplate {
@@ -1981,7 +2033,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let template = PathTemplate {
@@ -2004,7 +2058,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let template = PathTemplate {
@@ -2053,7 +2109,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let roots =
@@ -2075,7 +2133,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap();
@@ -2096,7 +2156,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap_err();
@@ -2121,7 +2183,9 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
-            launch_magic_scope: None,
+            launch_scope: None,
+            implicit_bases: ImplicitBases::Authoring,
+            launch_boundary: None,
             relative_boundary: None,
         };
         let roots = collect_roots(

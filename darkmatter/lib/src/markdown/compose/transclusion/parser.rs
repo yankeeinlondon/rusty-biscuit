@@ -62,6 +62,33 @@ pub(crate) fn parse_directives_in(
     ctx: SourceContext,
     line_offset: usize,
 ) -> Result<Vec<BlockDirective>, TransclusionError> {
+    parse_directives_deferring(content, data, ctx, line_offset, &|_| None).map(|(directives, _)| directives)
+}
+
+/// A directive line a dry run left as written: its text holds a value the
+/// run could not produce, so it is neither parsed nor resolved.
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredDirective {
+    /// The directive line as written, trimmed.
+    pub(crate) text: String,
+    /// Why the value it holds is not known.
+    pub(crate) reason: crate::markdown::compose::passive::DeferralReason,
+}
+
+/// [`parse_directives_in`], setting aside each directive line `deferred`
+/// gives a reason for instead of parsing it: in a dry run, a line holding a
+/// `{{ … }}` span left as written ([`PassiveSession::deferred_span_in`]),
+/// whose target is no path.
+///
+/// [`PassiveSession::deferred_span_in`]: crate::markdown::compose::passive::PassiveSession::deferred_span_in
+pub(crate) fn parse_directives_deferring(
+    content: &str,
+    data: Option<&DataRanges>,
+    ctx: SourceContext,
+    line_offset: usize,
+    deferred: &dyn Fn(&str) -> Option<crate::markdown::compose::passive::DeferralReason>,
+) -> Result<(Vec<BlockDirective>, Vec<DeferredDirective>), TransclusionError> {
+    let mut set_aside = Vec::new();
     let code_regions = find_code_regions(&structural_view(content, data));
     let mut directives = Vec::new();
 
@@ -86,6 +113,12 @@ pub(crate) fn parse_directives_in(
             if !is_in_code_region(first_non_ws, &code_regions)
                 && authored_directive(data, line_start, first_non_ws + keyword_len)
             {
+                if let Some(reason) = deferred(trimmed) {
+                    set_aside.push(DeferredDirective { text: trimmed.to_string(), reason });
+                    line_start = i.saturating_add(1);
+                    line_number += 1;
+                    continue;
+                }
                 let (kind, raw_target, mut options) =
                     parse_directive_line(trimmed, line_number, &ctx)?;
                 if let Some(data) = data {
@@ -112,10 +145,16 @@ pub(crate) fn parse_directives_in(
         line_number += 1;
     }
 
-    Ok(directives)
+    Ok((directives, set_aside))
 }
 
 /// Parses frontmatter `prologue` and `epilogue` references.
+///
+/// `ctx` is the document's error context. When it holds the file as written
+/// (frontmatter included, as
+/// [`Markdown::loaded_source_context_for_errors`](crate::markdown::Markdown) gives it), an
+/// invalid field's error names its key's line there; otherwise its `line` is
+/// `0`, meaning unknown, and its message names no line.
 pub fn parse_frontmatter_refs(
     frontmatter: &FrontmatterMap,
     ctx: SourceContext,
@@ -131,39 +170,21 @@ fn parse_reference_field(
     field_name: &str,
     ctx: &SourceContext,
 ) -> Result<Vec<String>, TransclusionError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
+    let invalid = || TransclusionError::ParseDirective {
+        ctx: Box::new(ctx.clone()),
+        line: crate::markdown::compose::shell_expansion::types::frontmatter_key_line(ctx, field_name).unwrap_or(0),
+        message: format!("Frontmatter '{field_name}' must be a string or array of strings"),
+        caret_col: None,
+        authored: None,
     };
-
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::Array(items) => {
-            let mut refs = Vec::with_capacity(items.len());
-            for item in items {
-                let Some(s) = item.as_str() else {
-                    return Err(TransclusionError::ParseDirective {
-                        ctx: Box::new(ctx.clone()),
-                        line: 0,
-                        message: format!(
-                            "Frontmatter '{}' must be a string or array of strings",
-                            field_name
-                        ),
-                        caret_col: None,
-                    });
-                };
-                refs.push(s.to_string());
-            }
-            Ok(refs)
-        }
-        _ => Err(TransclusionError::ParseDirective {
-            ctx: Box::new(ctx.clone()),
-            line: 0,
-            message: format!(
-                "Frontmatter '{}' must be a string or array of strings",
-                field_name
-            ),
-            caret_col: None,
-        }),
+        None => Ok(Vec::new()),
+        Some(Value::String(s)) => Ok(vec![s.clone()]),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_string).ok_or_else(invalid))
+            .collect(),
+        Some(_) => Err(invalid()),
     }
 }
 
@@ -193,6 +214,7 @@ fn parse_directive_line(
                     kind_str
                 ),
                 caret_col: None,
+                authored: None,
             });
         }
     };
@@ -207,6 +229,7 @@ fn parse_directive_line(
             line,
             message: "Directive target cannot be empty".to_string(),
             caret_col: None,
+            authored: None,
         });
     }
 
@@ -287,6 +310,7 @@ fn parse_interpolate_option(
             line,
             message,
             caret_col: Some(column),
+            authored: None,
         }),
     }
 }
@@ -325,6 +349,7 @@ fn parse_set_option(
                 None => "'set=' requires a JSON5 value".to_string(),
             },
             caret_col: None,
+            authored: None,
         });
     }
 
@@ -355,6 +380,7 @@ fn apply_set_property(
             line,
             message: format!("'set.{}=' requires a JSON5 value: {}", name, e),
             caret_col: None,
+            authored: None,
         })?
     };
 
@@ -454,6 +480,7 @@ fn apply_option(
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,
+                        authored: None,
                     })?;
                 let Some(obj) = parsed.as_object() else {
                     return Err(TransclusionError::ParseDirective {
@@ -461,6 +488,7 @@ fn apply_option(
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,
+                        authored: None,
                     });
                 };
                 options.replace = ReplaceOption::OneOff(obj.clone());
@@ -866,7 +894,7 @@ mod tests {
     /// The located error `content`'s single directive line produces.
     fn interpolate_error(content: &str) -> (usize, String, Option<usize>) {
         match parse_directives(content, dummy_ctx(content)) {
-            Err(TransclusionError::ParseDirective { ctx, line, message, caret_col }) => {
+            Err(TransclusionError::ParseDirective { ctx, line, message, caret_col, .. }) => {
                 assert_eq!(ctx.absolute, PathBuf::from("/test.md"), "{content:?}");
                 (line, message, caret_col)
             }

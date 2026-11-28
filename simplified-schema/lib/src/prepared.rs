@@ -135,8 +135,20 @@ impl CompiledValidators {
 /// Sets each problem's declared property description. Whitespace-only
 /// descriptions and descriptions identical to the rendered message are left
 /// out, so the description only ever adds to the message.
+///
+/// It also settles key problems ([`validate::annotate_key_problems`]): a
+/// removed key's problem names it with its replacement hint, and an unknown
+/// key gains a `did you mean` hint when a declared key is near it, and
+/// otherwise a hint to remove it or use one of the declared keys.
 pub fn describe_problems(json_schema: &Value, instance: &Value, problems: &mut [ValidationProblem]) {
+    validate::annotate_key_problems(json_schema, instance, problems);
     for problem in problems {
+        // A removed key's path names its owning object, whose description
+        // would misidentify what the author must fix.
+        if problem.code == crate::ValidationProblemCode::RemovedKey {
+            problem.description = None;
+            continue;
+        }
         problem.description = validate::resolve_problem_description(json_schema, problem, instance)
             .filter(|desc| !desc.trim().is_empty())
             .filter(|desc| *desc != problem.message);
@@ -192,7 +204,7 @@ pub struct Prepared {
     validators: CompiledValidators,
     conversion: Arc<ConversionPlan>,
     /// The schema's defaults, compiled once.
-    defaults: DefaultPlan,
+    defaults: Arc<DefaultPlan>,
     /// The directory a relative file value resolves from; `context`'s `cwd`
     /// when `None`.
     base_dir: Option<PathBuf>,
@@ -225,7 +237,13 @@ impl Prepared {
         base_dir: Option<PathBuf>,
         context: biscuit_file::FileResolutionContext,
     ) -> Result<Self, SchemaError> {
-        Self::compiled_through(json_schema, base_dir, context, &SHARED_VALIDATOR_CACHE)
+        let cache = &SHARED_VALIDATOR_CACHE;
+        // The shared cache's plans are per canonical schema for the process,
+        // so a schema prepared once per document or file (a host's kind
+        // definition, say) compiles its defaults once, not per call.
+        Self::assemble(json_schema, base_dir, context, cache, |schema| {
+            DefaultPlan::for_identity(cache.canonical_digest_shared(schema).identity, schema, cache)
+        })
     }
 
     /// [`Self::new`], compiling through `cache` instead of the process-wide
@@ -238,9 +256,21 @@ impl Prepared {
         context: biscuit_file::FileResolutionContext,
         cache: &ValidatorCache,
     ) -> Result<Self, SchemaError> {
+        Self::assemble(json_schema, base_dir, context, cache, |schema| {
+            DefaultPlan::compile(Arc::clone(schema), cache).map(Arc::new)
+        })
+    }
+
+    fn assemble(
+        json_schema: Arc<Value>,
+        base_dir: Option<PathBuf>,
+        context: biscuit_file::FileResolutionContext,
+        cache: &ValidatorCache,
+        defaults: impl FnOnce(&Arc<Value>) -> Result<Arc<DefaultPlan>, SchemaError>,
+    ) -> Result<Self, SchemaError> {
         let validators = CompiledValidators::build(&json_schema, cache, base_dir.as_deref(), &context)?;
         let conversion = ConversionPlan::for_hashed(cache.shared_schema_hash(&json_schema));
-        let defaults = DefaultPlan::compile(Arc::clone(&json_schema), cache)?;
+        let defaults = defaults(&json_schema)?;
         Ok(Self {
             json_schema,
             validators,
@@ -357,11 +387,22 @@ impl Prepared {
     }
 
     fn accepted<'input>(&self, value: Cow<'input, Value>, defaults: Vec<AppliedDefault>) -> ValidationSuccess<'input> {
+        let key_advice = validate::key_advice(&self.json_schema, &value);
         ValidationSuccess {
             value,
             advisories: self.advisories.clone(),
             defaults,
+            key_advice,
         }
+    }
+
+    /// The near-miss key advice for `value` ([`validate::key_advice`]): an
+    /// undeclared key of an object that opts in with `$advise-unknown-keys`
+    /// and closely resembles exactly one declared key. Advice never fails
+    /// validation, so a caller that judged `value` some other way (or whose
+    /// value failed) asks for it here.
+    pub fn key_advice(&self, value: &Value) -> Vec<ValidationProblem> {
+        validate::key_advice(&self.json_schema, value)
     }
 
     fn problems(&self, instance: &Value) -> Vec<ValidationProblem> {

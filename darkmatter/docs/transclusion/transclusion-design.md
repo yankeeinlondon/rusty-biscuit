@@ -426,10 +426,9 @@ If parent context is unknown (no heading before directive):
 
 - keep child heading root unchanged
 
-If re-level would overflow H6:
-
-- `fail_fast=true`: return error
-- otherwise: warning + include without re-leveling
+A child heading that re-leveling would push past H6 is written as bold text,
+with a `dm.transclusion.heading_overflow` warning naming its line; the other
+headings are re-leveled as usual.
 
 `::code` transclusions are fenced blocks and skip heading re-leveling.
 

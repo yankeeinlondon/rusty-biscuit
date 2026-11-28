@@ -134,8 +134,25 @@ sequence:
   values, each `start` again with every write so far), and pre-flight binds
   `shell: "echo {{{ who }}}"` under `who: string(default(ada))` as `echo ada`.
 - An empty `sequence: []` still validates its `$schema` and `$state`.
-- A dry run judges inputs, `$schema`, and `$state`, and names each inline
-  container check instead of evaluating it.
+- A dry run judges inputs, `$schema`, and `$state`; an inline container's
+  `$schema` is judged only at its turn in a real run. A value the run
+  writes before a task composes (a key any lifecycle `set` may write, a
+  `with:` value derived from one, a later step's `seq.outputs`,
+  `seq.run_id`, `loop.*`, `group.*` inside a group) is reported `not checked` wherever a prompt reads
+  it: a `::block` on it previews as conditional, and its schema check is not
+  run. `seq.index` and the other position fields stay checked, and so do
+  `::file` targets, which must exist before the sequence starts.
+- The one exception is a file the root's `initialize` writes with
+  `ensure_file`, `append_line`, or `append_jsonl` (a literal target, or a
+  `{{{ … }}}` one resolved from the root's values): it exists before anything
+  reads it, so a dry run reports each read of it that does not exist yet
+  (`::file`/`::code`, `prologue`/`epilogue`, a `prompt:`, `task:`,
+  `group:`, catalog, or `sequence:` file, `$schema`, `load_data`,
+  `file_exists`, `find_files`) `not checked`, known only at launch, and
+  what depends on it too. An append to a file that exists leaves what
+  reads its content unchecked the same way; its existence stays proven. A
+  prompt's own `initialize` or an earlier task creates its file too late:
+  both runs refuse the missing file.
 
 ## Results
 
@@ -193,22 +210,51 @@ An unusable hint fails before any task starts.
 ## Previewing
 
 ```bash
-claudine sequence workflow.md --dry-run              # one loop pass; no events; shell/side_effect tasks only rendered
-claudine sequence workflow.md --dry-run --dry-run-shell   # also run shell: tasks for real
+claudine sequence workflow.md --dry-run          # report on stderr, each composed prompt on stdout
+claudine sequence workflow.md --dry-run --json   # one JSON report on stdout
 ```
 
-`$(…)` composition expansions run for real even in a dry run.
+A dry run runs nothing: no provider, `shell:`/`side_effect:` task, `$(…)`
+expansion, lifecycle event, loop pass, or question. It reads the whole tree
+and reports every problem under its task (`composition.provider_unresolved`,
+`composition.no_executable`, a missing `prompt:` file, a missing input, a
+file with no `sequence` key (`composition.sequence_undefined`, which a real run
+refuses too), …),
+then exits `2` if any is an error or warning, else `0`. On a terminal a
+choice the run would ask about is a warning; without one it is an error.
+An optional `$schema` value that fails its schema is graded as the run
+treats it: the sequence's own values and a root body step drop it with a
+warning (`composition.optional_dropped`), while a `prompt:` task's document
+refuses it (the schema's error).
+A dry run never exits `1`; a refused command line (`--json` without
+`--dry-run`, `--dry-run-shell`) exits `2` with a usage message and no
+report. In `--json`, match findings by `code`, never by message text.
+
+A real run checks the same things at preflight. If one stops it before the
+first task, it prints the same report under `Sequence preflight found …; no
+task ran`, ends with `The run stopped at: …` (unless a row already says
+it), and exits `1`; lifecycle `err.*` describes that returned error, not the
+report's first row. If preflight passes, new warnings (a step's own
+`agent:`/`model:`, a near-miss key) print once before task one.
 
 ## Removed spellings
 
 | Removed | Use instead |
 |---|---|
 | `kind: sequence` + `list:` | `sequence:` |
-| `execution: serial` | a nested `sequence:` |
-| sequence `fail_fast:`, `--fail-fast` | lifecycle handlers |
-| task `setup:`/`teardown:` | an inline sequence, or the prompt's own events |
+| `execution:` on a task or group (`serial` or `parallel`) | omit it; a nested `sequence:` for ordered work |
+| sequence `fail_fast:`, `--fail-fast` | `fail_fast` on a group object, or lifecycle handlers |
+| task `fail_fast:` | `fail_fast` on a `group:` object |
+| task `setup:` | a preceding `side_effect:` or `shell:` task |
+| task `teardown:` | a group's `finalize:` (a group of one for a single task) |
 | `state`, `outputs`, `step`, `total_steps` | `seq.*` |
 | `interactive: true` in a sequence document | `-i` |
+| `--dry-run-shell` | run the sequence; a dry run runs no command |
+
+These are declared `removed(…)` in Claudine's schemas, so the editor, `md
+schema validate`, a dry run, and a run all refuse them, `null` included, with
+the replacement above. A step key one edit from a task field (`promt`) is a
+warning, and the step still runs.
 
 A runnable nesting example is in
 `claudine/docs/examples/sequence-containers.md`.

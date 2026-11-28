@@ -147,6 +147,13 @@ claudine compose @prompts/review.md review="review.md" count=3 draft=true
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and lifecycle-stack recovery.
 
+**Check before you run.** `--dry-run` on any of the three commands is a passive check: it runs no command, provider, or lifecycle event, asks nothing, and writes nothing. It reports every problem it finds (a missing `prompt:` file, a task with no provider, a missing input, a misplaced key) on stderr, grouped by task, and prints each composed prompt on stdout. It exits `2` when it finds any error or warning, else `0`; add `--json` for one machine-readable report. A real `sequence` run that stops before its first task prints the same report. See [Composition → Dry Run](docs/topics/composition.md#dry-run) and [`claudine sequence` → Dry run](docs/cli/sequence.md#dry-run).
+
+```sh
+claudine sequence renderers/_fleet.yaml --dry-run           # report on stderr, previews on stdout
+claudine sequence renderers/_fleet.yaml --dry-run --json    # one JSON report for CI
+```
+
 **Lifecycle events.** A document's frontmatter can react to its own run (`initialize`, `start`, `success`, `failure`, `finalize`, …). The lifecycle grammar and engine are [Darkmatter's](../darkmatter/docs/topics/lifecycle/index.md); Claudine is a host that adds `success`, `failure`, and `loop` and calls Darkmatter's `composed` and `failed` events `start` and `blocked`. See [Lifecycle](docs/topics/flow-control/lifecycle.md).
 
 Shell approval can fix an exact command or authorize a typed command shape,
@@ -255,12 +262,17 @@ Now you'll want to run the following from the repo's root:
 # ensure host has appropriate build tools and a few CLI's from the monorepo
 # used for devops are installed on the system
 just init
-# now install the claudine CLI
-just install-claudine
+# now install the claudine CLI (this also publishes Claudine's schemas for md and DMLS)
+just install_claudine
 # the first command that needs a config (for example `claudine hooks`) runs a short
 # interactive setup interview; change settings later with `claudine config`
 claudine hooks
 ```
+
+Setup also registers Claudine's format 3 schema bundle with Darkmatter (upgrading
+any older format 1 or format 2 installation in place), so `md` and the DMLS editor
+integration recognize and check Claudine documents in any folder; see
+[The published host registration](./docs/topics/schemas.md#the-published-host-registration).
 
 Prebuilt `claudine` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md), which also covers the ALSA library `claudine` needs on Linux.
 
@@ -296,6 +308,23 @@ option maps exactly to it (same output, final answer, and exit code as
     - The help system is always available with `--help`
     - It is also recommended to install shell completions for full laziness/productivity (`claudine completions --help`)
 
+
+## Troubleshooting
+
+Run `claudine doctor` when something does not work as expected. It checks
+your configuration files, the schemas Claudine registers with Darkmatter,
+the permissions handoff, speech, and whether `claudine` is on your `PATH`,
+and prints a remedy for every problem (exit status `1` while an error
+remains). Catalog conflicts include the positions of both declarations.
+`claudine doctor --fix` repairs the registration (upgrading older manifest
+versions in place and restoring missing or modified files) and the
+permissions handoff, and `--json` prints the report for scripts. See
+[`claudine doctor`](./docs/cli/doctor.md).
+
+```sh
+claudine doctor          # inspect; changes none of your files
+claudine doctor --fix    # repair what can be repaired, then report
+```
 
 ## Configuration
 

@@ -133,7 +133,7 @@ fn lazy_and_ambiguous_alternatives_through_a_reference_are_unchanged() {
 fn passive_validation_rewrites_and_runs_nothing() {
     let (_dir, root) = fixture();
     let marker = root.join("ran.txt");
-    let label = format!("$(touch {})", biscuit_file::to_portable_string(&marker));
+    let label = format!("$(touch {})", biscuit_file::to_forward_slash_string(&marker));
     let frontmatter = json!({"tree": tree(AUTHORED, &json!({"label": label}))});
     let (path, markdown) = document(&root, "  tree: node(required)@./types.yaml\n", &frontmatter);
     let text = std::fs::read_to_string(&path).expect("read document");

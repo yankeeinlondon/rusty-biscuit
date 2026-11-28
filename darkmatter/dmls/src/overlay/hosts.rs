@@ -11,26 +11,32 @@
 //! produced. It is computed once per schema preparation and carried on the
 //! overlay, so no provider rescans a schema root or a registration.
 //!
+//! A change to a configuration's registration inputs does not reload it at
+//! once: a publish writes a dozen files, reported in several batches. The
+//! change marks the configuration *dirty* with a deadline one settle window
+//! away, every further change resets it, and the configuration keeps
+//! serving its installed view until the deadline passes and a reload
+//! completes ([`HostRegistrations::expire`]). An explicit reload
+//! ([`HostRegistrations::invalidate_all`]) is immediate.
+//!
 //! User-facing guide: `darkmatter/docs/topics/host-registration.md`
 //! ("DMLS").
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::config::load::{CONFIG_MIGRATION_CODE, CONFIG_MISSING_CODE, ConfigRevision};
 use darkmatter::config::migration_receipt::content_hash;
 use darkmatter::config::registration::{
-    HostClaim, HostSelection, LegacyHost, LoadedRegistrations, RegisteredHosts, RegistrationDiagnostic,
-    manifest_member_candidates, select,
+    HostClaim, HostSelection, LoadedRegistrations, RegisteredHosts, RegistrationDiagnostic, select,
 };
-use darkmatter::lifecycle::host_profile::lifecycle_artifact_path;
 use darkmatter::lifecycle::md_host;
 use darkmatter::lifecycle::registry::KeyResolution;
 use darkmatter::markdown::compose::expression::HostFunctions;
-use darkmatter::markdown::compose::expression::host::facts_artifact_path;
-use darkmatter::markdown::schemas::catalog::{CatalogError, GlobalCatalog, HostFunctionCatalogError};
+use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use serde_json::Value;
 
 use crate::overlay::event_views::LifecycleHost;
@@ -40,6 +46,13 @@ use crate::workspace::watch::WatchedFolder;
 
 /// The name of the configuration file in a home and a repository root.
 const CONFIG_FILE_NAME: &str = ".darkmatter.yaml";
+
+/// How long a configuration's registration inputs must be quiet before the
+/// server reloads them. A measured Claudine publish (every member and the
+/// manifest rewritten) took under 1 ms on Linux, far below the 150 ms at
+/// which the window would grow, so this is the editor-debounce starting
+/// value: it only has to outlast one publish's batches of events.
+pub const REGISTRATION_SETTLE: Duration = Duration::from_millis(300);
 
 /// The configuration a context projects: the registrations of two contexts
 /// with equal keys are the same.
@@ -91,8 +104,9 @@ impl InstalledHosts {
         self.hosts.diagnostics()
     }
 
-    /// Whether `other` loaded the same profiles, warnings, and failure.
-    fn same_result(&self, other: &Self) -> bool {
+    /// Whether `other` loaded the same profiles and failure: what a
+    /// document's selection and analysis read.
+    fn same_effect(&self, other: &Self) -> bool {
         let profiles = |installed: &Self| -> Vec<(PathBuf, String)> {
             installed
                 .hosts
@@ -102,9 +116,13 @@ impl InstalledHosts {
                 .map(|profile| (profile.manifest().path.clone(), profile.revision().to_string()))
                 .collect()
         };
-        profiles(self) == profiles(other)
-            && self.hosts.loaded().diagnostics == other.hosts.loaded().diagnostics
-            && self.load_error == other.load_error
+        profiles(self) == profiles(other) && self.load_error == other.load_error
+    }
+
+    /// Whether `other` reported the same configuration-level warnings, which
+    /// are published on the files they name and never on a document.
+    fn same_diagnostics(&self, other: &Self) -> bool {
+        self.hosts.loaded().diagnostics == other.hosts.loaded().diagnostics
     }
 }
 
@@ -162,27 +180,18 @@ impl HostDependencies {
         }
     }
 
-    /// Whether a change at `path` can change the load: a recorded file whose
-    /// bytes now hash differently, a new entry in a manifest or member
-    /// folder, or a directory above a recorded file.
-    fn affected_by(&self, path: &Path) -> bool {
-        if let Some(recorded) = self.files.get(path).or_else(|| self.heads.get(path)) {
-            let current = work_counters::read(path).ok().map(|bytes| content_hash(&bytes));
-            return current != *recorded;
-        }
-        path.parent().is_some_and(|folder| self.folders.contains(folder))
-            || self.files.keys().any(|file| file.starts_with(path))
-            || self.folders.iter().any(|folder| folder.starts_with(path))
-    }
-
-    /// Whether `path` is something this load read or searched, without
-    /// comparing content: an in-flight preparation's result is stale when a
-    /// change touched it.
+    /// Whether a change at `path` can change the load: a recorded file or
+    /// ref, a new entry in a manifest or member folder, or a directory at or
+    /// above a recorded file or searched folder (a missing folder created, a
+    /// moved one). Judged by path alone, so the dispatch thread reads
+    /// nothing; the reload hashes, and an unchanged result keeps its
+    /// version.
     fn touches(&self, path: &Path) -> bool {
         self.files.contains_key(path)
             || self.heads.contains_key(path)
             || path.parent().is_some_and(|folder| self.folders.contains(folder))
             || self.files.keys().any(|file| file.starts_with(path))
+            || self.folders.iter().any(|folder| folder.starts_with(path))
     }
 
     fn watched_folders(&self) -> impl Iterator<Item = WatchedFolder> + '_ {
@@ -199,12 +208,32 @@ impl HostDependencies {
 
 /// One configuration's registrations.
 struct Scope {
-    installed: InstalledHosts,
+    /// `None` while the only result loaded was already superseded when it
+    /// completed: documents see no registration until the replacement load
+    /// installs, as before the first load.
+    installed: Option<InstalledHosts>,
     deps: HostDependencies,
     notices: Vec<ConfigNotice>,
+    /// A reload is due now.
     stale: bool,
+    /// A registration input changed: a reload is due once nothing changes
+    /// until this instant. The installed view serves until then.
+    due: Option<Instant>,
+    /// Advanced by every change to this configuration's inputs; a
+    /// preparation begun at an older generation is superseded.
+    generation: u64,
     /// The [`HostPreparation`] sequence number that installed this scope.
     seq: u64,
+}
+
+impl Scope {
+    fn needs_load(&self) -> bool {
+        self.stale
+    }
+
+    fn is_fresh(&self) -> bool {
+        !self.stale && self.due.is_none()
+    }
 }
 
 /// A change recorded while a preparation was running.
@@ -222,6 +251,8 @@ pub struct HostPreparation {
     context: FileResolutionContext,
     epoch: u64,
     seq: u64,
+    /// The scope's [`Scope::generation`] when it began (0 for a first load).
+    generation: u64,
 }
 
 /// A finished [`HostPreparation`], ready for [`HostRegistrations::install`].
@@ -229,6 +260,7 @@ pub struct PreparedHosts {
     key: HostsKey,
     epoch: u64,
     seq: u64,
+    generation: u64,
     hosts: RegisteredHosts,
     load_error: Option<Arc<str>>,
     deps: HostDependencies,
@@ -255,6 +287,7 @@ impl HostPreparation {
     /// everything they read. Does all of a preparation's I/O, and touches no
     /// shared state: it never migrates, writes, prompts, or fetches.
     pub fn run(self) -> PreparedHosts {
+        work_counters::record_host_load();
         let mut deps = HostDependencies::default();
         let mut notices = Vec::new();
         let loaded = darkmatter::markdown::schemas::slots::session::load_passively(&self.context);
@@ -298,6 +331,18 @@ impl HostPreparation {
                 deps.files.insert(normalized(&dependency.path), Some(dependency.content_hash.clone()));
                 deps.record_folder_of(&dependency.path);
             }
+            // Every location the load looked at, present or not: a member or
+            // import created there republishes the host.
+            for candidate in profile.candidates() {
+                deps.record_file(candidate);
+                deps.record_folder_of(candidate);
+            }
+        }
+        // Everything a refused entry read or probed: its manifest and every
+        // member, where a repair or creation will appear.
+        for watched in &hosts.loaded().watches {
+            deps.record_file(watched);
+            deps.record_folder_of(watched);
         }
         for diagnostic in &hosts.loaded().diagnostics {
             // A manifest that cannot be found names its configuration file;
@@ -305,12 +350,6 @@ impl HostPreparation {
             for candidate in entry_candidates(&diagnostic.entry.reference, &diagnostic.entry.declared_in, &self.context) {
                 deps.record_file(&candidate);
                 deps.record_folder_of(&candidate);
-                // A member that is missing or broken is where its repair or
-                // creation will appear.
-                for member in manifest_member_candidates(&candidate, &self.context) {
-                    deps.record_file(&member);
-                    deps.record_folder_of(&member);
-                }
             }
             let declaring = diagnostic.file == diagnostic.entry.declared_in;
             deps.record_file(&diagnostic.file);
@@ -319,7 +358,16 @@ impl HostPreparation {
             }
         }
         deps.record_absences();
-        PreparedHosts { key: self.key, epoch: self.epoch, seq: self.seq, hosts, load_error, deps, notices }
+        PreparedHosts {
+            key: self.key,
+            epoch: self.epoch,
+            seq: self.seq,
+            generation: self.generation,
+            hosts,
+            load_error,
+            deps,
+            notices,
+        }
     }
 }
 
@@ -332,7 +380,6 @@ fn entry_candidates(reference: &str, declared_in: &Path, context: &FileResolutio
 }
 
 /// Every configuration's registered hosts.
-#[derive(Default)]
 pub struct HostRegistrations {
     scopes: HashMap<HostsKey, Scope>,
     next_version: u64,
@@ -343,42 +390,89 @@ pub struct HostRegistrations {
     in_flight: HashMap<u64, u64>,
     /// Invalidations since the oldest running preparation began.
     changes: Vec<(u64, Change)>,
+    /// How long a changed configuration waits for quiet before it reloads
+    /// ([`REGISTRATION_SETTLE`] in the server).
+    settle: Duration,
+    /// A configuration became due since [`Self::take_expired`] last ran.
+    expired: bool,
+}
+
+impl Default for HostRegistrations {
+    /// No settle window: a change is due at once, as a caller that prepares
+    /// on its own thread expects. The server sets [`REGISTRATION_SETTLE`].
+    fn default() -> Self {
+        Self::with_settle(Duration::ZERO)
+    }
 }
 
 impl HostRegistrations {
+    /// Registrations whose changed inputs reload after `settle` of quiet.
+    pub fn with_settle(settle: Duration) -> Self {
+        Self {
+            scopes: HashMap::new(),
+            next_version: 0,
+            epoch: 0,
+            next_seq: 0,
+            in_flight: HashMap::new(),
+            changes: Vec::new(),
+            settle,
+            expired: false,
+        }
+    }
+
+    /// Replaces the settle window; a deadline already set keeps its instant.
+    pub fn set_settle(&mut self, settle: Duration) {
+        self.settle = settle;
+    }
+
     /// The installed registrations of `context`'s configuration; `None`
-    /// before its first preparation. A lookup only: a stale scope serves its
-    /// registrations until its preparation installs.
+    /// until a load completes that no change superseded. A lookup only: a dirty or stale scope
+    /// serves its registrations until its reload installs.
     pub fn lookup(&self, context: &FileResolutionContext) -> Option<InstalledHosts> {
-        self.scopes.get(&HostsKey::of(context)).map(|scope| scope.installed.clone())
+        self.scopes.get(&HostsKey::of(context)).and_then(|scope| scope.installed.clone())
     }
 
-    /// Whether `context`'s configuration is installed and no change has
-    /// marked it stale.
+    /// Whether `context`'s configuration is installed with no change
+    /// pending: neither due for a reload nor waiting for quiet.
     pub fn is_fresh(&self, context: &FileResolutionContext) -> bool {
-        self.scopes.get(&HostsKey::of(context)).is_some_and(|scope| !scope.stale)
+        self.scopes.get(&HostsKey::of(context)).is_some_and(Scope::is_fresh)
     }
 
-    /// Starts loading `context`'s configuration unless it is fresh. Reads
-    /// nothing.
+    /// Whether `context`'s configuration must load now: never prepared, or
+    /// due. One waiting for quiet does not, and serves its installed view.
+    pub fn needs_load(&self, context: &FileResolutionContext) -> bool {
+        self.scopes.get(&HostsKey::of(context)).is_none_or(Scope::needs_load)
+    }
+
+    /// Starts loading `context`'s configuration when it
+    /// [needs a load](Self::needs_load). Reads nothing.
     pub fn begin(&mut self, context: &FileResolutionContext) -> Option<HostPreparation> {
-        if self.is_fresh(context) {
+        if !self.needs_load(context) {
             return None;
         }
+        let key = HostsKey::of(context);
+        let generation = self.scopes.get(&key).map_or(0, |scope| scope.generation);
         self.next_seq += 1;
         self.in_flight.insert(self.next_seq, self.epoch);
-        Some(HostPreparation { key: HostsKey::of(context), context: context.clone(), epoch: self.epoch, seq: self.next_seq })
+        Some(HostPreparation { key, context: context.clone(), epoch: self.epoch, seq: self.next_seq, generation })
     }
 
-    /// Installs a finished preparation. An older preparation never replaces
-    /// a newer one, and a change recorded while it ran that touches what it
-    /// read leaves the scope stale. A result equal to the installed one
-    /// keeps its version.
+    /// Installs a finished preparation, at `now`. A result the configuration
+    /// has moved past is dropped and the installed view kept: an older
+    /// preparation never replaces a newer one, and one begun before a later
+    /// change to the configuration is superseded by the reload that change
+    /// scheduled. A change recorded while it ran that touches what it read
+    /// (where the installed view did not) schedules another reload and
+    /// installs nothing; with no installed view yet, only the result's
+    /// dependencies are kept, to watch and schedule that reload from. A result
+    /// with the same profiles and failure keeps its version, so no
+    /// document's analysis changes; one whose warnings alone differ replaces
+    /// them under the same version.
     ///
     /// ## Returns
     ///
     /// Whether the configuration's registrations are fresh afterwards.
-    pub fn install(&mut self, prepared: PreparedHosts) -> bool {
+    pub fn install(&mut self, prepared: PreparedHosts, now: Instant) -> bool {
         self.in_flight.remove(&prepared.seq);
         let changes: Vec<Change> = self
             .changes
@@ -390,34 +484,62 @@ impl HostRegistrations {
             Some(oldest) => self.changes.retain(|(epoch, _)| epoch > oldest),
             None => self.changes.clear(),
         }
-        let PreparedHosts { key, seq, hosts, load_error, deps, notices, .. } = prepared;
+        let PreparedHosts { key, seq, generation, hosts, load_error, deps, notices, .. } = prepared;
         if let Some(scope) = self.scopes.get(&key)
-            && scope.seq > seq
+            && (scope.seq > seq || scope.generation > generation)
         {
-            return !scope.stale;
+            return scope.is_fresh();
         }
+        let touched = changes.iter().any(|change| match change {
+            Change::All => true,
+            Change::Path(path) => deps.touches(path),
+        });
         let mut installed = InstalledHosts { hosts: Arc::new(hosts), version: 0, load_error };
-        match self.scopes.get(&key) {
-            Some(previous) if previous.installed.same_result(&installed) => installed = previous.installed.clone(),
+        let previous = self.scopes.get(&key);
+        let generation = previous.map_or(generation, |scope| scope.generation);
+        if touched {
+            let due = Some(now + self.settle);
+            match self.scopes.get_mut(&key) {
+                // The installed view serves until a reload after quiet.
+                Some(scope) if scope.installed.is_some() => {
+                    scope.stale = false;
+                    scope.due = due;
+                }
+                // Superseded before any view was installed: its profiles,
+                // warnings, and notices are withheld, but what it read is
+                // where the next change will show.
+                _ => {
+                    let scope = Scope { installed: None, deps, notices: Vec::new(), stale: false, due, generation, seq };
+                    self.scopes.insert(key, scope);
+                }
+            }
+            return false;
+        }
+        match previous.and_then(|scope| scope.installed.as_ref()) {
+            Some(previous) if previous.same_effect(&installed) => {
+                if previous.same_diagnostics(&installed) {
+                    installed = previous.clone();
+                } else {
+                    installed.version = previous.version;
+                }
+            }
             _ => {
                 self.next_version += 1;
                 installed.version = self.next_version;
             }
         }
-        let stale = changes.iter().any(|change| match change {
-            Change::All => true,
-            Change::Path(path) => deps.touches(path),
-        });
-        self.scopes.insert(key, Scope { installed, deps, notices, stale, seq });
-        !stale
+        self.scopes.insert(key, Scope { installed: Some(installed), deps, notices, stale: false, due: None, generation, seq });
+        true
     }
 
-    /// Prepares `context`'s configuration on the calling thread unless it is
-    /// fresh, for a caller that owns the cache outright.
-    pub fn prepare(&mut self, context: &FileResolutionContext) {
+    /// Prepares `context`'s configuration on the calling thread, at `now`,
+    /// when it is due ([`Self::expire`] first), for a caller that owns the
+    /// cache outright.
+    pub fn prepare(&mut self, context: &FileResolutionContext, now: Instant) {
+        self.expire(now);
         if let Some(preparation) = self.begin(context) {
             let prepared = preparation.run();
-            self.install(prepared);
+            self.install(prepared, now);
         }
     }
 
@@ -428,32 +550,81 @@ impl HostRegistrations {
         }
     }
 
-    /// Marks stale every configuration a change at one of `paths` can
-    /// affect. A recorded file is re-read and compared with its recorded
-    /// hash first, so an unchanged file invalidates nothing.
-    pub fn invalidate_paths(&mut self, paths: &[PathBuf]) {
+    /// Schedules a reload, one settle window after `now`, of every
+    /// configuration a change at one of `paths` can affect (see
+    /// [`HostDependencies::touches`]), resetting the deadline of one already
+    /// waiting and superseding a preparation in flight. Reads nothing.
+    pub fn invalidate_paths(&mut self, paths: &[PathBuf], now: Instant) {
+        let due = now + self.settle;
         for path in paths {
             let path = normalized(path);
             self.record_change(Change::Path(path.clone()));
             for scope in self.scopes.values_mut() {
-                scope.stale |= !scope.stale && scope.deps.affected_by(&path);
+                if scope.deps.touches(&path) {
+                    scope.stale = false;
+                    scope.due = Some(due);
+                    scope.generation += 1;
+                }
             }
         }
     }
 
-    /// Marks every configuration stale.
+    /// Schedules a reload of every configuration one settle window after
+    /// `now`: a saved file on a client whose watches cannot report the
+    /// registration inputs.
+    pub fn schedule_all(&mut self, now: Instant) {
+        self.record_change(Change::All);
+        let due = now + self.settle;
+        for scope in self.scopes.values_mut() {
+            scope.stale = false;
+            scope.due = Some(due);
+            scope.generation += 1;
+        }
+    }
+
+    /// Marks every configuration due now: an explicit reload.
     pub fn invalidate_all(&mut self) {
         self.record_change(Change::All);
         for scope in self.scopes.values_mut() {
             scope.stale = true;
+            scope.due = None;
+            scope.generation += 1;
         }
+    }
+
+    /// Marks due every configuration whose settle deadline is at or before
+    /// `now`. Whoever expires it first, [`Self::take_expired`] reports it.
+    pub fn expire(&mut self, now: Instant) {
+        for scope in self.scopes.values_mut() {
+            if scope.due.is_some_and(|due| due <= now) {
+                scope.due = None;
+                scope.stale = true;
+                self.expired = true;
+            }
+        }
+    }
+
+    /// [`Self::expire`]s at `now`.
+    ///
+    /// ## Returns
+    ///
+    /// Whether any configuration became due since the last call, so the
+    /// caller schedules the reloads.
+    pub fn take_expired(&mut self, now: Instant) -> bool {
+        self.expire(now);
+        std::mem::take(&mut self.expired)
+    }
+
+    /// The earliest settle deadline still waiting, if any.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.scopes.values().filter_map(|scope| scope.due).min()
     }
 
     /// Every folder a configuration's load depends on: the configuration
     /// files' folders, each manifest's, member's, and import's folder, and
-    /// the folders a refused entry's manifest was searched in, each absent
-    /// one with the nearest existing ancestor its preparation observed. A
-    /// lookup only.
+    /// the folders a refused entry's manifest and members were searched in,
+    /// each absent one with the nearest existing ancestor its preparation
+    /// observed. A lookup only.
     pub fn watch_folders(&self) -> BTreeSet<WatchedFolder> {
         self.scopes.values().flat_map(|scope| scope.deps.watched_folders()).collect()
     }
@@ -487,8 +658,8 @@ impl HostRegistrations {
     /// the documents the configuration serves.
     pub fn diagnostics(&self) -> Vec<RegistrationDiagnostic> {
         let mut all: Vec<RegistrationDiagnostic> = Vec::new();
-        for scope in self.scopes.values() {
-            for diagnostic in scope.installed.diagnostics() {
+        for installed in self.scopes.values().filter_map(|scope| scope.installed.as_ref()) {
+            for diagnostic in installed.diagnostics() {
                 if !all.contains(&diagnostic) {
                     all.push(diagnostic);
                 }
@@ -538,12 +709,10 @@ impl HostView {
 
     /// The view `select` gives a document with `frontmatter` at `path`,
     /// judged in its own `context`, under `installed` (the configuration's
-    /// registrations, when prepared). Only the document's own selection
-    /// warnings are part of the view; the configuration's are published on
-    /// the files they name ([`HostRegistrations::diagnostics`]).
-    ///
-    /// Reads the legacy host catalogs in the document's schema roots only
-    /// when no registered host identifies the document.
+    /// registrations, when prepared; `md` without them). Only the document's
+    /// own selection warnings are part of the view; the configuration's are
+    /// published on the files they name ([`HostRegistrations::diagnostics`]).
+    /// Reads nothing: a schema root's files never supply a host.
     pub fn select(
         installed: Option<&InstalledHosts>,
         frontmatter: &Value,
@@ -559,31 +728,12 @@ impl HostView {
         view
     }
 
-    /// The legacy view of `context`'s schema roots alone, with no
-    /// registration excluded: only for a caller with no installed
-    /// registrations to select under (a provider test building its own
-    /// [`DocumentContext`](crate::providers::DocumentContext)). A served
-    /// document's view always comes from [`select`](Self::select).
-    pub fn unregistered(context: &FileResolutionContext) -> Self {
-        let legacy = LegacyHost::discover(context, None);
-        if legacy.is_empty() {
-            Self::md()
-        } else {
-            Self::of(HostSelection::Legacy(Arc::new(legacy)), Vec::new())
-        }
-    }
-
     fn of(selection: HostSelection, diagnostics: Vec<RegistrationDiagnostic>) -> Self {
         let (lifecycle, catalogs, functions) = match &selection {
             HostSelection::Registered(profile) => (
-                LifecycleHost::of(Some(Arc::clone(profile.lifecycle())), Vec::new()),
+                LifecycleHost::of(Arc::clone(profile.lifecycle())),
                 vec![GlobalCatalog::clone(profile.globals())],
                 profile.functions().iter().map(|set| set.functions.clone()).collect(),
-            ),
-            HostSelection::Legacy(legacy) => (
-                LifecycleHost::of(legacy.lifecycle().cloned(), legacy.incomplete().to_vec()),
-                legacy.globals().iter().map(|(_, catalog)| GlobalCatalog::clone(catalog)).collect(),
-                legacy.functions().iter().map(|(_, functions)| functions.clone()).collect(),
             ),
             HostSelection::Md | HostSelection::Ambiguous(_) => (LifecycleHost::md(), Vec::new(), Vec::new()),
         };
@@ -601,30 +751,15 @@ impl HostView {
         &self.lifecycle
     }
 
-    /// The host global catalogs, in root order for a legacy host.
+    /// The host global catalogs: the registered host's one catalog, built
+    /// from its namespace files; none for any other selection.
     pub fn catalogs(&self) -> &[GlobalCatalog] {
         &self.catalogs
-    }
-
-    /// The legacy host catalogs that did not load.
-    pub fn catalog_errors(&self) -> &[CatalogError] {
-        match &self.selection {
-            HostSelection::Legacy(legacy) => legacy.catalog_errors(),
-            _ => &[],
-        }
     }
 
     /// The analysis-only host function sets; an earlier set wins a name.
     pub fn functions(&self) -> &[HostFunctions] {
         &self.functions
-    }
-
-    /// The legacy function catalogs that did not load.
-    pub fn function_errors(&self) -> &[HostFunctionCatalogError] {
-        match &self.selection {
-            HostSelection::Legacy(legacy) => legacy.function_errors(),
-            _ => &[],
-        }
     }
 
     /// The selection's warnings: `dm.host.ambiguous`, and a conflicting
@@ -639,29 +774,6 @@ impl HostView {
     pub fn unknown_events(&self) -> &[UnknownHostEvent] {
         &self.unknown_events
     }
-
-    /// The files a legacy view read, whose content a cached view depends on,
-    /// and the artifact locations beside them, whose presence it depends on.
-    pub(crate) fn legacy_inputs(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
-        let HostSelection::Legacy(legacy) = &self.selection else {
-            return (Vec::new(), Vec::new());
-        };
-        let catalogs: Vec<PathBuf> = legacy
-            .globals()
-            .iter()
-            .map(|(path, _)| path.clone())
-            .chain(legacy.catalog_errors().iter().map(|error| PathBuf::from(&error.catalog)))
-            .collect();
-        let functions: Vec<PathBuf> = legacy
-            .functions()
-            .iter()
-            .map(|(path, _)| path.clone())
-            .chain(legacy.function_errors().iter().map(|error| error.path.clone()))
-            .collect();
-        let probes =
-            catalogs.iter().map(|path| lifecycle_artifact_path(path)).chain(functions.iter().map(|path| facts_artifact_path(path))).collect();
-        (catalogs.into_iter().chain(functions).collect(), probes)
-    }
 }
 
 /// The root keys of `frontmatter` that the document's own lifecycle treats
@@ -669,7 +781,7 @@ impl HostView {
 /// own events (an event `md` does not have under that name). Only a
 /// document no registered host identified has any.
 fn unknown_host_events(view: &HostView, hosts: &RegisteredHosts, frontmatter: &Value) -> Vec<UnknownHostEvent> {
-    if !matches!(view.selection, HostSelection::Md | HostSelection::Legacy(_)) {
+    if !matches!(view.selection, HostSelection::Md) {
         return Vec::new();
     }
     let Some(map) = frontmatter.as_object() else {
@@ -721,9 +833,15 @@ mod tests {
         }
 
         fn version(&self, registrations: &mut HostRegistrations) -> u64 {
-            registrations.prepare(&self.context());
+            registrations.prepare(&self.context(), Instant::now());
             registrations.lookup(&self.context()).expect("installed").version
         }
+    }
+
+    /// A fixed origin and offsets from it in milliseconds: the controlled
+    /// clock these tests pass to every call.
+    fn at(origin: Instant, millis: u64) -> Instant {
+        origin + Duration::from_millis(millis)
     }
 
     #[test]
@@ -733,18 +851,20 @@ mod tests {
         let first = fixture.version(&mut registrations);
 
         std::fs::write(fixture.config(), "register: []\n").unwrap();
-        registrations.invalidate_paths(&[fixture.config()]);
+        registrations.invalidate_paths(&[fixture.config()], Instant::now());
         assert!(!registrations.is_fresh(&fixture.context()), "the configuration file changed");
         let again = fixture.version(&mut registrations);
         assert_eq!(again, first, "the same (empty) result keeps its version");
 
-        registrations.invalidate_paths(&[fixture.config()]);
-        assert!(registrations.is_fresh(&fixture.context()), "an unchanged file invalidates nothing");
+        registrations.invalidate_paths(&[fixture.config()], Instant::now());
+        let generation = registrations.generation();
+        assert_eq!(fixture.version(&mut registrations), first, "an unchanged file reloads to the same view");
+        assert_eq!(registrations.generation(), generation, "and changes no analysis generation");
 
         std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
         registrations.invalidate_all();
         let refused = fixture.version(&mut registrations);
-        assert_ne!(refused, first);
+        assert_eq!(refused, first, "a refusal that loads no profile changes only the published warnings");
         let diagnostics = registrations.diagnostics();
         assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
         assert_eq!(diagnostics[0].code, darkmatter::config::registration::HOST_REGISTRATION_CODE);
@@ -755,7 +875,7 @@ mod tests {
         let fixture = Fixture::new();
         std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
         let mut registrations = HostRegistrations::default();
-        registrations.prepare(&fixture.context());
+        registrations.prepare(&fixture.context(), Instant::now());
         let manifest = fixture.root.join("home/missing/darkmatter-host.yaml");
         assert!(registrations.dependencies().contains(&manifest), "{:?}", registrations.dependencies());
         let watched = registrations.watch_folders();
@@ -765,15 +885,19 @@ mod tests {
             "{watched:?}"
         );
 
+        // The missing folder's own creation is an event the load can follow.
         std::fs::create_dir_all(&folder).unwrap();
+        registrations.invalidate_paths(std::slice::from_ref(&folder), Instant::now());
+        assert!(!registrations.is_fresh(&fixture.context()), "the folder appeared");
+        registrations.prepare(&fixture.context(), Instant::now());
         std::fs::write(&manifest, "kind: darkmatter-host\n").unwrap();
-        registrations.invalidate_paths(&[manifest]);
+        registrations.invalidate_paths(&[manifest], Instant::now());
         assert!(!registrations.is_fresh(&fixture.context()), "the manifest appeared");
     }
 
     /// The repository configuration is read as committed at `HEAD`, so a
     /// commit (a rewritten branch ref) or a checkout (a rewritten `HEAD`)
-    /// reloads the registrations; an unchanged ref does not.
+    /// reloads the registrations; an unchanged ref reloads to the same view.
     #[test]
     fn a_commit_or_checkout_reloads_the_registrations() {
         let fixture = Fixture::new();
@@ -784,20 +908,22 @@ mod tests {
         std::fs::write(&branch, "1111111111111111111111111111111111111111\n").unwrap();
         let context = fixture.context().with_repository_root(&repo);
         let mut registrations = HostRegistrations::default();
-        registrations.prepare(&context);
+        registrations.prepare(&context, Instant::now());
         assert_eq!(registrations.head_paths(), BTreeSet::from([repo.join(".git/HEAD"), branch.clone()]));
+        let version = registrations.lookup(&context).unwrap().version;
 
-        registrations.invalidate_paths(std::slice::from_ref(&branch));
-        assert!(registrations.is_fresh(&context), "an unchanged ref invalidates nothing");
+        registrations.invalidate_paths(std::slice::from_ref(&branch), Instant::now());
+        registrations.prepare(&context, Instant::now());
+        assert_eq!(registrations.lookup(&context).unwrap().version, version, "an unchanged ref keeps the view");
         std::fs::write(&branch, "2222222222222222222222222222222222222222\n").unwrap();
-        registrations.invalidate_paths(std::slice::from_ref(&branch));
+        registrations.invalidate_paths(std::slice::from_ref(&branch), Instant::now());
         assert!(!registrations.is_fresh(&context), "a commit moved the branch");
 
-        registrations.prepare(&context);
+        registrations.prepare(&context, Instant::now());
         std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/other\n").unwrap();
-        registrations.invalidate_paths(&[repo.join(".git/HEAD")]);
+        registrations.invalidate_paths(&[repo.join(".git/HEAD")], Instant::now());
         assert!(!registrations.is_fresh(&context), "a checkout moved `HEAD`");
-        registrations.prepare(&context);
+        registrations.prepare(&context, Instant::now());
         assert!(registrations.head_paths().contains(&repo.join(".git/refs/heads/other")));
     }
 
@@ -808,7 +934,7 @@ mod tests {
     fn a_missing_user_configuration_is_a_notice_and_nothing_is_written() {
         let fixture = Fixture::new();
         let mut registrations = HostRegistrations::default();
-        registrations.prepare(&fixture.context());
+        registrations.prepare(&fixture.context(), Instant::now());
         let notices = registrations.notices();
         assert_eq!(notices.len(), 1, "{notices:#?}");
         let notice = notices.first().unwrap();
@@ -818,8 +944,8 @@ mod tests {
         assert!(!fixture.config().exists(), "a passive load creates nothing");
 
         std::fs::write(fixture.config(), "{}\n").unwrap();
-        registrations.invalidate_paths(&[fixture.config()]);
-        registrations.prepare(&fixture.context());
+        registrations.invalidate_paths(&[fixture.config()], Instant::now());
+        registrations.prepare(&fixture.context(), Instant::now());
         assert!(registrations.notices().is_empty(), "{:#?}", registrations.notices());
     }
 
@@ -832,7 +958,7 @@ mod tests {
         let legacy = fixture.root.join("home").join(darkmatter::config::migration::LEGACY_WHITELIST_FILE_NAME);
         std::fs::write(&legacy, "ls\n").unwrap();
         let mut registrations = HostRegistrations::default();
-        registrations.prepare(&fixture.context());
+        registrations.prepare(&fixture.context(), Instant::now());
         let notices = registrations.notices();
         assert!(
             notices.iter().any(|notice| notice.code == CONFIG_MIGRATION_CODE && notice.file == legacy),
@@ -842,21 +968,190 @@ mod tests {
         assert_eq!(std::fs::read_to_string(fixture.config()).unwrap(), "{}\n");
     }
 
+    /// A first load that a change touched while it ran installs nothing:
+    /// its refusal and notices are withheld, Markdown selection and the YAML
+    /// contract key see no registration (as before any load), and its reads
+    /// are kept so the replacement reload is scheduled and watched. An older
+    /// result never replaces a newer one.
     #[test]
-    fn a_change_during_a_preparation_leaves_it_stale_and_an_older_one_never_wins() {
+    fn a_change_during_a_first_preparation_withholds_it_and_an_older_one_never_wins() {
         let fixture = Fixture::new();
-        let mut registrations = HostRegistrations::default();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
         let older = registrations.begin(&fixture.context()).expect("cold").run();
 
-        std::fs::write(fixture.config(), "# edited\n").unwrap();
-        let during = registrations.begin(&fixture.context()).expect("still cold");
-        registrations.invalidate_paths(&[fixture.config()]);
-        assert!(!registrations.install(during.run()), "the change touched what it read");
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        let during = registrations.begin(&fixture.context()).expect("still cold").run();
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        assert!(!registrations.install(during, at(origin, 10)), "the change touched what it read");
+        assert!(registrations.lookup(&fixture.context()).is_none(), "the superseded result is withheld");
+        assert!(registrations.diagnostics().is_empty(), "its refusal is never published");
+        assert_eq!(registrations.generation(), 0, "no analysis version was issued for it");
+        assert!(registrations.dependencies().contains(&fixture.config()), "its reads are watched");
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 310)), "the replacement waits for quiet");
+        assert!(registrations.begin(&fixture.context()).is_none(), "and is not due yet");
 
-        let newer = registrations.begin(&fixture.context()).expect("stale").run();
-        assert!(registrations.install(newer));
+        let path = fixture.root.join("work/roster.yaml");
+        let selected = HostView::select(registrations.lookup(&fixture.context()).as_ref(), &Value::Null, &path, &fixture.context());
+        assert!(matches!(selected.selection(), HostSelection::Md), "Markdown selection is neutral meanwhile");
+        let mut contracts = super::super::yaml_contract::YamlContracts::default();
+        let mut key = |hosts: Option<&InstalledHosts>| {
+            contracts.key("kind: roster\n", &path, &fixture.context(), 1, None, hosts).expect("loads")
+        };
+        let neutral = key(None);
+        assert_eq!(key(registrations.lookup(&fixture.context()).as_ref()), neutral, "the YAML key names no revision");
+
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 100));
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 400)), "a later change resets the wait");
+        assert!(registrations.take_expired(at(origin, 400)));
+        let newer = registrations.begin(&fixture.context()).expect("due").run();
+        assert!(registrations.install(newer, at(origin, 410)));
+        assert!(registrations.is_fresh(&fixture.context()));
+        let installed = registrations.lookup(&fixture.context()).expect("the current result installs");
+        assert!(registrations.diagnostics().is_empty(), "{:#?}", registrations.diagnostics());
+        assert_ne!(key(Some(&installed)), neutral, "the YAML key follows the current result");
+        assert!(registrations.install(older, at(origin, 420)), "a dropped older result leaves the newer one fresh");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, installed.version);
+    }
+
+    /// Two batches of events inside one settle window give one load, after
+    /// the window has been quiet from the last event; until then the
+    /// installed view serves and no load is due.
+    #[test]
+    fn two_batches_within_the_window_give_one_load_after_quiet() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        registrations.prepare(&fixture.context(), origin);
         let installed = registrations.lookup(&fixture.context()).unwrap().version;
-        assert!(registrations.install(older), "a dropped older result leaves the newer one fresh");
+
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 10));
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 310)));
+        assert!(!registrations.take_expired(at(origin, 200)), "still inside the window");
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 200));
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 500)), "the second batch resets the deadline");
+        assert!(!registrations.take_expired(at(origin, 400)), "quiet since the second batch for 200 ms only");
+        assert!(!registrations.needs_load(&fixture.context()), "waiting serves the installed view");
+        assert!(registrations.begin(&fixture.context()).is_none(), "and loads nothing");
         assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, installed);
+
+        assert!(registrations.take_expired(at(origin, 500)), "quiet for the whole window");
+        assert!(!registrations.take_expired(at(origin, 501)), "reported once");
+        let load = registrations.begin(&fixture.context()).expect("one load is due");
+        assert!(registrations.begin(&fixture.context()).is_some(), "due until it installs");
+        assert!(registrations.install(load.run(), at(origin, 510)));
+        assert!(registrations.is_fresh(&fixture.context()));
+        assert!(registrations.next_deadline().is_none());
+    }
+
+    /// An event arriving while a reload runs supersedes its result: the
+    /// installed view is kept, and the newer reload installs after quiet.
+    #[test]
+    fn a_newer_event_supersedes_an_in_flight_reload() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        registrations.prepare(&fixture.context(), origin);
+        let first = registrations.lookup(&fixture.context()).unwrap().version;
+
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        assert!(registrations.take_expired(at(origin, 300)));
+        let in_flight = registrations.begin(&fixture.context()).expect("due").run();
+
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 320));
+        assert!(!registrations.install(in_flight, at(origin, 330)), "superseded");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, first, "the installed view is kept");
+        assert!(registrations.diagnostics().is_empty(), "the superseded refusal is never published");
+        assert!(registrations.begin(&fixture.context()).is_none(), "the newer reload waits for quiet");
+
+        registrations.prepare(&fixture.context(), at(origin, 620));
+        assert!(registrations.is_fresh(&fixture.context()));
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, first, "the newer result is the same view");
+    }
+
+    /// A change, during a warm reload, at a path only that reload read (a
+    /// newly registered manifest) rearms the wait without installing: the
+    /// installed view and its warnings are kept.
+    #[test]
+    fn a_change_to_an_input_only_the_reload_read_rearms_it_without_installing() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.prepare(&fixture.context(), origin);
+        let first = registrations.lookup(&fixture.context()).unwrap().version;
+
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        assert!(registrations.take_expired(at(origin, 300)));
+        let in_flight = registrations.begin(&fixture.context()).expect("due").run();
+        let manifest = fixture.root.join("home/missing/darkmatter-host.yaml");
+        assert!(!registrations.dependencies().contains(&manifest), "not a recorded input yet");
+        registrations.invalidate_paths(std::slice::from_ref(&manifest), at(origin, 320));
+        assert!(registrations.needs_load(&fixture.context()), "the installed view never read it, so its deadline is not reset");
+
+        assert!(!registrations.install(in_flight, at(origin, 330)), "the reload read the changed path");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, first, "the installed view is kept");
+        assert!(registrations.diagnostics().is_empty(), "the touched refusal is never published");
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 630)), "the reload waits for quiet again");
+    }
+
+    /// An explicit reload is due at once, whatever the window; a change to
+    /// a path no configuration read schedules nothing.
+    #[test]
+    fn an_explicit_reload_is_immediate_and_an_unrelated_path_schedules_nothing() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        registrations.prepare(&fixture.context(), origin);
+
+        registrations.invalidate_paths(&[fixture.root.join("work/notes.md")], origin);
+        assert!(registrations.is_fresh(&fixture.context()));
+        assert!(registrations.next_deadline().is_none());
+
+        registrations.invalidate_all();
+        assert!(registrations.needs_load(&fixture.context()), "due at once");
+        assert!(registrations.next_deadline().is_none());
+
+        registrations.prepare(&fixture.context(), origin);
+        registrations.schedule_all(at(origin, 5));
+        assert!(!registrations.needs_load(&fixture.context()), "a save fallback waits for quiet");
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 305)));
+    }
+
+    /// A broken registration is published once its reload completes and
+    /// cleared by the repair's reload; a reload whose warnings alone change
+    /// keeps the analysis version.
+    #[test]
+    fn a_repair_clears_the_published_refusal() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        registrations.prepare(&fixture.context(), origin);
+        assert_eq!(registrations.diagnostics().len(), 1);
+        let refused = registrations.lookup(&fixture.context()).unwrap().version;
+
+        std::fs::write(fixture.config(), "register:\n  - ./elsewhere/darkmatter-host.yaml\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        registrations.prepare(&fixture.context(), at(origin, 300));
+        let moved = registrations.diagnostics();
+        assert_eq!(moved.len(), 1, "{moved:#?}");
+        assert!(moved[0].entry.reference.contains("elsewhere"), "{moved:#?}");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, refused, "warnings alone keep the version");
+        let watched = registrations.watch_folders();
+        assert!(
+            watched.iter().any(|folder| folder.folder == fixture.root.join("home/elsewhere")),
+            "watches follow the moved target: {watched:?}"
+        );
+
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 400));
+        registrations.prepare(&fixture.context(), at(origin, 700));
+        assert!(registrations.diagnostics().is_empty(), "{:#?}", registrations.diagnostics());
     }
 }

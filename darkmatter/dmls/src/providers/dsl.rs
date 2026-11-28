@@ -237,7 +237,9 @@ fn interpolation_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = frontmatter::expression_property_keys(ctx);
-    let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
+    let view = ctx.host_view();
+    let mut host = host_function_candidates(partial, &view);
+    host.extend(expressions::host_global_candidates(partial, &HostCatalogs(view)));
     // Callback locals extend the enclosing directive scope only at this cursor.
     let candidates = with_site_scope(ctx, Some(token_start), |site| {
         let start = expressions::expression_body_start(ctx.text, offset).unwrap_or(token_start);
@@ -250,6 +252,33 @@ fn interpolation_completions(
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
         .collect();
     if prioritize { retain_completion_order(&mut items); }
+    items
+}
+
+/// The selected view's host functions matching `partial`, each offered once
+/// under its canonical name. A canonical name or alias matches by prefix
+/// without regard to case, as dispatch resolves a host name; an `md`
+/// document, or one whose host is refused or unselected, has none.
+fn host_function_candidates(partial: &str, view: &crate::overlay::hosts::HostView) -> Vec<expressions::ExprCompletion> {
+    let partial = partial.to_ascii_lowercase();
+    let mut items = Vec::new();
+    for set in view.functions() {
+        for canonical in set.function_names() {
+            let aliases = set.aliases(canonical).unwrap_or_default();
+            let matches = std::iter::once(canonical)
+                .chain(aliases.iter().map(String::as_str))
+                .any(|name| name.to_ascii_lowercase().starts_with(&partial));
+            if matches {
+                items.push(expressions::ExprCompletion {
+                    label: canonical.to_string(),
+                    insert_text: canonical.to_string(),
+                    kind: expressions::ExprCompletionKind::Function,
+                    detail: Some("host function".to_string()),
+                    documentation: None,
+                });
+            }
+        }
+    }
     items
 }
 
@@ -291,9 +320,7 @@ fn interpolation_candidates(
 }
 
 /// The host global catalogs of the document's selected host view
-/// ([`DocumentContext::host_view`]); none for an `md` document. A legacy
-/// catalog that failed to load contributes no globals here; [`diagnostics`]
-/// reports it ([`host_catalog_diagnostics`]).
+/// ([`DocumentContext::host_view`]); none for an `md` document.
 pub(crate) fn host_catalogs(ctx: &DocumentContext) -> HostCatalogs {
     HostCatalogs(ctx.host_view())
 }
@@ -323,76 +350,6 @@ fn enter_view_functions(
     view: &crate::overlay::hosts::HostView,
 ) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
     view.functions().iter().rev().map(|functions| functions.enter()).collect()
-}
-
-/// One `dm.schema.host_catalog` warning per host function catalog that
-/// failed to load (or names a built-in function), at the top of the
-/// document: the functions it declares are unknown here.
-fn host_function_catalog_diagnostics(
-    failed: &[darkmatter::markdown::schemas::catalog::HostFunctionCatalogError],
-    out: &mut Vec<Diagnostic>,
-) {
-    for error in failed {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::SCHEMA_HOST_CATALOG,
-            source::SCHEMA,
-            format!("host {error}; the functions it declares are not known to this document"),
-        ));
-    }
-}
-
-/// One `dm.schema.host_catalog` warning per host catalog that failed to load,
-/// at the top of the document: its globals are unknown here, so expressions
-/// reading them are validated as document properties. The message is the
-/// catalog error, which names the file, the field, and the reason.
-fn host_catalog_diagnostics(
-    failed: &[darkmatter::markdown::schemas::catalog::CatalogError],
-    out: &mut Vec<Diagnostic>,
-) {
-    for error in failed {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::SCHEMA_HOST_CATALOG,
-            source::SCHEMA,
-            format!("host {error}; the globals it declares are not known to this document"),
-        ));
-    }
-}
-
-/// One `dm.lifecycle.incomplete_analysis` warning per host catalog whose
-/// lifecycle artifact could not be used, at the top of a document with
-/// frontmatter, when no other catalog's could: the document's lifecycle
-/// stacks are then analyzed as the `md` host's, so a host-only event, verb,
-/// or rename is not seen. The message is the artifact's reason.
-/// Without a supplied `host`, the document's selected one is read.
-fn lifecycle_host_diagnostics(
-    ctx: &DocumentContext,
-    host: Option<&crate::overlay::event_views::LifecycleHost>,
-    out: &mut Vec<Diagnostic>,
-) {
-    if ctx.overlay.is_none() {
-        return;
-    }
-    let discovered;
-    let host = match host {
-        Some(host) => host,
-        None => {
-            discovered = crate::overlay::event_views::LifecycleHost::for_document(ctx);
-            &discovered
-        }
-    };
-    for reason in host.incomplete() {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::LIFECYCLE_INCOMPLETE_ANALYSIS,
-            source::SCHEMA,
-            format!("{reason}; lifecycle stacks are analyzed as the `md` host's"),
-        ));
-    }
 }
 
 pub(super) fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
@@ -821,26 +778,12 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
-/// All Layer-3 DSL diagnostics for the document, reading its lifecycle
-/// host for the incomplete-analysis check.
+/// All Layer-3 DSL diagnostics for the document.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
-    diagnostics_under(ctx, None)
-}
-
-/// [`diagnostics`] with the incomplete-analysis check under `host`, which is
-/// not rediscovered.
-pub fn diagnostics_with_host(ctx: &DocumentContext, host: &crate::overlay::event_views::LifecycleHost) -> Vec<Diagnostic> {
-    diagnostics_under(ctx, Some(host))
-}
-
-fn diagnostics_under(ctx: &DocumentContext, host: Option<&crate::overlay::event_views::LifecycleHost>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let view = ctx.host_view();
     let _host_functions = enter_view_functions(&view);
-    host_catalog_diagnostics(view.catalog_errors(), &mut out);
-    host_function_catalog_diagnostics(view.function_errors(), &mut out);
     let catalogs = HostCatalogs(view);
-    lifecycle_host_diagnostics(ctx, host, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);
@@ -1575,7 +1518,9 @@ pub(super) fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<
         .and_then(|entry| entry.scalar.clone())
 }
 
-/// The document spans of top-level `prologue`/`epilogue` frontmatter values.
+/// The document spans of top-level `prologue`/`epilogue` frontmatter values
+/// that composition reads as file references; a value it emits as inline
+/// Markdown is never a link target.
 fn frontmatter_prologue_epilogue(ctx: &DocumentContext) -> Vec<SourceSpan> {
     let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) else {
         return Vec::new();
@@ -1583,7 +1528,12 @@ fn frontmatter_prologue_epilogue(ctx: &DocumentContext) -> Vec<SourceSpan> {
     ["prologue", "epilogue"]
         .into_iter()
         .filter_map(|key| ast.entry_by_dotted(key))
-        .filter(|entry| entry.scalar.is_some())
+        .filter(|entry| {
+            entry
+                .scalar
+                .as_deref()
+                .is_some_and(|value| !darkmatter::markdown::compose::transclusion::frontmatter_value_is_inline(value))
+        })
         .map(|entry| entry.value_span.clone())
         .collect()
 }

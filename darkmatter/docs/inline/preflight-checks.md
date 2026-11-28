@@ -548,6 +548,214 @@ that offers no exact choice approves the shape for the rest of the
 composition. `darkmatter_cli::approval::approve_with_io` runs one prompt
 session over any reader and writer, which is how the prompt is tested.
 
+## Dry runs
+
+A dry run composes a document to show what it would produce, with no effect
+at all: no command runs, no login shell is started, no network packet is
+sent, no provider API is queried, no approval is asked for, and no cache is
+read or written. A library caller asks for one with
+`ComposeOptions::with_dry_run()`:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+
+let options = ComposeOptions::new().with_dry_run();
+assert!(options.is_dry_run());
+let session = options.passive_session().expect("a dry run records into a session").clone();
+// compose with `options`, then read what was left as written:
+for deferral in session.deferrals() {
+    println!("{:?}: {}", deferral.construct, deferral.reason.describe());
+}
+```
+
+### What a dry run leaves as written
+
+Work that needs an effect is not an error in a dry run. It is *deferred*: its
+authored text stays in the output exactly as written, and the session
+records a `Deferral` saying which construct was left (`construct`), why
+(`reason`), its authored text, and its frontmatter key or line when known.
+Everything that does not depend on it composes as usual.
+
+Given this document:
+
+```md
+---
+branch: $(git branch --show-current)
+title: Release
+---
+# {{ title }}
+On {{ branch }}.
+::shell git log -1
+::block when="branch == 'main'"
+Ship it.
+::end-block
+Alias {{ has_alias("ll") }}.
+```
+
+a dry run composes:
+
+```md
+# Release
+On {{ branch }}.
+::shell git log -1
+::block when="branch == 'main'"
+Ship it.
+::end-block
+Alias {{ has_alias("ll") }}.
+```
+
+and records five deferrals: the `branch` value, the `{{ branch }}` span that
+reads it, the `::shell` line, the `::block` whose condition reads `branch`,
+and the `has_alias` call. `title` composed, because it reads nothing deferred.
+
+| Construct (`DeferredConstruct`) | Left as written when | Reason (`DeferralReason`) |
+| --- | --- | --- |
+| `FrontmatterValue` | a `$( … )` value, or a value that reads one | `Command`, `DependsOn` |
+| `Interpolation` | a `{{ … }}` span that reads a deferred or absent value, calls an effectful function, or reads a file the host declared created or changed (`load_data`, the frontmatter readers, `find_files`) | `DependsOn`, `MissingInput`, `WrittenAtLaunch`, `CreatedAtLaunch`, `ChangedAtLaunch`, `ShellProbe`, `NetworkProbe`, `ProviderQuery` |
+| `ShellDirective` | a body `::shell` line | `Command` |
+| `ShellBlock` | a body `::shell-block` region | `Command` |
+| `BlockCondition` | a `::block when=…` whose condition reads a deferred value or asks about a file the host declared created or changed (`file_exists`, a content or listing reader); the whole region stays, directive lines included (inside a `::map`/`::filter` copy too, where its body is still expanded) | `DependsOn`, `MissingInput`, `WrittenAtLaunch`, `CreatedAtLaunch`, `ChangedAtLaunch` |
+| `Collection` | a `::map`/`::filter` whose `when=`, source, positional callback, `filter=`, `while=`, `until=`, or `sort=` reads a deferred or absent value or calls an effectful function; the whole region stays as written and inert, so nothing inside it (a `{{ i }}`, a `::file` target) runs, and `authored` is the region | `DependsOn`, `MissingInput`, `WrittenAtLaunch`, `ShellProbe`, `NetworkProbe`, `ProviderQuery` |
+| `Transclusion` | a `::file`/`::code` whose target or `when=` reads a deferred value, or whose target is a file the host declared created or changed, or a `prologue`/`epilogue` that does; the directive stays as written, its target unread. The condition-blind pre-flight walk (`Markdown::compose_preflight`) sets the same directives and sections aside instead of parsing or resolving them | any |
+| `SchemaTemplate` | a `$schema` slot whose read would need approval; the schema's checks are not run | `ReadNeedsApproval` |
+| `SchemaCheck` | a schema problem with a value the host declared written at launch; that value is judged when it is known | `WrittenAtLaunch` |
+
+The effectful functions are those that start the login shell (`has_alias`,
+`can_execute`, …), send packets (`ping`, `ping_under`), or query a
+provider's API (`pr`, `cicd`, …). A pure function such as `upper` still
+evaluates.
+
+### How deferral spreads
+
+A read of a deferred value is unavailable, and that travels through the
+expression like any evaluation error: through lookups, conditions,
+collections, function arguments, member paths (`branch.name`), and values
+derived from it. `try(…)` and `||` never turn it into a value, so a fallback
+cannot hide what a dry run skipped. The surface that started the evaluation
+keeps its own text: a span, a whole `::block` region, a whole `::map` or
+`::filter` region, or a frontmatter value, which is then deferred in turn.
+A collection that meets an unavailable value at a later item keeps none of
+the copies earlier items produced. A failure on values the dry run does
+know is still a failure: a boolean `sort=` key is
+`dm.collection.invalid_sort_key` and `i => i / 0` is
+`dm.collection.callback_failed`, dry run or not. The session is shared by every clone of the
+options, so a transcluded document, a schema slot, and a callback report
+into the same list.
+
+### Values a host declares absent
+
+A host that reports a missing input itself (Claudine's dry run reports each
+missing required input as its own finding) can declare that name absent
+before composing, with `PassiveSession::defer_absent(name, reason)`. A read
+of an absent name that finds no value is then unavailable for that reason
+(`MissingInput` for a missing input), so it stays as written and spreads
+like any deferred value, and the schema stage does not report the same name
+as a missing required property. A value the read does find (a default, a
+setter) reads as itself:
+
+```rust
+let options = ComposeOptions::new().with_dry_run();
+let session = options.passive_session().cloned().unwrap();
+session.defer_absent("topic", DeferralReason::MissingInput { name: "topic".into() });
+// `Topic is {{ topic }}.` composes as written; `$schema: { topic: string(required) }` passes.
+```
+
+A host that knows the run will *replace* a value before this composition
+(Claudine's sequence dry run, for a key an earlier task's lifecycle `set`
+writes, or a later step's `seq.outputs`) declares it with
+`PassiveSession::defer_written(path, reason)`. Unlike an absent name, a
+written one is unavailable *whatever it holds now*: the document's own
+`topic: missing` is not what the run will read. `path` is a top-level name
+(`topic`) or a member path (`seq.outputs`); a read of it or below it
+(`seq.outputs[0]`) is unavailable for `WrittenAtLaunch`, while a sibling
+(`seq.index`) reads as itself. What decides is the value a read selects,
+not how it is written: `seq.outputs`, `seq['outputs']`, `(seq).outputs`,
+and `seq['out' + 'puts']` all select `seq.outputs`, so all four are
+unavailable, in an interpolation, a `when=` condition, a frontmatter value,
+an inclusion target, and a `::map`/`::filter` callback or option alike. An
+explicit `fm.` read names the document's own property, so when the host
+binds a global `seq`, `fm.seq.outputs` (or `fm['seq'].outputs`) reads the
+document's authored `seq:` and is not the written value. A schema problem
+with a written top-level value is not reported; a `SchemaCheck` deferral
+names it instead:
+
+```rust
+session.defer_written("topic", DeferralReason::WrittenAtLaunch { name: "topic".into() });
+// With `topic: missing` and `$schema: { topic: enum(a) }`, no constraint
+// error: one `SchemaCheck` deferral. `::block when="topic == 'a'"` stays
+// whole as a conditional.
+```
+
+### Files a host declares created
+
+A dry run runs no lifecycle event, yet a real run's `initialize` can create
+a file a later read needs, or append to one that exists:
+
+```yaml
+initialize:
+  - ensure_file: [gen/notes.md, "Notes."]
+```
+
+with `::file gen/notes.md` in the body. A host finds such writes with
+`lifecycle::created_files(stack)`, which lists every `ensure_file`,
+`append_line`, and `append_jsonl` whose file operand is text (one under a
+`when:` branch too, marked `conditional`; a `{{ … }}` operand is listed
+with `template: true`). `CreatedFile::change()` says what the effect does:
+`InitializerChange::CreatesIfAbsent` for `ensure_file`, which leaves an
+existing file as it is, and `CreatesOrAppends` for the two appends, which
+also change an existing file's content.
+
+`CreatedFile::target(source, context, mutation_root)` resolves a literal
+operand exactly as the effect will, and gives `None` for a template and for
+a target the effect refuses because it lies outside the engine's mutation
+root, which the run never writes. For a template, the host either resolves
+its text itself and calls `CreatedFile::target_as(resolved, …)`, or, when it
+cannot know the value before the event runs, calls `CreatedFile::pattern(…)`,
+a `WritePattern` of the operand's literal text with anything where a span
+stands (`logs/{{ day }}.jsonl` reaches only `logs/*.jsonl`; an operand that
+starts with a span reaches anything below the mutation root). The host then
+declares each one:
+
+```rust
+let session = options.passive_session().cloned().unwrap();
+session.declare_initializer_write(&target, InitializerChange::CreatesIfAbsent,
+    DeferralReason::CreatedAtLaunch { path: "gen/notes.md".into() });
+// or, for a destination it cannot resolve:
+session.declare_unresolved_write(pattern, change, reason);
+// `::file gen/notes.md` stays as written: one `Transclusion` deferral.
+```
+
+`PassiveSession::defer_created(path, reason)` is the `CreatesIfAbsent`
+declaration. Every reader then asks one of three questions before it treats
+what it finds as a verdict:
+
+| Question | Answers | Asked by |
+|---|---|---|
+| `initializer_changes(path)` | a file that may not exist yet, or an existing one an append targets (`ChangedAtLaunch`) | `::file`/`::code`, `prologue`/`epilogue` (`Transclusion`), the pre-flight walk and reference graph (not walked), `load_data` (`Interpolation`), `frontmatter`/`try_frontmatter`/`markdown_title`/`markdown_body_empty`/`validate_schema` and the schema files and named-type imports `validate_schema` reads |
+| `created_file(path)` / `created_among(candidates)` | a missing file the run may create; an existing file always exists | `file_exists` (`BlockCondition`), every missing-file reader, reference validation |
+| `changes_listing(folders, matches)` | a file absent now that the listing would select, or an unresolved write below one of the folders | `find_files` |
+
+A declared file is matched by the entry it names, not by its spelling:
+`sub/../gen/notes.md`, a folder reached through a symbolic link, and, on a
+volume that opens another case's spelling, `GEN/Notes.md` are the same
+file. A pattern is matched by text. A file no declaration reaches is read
+as it is, and every other missing file is still refused.
+
+### What a dry run still refuses
+
+A dry run never turns a refusal into a deferral:
+
+- a blacklisted command is refused first, as a real run would refuse it;
+- a remote read the configuration denies keeps its typed refusal, and one it
+  allows is fetched without being stored;
+- a function or call the document may not make at all fails as it would in
+  a real run.
+
+Claudine's passive document check (`--dry-run` on `compose`,
+`inline-compose`, and `sequence`) composes through this mode, marks each
+deferred construct in its preview, and reports each as its own not-checked
+row.
+
 ## Timeouts
 
 - Default timeout: 10 seconds

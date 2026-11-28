@@ -165,7 +165,7 @@ pub use indentation::{IndentStyle, Indentation};
 pub use list_format::{ListFormat, classify_list};
 
 // Re-export the path→text rendering boundary
-pub use path_text::{canonicalize_simplified, to_portable_string, try_portable_string};
+pub use path_text::{canonicalize_simplified, to_forward_slash_string, try_forward_slash_string};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]
@@ -213,8 +213,8 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 #[cfg(feature = "file-reference-syntax")]
 pub use self::file_reference::{
     BaseDirOrigin, ContextAnchor, FileReference, FileReferenceClass, FileReferenceError,
-    FileReferenceKind, FileResolutionContext, GlobReference, GlobReferenceError, IntentForms,
-    LaunchMagicScope, MagicPathRegistration, MagicPathTier, PackageAreaFallback, PathIdentity,
+    FileReferenceKind, FileResolutionContext, GlobReference, GlobReferenceError, ImplicitBases, IntentForms,
+    LaunchScope, MagicPathRegistration, MagicPathTier, PackageAreaFallback, PathIdentity,
     PathPosition, PortabilityPreference, RelativeRoute, RepositoryScope, RepositoryScopeCatalog,
     RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure, RootProvenance,
     capture_env, home_dir, user_cache_dir, user_cache_dir_from,
@@ -222,16 +222,16 @@ pub use self::file_reference::{
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, GlobListing,
-    MagicSearchRoot, PartialCompletion, PreparedGlobReference, ProbeDisposition, ProbedCandidate,
+    CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, EntryKind, GlobListing,
+    MagicSearchRoot, PartialCompletion, PlannedTarget, PreparedGlobReference, ProbeDisposition, ProbedCandidate,
     Resolved, SkippedEntry, find_git_root,
 };
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding, FsShadowProbe,
     InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortablePath, PortablePathError,
-    PortableReference, ProbeError, ResolutionProblem, SpellingProblem,
+    PortableReference, ProbeError, ResolutionProblem, ShadowCache, ShadowProbe, SpellingProblem,
 };
 
 #[cfg(feature = "fetch")]

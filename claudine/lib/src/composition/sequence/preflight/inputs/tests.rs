@@ -106,7 +106,7 @@ fn every_owning_document_is_inventoried_with_its_file_and_container() {
         // `$schema` and `$state` requirements are not inputs.
         let missing: Vec<Vec<String>> = inventory.owners.iter().map(missing_names).collect();
         assert_eq!(missing, [vec!["reviewer"], vec!["spec"], vec!["leg_input"], vec![]], "{name}");
-        let Some(CompositionError::SequenceMissingProperties { failures, failure_count }) = inventory.missing_error() else {
+        let Some(CompositionError::SequenceMissingProperties { failures, failure_count, .. }) = inventory.missing_error() else {
             panic!("{name}: expected the combined report");
         };
         assert_eq!(failure_count, 3);
@@ -184,7 +184,7 @@ sequence:
     // authored reference is read as the literal file name it always was.
     assert!(matches!(
         resolved,
-        Err(CompositionError::SequenceExternalLoad { ref context, .. }) if context.contains("{{ plan }}")
+        Err(CompositionError::SequenceReferenceResolution { ref reference, .. }) if reference.contains("{{ plan }}")
     ), "{resolved:?}");
     fs::write(&root, fs::read_to_string(&root).unwrap().replace("  - name: nested\n    prompt: \"{{ plan }}\"\n", "")).unwrap();
     let resolved = discover(&root, &caller, json!({"spec": "work/spec.md"})).unwrap();
@@ -241,7 +241,7 @@ fn malformed_declarations_and_invalid_values_fail_discovery() {
 #[test]
 fn discovery_runs_nothing() {
     let dir = TempDir::new().unwrap();
-    let marker = |name: &str| biscuit_file::to_portable_string(&dir.path().join(name));
+    let marker = |name: &str| biscuit_file::to_forward_slash_string(&dir.path().join(name));
     write(dir.path(), "prompt.md", &format!("---\nprobe: \"$(touch {})\"\n---\nP.\n", marker("prompt-shell")));
     write(dir.path(), "child.yaml", &format!(
         "kind: sequence\nprobe: \"$(touch {})\"\ninitialize:\n  - ensure_file: {}\nsequence:\n  - name: ask\n    prompt: ./prompt.md\n",
@@ -300,7 +300,10 @@ fn a_referenced_template_never_selects_a_prompt_from_its_referrers_values() {
     let leaked = write(dir.path(), "elsewhere/leaked.md", "---\ntitle: l\n---\nLeaked.\n");
     let fallback = write(dir.path(), "fallback.md", "---\ntitle: f\n---\nFallback.\n");
     let own = write(dir.path(), "own.md", "---\ntitle: o\n---\nOwn.\n");
-    let template = format!("template:\n  prompt: \"{{{{ prompt_path || '{}' }}}}\"\nsequence:\n  - name: one\n", fallback.display());
+    // `/` separators: a Windows `\` inside the double-quoted scalar would be
+    // read as a YAML escape.
+    let fallback = fallback.display().to_string().replace('\\', "/");
+    let template = format!("template:\n  prompt: \"{{{{ prompt_path || '{fallback}' }}}}\"\nsequence:\n  - name: one\n");
     write(dir.path(), "roster.yaml", &format!("kind: sequence\n{template}"));
     write(dir.path(), "own.yaml", &format!("kind: sequence\nprompt_path: {}\n{template}", own.display()));
     let prompts = |root: &Path, setters: Value| -> Vec<std::ffi::OsString> {
@@ -332,7 +335,8 @@ fn leaving_verdicts_records_a_failed_owner_instead_of_failing() {
     let options = InputDiscoveryOptions::new(&resolution, &context).with_caller_layers(&layers);
 
     let inventory = discover_sequence_inputs(&load(&root), options.leaving_verdicts()).unwrap();
-    assert_eq!(inventory.failed_owners, vec![1]);
+    assert_eq!(inventory.failed_owners.iter().map(|failed| failed.owner).collect::<Vec<_>>(), vec![1]);
+    assert!(matches!(inventory.failed_owners[0].error, CompositionError::SchemaValidation { .. }));
     assert_eq!(inventory.owners[1].role, InputOwnerRole::Nested);
     assert!(inventory.owners[1].missing.is_none());
     assert!(inventory.missing_error().is_none());

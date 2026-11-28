@@ -148,7 +148,7 @@ impl Case {
     /// Asserts nothing observed `name`: no read of its bytes, no entry in
     /// the read set.
     fn assert_unread(&self, name: &str) {
-        let entry = biscuit_file::to_portable_string(&self.path(name));
+        let entry = biscuit_file::to_forward_slash_string(&self.path(name));
         let observations = self.runtime.observations_since(ReadMark::default());
         let read = observations.iter().find(|observation| {
             observation.entry == entry && matches!(observation.kind, ObservationKind::File | ObservationKind::Url)
@@ -158,7 +158,7 @@ impl Case {
     }
 
     fn assert_read(&self, name: &str) {
-        let entry = biscuit_file::to_portable_string(&self.path(name));
+        let entry = biscuit_file::to_forward_slash_string(&self.path(name));
         assert!(self.runtime.read_set().contains(&entry), "{name} is read: {:?}", self.runtime.read_set());
     }
 }

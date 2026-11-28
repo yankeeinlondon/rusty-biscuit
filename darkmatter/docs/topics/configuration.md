@@ -175,7 +175,8 @@ flowchart TD
 
 `permissions` holds three separate policies: `file-read` (the files a schema
 slot may read without asking), `shell-commands` (the commands that run
-without a prompt), and `network` (`allow` or `deny` for URL fetches). A
+without a prompt), and `network` (`allow`, `ask`, or `deny` for URL
+fetches). A
 leading `!` on a list entry excludes what it matches from pre-approval:
 
 ```yaml
@@ -190,8 +191,8 @@ permissions:
 
 Inside a repository, an operation is pre-approved when no file excludes it
 and either your user file allows it or the repository file allows it both as
-committed at `HEAD` and in the working copy; `network` is `allow` only when
-every file says so. The entry forms, how the scopes combine, current-run
+committed at `HEAD` and in the working copy; `network` is the most
+restrictive setting any file holds (`deny` over `ask` over `allow`). The entry forms, how the scopes combine, current-run
 approvals, and the built-in shell blacklist are described in
 [Permissions](./permissions.md).
 
@@ -218,8 +219,22 @@ The reference is then followed, once per file:
 - A missing, unreadable, or invalid-YAML target, one without a
   `permissions` mapping, or one whose `permissions` is another reference (no
   chains) is an error (`dm.config.reference`) naming both files and
-  suggesting `md init --inline`. It is never replaced by defaults or an
-  empty policy; a command that needs the policy stops.
+  suggesting a repair in the referring file's own scope. It is never
+  replaced by defaults or an empty policy; a command that needs the policy
+  stops. The suggested repair:
+
+  | Reference declared in | Suggested repair |
+  | --- | --- |
+  | `~/.darkmatter.yaml` | correct the target, point `permissions` at another file, or run `md init --inline` |
+  | the repository's `.darkmatter.yaml` | correct the target, or edit the reference in that file (point it at another file or write the block inline); `md init` writes your user file, so it is never suggested here |
+  | the repository's `.darkmatter.yaml` at `HEAD` | the same correction, and commit it: the committed reference and target are what `HEAD` reads, so a working-copy fix alone leaves the error |
+
+  For example, a repository `permissions: ./policy.yaml` with no
+  `policy.yaml` reports
+
+  ```text
+  the `permissions` reference `./policy.yaml` names `/home/me/project/policy.yaml`, which does not exist; create it, or point `permissions` in `/home/me/project/.darkmatter.yaml` at another file or write the block there inline
+  ```
 - A repository file's target must really be inside the repository: in the
   working copy, a symbolic link that leads outside is an error. At `HEAD` the
   target is read from the committed tree only, never from disk; committed
@@ -296,6 +311,56 @@ flowchart TD
     S --> P["permissions(): blocks or one error"]
     S --> G["registrations(): valid entries and findings"]
 ```
+
+### Checking one file without loading
+
+A diagnostic tool (such as `claudine doctor`) that wants to know whether one
+configuration file is valid, without any side effect, calls
+`inspect_working_file`. It judges the user file, or the repository file as it
+is in the working copy, exactly as a load would, and returns that one
+`ConfigFile`:
+
+```rust
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::load::inspect_working_file;
+use darkmatter::config::schema::ConfigScope;
+
+fn check(context: &FileResolutionContext) {
+    match inspect_working_file(context, ConfigScope::User) {
+        Ok(file) if !file.is_present() => println!("{} does not exist", file.path().display()),
+        Ok(file) => {
+            if let Err(error) = file.permissions() {
+                println!("invalid permissions: {error}");
+            }
+            for finding in file.registration_findings() {
+                println!("invalid register entry: {finding}");
+            }
+        }
+        // Not YAML, not a mapping, an unknown key, or unreadable.
+        Err(error) => println!("{error}"),
+    }
+}
+```
+
+- It reads that one file and nothing else: not the committed (`HEAD`) file,
+  not the target of a `permissions` reference (the setting is the reference
+  as written), and no installed registration.
+- It never writes: a missing file is not created, and a legacy policy file is
+  neither migrated nor deleted.
+- A context with no home (user scope) or no repository (repository scope) is
+  a `Read` error.
+- `md init` reads the file it edits through the same reader and judge.
+
+A program that is about to point a `permissions` reference at its own file
+(Claudine's setup and `doctor --fix` do this) can first check that the file's
+block would be accepted as the target of that reference, with
+`darkmatter::config::init::check_referenced_permissions(text, path, scope,
+context)`. It reads nothing from disk: `text` is the file's would-be
+contents. It passes when `permissions` is a mapping the loader accepts for
+`scope` (`{}` included, which means the scope's defaults), and fails when the
+block is missing, `null`, itself a reference, or holds an invalid entry. Its
+error message can quote the file's values, so show it only to the file's
+owner.
 
 ## Errors
 
@@ -535,7 +600,7 @@ Error: /home/me/.darkmatter.yaml:2:1 at `/not-a-setting`: `not-a-setting` is not
 Claudine reads the same file once at startup, before any hook, agent,
 provider, or composition is dispatched. A file that does not load stops the
 run with that located error. A missing file is one warning naming
-`claudine init`, except for a provider hook callback (`claudine handle`) and
+`md init`, except for a provider hook callback (`claudine handle`) and
 `claudine steer`, which answer a program on their streams; completion reads no
 configuration. Each request Claudine composes receives the invocation's
 snapshot, projected for the repository the request's document lives in.
@@ -632,10 +697,10 @@ for reason in &report.reasons {
 | Change | Result |
 |---|---|
 | the same block, inline or behind a reference, in any order | not widening |
-| an entry removed, a `!` exclusion added, `network: allow` → `deny` | not widening |
+| an entry removed, a `!` exclusion added, `network` narrowed (`allow` → `ask` or `deny`, `ask` → `deny`) | not widening |
 | an entry added (a rewritten glob or command counts as added) | `added-allow` |
 | a `!` exclusion removed | `removed-exclusion` |
-| `network: deny` → `allow` | `network-allowed` |
+| `network` widened (`deny` → `ask` or `allow`, `ask` → `allow`) | `network-allowed` |
 | a deleted file or property whose default is wider | `added-allow` |
 | a shipped default that grows, or that the trusted code cannot read | `added-allow`, `defaults-not-understood` |
 | any change to a file the check depends on | `checker-input-changed` |

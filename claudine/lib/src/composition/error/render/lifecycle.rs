@@ -853,7 +853,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             if candidates.len() >= 2 {
                 let mut tried = String::from("Tried:");
                 for (index, probed) in candidates.iter().enumerate() {
-                    let path = biscuit_file::to_portable_string(probed.candidate().path());
+                    let path = biscuit_file::to_forward_slash_string(probed.candidate().path());
                     tried.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
                 }
                 body.push(rows(tried));

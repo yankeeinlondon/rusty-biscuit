@@ -1,0 +1,12 @@
+exit: 0
+--- stdout
+{
+  "valid": true,
+  "references_scanned": 2,
+  "references_valid": 2,
+  "issues": [],
+  "warnings": [
+    "Remote URL not verified: https://example.com"
+  ]
+}
+--- stderr

@@ -1,0 +1,34 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.reference.missing_document",
+      "severity": "error",
+      "message": "the prompt file does not exist",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "prompt:",
+      "reference": "./metadata.md",
+      "failure": "no-match",
+      "included_via": [],
+      "base": "[ROOT]/work",
+      "resolved": "[ROOT]/work/metadata.md",
+      "suggestions": [
+        "[ROOT]/work/metadata.yaml"
+      ],
+      "hint": "create metadata.md before a real run, or correct the reference"
+    }
+  ],
+  "counts": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 0
+  }
+}

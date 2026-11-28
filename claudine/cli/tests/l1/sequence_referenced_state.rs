@@ -282,9 +282,10 @@ referenced_state!(a_setter_outranks_a_nested_references_own_input_value,
 const MISSING_CHILD: &str = "kind: sequence\n$schema:\n  reviewer: string(required) -> who signs off\ninitialize: [{ append_line: [events.log, child-initialize] }]\nstart: [{ append_line: [events.log, child-start] }]\nsequence:\n  - { name: sign, shell: \"echo {{ reviewer }}\" }\n";
 
 /// Runs `root` (which also lacks its own `topic`) without setters and asserts
-/// the one combined report names both owning documents, the child at
-/// `property`, and both inputs, with no event of either document run.
-fn assert_combined_report(root: &str, property: &str) {
+/// the one combined report names both owning documents, the child under
+/// the `owner` subject, and both inputs, with no event of either document
+/// run.
+fn assert_combined_report(root: &str, owner: &str) {
     let root_doc = format!("---\n$schema:\n  topic: string(required) -> what is reviewed\nstart: [{{ append_line: [events.log, root-start] }}]\n{root}---\n");
     let fixture = CliProcessFixture::named("sequence-referenced-inputs");
     fs::create_dir_all(fixture.cwd().join("lists")).unwrap();
@@ -296,9 +297,12 @@ fn assert_combined_report(root: &str, property: &str) {
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("Missing required schema properties in 2 documents of the sequence"), "{flat}");
-    assert!(flat.contains("root.md - `topic`: string — what is reviewed"), "{flat}");
-    assert!(flat.contains(&format!("child.yaml (`{property}`) - `reviewer`: string — who signs off")), "{flat}");
+    // One row per missing input (the spec's one finding per input), no aggregate copy.
+    assert!(flat.contains("Sequence preflight found 2 errors and 0 warnings; no task ran"), "{flat}");
+    assert!(flat.contains("root.md ✗ `topic` (string — what is reviewed) is required and has no value"), "{flat}");
+    let child = flat.find(owner).map(|at| &flat[at..]).unwrap_or_else(|| panic!("no `{owner}` subject: {flat}"));
+    assert!(child.contains("`reviewer` (string — who signs off) is required and has no value"), "{flat}");
+    assert!(child.contains("here in lists/child.yaml"), "{flat}");
     for log in ["events.log", "lists/events.log"] {
         assert!(!fixture.cwd().join(log).exists(), "collection ran a lifecycle event ({log}): {flat}");
     }
@@ -307,12 +311,12 @@ fn assert_combined_report(root: &str, property: &str) {
 
 #[test]
 fn a_root_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event() {
-    assert_combined_report("sequence: lists/child.yaml\n", "sequence");
+    assert_combined_report("sequence: lists/child.yaml\n", "root.md ✗ `topic`");
 }
 
 #[test]
 fn a_nested_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event() {
-    assert_combined_report("sequence: [{ name: review, sequence: lists/child.yaml }]\n", "sequence[0].sequence");
+    assert_combined_report("sequence: [{ name: review, sequence: lists/child.yaml }]\n", "task review (sequence[0])");
 }
 
 // ============================================================================
@@ -782,8 +786,8 @@ fn assert_who_reported_missing(root: &str, extra: &[&str]) {
     let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("Missing required schema properties in 1 step of the sequence"), "{flat}");
-    assert!(flat.contains("- `who`: string"), "{flat}");
+    assert!(flat.contains("Sequence preflight found 1 error and 0 warnings; no task ran"), "{flat}");
+    assert!(flat.contains("`who` (string) is required and has no value"), "{flat}");
     assert!(!stdout.contains("NOT_RUN"), "{stdout}");
     assert!(!fixture.audio_spool().exists());
 }
@@ -793,10 +797,20 @@ fn a_required_root_input_nothing_writes_is_still_reported_missing() {
     assert_who_reported_missing("kind: sequence\n$schema:\n  who: string(required)\nsequence:\n  - { name: work, shell: echo NOT_RUN }\n", &[]);
 }
 
-// A dry run fires no `initialize`, so the value it would write is missing.
+// A dry run fires no `initialize`: the input it would write is `not
+// checked`, never missing, since the real run reads it before collecting.
 #[test]
-fn a_dry_run_reports_an_input_only_initialize_writes_as_missing() {
-    assert_who_reported_missing(&format!("{INITIALIZED_ROOT}sequence:\n  - {{ name: work, shell: echo NOT_RUN }}\n"), &["--dry-run"]);
+fn a_dry_run_leaves_an_input_only_initialize_writes_not_checked() {
+    let fixture = CliProcessFixture::named("sequence-initialize-input-dry-run");
+    fs::write(fixture.cwd().join("root.yaml"), format!("{INITIALIZED_ROOT}sequence:\n  - {{ name: work, shell: echo NOT_RUN }}\n")).unwrap();
+    let output = fixture.command().args(["sequence", "--goose", "--dry-run", "--json"]).arg(fixture.cwd().join("root.yaml")).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let diagnostics = envelope["diagnostics"].as_array().unwrap();
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic["code"] == "composition.missing_properties"), "{stdout}");
+    assert!(stdout.contains("input `who`"), "{stdout}");
+    assert!(!fixture.audio_spool().exists());
 }
 
 // ============================================================================

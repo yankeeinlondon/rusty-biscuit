@@ -121,7 +121,7 @@ fn self_referencing_file_is_a_structured_cycle_error() {
     let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a file that references itself cannot resolve");
 
-    let SchemaError::ReferenceCycle { chain } = err else {
+    let SchemaError::ReferenceCycle { chain, .. } = err else {
         panic!("expected a reference cycle, got {err:?}");
     };
     assert!(chain.contains("a.yaml"), "chain must name the file: {chain}");
@@ -136,7 +136,7 @@ fn two_file_cycle_is_a_structured_cycle_error() {
     let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("mutually referencing files cannot resolve");
 
-    let SchemaError::ReferenceCycle { chain } = err else {
+    let SchemaError::ReferenceCycle { chain, .. } = err else {
         panic!("expected a reference cycle, got {err:?}");
     };
     assert!(chain.contains("a.yaml"), "chain must name a.yaml: {chain}");
@@ -159,7 +159,7 @@ fn root_union_arm_cycling_back_into_the_chain_is_rejected() {
     let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a union arm may not re-enter an open file");
 
-    let SchemaError::ReferenceCycle { chain } = err else {
+    let SchemaError::ReferenceCycle { chain, .. } = err else {
         panic!("expected a reference cycle, got {err:?}");
     };
     assert!(chain.contains("a.yaml"), "chain must name a.yaml: {chain}");
@@ -242,7 +242,7 @@ fn one_hop_past_the_cap_reports_depth_exhaustion_not_a_cycle() {
     let err = resolve_yaml_schema(&reference(&entry), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a chain one file past the cap cannot resolve");
 
-    let SchemaError::ReferenceDepthExceeded { limit, chain } = &err else {
+    let SchemaError::ReferenceDepthExceeded { limit, chain, .. } = &err else {
         panic!("expected depth exhaustion, got {err:?}");
     };
     assert_eq!(*limit, MAX_REFERENCE_DEPTH);

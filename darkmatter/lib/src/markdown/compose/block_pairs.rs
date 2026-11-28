@@ -400,11 +400,19 @@ impl BlockPairError {
     /// region. Consumers render it beside the reason, so a host that drops
     /// generated lines drops it with [`Self::line`].
     pub(crate) fn note(&self) -> Option<String> {
+        self.note_with(Some)
+    }
+
+    /// [`Self::note`] with its line mapped by `line`, for a consumer that
+    /// reports lines in another count; no note when `line` gives none.
+    pub(crate) fn note_with(&self, line: impl Fn(usize) -> Option<usize>) -> Option<String> {
         match self {
-            BlockPairError::CrossedClose { open_line: line, .. }
-            | BlockPairError::CollectionInShellBody { shell_line: line, .. } => Some(format!("opened at line {line}")),
+            BlockPairError::CrossedClose { open_line: at, .. }
+            | BlockPairError::CollectionInShellBody { shell_line: at, .. } => {
+                line(*at).map(|at| format!("opened at line {at}"))
+            }
             BlockPairError::UnterminatedBlock { file_ends_at_line, .. } => {
-                Some(format!("file ends at line {file_ends_at_line}"))
+                line(*file_ends_at_line).map(|at| format!("file ends at line {at}"))
             }
             _ => None,
         }

@@ -52,6 +52,140 @@ pub(super) fn second_document_start(text: &str) -> Option<usize> {
     Some(document_marker_above(text, node).unwrap_or(node))
 }
 
+/// The byte offsets of the first mapping key of `text` that repeats an
+/// earlier key of the same mapping, in document order, and of that earlier
+/// key: `(first, repeated)`. A strict load refuses the repeat as a duplicate
+/// entry whose own mark is the mapping's start. `None` when no key repeats or
+/// the text does not parse that far. Only the duplicate-error path runs it.
+pub(super) fn duplicate_key_marks(text: &str) -> Option<(usize, usize)> {
+    let mut keys = 0;
+    let mut duplicate = None;
+    // The first pass numbers every key in document order and finds the first
+    // repeated one and the key it repeats; a pass per key stops at its mark.
+    let _ = serde_yaml_ng::Deserializer::from_str(text)
+        .next()?
+        .deserialize_any(Walk { keys: &mut keys, find: Find::Duplicate(&mut duplicate) });
+    let (first, repeated) = duplicate?;
+    Some((key_mark(text, first)?, key_mark(text, repeated)?))
+}
+
+/// The byte offset of key number `target`, in document order.
+fn key_mark(text: &str, target: usize) -> Option<usize> {
+    let mut keys = 0;
+    let error = serde_yaml_ng::Deserializer::from_str(text)
+        .next()?
+        .deserialize_any(Walk { keys: &mut keys, find: Find::Stop(target) })
+        .err()?;
+    stop_offset(&error)
+}
+
+/// What a [`Walk`] looks for.
+enum Find<'a> {
+    /// The numbers of the first key repeating an earlier key of its mapping
+    /// and of the key it repeats: `(first, repeated)`.
+    Duplicate(&'a mut Option<(usize, usize)>),
+    /// Fail at the key with this number.
+    Stop(usize),
+}
+
+/// Visits every node, numbering mapping keys in document order.
+struct Walk<'a, 'b> {
+    keys: &'a mut usize,
+    find: Find<'b>,
+}
+
+impl Walk<'_, '_> {
+    fn nested(&mut self) -> Walk<'_, '_> {
+        let find = match &mut self.find {
+            Find::Duplicate(found) => Find::Duplicate(found),
+            Find::Stop(target) => Find::Stop(*target),
+        };
+        Walk { keys: self.keys, find }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Walk<'_, '_> {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Walk<'_, '_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("any YAML node")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<(), A::Error> {
+        let mut seen: Vec<(YamlValue, usize)> = Vec::new();
+        loop {
+            let number = *self.keys;
+            *self.keys += 1;
+            let key = match &mut self.find {
+                Find::Stop(target) if *target == number => {
+                    map.next_key_seed(StopSeed)?;
+                    return Ok(());
+                }
+                Find::Stop(_) => map.next_key::<IgnoredAny>()?.map(|_| None),
+                Find::Duplicate(_) => map.next_key::<YamlValue>()?.map(Some),
+            };
+            let Some(key) = key else { return Ok(()) };
+            if let (Some(key), Find::Duplicate(found)) = (key, &mut self.find) {
+                if found.is_none()
+                    && let Some((_, first)) = seen.iter().find(|(earlier, _)| *earlier == key)
+                {
+                    **found = Some((*first, number));
+                }
+                seen.push((key, number));
+            }
+            map.next_value_seed(self.nested())?;
+        }
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(mut self, mut seq: A) -> Result<(), A::Error> {
+        while seq.next_element_seed(self.nested())?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_enum<A: EnumAccess<'de>>(mut self, data: A) -> Result<(), A::Error> {
+        let (IgnoredAny, variant) = data.variant()?;
+        variant.newtype_variant_seed(self.nested())
+    }
+}
+
+/// Fails at the node it is handed, as [`Stop`] does.
+struct StopSeed;
+
+impl<'de> DeserializeSeed<'de> for StopSeed {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(Stop)
+    }
+}
+
 /// The start of the `---` line holding `node` or separated from it only by
 /// blank and comment lines.
 fn document_marker_above(text: &str, node: usize) -> Option<usize> {
@@ -240,6 +374,21 @@ mod tests {
         assert_eq!(offender("a: [1, {b: !t x}]\n", Offender::Tag), Some((1, 12)));
         assert_eq!(offender("!t {a: 1}\n", Offender::Tag), Some((1, 1)));
         assert_eq!(offender("a: 1\n", Offender::Tag), None);
+    }
+
+    fn duplicate(text: &str) -> Option<((usize, usize), (usize, usize))> {
+        let (first, repeated) = duplicate_key_marks(text)?;
+        Some((biscuit_file::source_position(text, first)?, biscuit_file::source_position(text, repeated)?))
+    }
+
+    #[test]
+    fn a_duplicate_key_is_marked_at_both_spellings() {
+        assert_eq!(duplicate("kind: a\nkind: b\n"), Some(((1, 1), (2, 1))));
+        assert_eq!(duplicate("a:\n  b: 1\n  c: 2\n  b: 3\nd: 4\n"), Some(((2, 3), (4, 3))));
+        assert_eq!(duplicate("a: [{x: 1}, {y: 1, y: 2}]\n"), Some(((1, 14), (1, 20))));
+        assert_eq!(duplicate("a:\n  b: 1\n  b: 2\nb: 3\nb: 4\n"), Some(((2, 3), (3, 3))), "the first repeat in document order");
+        assert_eq!(duplicate("a: {b: 1}\nc: {b: 1}\n"), None, "keys repeat only within one mapping");
+        assert_eq!(duplicate("a: 1\n"), None);
     }
 
     #[test]

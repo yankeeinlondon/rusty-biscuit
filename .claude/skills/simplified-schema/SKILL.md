@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); object composition (`...name` spreads, `$extends`, `ObjectComposition`, `InvalidCompositionTarget`); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-11-22T00:00:00Z
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); object composition (`...name` spreads, `$extends`, `ObjectComposition`, `InvalidCompositionTarget`); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; namespace schemas (`kind: namespace-schema`); callable catalogs (`kind: expression-schema`, `kind: mutation-schema`, `NotSchemaReason::CallableCatalog`, `SchemaError::CallableCatalog`); trigger and library `name` labels; bundle resolution (`resolve::bundle`); schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-11-23T00:00:00Z
 ---
 
 # simplified-schema
@@ -26,7 +26,7 @@ feature) depend on it directly.
 | Passive expression syntax (`expression/`), literal-token codec (`pending.rs`) | Expression evaluation and the function registry |
 | The `SimplifiedSchema` facade object (`schema/`) | `schemas::resolve` wrappers that pass `SHIPPED_SOURCES` so `Name@darkmatter:<stem>` resolves |
 | Schema roots (`roots.rs`), triggers (`triggers/`: grammar, envelope, lint, matcher, discovery, assembly, prepared bundles, findings, and the identifying-trigger proof `identify.rs::{admit_identifying_trigger, identifies}` host registration uses), `EmbeddedSchemaBundle` (`embedded.rs`), the trigger definition (`schemas/schema-trigger.yaml`) | Layering matched trigger payloads into an `EffectiveSchema`; the `triggers.rs` wrappers (`scan`, `scan_with_embedded`, `scan_with_source`, `prepare_trigger_bundle`) that add `SHIPPED_SOURCES` |
-| Whole YAML documents (`yaml_documents/`): the loader, `KindRegistry`, selection, kind checks | The adapter (`yaml_documents/mod.rs`): `kind_host()`, `shipped_kind_registry()`, `YamlContract`, `YamlValidation`, `Route` |
+| Whole YAML documents (`yaml_documents/`): the loader, `KindRegistry`, selection, kind checks (including strict envelope admission and syntax-only checks for `expression-schema` and `mutation-schema`, plus `NotSchemaReason::CallableCatalog` privacy) | The adapter (`yaml_documents/mod.rs`): `kind_host()`, `shipped_kind_registry()`, `YamlContract`, `YamlValidation`, `Route`, and callable catalog semantic validation (`validate_callable_catalog`) |
 
 Rule of thumb: if it answers "what does this schema text mean, and does this
 value satisfy it?", or "which schema-kind documents exist for this context,
@@ -167,7 +167,9 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
 | Resolve against a checked bundle's bytes only (listed `./`/`../` members and host built-ins; everything else refused unread) | `resolve::bundle::with(&BundleSources::on_disk(root, bytes)?, \|\| …)` → `(T, BundleReads { attempted, missing, served })`; `BundleSources::embedded(name, bytes)` for a virtual root ([details](../../../simplified-schema/docs/topics/selecting-schema-files.md#resolving-inside-a-bundle)) |
+| Hold every `types` declaration of a member (used or not: imports, `$extends`, spreads, arms, `example(file)` selection) to the bundle | `resolve::check_declared_types(text, path, &ctx, shipped)` inside `resolve::bundle::with` |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
+| One observation of local files across operations and threads (a dry run's passes) | `resolve::buffers::SharedReads` (`read`, `holds`), in force per thread with `enter_shared_reads`/`with_shared_reads`, consulted by `buffers::read` after guards; `open_source` is the one counted open (`work_counters::source_opens`, `observe_opens` for a host's test seam); `SharedReads::memo::<T>()` holds a host's work derived from those bytes, valid while `shared_reads_alone()` is `Some` (no guard, bundle, or editor buffer) |
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template, drop replaced properties, slot positions and texts | see [templates.md](templates.md#slot-and-template-apis) |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
@@ -177,8 +179,30 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Export | `to_json_schema()`, `to_simplified_yaml()`; `provenance()` lists files read |
 | Lower-level compile once | `Prepared::new(Arc<Value>, base_dir, ctx)` then `validate_strict`/`validate_soft` |
 | Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_schema_table`, `parse_property_definition`, `parse_standalone_schema_document` |
+| A host namespace file (`kind: namespace-schema`): admit, then resolve its `$schema` with its private `types` | `parse_namespace_schema_document(text, path)` → `NamespaceSchemaDocument`; `resolve::resolve_namespace_payload(text, path, &ctx, shipped)` ([details](../../../simplified-schema/docs/topics/language/schema-documents.md#kind-namespace-schema), [code map](schema-documents.md#namespaces-labels-and-bundles)) |
 | Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
 | Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
+| Locate a resolver failure in a whole YAML file (carrier `$schema`/`types` restored, union arms followed as sequence indices, the spelled name picks the section, never a `-> description` that mentions it) | `yaml_documents::{reference_site, declaration_segments}` (a file-reference failure's declaration is `SchemaError::reference_site()`, recorded at first read: `ImportEngine::resolve_namespace`, `ExampleRehome`, and `resolve/example_sites.rs::ExampleSites` for examples judged after lowering; `None` when two declarations wrote the spelling; a selected file refused for its role gets the naming declaration through `SchemaError::refused_at` in `resolve_reference_in_context` and `resolve_namespace`, never for a content refusal, and keeps it through `triggers::assemble::refused_trigger_file`); a declaration's text with its descriptions blanked, offsets kept: `simplified::grammar::without_descriptions`; a grammar failure under any document's carrier: `locate_carrier_definition_failure(text, "$schema")`; a validation problem a `schema` carrier reported at itself: `LoadedYamlDocument::locate_declaration_problems` |
+
+**Key declarations.** A block-form property `removed(<replacement>)` lives
+in the boxed `SchemaShape::key_declarations` (`KeyDeclarations`, read
+through `shape.removed()` and `shape.advise_unknown_keys()`; boxed so the
+enums holding a shape stay under clippy's variant-size limit), never in
+`properties` (parsed by
+`simplified/mod.rs::removed_declaration`, carried through composition by
+`resolve/composition.rs::Assembled::removed`, lowered to a `false` property
+plus the owner's `x-darkmatter-removed` annotation). `$advise-unknown-keys`
+is `KeyDeclarations::advise_unknown_keys`, lowered to
+`x-darkmatter-advise-unknown-keys`, never inherited. Prepared validation
+rewrites a `false`-property violation into `RemovedKey` (path = owner,
+`offending_property` = key, `hint` = replacement) and hints `UnknownKey` in
+`validate::annotate_key_problems`; `validate::key_advice` produces
+`NearMissKey` advice, returned beside an accepted value
+(`ValidationSuccess::key_advice`) and never among a failure's problems. Every
+suggestion ranks with `validation::suggest` (`md clean` uses it too). Both
+annotations are skipped as key metadata by the projections in
+`simplified/source.rs`, and export writes them back; the inline expression
+writer refuses them as lossy.
 
 `ValidationFailure` is `#[non_exhaustive]`: `InvalidData { problems }`,
 `UnavailableCheck { problems }` (a check this build or an in-memory schema

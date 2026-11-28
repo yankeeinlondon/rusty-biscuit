@@ -205,6 +205,12 @@ pub fn effective_schema_for(
     markdown: &Markdown,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<(Option<crate::markdown::schemas::EffectiveSchema>, Vec<super::ComposeWarning>)> {
+    // Rooted as composition roots the document, so the host judges against
+    // the schema composition will use.
+    let rooted_markdown = request.admitted_document(markdown);
+    let markdown = rooted_markdown.as_ref();
+    let rooted_request = request.rooted_at(markdown);
+    let request = rooted_request.as_ref();
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, request, &mut trigger_registry)?;
     let consumer = source_path(markdown, request);
@@ -327,7 +333,7 @@ impl CallerProjection {
             let ([ValuePathSegment::Key(key), below @ ..], Some(text)) = (path.as_slice(), native.as_str()) else {
                 continue;
             };
-            let portable = biscuit_file::to_portable_string(Path::new(text));
+            let portable = biscuit_file::to_forward_slash_string(Path::new(text));
             if portable == text {
                 continue;
             }
@@ -400,10 +406,13 @@ fn slot_below<'v>(value: &'v mut serde_json::Value, steps: &[ValuePathSegment]) 
     })
 }
 
-/// Trigger discovery runs only for a request inside a repository; the schema
-/// roots themselves come from the document's own context.
-fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> bool {
-    options.resolution_context().repository_root().is_some()
+/// The schema roots (trigger discovery and bare-name lookup) are searched only
+/// for a source whose own context is inside a repository. An enclosing
+/// request's repository never extends to a child or link target opened
+/// outside it (a note opened through `~`): eligibility, like the roots
+/// themselves, belongs to each source document.
+fn searches_schema_roots(source_context: &biscuit_file::FileResolutionContext) -> bool {
+    source_context.repository_root().is_some()
 }
 
 pub(crate) fn prepare_schemas(
@@ -434,7 +443,9 @@ pub(crate) fn prepare_schemas(
     // The source's own context: a child opened through `~`, or a source
     // outside the request's tree, resolves its `file` values in the tree it
     // was opened in, as its transclusions do.
-    let mut schemas = DarkmatterSchemas::new(options.source_file_resolution_context());
+    let source_context = options.source_file_resolution_context();
+    let searches_roots = searches_schema_roots(&source_context);
+    let mut schemas = DarkmatterSchemas::new(source_context);
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
@@ -458,7 +469,7 @@ pub(crate) fn prepare_schemas(
     }
     if options.trigger_schemas
         && let Some(ComposeSource::File(_)) = markdown.source()
-        && discovers_triggers(options)
+        && searches_roots
     {
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
@@ -475,8 +486,21 @@ pub(crate) fn prepare_schemas(
             *trigger_registry = Some(registry.clone());
         }
     }
+    // Bare-name lookup in the schema roots does not depend on triggers: a
+    // request without them (the standalone reference and graph commands,
+    // `--disable schema-triggers`) still resolves the `$schema` and
+    // `Name@file` imports the document names.
+    if schemas.trigger_registry().is_none()
+        && let Some(ComposeSource::File(_)) = markdown.source()
+        && searches_roots
+    {
+        schemas = schemas
+            .with_schema_root_lookup()
+            .map_err(|err| prepare_error(format!("schema could not be prepared: {err}"), err))?;
+    }
     // Registration is its own trigger source, judged in the source's own
-    // context; `--disable schema-triggers` turns it off with the roots, and a
+    // context; `--disable schema-triggers` turns it off with root trigger
+    // discovery (bare-name lookup stays), and a
     // caller's own host options are never replaced.
     if options.trigger_schemas
         && let Some(hosts) = options.applied_registered_hosts()
@@ -661,6 +685,9 @@ pub(crate) fn run_with_registry(
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
     }
+    for advice in &report.key_advice {
+        compose_report.add_warning(crate::markdown::compose::ComposeWarning::schema_key_advice(advice, &path));
+    }
 
     // Defer only the problems on values a later stage resolves; `deferral`
     // names them for this pass (see [`PendingDeferral`]). Deferral is sound
@@ -708,6 +735,44 @@ pub(crate) fn run_with_registry(
                 .is_some_and(|name| projection.native.contains_key(&name))
                 || projection.nested_native.iter().any(|(path, _)| nested_occurrence(path) == p.path))
             {
+                return false;
+            }
+            // A dry run keeps a value it deferred as written (and as data,
+            // so the deferral below cannot see its syntax); nothing judges
+            // that text, since no run resolved it.
+            if let Some(session) = options.passive_session()
+                && let Some(name) = top_level_pointer_segment(&p.path)
+                && fm_map
+                    .get(&name)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|text| session.deferred_value(text).is_some())
+            {
+                return false;
+            }
+            // …nor reports a value it declared absent as missing: the dry
+            // run reports that input itself.
+            if let Some(session) = options.passive_session()
+                && p.code == simplified_schema::ValidationProblemCode::MissingRequired
+                && p.instance_path.segments().is_empty()
+                && p.property.as_deref().is_some_and(|name| session.absent_value(name).is_some())
+            {
+                return false;
+            }
+            // …nor judges a value the run writes before this composition:
+            // what it holds now is not what the run reads.
+            if let Some(session) = options.passive_session()
+                && let Some(name) = top_level_pointer_segment(&p.path).or_else(|| {
+                    (p.instance_path.segments().is_empty()).then(|| p.property.clone()).flatten()
+                })
+                && let Some(reason) = session.written_value(&name)
+            {
+                session.record(crate::markdown::compose::passive::Deferral {
+                    construct: crate::markdown::compose::passive::DeferredConstruct::SchemaCheck,
+                    reason,
+                    authored: name.clone(),
+                    key: Some(name),
+                    line: None,
+                });
                 return false;
             }
             if !defer_shell_pending {
@@ -1124,8 +1189,31 @@ fn defers_template(err: &simplified_schema::SchemaError, options: &crate::markdo
         .slot_session
         .as_ref()
         .is_some_and(|session| session.mode() == crate::markdown::schemas::slots::SessionMode::ReferenceCheck);
-    (options.defer_shell_pending_schema_problems || reference_check)
-        && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_))
+    let defers = (options.defer_shell_pending_schema_problems || reference_check)
+        && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_));
+    // A dry run is a reference-check session: the schema it could not
+    // resolve without asking is left unchecked, and said so: by the URLs it
+    // needed network approval for, else by the file read it needed
+    // approval for.
+    if defers && let Some(session) = options.passive_session() {
+        use crate::markdown::compose::passive::{Deferral, DeferralReason, DeferredConstruct};
+        let urls = options.slot_session.as_ref().map(|slots| slots.take_unapproved_urls()).unwrap_or_default();
+        let reasons: Vec<DeferralReason> = if urls.is_empty() {
+            vec![DeferralReason::ReadNeedsApproval { target: "a file its schema slot names".to_string() }]
+        } else {
+            urls.into_iter().map(|url| DeferralReason::NetworkNeedsApproval { url }).collect()
+        };
+        for reason in reasons {
+            session.record(Deferral {
+                construct: DeferredConstruct::SchemaTemplate,
+                reason,
+                authored: err.to_string(),
+                key: Some("$schema".to_string()),
+                line: None,
+            });
+        }
+    }
+    defers
 }
 
 /// Rechecks only caller-file classification against the current effective
@@ -2316,7 +2404,7 @@ fn resolve_caller_file_value_on_path<'r>(
                     })?;
             }
             let native = path.to_string_lossy().into_owned();
-            let presentation = biscuit_file::to_portable_string(&path);
+            let presentation = biscuit_file::to_forward_slash_string(&path);
             return Ok(Some(ResolvedCallerFileValue {
                 native: serde_json::Value::String(native),
                 presentation: serde_json::Value::String(presentation),
@@ -2376,7 +2464,7 @@ fn resolve_caller_file_value_on_path<'r>(
             .map(|candidate| candidate.candidate().provenance())
             .unwrap_or(biscuit_file::RootProvenance::Absolute);
         let native = resolved.to_string_lossy().into_owned();
-        let presentation = biscuit_file::to_portable_string(&resolved);
+        let presentation = biscuit_file::to_forward_slash_string(&resolved);
         return Ok(Some(ResolvedCallerFileValue {
             native: serde_json::Value::String(native),
             presentation: serde_json::Value::String(presentation),
@@ -2463,6 +2551,7 @@ fn caller_projection_failure(
     let pointer = format!("/{}", key.replace('~', "~0").replace('/', "~1"));
     CallerProjectionFailure {
         problem: Box::new(ValidationProblem {
+            hint: None,
             path: pointer.clone(),
             message,
             kind: ValidationProblemKind::Invalid,
@@ -2711,23 +2800,24 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_needs_a_request_repository() {
-        let request_repo = tempfile::tempdir().unwrap();
-        let nested_repo = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
-        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-        let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
-            .with_repository_root(request_repo.path());
-        let options = crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot);
+    fn schema_root_search_needs_a_source_repository() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let request = biscuit_file::FileResolutionContext::new(repo.path())
+            .with_repository_root(repo.path());
+        let in_repo = request.for_source(repo.path().join("doc.md"));
+        // A source the request accepted outside its tree keeps no
+        // repository root, so it searches no schema roots even though the
+        // request itself is inside a repository.
+        let external = request.for_trusted_external_source(outside.path().join("note.md"));
         // A context without a repository root discovers nothing, even when
         // the document itself sits inside a repository.
-        let unbounded = crate::markdown::compose::test_request_in(
-            ComposeOptions::new(),
-            biscuit_file::FileResolutionContext::new(nested_repo.path()),
-        );
+        let unbounded = biscuit_file::FileResolutionContext::new(repo.path()).for_source(repo.path().join("doc.md"));
 
-        assert!(discovers_triggers(&options));
-        assert!(!discovers_triggers(&unbounded));
+        assert!(searches_schema_roots(&in_repo));
+        assert!(!searches_schema_roots(&external));
+        assert!(!searches_schema_roots(&unbounded));
     }
 
     #[test]
@@ -3333,6 +3423,7 @@ mod tests {
 
         let defers = |path: &str, code: ValidationProblemCode| {
             let problem = ValidationProblem {
+                hint: None,
                 path: path.to_string(),
                 message: String::new(),
                 kind: ValidationProblemKind::Type,

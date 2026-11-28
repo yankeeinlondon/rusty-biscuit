@@ -1,0 +1,23 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.compose.warning",
+      "severity": "warning",
+      "message": "a producer reported a warning without a code",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "counts": {
+    "errors": 0,
+    "warnings": 1,
+    "info": 0
+  }
+}

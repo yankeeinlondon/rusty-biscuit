@@ -146,7 +146,11 @@ running out mid-scan) becomes a coverage status and a limitation in the report.
 ## Matching rules
 
 Evidence is matched by file identity: `(st_dev, st_ino)` on Unix, the volume
-serial plus 128-bit file ID on Windows.
+serial plus 128-bit file ID on Windows. `FileIdentity::of_path(path,
+follow_links)` reads one; with `follow_links` false a link reports its own
+identity, so it is also how a caller asks whether two spellings reach the same
+entry (for example `Action.yaml` and `action.yaml` on a case-insensitive
+volume) without following anything.
 
 - The tree is walked once per query, however many processes are inspected.
   Hidden and Git-ignored entries are in scope.

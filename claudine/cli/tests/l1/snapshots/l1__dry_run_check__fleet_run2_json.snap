@@ -1,0 +1,196 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/renderers/_fleet.yaml",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.selection_key_as_data",
+      "severity": "warning",
+      "message": "`agent: opencode` is step data (read as `seq.agent`), not the task's provider",
+      "source": {
+        "file": "/work/renderers/_fleet.yaml",
+        "line": 5,
+        "column": 7,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "to choose the provider, move it into the task's inputs: `with: { agent: opencode }`",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0].agent"
+        }
+      ]
+    },
+    {
+      "code": "composition.selection_key_as_data",
+      "severity": "warning",
+      "message": "`model: gemini/neon` is step data (read as `seq.model`), not the task's model",
+      "source": {
+        "file": "/work/renderers/_fleet.yaml",
+        "line": 6,
+        "column": 7,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "to choose the model, move it into the task's inputs: `with: { model: gemini/neon }`",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0].model"
+        }
+      ]
+    },
+    {
+      "code": "composition.provider_unresolved",
+      "severity": "error",
+      "message": "no provider for this task; a non-interactive run fails here",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "add `with: { agent: opencode }`, or run with `--provider opencode`",
+      "notes": [
+        "1. --provider flag             not given",
+        "2. agent= setter               not given",
+        "3. with.agent                  not set (see `agent:` above)",
+        "4. _find.md frontmatter agent  not set",
+        "5. _fleet.yaml agent           not set"
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: model requirement (no provider)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "find",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.reference.missing_document",
+      "severity": "error",
+      "message": "the prompt file does not exist",
+      "source": {
+        "file": "/work/renderers/_fleet.yaml",
+        "line": 12,
+        "column": 15,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "prompt:",
+      "reference": "./_frontmatter.md",
+      "failure": "no-match",
+      "included_via": [],
+      "base": "/work/renderers/_fleet.yaml",
+      "resolved": "/work/renderers/_frontmatter.md",
+      "hint": "create renderers/_frontmatter.md before a real run, or correct the reference",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[1].prompt"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: provider (the prompt file could not be read)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "the prompt file does not exist",
+          "source": {
+            "file": "/work/renderers/_fleet.yaml",
+            "line": 12,
+            "column": 15,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[1]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: inputs (the prompt file could not be read)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "the prompt file does not exist",
+          "source": {
+            "file": "/work/renderers/_fleet.yaml",
+            "line": 12,
+            "column": 15,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[1]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 2,
+    "warnings": 2,
+    "info": 3
+  }
+}

@@ -139,7 +139,7 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     let context = biscuit_file::FileResolutionContext::new(dir.path());
     let error = resolve_schema(&json!(types_only.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(
-        matches!(&error, SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly }
+        matches!(&error, SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly, .. }
             if path.ends_with("types-only.yaml")),
         "{error:?}"
     );
@@ -160,7 +160,13 @@ fn pure_sequence_is_a_whole_file_union_but_not_a_namespace() {
     write(&consumer, "$schema:\n  value: person@./union.yaml\n");
     let context = biscuit_file::FileResolutionContext::new(dir.path());
     let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
-    assert!(matches!(error, SchemaError::SchemaDocument { .. }));
+    assert!(
+        matches!(
+            &error,
+            SchemaError::NotASchemaDocument { reason: simplified_schema::NotSchemaReason::RootUnionImport, site: Some(_), .. }
+        ),
+        "a root-union file cannot supply named imports, refused at the import: {error:?}"
+    );
 }
 
 #[test]

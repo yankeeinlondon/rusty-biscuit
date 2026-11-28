@@ -38,6 +38,7 @@ pub mod grammar;
 pub mod model;
 pub mod normalize;
 pub mod preflight;
+pub mod removed;
 pub mod reserved;
 pub mod source;
 pub mod task;
@@ -147,12 +148,71 @@ impl<'a> SequenceSourceOptions<'a> {
 /// on object steps, more than one executable field, reserved-key
 /// collisions, a root `when:`, an invalid root `loop:`, or external file load
 /// failures. A valid root `loop:` or task `when:` is refused with its
-/// not-yet-supported error.
+/// not-yet-supported error. A YAML file declaring `kind: sequence` that
+/// does not meet the formal sequence kind is
+/// [`CompositionError::SchemaValidation`].
 pub fn resolve_sequence_plan(
     source: &ResolvedCompositionSource,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<SequencePlan>, CompositionError> {
     resolve_sequence_plan_with(source, SequenceSourceOptions::new(file_resolution_context))
+}
+
+/// Judges a YAML file that declares `kind: sequence` and an inline
+/// `sequence` list against Claudine's prepared formal sequence kind
+/// ([`formal_sequence_kind`]), strictly and as written. A Markdown document,
+/// or a YAML file claiming no kind or another one, is not judged here.
+///
+/// ## Panics
+///
+/// When the compiled-in definition does not compile: a build defect a test
+/// catches.
+///
+/// [`formal_sequence_kind`]: crate::composition::schema::shipped::formal_sequence_kind
+fn validate_formal_sequence_file(
+    source: &ResolvedCompositionSource,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<(), CompositionError> {
+    let fm = source.markdown.frontmatter();
+    let claims_sequence = fm.as_map().get("kind").and_then(|kind| kind.as_str()) == Some("sequence");
+    if !claims_sequence || !super::resolve::is_yaml_source(&source.resolved_path) {
+        return Ok(());
+    }
+    let refused = |message: String, problems: Vec<String>| CompositionError::SchemaValidation {
+        source_path: source.resolved_path.clone(),
+        message,
+        problems,
+        failures: Vec::new(),
+    };
+    let kind = crate::composition::schema::shipped::formal_sequence_kind();
+    let base_dir = source.resolved_path.parent().map(Path::to_path_buf);
+    // The definition is compiled in and proven to compile by the shipped
+    // artifact's tests; nothing the document holds can make it fail.
+    let prepared = simplified_schema::Prepared::new(Arc::clone(&kind.json_schema), base_dir, context.clone())
+        .unwrap_or_else(|error| panic!("Claudine's `kind: sequence` definition must compile: {error}"));
+    let document: Value = fm
+        .as_map()
+        .iter()
+        .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
+        .collect::<Map<String, Value>>()
+        .into();
+    let failure = match prepared.validate_strict(&document) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure,
+    };
+    if let simplified_schema::ValidationFailure::Unprepared { error } = &failure {
+        return Err(refused(format!("the `kind: sequence` definition cannot judge the file: {error}"), Vec::new()));
+    }
+    let problems = failure.problems();
+    let message = problems
+        .iter()
+        .map(|problem| if problem.path.is_empty() { problem.message.clone() } else { format!("{}: {}", problem.path, problem.message) })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(refused(
+        format!("not a valid `kind: sequence` file: {message}"),
+        problems.iter().map(|problem| problem.path.clone()).collect(),
+    ))
 }
 
 /// [`resolve_sequence_plan`] with caller-supplied capabilities.
@@ -166,6 +226,15 @@ pub fn resolve_sequence_plan_with(
     source: &ResolvedCompositionSource,
     options: SequenceSourceOptions<'_>,
 ) -> Result<Option<SequencePlan>, CompositionError> {
+    // A failure the source layers raised without knowing the file is the
+    // root's `sequence` value's.
+    resolve_root_plan(source, options).map_err(|error| error.locate_sequence(&source.resolved_path, "sequence", None))
+}
+
+fn resolve_root_plan(
+    source: &ResolvedCompositionSource,
+    options: SequenceSourceOptions<'_>,
+) -> Result<Option<SequencePlan>, CompositionError> {
     let fm = source.markdown.frontmatter();
     let sequence_value = match fm.as_map().get("sequence") {
         Some(v) => v.clone(),
@@ -173,7 +242,7 @@ pub fn resolve_sequence_plan_with(
     };
 
     if let Some(value) = fm.as_map().get("fail_fast") {
-        return Err(grammar::removed_task_key("fail_fast", value, &source.resolved_path));
+        return Err(removed::removed_key(removed::RemovedOwner::Root, "fail_fast", value, &source.resolved_path));
     }
     let fail_fast = true;
 
@@ -211,6 +280,10 @@ pub fn resolve_sequence_plan_with(
                 fail_fast,
                 options.file_resolution_context,
             )?;
+            // The runtime grammar's own refusals are more precise (a task's
+            // declaration, a `$state` that does not load), so the kind judges
+            // only what that grammar accepted, before anything runs.
+            validate_formal_sequence_file(source, options.file_resolution_context)?;
             plan.document_scope = Some(Arc::new(document::SequenceDocumentScope {
                 declaring_path: source.resolved_path.clone(),
                 property: "sequence".into(),
@@ -232,6 +305,7 @@ pub fn resolve_sequence_plan_with(
         SequenceSourceSpec::Reference(reference) => {
             let path = source::resolve_sequence_reference(
                 &reference.reference,
+                model::ExecutableField::Sequence,
                 &source.resolved_path,
                 options.file_resolution_context,
             )?;
@@ -269,17 +343,25 @@ fn resolve_expression_source(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
-    let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path);
-    let value = expr::evaluate_whole(expression, &lookup)?;
+    let items = expression_source_items(expression, frontmatter, invocation_path, file_resolution_context)?;
+    normalize::normalize_plan(&items, Source::Expression, invocation_path, fail_fast)
+}
 
-    let items = match value {
+/// The items a whole-value `{{ … }}` source yields, before any is read as a
+/// task: the list [`resolve_expression_source`] normalizes.
+fn expression_source_items(
+    expression: &str,
+    frontmatter: &Map<String, Value>,
+    invocation_path: &Path,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Vec<Value>, CompositionError> {
+    let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path);
+    Ok(match expr::evaluate_whole(expression, &lookup)? {
         Value::Array(items) => items,
         Value::Null => Vec::new(),
         Value::String(text) => classify_string_items(&text),
         other => classify_string_items(&other.to_string()),
-    };
-
-    normalize::normalize_plan(&items, Source::Expression, invocation_path, fail_fast)
+    })
 }
 
 /// Resolve a `$( … )` source through the caller's approved-command runner.
@@ -294,6 +376,7 @@ fn resolve_shell_source(
         .ok_or_else(|| CompositionError::SequenceShellFailed {
             command: command.to_string(),
             source: super::error::SequenceShellCause::Unavailable,
+            site: Box::new(super::error::SequenceSite::at(invocation_path, "sequence")),
         })?;
 
     let output = runner(command)?;

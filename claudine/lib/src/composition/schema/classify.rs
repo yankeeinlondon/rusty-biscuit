@@ -541,6 +541,7 @@ pub fn build_schema_status_report(
         file_resolution_context,
         CompositionMode::ChainedDocument,
         trigger_findings,
+        None,
     )
 }
 
@@ -548,6 +549,8 @@ pub fn build_schema_status_report(
 ///
 /// For `inline-compose` a required-but-not-eager property that is absent is
 /// reported as [`PropertyState::Deferred`] rather than [`PropertyState::Missing`].
+/// A `$schema` template resolves through `slot_session`, as for
+/// [`super::pre_validate_schema_for_mode`].
 ///
 /// ## Errors
 ///
@@ -559,6 +562,7 @@ pub fn build_schema_status_report_for_mode(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
     trigger_findings: &super::TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     let phase = launch_phase_for_mode(mode);
     // Skip when the document has no `$schema`.
@@ -581,7 +585,7 @@ pub fn build_schema_status_report_for_mode(
         file_resolution_context,
         &callers,
         trigger_findings,
-        None,
+        slot_session,
     )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still

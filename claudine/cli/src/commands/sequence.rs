@@ -8,6 +8,7 @@ use claudine::composition::{
     SequenceShellCause, parse_interactive_hint,
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use darkmatter::findings::reference::DocumentResolution;
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
@@ -75,9 +76,10 @@ fn reject_sequence_interactive(
         .map(parse_interactive_hint)
         .transpose()?
     {
-        return Err(CompositionError::SequenceInteractiveRejected(
-            source.resolved_path.clone(),
-        ));
+        return Err(CompositionError::SequenceInteractiveRejected {
+            path: source.resolved_path.clone(),
+            site: Box::new(claudine::composition::SequenceSite::at(&source.resolved_path, "interactive")),
+        });
     }
     Ok(())
 }
@@ -91,7 +93,7 @@ fn reject_sequence_interactive(
 /// that `sequence`, `prompt`, `name`, `description`, `$schema`, and other keys
 /// behave exactly as they would in a Markdown frontmatter block.
 #[allow(clippy::result_large_err)]
-fn resolve_sequence_source(
+pub(crate) fn resolve_sequence_source(
     file_ref: &str,
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
@@ -113,14 +115,18 @@ fn resolve_sequence_source(
             source,
         }
     })?;
-    let detailed = reference.resolve_detailed(context);
-    let resolved_path = match detailed.outcome() {
-        biscuit_file::DetailedOutcome::Matched(path) => path.clone(),
-        biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch) => {
+    // As for a Markdown argument: the user's own request, so every location
+    // is admitted.
+    let resolved_path = match darkmatter::findings::reference::resolve_document(&reference, context, |_| {
+        Ok::<(), std::convert::Infallible>(())
+    }) {
+        DocumentResolution::Found(path) => path,
+        DocumentResolution::NoMatch(detailed) => {
             return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
-        biscuit_file::DetailedOutcome::Failed(_) => {
-            let source = match detailed.into_convenience() {
+        DocumentResolution::Refused(never) => match never {},
+        DocumentResolution::Failed(detailed) => {
+            let source = match (*detailed).into_convenience() {
                 Err(source) => source,
                 Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
                     "resolver returned a failed outcome without a typed error for `{file_ref}`"
@@ -135,7 +141,7 @@ fn resolve_sequence_source(
 
     if !composition::is_yaml_source(&resolved_path) {
         return Err(CompositionError::NotMarkdown(
-            biscuit_file::to_portable_string(&resolved_path),
+            biscuit_file::to_forward_slash_string(&resolved_path),
         ));
     }
 
@@ -170,7 +176,7 @@ pub(crate) fn emit_empty_sequence_notice(path: &std::path::Path) {
         &biscuit_terminal::components::prose::Prose::new(format!(
             "<dim>sequence</dim> <bold>{}</bold> resolved to <bold>0 steps</bold>; \
              nothing to run.",
-            biscuit_file::to_portable_string(path)
+            biscuit_file::to_forward_slash_string(path)
         ))
         .render(&crate::log::terminal()),
     );
@@ -189,12 +195,14 @@ fn expand_shell_source(
     let approved = claudine::harness::shell::validate_and_approve_command(command, options)
         .map_err(|e| CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Approval(e),
         })?;
 
     let mut child = claudine::child_environment::command(&approved.executable).map_err(|e| {
         CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Spawn(std::io::Error::other(e)),
         }
     })?;
@@ -203,12 +211,14 @@ fn expand_shell_source(
         .output()
         .map_err(|e| CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Spawn(e),
         })?;
 
     if !output.status.success() {
         return Err(CompositionError::SequenceShellFailed {
             command: command.to_string(),
+            site: Box::new(claudine::composition::SequenceSite::unlocated()),
             source: SequenceShellCause::Exited {
                 status: output.status.to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -265,7 +275,7 @@ fn run_sequence_inner(
 
     // One TTS pre-warm worker for the whole sequence, shared by every step and
     // task; dropping it on return cancels unfinished preparation.
-    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(false);
     let invocation = crate::request::with_darkmatter_config(claudine::invocation_context::InvocationContext::capture(request)?)
         .with_environment_source(documents)
         .with_prewarm(prewarm.handle());
@@ -374,7 +384,6 @@ fn run_sequence_inner(
             &invocation,
             source_context.file_resolution_context(),
         )),
-        false,
         shared.yolo,
     );
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
@@ -488,6 +497,7 @@ mod tests {
             repo: false,
             dry_run: false,
             dry_run_shell: false,
+            json: false,
             quiet: false,
             silent: true,
             set: None,
@@ -530,7 +540,7 @@ mod tests {
         let err = reject_sequence_interactive(&source)
             .expect_err("interactive: true must be rejected for sequence");
         assert!(
-            matches!(err, CompositionError::SequenceInteractiveRejected(_)),
+            matches!(err, CompositionError::SequenceInteractiveRejected { .. }),
             "expected SequenceInteractiveRejected, got {err:?}"
         );
     }
@@ -632,7 +642,7 @@ mod tests {
             assert_eq!(detail["failure"], "no_match");
             assert_eq!(
                 detail["base_dir"],
-                biscuit_file::to_portable_string(dir.path())
+                biscuit_file::to_forward_slash_string(dir.path())
             );
             assert_eq!(detail["candidates"].as_array().unwrap().len(), 1);
             if reference.ends_with(".yaml") {

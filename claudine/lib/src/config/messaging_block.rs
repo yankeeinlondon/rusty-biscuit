@@ -134,7 +134,7 @@ pub struct ClaudineMessengerConfig {
 
 impl ClaudineMessengerConfig {
     /// Validate that `active_config` references an existing key in `configurations`.
-    pub(crate) fn validate(&self) -> Result<()> {
+    pub(crate) fn validate_selection(&self) -> Result<()> {
         if let Some(active) = &self.active_config {
             if active.trim().is_empty() {
                 return Err(ClaudineError::ConfigValidation(
@@ -147,11 +147,14 @@ impl ClaudineMessengerConfig {
                 )));
             }
         }
+        Ok(())
+    }
 
+    /// Validate each route definition in `configurations`.
+    pub(crate) fn validate_routes(&self) -> Result<()> {
         for (name, config) in &self.configurations {
             validate_provider_config(config, name)?;
         }
-
         Ok(())
     }
 }

@@ -647,7 +647,7 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
 fn pty_sequence_auto_selectable_skips_review_and_launches() {
     // The review-5 High finding: auto-selectable states (`Selected` /
     // `ListOneInstalled`) must bypass the review screen on a TTY, exactly like
-    // direct compose's `resolve_live_target_with_tty` returns before the picker.
+    // direct compose's `decide_target` returns before the picker.
     // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
     // staged) classifies as `ListOneInstalled`, so the provider must launch with
     // no alternate-screen review UI and no keyboard input.

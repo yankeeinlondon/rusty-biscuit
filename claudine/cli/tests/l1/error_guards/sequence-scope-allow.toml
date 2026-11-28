@@ -1,0 +1,396 @@
+# Exceptions to the sequence error scope guards, read by
+# `cli/tests/l1/error_guards/sequence_scope.rs`.
+#
+# `guard` is `site` (a `Sequence…` variant without `site` or
+# `source_path` + `property`), `noun` (a hard-coded construct noun in an
+# `#[error]` text, keyed by variant, or in a renderer, keyed by
+# `render/<file>.rs`), or `catch_all` (a variant that renders as the generic
+# "composition failed" block).
+#
+# Every `Sequence…` variant meets the sequence error standard, so none is
+# listed; the entries left are tagged `outside-scope`, other variants the
+# standard does not cover.
+
+[[allow]]
+guard = "catch_all"
+variant = "AgentHintAmbiguous"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "AgentHintInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "AgentHintWrongType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "AtomicWriteFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "FileNotFound"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InlineArtifactUnreadable"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InlineGuardMissing"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InlineInteractiveUnsupported"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InlineRollbackFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InsufficientFilePermissions"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InteractiveHintWrongType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InteractiveSelectionRequired"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InvalidAction"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InvalidDecrementType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InvalidIncrementType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "InvalidReference"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LaunchRepositoryUnreadable"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleBreakWithoutLoop"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleCancellationRecovery"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleDeferNotImplemented"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleEditFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleExpressionFunctionKeyValueUnsupported"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleInitializeFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleLoopGateFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecyclePrepCycle"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecyclePrepFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecyclePrepUnavailable"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleRequeueEnqueueFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleResumeWithoutSession"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleSayConflict"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleSetupPhaseRecoveryUnsupported"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleShellResolution"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleShellTemplateRefused"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LifecycleUnknownEffect"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopActionExpressionInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopActionWriteRefused"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopEvaluationFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopExpressionInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopInterrupted"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopLimitExceeded"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopMaxIterationsEnvInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopMaxTemplateInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "LoopRateLimitPolicyNotAccepted"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "MarkdownLoad"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "ModelHintWrongType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "ModelSelectionFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "NoRunnableProviders"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "NotMarkdown"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "PreFlightFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "PreFlightShellAuditFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "PreFlightStateBuildFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "PromptPropertyMissing"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "PromptPropertyWrongType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "ResolutionContext"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "SelectionUnavailable"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "ShellApprovalUnavailable"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "ShellCommandDenied"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "TaskLoopMisplaced"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "TaskWhenEvaluationFailed"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "TaskWhenInvalid"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "UnresolvedFileReference"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "WhenMisplaced"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"
+
+[[allow]]
+guard = "catch_all"
+variant = "YoloHintWrongType"
+tag = "outside-scope"
+reason = "renders through the generic composition-failed block; not a sequence error, so outside this standard"

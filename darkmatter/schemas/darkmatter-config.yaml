@@ -16,7 +16,7 @@ types:
     file-read-pattern: "string(pattern(\\S)) -> One `file-read` entry: a glob reference (`./*.yaml`, `&docs/**/*.md`, `~/notes/*.md`, `{{VAR}}/*.md`). Relative patterns are relative to the reading document, `&` is the repository root. A leading `!` excludes what it matches. Absolute paths are rejected; at repository scope `~/` and patterns leaving the repository are rejected too."
     shell-command-rule: "string(pattern(\\S)) -> One `shell-commands` rule: `exact <command>`, `prefix <command>`, or `template <shape>`. A leading `!` excludes what it matches from pre-approval."
     shell-command-rules: "shell-command-rule[](required; default([])) -> Shell commands that run without a prompt. Default: none, so every command prompts."
-    network-setting: "enum(allow, deny; required; default(deny)) -> Whether a schema slot or a composition may fetch URLs: `allow` permits every URL, `deny` none (`--allow host=HOST` still allows one host for one run)."
+    network-setting: "enum(allow, ask, deny; required; default(deny)) -> Whether a schema slot or a composition may fetch URLs: `allow` permits every URL, `ask` makes each URL need an approval for the run (a schema slot asks; a composition read and a dry run never ask), `deny` permits none (`--allow host=HOST` still allows one host for one run under `ask` or `deny`)."
     permissions-reference: "string(pattern(\\S)) -> A file reference, resolved from this file's directory, to another YAML file whose own `permissions` mapping holds the block (`~/.claudine/config.yaml`)."
     manifest-reference: "string(pattern(\\S)) -> A file reference to a host registration manifest."
     register: "manifest-reference[](required; default([])) -> Host registration manifests to load."

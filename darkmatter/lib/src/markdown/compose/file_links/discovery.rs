@@ -74,11 +74,42 @@ pub fn discover(
     })
 }
 
+/// In a dry run, why the files `directive` lists may differ when the run
+/// lists them: the run's initializer may create a file the listing selects
+/// ([`PassiveSession::changes_listing`](crate::markdown::compose::passive::PassiveSession::changes_listing)).
+/// Rewriting a file already listed changes no listing.
+pub(crate) fn changes_at_launch(
+    directive: &FileLinksDirective,
+    source: &ComposeSource,
+    document_context: &FileResolutionContext,
+    session: &crate::markdown::compose::passive::PassiveSession,
+) -> Option<crate::markdown::compose::passive::DeferralReason> {
+    match &directive.mode {
+        FileLinksMode::Glob(glob) => {
+            let globs = GlobReference::new([glob]).ok()?;
+            session.changes_listing(&globs.roots(document_context), |path| {
+                has_allowed_extension(path) && globs.matches(path, document_context)
+            })
+        }
+        FileLinksMode::Dir { path, depth } => {
+            let source_path = require_source_file(source, directive.line).ok()?;
+            let folder = crate::markdown::compose::passive::lexically_absolute(&source_path.parent()?.join(path))?;
+            // `depth` counts the folders below `folder` the walk descends.
+            let reaches = |candidate: &Path| {
+                candidate.strip_prefix(&folder).is_ok_and(|rest| rest.components().count() <= *depth as usize + 1)
+            };
+            session.changes_listing(std::slice::from_ref(&folder), |candidate| {
+                has_allowed_extension(candidate) && reaches(candidate)
+            })
+        }
+    }
+}
+
 /// Extracts the source file path, erroring for non-file sources.
 fn require_source_file(source: &ComposeSource, line: usize) -> Result<PathBuf, FileLinksError> {
     match source {
         ComposeSource::File(path) => Ok(path.clone()),
-        _ => Err(FileLinksError::MissingSourceContext { line, document: None }),
+        _ => Err(FileLinksError::MissingSourceContext { line, document: None, authored: None }),
     }
 }
 
@@ -101,7 +132,7 @@ fn discover_glob(
     source_canonical: &Path,
     line: usize,
 ) -> Result<(Vec<PathBuf>, PathBuf, Vec<biscuit_file::SkippedEntry>), FileLinksError> {
-    let glob_error = |source| FileLinksError::GlobReference { line, source: Arc::new(source), document: None };
+    let glob_error = |source| FileLinksError::GlobReference { line, source: Arc::new(source), document: None, authored: None };
     let listing = GlobReference::new([glob])
         .and_then(|globs| globs.list_files(document_context))
         .map_err(glob_error)?;
@@ -141,6 +172,7 @@ fn discover_dir(
             path: path.to_string(),
             line,
             document: None,
+            authored: None,
         });
     }
     // `--dir` requires a directory. Without this guard a regular-file target
@@ -151,13 +183,14 @@ fn discover_dir(
             path: path.to_string(),
             line,
             document: None,
+            authored: None,
         });
     }
     let component_root = canonicalize(&target);
 
     let mut candidates = BTreeMap::new();
     walk_recursive(&target, 0, depth, boundary, source_canonical, &mut candidates)
-        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source, document: None })?;
+        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source, document: None, authored: None })?;
 
     Ok((candidates.into_values().collect(), component_root))
 }
@@ -715,7 +748,7 @@ mod tests {
 
         let glob = format!(
             "::file-links \"{}/*.md\"\n",
-            biscuit_file::to_portable_string(outside.path())
+            biscuit_file::to_forward_slash_string(outside.path())
         );
         let render = discover_content(&glob, &source)
             .unwrap()

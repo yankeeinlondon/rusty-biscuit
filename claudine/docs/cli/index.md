@@ -42,6 +42,8 @@ Composition:
 Administration:
   config            Manage Claudine configuration with a TUI
   sync              Re-sync hook registrations with detected agents
+  setup             Set up Claudine with Darkmatter; safe to rerun, keeps settings
+  doctor            Check configuration, registration, speech, and PATH; --fix repairs
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
@@ -50,6 +52,18 @@ Administration:
   context           Show Darkmatter runtime context, expression engine, and side effects
   errors            Show the diagnostic error-code contract (codes, dispositions, details)
 ```
+
+[`claudine setup`](./setup.md) sets Claudine up with Darkmatter again, for
+example after an upgrade.
+
+[`claudine doctor`](./doctor.md) checks your configuration, Claudine's
+Darkmatter registration and permissions, speech, and `PATH` in one run, and
+`claudine doctor --fix` repairs what it safely can. It works even when the
+configuration is missing or broken.
+
+One maintenance command is hidden from this list:
+[`claudine registrations`](./registrations.md) lists, prints, and publishes
+the schema files Claudine registers with Darkmatter.
 
 ## CLI Switch Overview
 
@@ -82,6 +96,6 @@ claudine --plain inline-compose --help
 claudine inline-compose --help --plain
 ```
 
-A help request after the command is answered before any other argument is checked. An unknown provider, a missing option value, malformed `--set` JSON, `--dry-run-shell` without `--dry-run`, or conflicting switches next to `--help` still print the reference and exit 0, with nothing on stderr. Nothing is composed, no configuration is created, no lifecycle action runs, and no provider launches. Only the first literal `--` changes this: everything after it belongs to the provider, so a `--help` there is forwarded instead of answered.
+A help request after the command is answered before any other argument is checked. An unknown provider, a missing option value, malformed `--set` JSON, `--json` without `--dry-run`, the removed `--dry-run-shell`, or conflicting switches next to `--help` still print the reference and exit 0, with nothing on stderr. Nothing is composed, no configuration is created, no lifecycle action runs, and no provider launches. Only the first literal `--` changes this: everything after it belongs to the provider, so a `--help` there is forwarded instead of answered.
 
 Shell completion is unaffected: completing a command line that contains `--help` lists candidates rather than printing help.

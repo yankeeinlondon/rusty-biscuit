@@ -201,6 +201,132 @@ pub(crate) fn authored_opener(
     Some((context, located))
 }
 
+/// Where a directive's parse or resolution failure is reported: the line a
+/// parser or resolver counted is in the current body, which page blocks,
+/// interpolation, and the frontmatter split all shift away from the file.
+#[derive(Debug, Clone)]
+pub(crate) enum DirectiveSite {
+    /// A document with no file: its current-body line is its only coordinate.
+    Body,
+    /// The directive's opener in its loaded file, and that file's context.
+    Authored(biscuit_terminal::errors::SourceContext, AuthoredSpan),
+    /// A file whose body map does not prove where the directive was written:
+    /// the failure names the file and no line.
+    Unproven,
+}
+
+impl DirectiveSite {
+    /// The site of the directive occupying `span` of `markdown`'s current
+    /// body, which `origin` maps when it describes that body.
+    pub(crate) fn of_span(markdown: &Markdown, origin: Option<&BodyOrigin>, span: &Range<usize>) -> Self {
+        if !matches!(markdown.source(), Some(crate::markdown::compose::ComposeSource::File(_))) {
+            return Self::Body;
+        }
+        let origin = origin.filter(|origin| origin.describes(markdown.content()));
+        match authored_opener(markdown, origin, span) {
+            Some((context, opener)) => Self::Authored(context, opener),
+            None => Self::Unproven,
+        }
+    }
+
+    /// The site of the directive on one-based `line` of `markdown`'s current
+    /// body, for a parser that reports only the line: its first character
+    /// past indentation and block-quote markers.
+    pub(crate) fn of_line(markdown: &Markdown, origin: Option<&BodyOrigin>, line: usize) -> Self {
+        let content = markdown.content();
+        let span = line.checked_sub(1).and_then(|index| {
+            let start = if index == 0 {
+                0
+            } else {
+                content.match_indices('\n').nth(index - 1).map(|(at, _)| at + 1)?
+            };
+            let end = content[start..].find('\n').map_or(content.len(), |at| start + at);
+            // Past a block quote's markers, as the directive's opener is.
+            let start = end - content[start..end].trim_start_matches([' ', '\t', '>']).len();
+            (start < end).then_some(start..end)
+        });
+        match span {
+            Some(span) => Self::of_span(markdown, origin, &span),
+            None if matches!(markdown.source(), Some(crate::markdown::compose::ComposeSource::File(_))) => Self::Unproven,
+            None => Self::Body,
+        }
+    }
+
+    /// The file line of one-based `line` of `markdown`'s current body, for a
+    /// line a failure only mentions (a note's): a directive's line as
+    /// [`of_line`](Self::of_line) places it, or the line just past the body's
+    /// last line break when the body's last byte is the loaded file's last;
+    /// `None` when neither is proven.
+    pub(crate) fn file_line(markdown: &Markdown, origin: Option<&BodyOrigin>, line: usize) -> Option<usize> {
+        if let Self::Authored(_, at) = Self::of_line(markdown, origin, line) {
+            return Some(at.line());
+        }
+        let content = markdown.content();
+        let context = markdown.loaded_source_context_for_errors()?;
+        let origin = origin.filter(|origin| origin.describes(content))?;
+        let last = origin.project(&(content.len().checked_sub(1)?..content.len()))?;
+        (line == content.split('\n').count() && last.end == context.content.len())
+            .then(|| context.content.split('\n').count())
+    }
+
+    /// Applies this site to a failure's `line` and `authored` fields: the
+    /// authored line and opener, the unknown line `0`, or nothing.
+    pub(crate) fn place(&self, line: &mut usize, authored: &mut Option<AuthoredSpan>) {
+        match self {
+            Self::Body => {}
+            Self::Authored(_, opener) => {
+                *line = opener.line();
+                *authored = Some(opener.clone());
+            }
+            Self::Unproven => {
+                *line = 0;
+                *authored = None;
+            }
+        }
+    }
+
+    /// As [`place`](Self::place), for a failure that also carries the context
+    /// its line counts: an authored site moves it to the loaded file.
+    pub(crate) fn place_in(
+        &self,
+        ctx: &mut biscuit_terminal::errors::SourceContext,
+        line: &mut usize,
+        authored: &mut Option<AuthoredSpan>,
+    ) {
+        if let Self::Authored(context, _) = self {
+            *ctx = context.clone();
+        }
+        self.place(line, authored);
+    }
+}
+
+/// The note of the block-pair scan failure at `body_line` of `markdown`'s
+/// body (over `data`, its inserted bytes), its line mapped by `line`: `None`
+/// when the note's line is not proven, or the body no longer fails there.
+pub(crate) fn scan_note(
+    markdown: &Markdown,
+    data: Option<&super::body_origin::DataRanges>,
+    body_line: usize,
+    line: impl Fn(usize) -> Option<usize>,
+) -> Option<String> {
+    let data = data.filter(|data| data.describes(markdown.content()));
+    match super::block_pairs::scan_block_pairs_in(markdown.content(), data) {
+        Err(error) if error.line() == body_line => error.note_with(line),
+        _ => None,
+    }
+}
+
+/// The `Line:` row of a directive failure's status block, absent for the
+/// unknown line `0` an [`DirectiveSite::Unproven`] site leaves.
+pub(crate) fn line_row(line: usize) -> Option<String> {
+    (line != 0).then(|| format!("<dim>Line:</dim> {line}"))
+}
+
+/// A status block body of `rows`, one per line, skipping absent ones.
+pub(crate) fn status_rows(rows: impl IntoIterator<Item = Option<String>>) -> String {
+    rows.into_iter().flatten().collect::<Vec<_>>().join("\n")
+}
+
 /// Where `span` of the current body sits in `markdown`'s loaded file: the
 /// whole span when every byte of it is authored, otherwise its opener (the
 /// directive marker no stage writes), otherwise the file alone.

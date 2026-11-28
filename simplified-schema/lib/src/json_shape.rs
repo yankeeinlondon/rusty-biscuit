@@ -603,12 +603,14 @@ impl<'s> Translator<'s> {
         };
         let alphanumeric =
             map.get(DARKMATTER_TYPE_ANNOTATION).and_then(Value::as_str) == Some(SimplifiedType::Alphanumeric.as_keyword());
+        let no_coerce = map.get(crate::format::DARKMATTER_NO_COERCE_ANNOTATION) == Some(&Value::Bool(true));
         let shape = Shape::Text(TextShape {
             min_length,
             max_length,
             pattern,
             members: None,
-            scalar_text: !alphanumeric,
+            scalar_text: !alphanumeric && !no_coerce,
+            no_coerce: no_coerce && !alphanumeric,
         });
         let shape = match format {
             Some(name) => shape.assert(format_assertion(name)),

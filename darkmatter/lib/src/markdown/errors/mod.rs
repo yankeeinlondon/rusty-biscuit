@@ -388,6 +388,7 @@ mod tests {
             ctx: Box::new(ctx),
             opening_line: 14,
             opening_text: "::block when=\"x\"".to_string(),
+            authored: None,
         };
         let out = render(&err);
         assert!(out.contains("unterminated"));
@@ -421,6 +422,7 @@ mod tests {
             service: "bogus".into(),
             line: 4,
             document: None,
+            authored: None,
         };
         let out = render(&err);
         assert!(out.contains("invalid cleanup service"));
@@ -453,6 +455,7 @@ mod tests {
             message: "unexpected end".into(),
             directive_text: "::file ./broken.md when=".to_string(),
             caret_col: Some(27),
+            authored: None,
         };
         let out = render(&err);
         assert!(out.contains("ReferenceError"));

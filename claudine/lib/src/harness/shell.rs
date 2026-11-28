@@ -57,10 +57,6 @@ pub struct ShellApprovalOptions {
     /// rest of the run whether or not they could be saved, because the
     /// captured policy is never reloaded mid-run. Shared by every clone.
     pub run_rules: Arc<Mutex<ShellRuleSet>>,
-    /// When set, a non-TTY unapproved command is reported with dry-run
-    /// framing (a `Cannot dry-run: …` message pointing at `--yolo` /
-    /// pre-approval) instead of the generic "no approval handler" guidance.
-    pub dry_run: bool,
     /// Closed invocation membership: later discovery may only reuse these approvals.
     pub closed_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
 }
@@ -72,7 +68,6 @@ impl Default for ShellApprovalOptions {
             approval_handler: None,
             approval_cache: Arc::new(Mutex::new(HashMap::new())),
             run_rules: Arc::new(Mutex::new(ShellRuleSet::default())),
-            dry_run: false,
             closed_approvals: None,
         }
     }

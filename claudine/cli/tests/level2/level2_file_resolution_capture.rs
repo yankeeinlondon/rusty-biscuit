@@ -550,7 +550,7 @@ fn level2_proxy_keeps_caller_file_parameter_anchored_to_launch_directory_in_tmux
     let capture = run_surface_command(&mut harness, &staged, &launch_dir, &command);
 
     assert_eq!(capture.exit_code, 0, "plain:\n{}", capture.frame.plain);
-    let expected = biscuit_file::to_portable_string(
+    let expected = biscuit_file::to_forward_slash_string(
         &launch_spec.canonicalize().expect("canonical launch spec"),
     );
     let prompt = fs::read_to_string(&staged.provider_log).unwrap_or_default();

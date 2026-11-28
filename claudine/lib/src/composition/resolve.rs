@@ -3,10 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{
-    DetailedOutcome, FileReference, FileResolutionContext, MagicPathTier, PathPosition,
-    ResolutionFailure,
-};
+use biscuit_file::{FileReference, FileResolutionContext, MagicPathTier, PathPosition};
+use darkmatter::findings::reference::DocumentResolution;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
@@ -134,10 +132,10 @@ pub fn derive_request_context_for_source(
     source_path: &Path,
 ) -> Result<FileResolutionContext, CompositionError> {
     let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
-        reference: biscuit_file::to_portable_string(source_path),
+        reference: biscuit_file::to_forward_slash_string(source_path),
         source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
             "resolved source path has no parent directory: {}",
-            biscuit_file::to_portable_string(source_path)
+            biscuit_file::to_forward_slash_string(source_path)
         )),
     })?;
 
@@ -156,7 +154,7 @@ pub fn derive_request_context_for_source(
         Some(source_path),
         git_root.as_deref(),
         repo_info.as_ref(),
-        Some(provisional_context.launch_magic_scope()),
+        Some(provisional_context.launch_scope()),
     )?)
 }
 
@@ -177,14 +175,18 @@ pub fn resolve_composition_source_in_context(
         }
     })?;
 
-    let detailed = reference.resolve_detailed(context);
-    let resolved_path = match detailed.outcome() {
-        DetailedOutcome::Matched(path) => path.clone(),
-        DetailedOutcome::Failed(ResolutionFailure::NoMatch) => {
+    // A top-level document argument is the user's own request: no read
+    // permission governs it, so every location is admitted.
+    let resolved_path = match darkmatter::findings::reference::resolve_document(&reference, context, |_| {
+        Ok::<(), std::convert::Infallible>(())
+    }) {
+        DocumentResolution::Found(path) => path,
+        DocumentResolution::NoMatch(detailed) => {
             return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
-        DetailedOutcome::Failed(_) => {
-            let source = match detailed.into_convenience() {
+        DocumentResolution::Refused(never) => match never {},
+        DocumentResolution::Failed(detailed) => {
+            let source = match (*detailed).into_convenience() {
                 Err(source) => source,
                 Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
                     "resolver returned a failed outcome without a typed error for `{file_ref}`"
@@ -204,22 +206,28 @@ pub fn resolve_composition_source_in_context(
         .unwrap_or("");
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return Err(CompositionError::NotMarkdown(
-            biscuit_file::to_portable_string(&resolved_path),
+            biscuit_file::to_forward_slash_string(&resolved_path),
         ));
     }
 
-    let original_text = fs::read_to_string(&resolved_path).map_err(|e| {
-        CompositionError::MarkdownLoad {
-            path: resolved_path.clone(),
-            source: MarkdownLoadCause::Read(e),
-        }
+    // One read gives the original text and the parse, so the two never
+    // describe different revisions.
+    let read = super::read_local_source(&resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+        path: resolved_path.clone(),
+        source: MarkdownLoadCause::Read(e),
     })?;
+    let original_text = std::str::from_utf8(&read.bytes)
+        .map_err(|_| CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8")),
+        })?
+        .to_string();
 
     // Parse fallibly so malformed frontmatter surfaces as a real error. The
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
     // empty-frontmatter document, which downstream looks like a *missing*
     // `prompt` property — hiding the actual YAML syntax error from the user.
-    let markdown = Markdown::try_from(resolved_path.as_path())
+    let markdown = Markdown::from_read_source(&resolved_path, &read)
         .map_err(|e| map_load_error(&resolved_path, e))?
         .with_source(ComposeSource::File(resolved_path.clone()));
 
@@ -267,9 +275,11 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
         source: MarkdownLoadCause::Yaml(e),
     })?;
     let root = json_value.as_object().ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType(
-            "YAML sequence file root must be an object".to_string(),
-        )
+        CompositionError::SequenceExternalWrongType {
+            path: path.to_path_buf(),
+            problem: "a YAML sequence file's root must be an object".to_string(),
+            site: Box::new(super::SequenceSite::file(path)),
+        }
     })?;
 
     let mut frontmatter = darkmatter::markdown::Frontmatter::new();
@@ -434,7 +444,7 @@ pub fn reload_authored_source(
     source: &ResolvedCompositionSource,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
     let original_text =
-        fs::read_to_string(&source.resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+        super::read_local_text(&source.resolved_path).map_err(|e| CompositionError::MarkdownLoad {
             path: source.resolved_path.clone(),
             source: MarkdownLoadCause::Read(e),
         })?;
@@ -655,7 +665,7 @@ fn read_source_text_for_enrichment_in_context(
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return None;
     }
-    fs::read_to_string(resolved_path).ok()
+    super::read_local_text(&resolved_path).ok()
 }
 
 /// Validate that the resolved file is readable and writable.

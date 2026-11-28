@@ -15,6 +15,10 @@ planning cross-OS evidence, and say which hosts were declared when you report.
 | `BUILD_MACOS` | A macOS host other than this one | Same flow as Linux. |
 
 Each value is an SSH destination (an `~/.ssh/config` alias or `user@host`).
+For scripts streamed to WSL, use `bash -lc "exec bash -s"`. The rig returns 1 from
+`bash -ls` when `set -e` is active and its logout hook runs without a terminal,
+even after an explicit `exit 0`.
+
 Call it as `ssh -o BatchMode=yes "$BUILD_WSL" …` so a missing key fails fast
 instead of prompting. OpenSSH 10 prints a `post-quantum key exchange` warning
 on every connection; it is noise. `cross-check` passes `-o WarnWeakCrypto=no`
@@ -196,6 +200,15 @@ as a `git diff --cached --binary <base>` built with a temporary
   `cross-check` sends `bash -lc 'bash "$0"' <script>` instead. Suspect this
   whenever a login-shell remote command reports a failure that the output
   contradicts.
+- **A `macos` leg builds its archive, then fails with `just: command not
+  found`.** On bolt, `just` is installed only at `/opt/homebrew/bin/just`, and
+  the bash login profile that `cross-check`'s `bash -lc` reads leaves
+  `/opt/homebrew/bin` off `PATH`; `~/.cargo/bin` is on it. The leg prints
+  `macos FAIL` without running a test. Every package fails the same way, so it
+  is the rig, not the change; check with `ssh bolt 'bash -lc "command -v
+  just"'`. The fix is on the rig: put `eval "$(/opt/homebrew/bin/brew
+  shellenv)"` in bolt's `~/.bash_profile`, or install `just` into
+  `~/.cargo/bin`. Seen 2026-11-23.
 - **`build-linux` can run out of memory linking Darkmatter's archive.** A
   `just cross-check darkmatter --os linux` compile builds every target together,
   `browser` included, and the kernel kills `ld` (`collect2: fatal error: ld
@@ -260,6 +273,15 @@ Disk-space crises are handled by the `storage-strategy` skill. What
   pins the target directory: each clone builds into its own `<clone>\target`,
   which sits on the `CODING_DIR` volume because the clone does. An override
   pointing anywhere else can fill the small system drive and freeze the host.
+- Use `just sweep [host|all]` for the Cargo sweep and `just sweep-status [host|all]` for
+  projected free space, cleanup savings, and the sweep schedule. Omit the host
+  to run locally, pass an SSH destination, or use `all` for this machine and every
+  configured `BUILD_*` destination. Use `just install-sweep` to register the local
+  schedule from a durable checkout. A Windows target
+  can resolve its checkout from its installed Cargo sweep task when the
+  standard coding checkout is absent. The cross-check clone for the calling
+  worktree is the final fallback. A WSL target sweeps inside the guest.
+  For Windows-side VHDX compaction, see `docs/kache-strategy.md`.
 - No scheduled sweep covers standing clones or scratch checkouts.
   `cross-check-refresh` is how clones get retired, including standalone
   clones of this repository left in `CODING_DIR` (2026-11-01: a three-week-old

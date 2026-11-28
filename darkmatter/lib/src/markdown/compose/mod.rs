@@ -114,6 +114,7 @@ pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+pub mod passive;
 pub mod policy;
 pub mod report_diagnostics;
 pub(crate) mod pipeline;
@@ -192,7 +193,8 @@ pub use context::options::{
 };
 pub use context::request::{
     ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,
-    build_resolution_context_with_catalog, capture_resolution_context,
+    build_resolution_context_with_catalog, capture_resolution_context, derive_in_own_repository,
+    names_another_repository, nearest_repository_root,
 };
 #[cfg(test)]
 pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
@@ -209,7 +211,7 @@ pub use pipeline::operations::{
     ComposePhase,
 };
 pub use toc_linking::TocLinkingError;
-pub use transclusion::TransclusionError;
+pub use transclusion::{InclusionSite, TransclusionError};
 
 // Internal re-export for crate modules that still use TransclusionOptions
 pub(crate) use context::options::TransclusionOptions;
@@ -245,6 +247,10 @@ impl Markdown {
     ///
     /// Returns a new `Markdown` document and a report of changes made.
     ///
+    /// A document with no source of its own is composed as the file the
+    /// request names ([`ComposeOptions::with_source_file`]), and the returned
+    /// document carries that path; its text is never re-read from disk.
+    ///
     /// ## Examples
     ///
     /// ```
@@ -265,7 +271,7 @@ impl Markdown {
         &self,
         request: &ComposeRequest,
     ) -> MarkdownResult<(Markdown, ComposeReport)> {
-        let mut result = self.clone();
+        let mut result = request.admitted_document(self).into_owned();
         let report = result.run_compose_pipeline(request)?;
         Ok((result, report))
     }
@@ -285,7 +291,7 @@ impl Markdown {
     /// ([`ComposeOptions::with_shared_data_runtime`]), otherwise this
     /// composition's own.
     pub fn compose_with_warnings(&self, request: &ComposeRequest) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
-        let mut result = self.clone();
+        let mut result = request.admitted_document(self).into_owned();
         let mut request = request.clone();
         let data_runtime = request.data_runtime();
         request.data_runtime = Some(data_runtime.clone());
@@ -319,7 +325,7 @@ impl Markdown {
         request: &ComposeRequest,
         hook: &mut ResolvedFrontmatterHook<'_>,
     ) -> MarkdownResult<(Markdown, ComposeReport)> {
-        let mut result = self.clone();
+        let mut result = request.admitted_document(self).into_owned();
         let report = result.run_root_pipeline_hooked(request.clone(), Some(hook))?;
         Ok((result, report))
     }

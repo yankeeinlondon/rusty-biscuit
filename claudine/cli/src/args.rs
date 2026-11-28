@@ -89,6 +89,12 @@ pub(crate) enum Commands {
     Signals(commands::signals::SignalsArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
+    /// Set up Claudine with Darkmatter; safe to rerun, keeps settings
+    /// (publishes and registers its host registration, replacing an old one).
+    Setup(commands::setup::SetupArgs),
+    /// Check Claudine's configuration, registration, permissions, speech,
+    /// and executable path; `--fix` repairs what it safely can.
+    Doctor(commands::doctor::DoctorArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
     /// Manage MCP (Model Context Protocol) servers.
@@ -128,6 +134,10 @@ pub(crate) enum Commands {
     Context(commands::context::ContextArgs),
     /// Show the diagnostic error-code contract (codes, dispositions, details).
     Errors(commands::errors::ErrorsArgs),
+    /// List, print, or publish Claudine's Darkmatter host registration
+    /// (maintainers).
+    #[command(hide = true)]
+    Registrations(commands::registrations::RegistrationsArgs),
 }
 
 /// Exit status of a refused invocation: a usage error, with nothing run.

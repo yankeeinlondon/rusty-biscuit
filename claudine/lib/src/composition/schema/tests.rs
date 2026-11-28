@@ -191,7 +191,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
         [
             format!(
                 "git add {}",
-                biscuit_file::to_portable_string(prepared.source_repo_root.as_ref().unwrap())
+                biscuit_file::to_forward_slash_string(prepared.source_repo_root.as_ref().unwrap())
             ),
             "just commit".to_string(),
             "git add ..".to_string(),
@@ -375,13 +375,6 @@ fn schema_validates_while_lifecycle_err_span_is_deferred() {
     assert_eq!(fm.get("total_phases").and_then(|v| v.as_i64()), Some(3));
 
     // The lifecycle key is deferred (DM1) and its span survives raw.
-    assert!(
-        prepared
-            .deferred_lifecycle_keys
-            .iter()
-            .any(|k| k == "failure"),
-        "failure should be reported as a deferred lifecycle key"
-    );
     let failure = prepared
         .lifecycle
         .stack(crate::composition::LifecycleSignal::Failure);
@@ -771,7 +764,7 @@ fn inline_launch_fails_naming_a_missing_eager_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nbody\n"));
 
-    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None)
     .unwrap_err();
     let CompositionError::MissingProperties { missing, .. } = err else {
         panic!("expected MissingProperties naming prompt, got: {err:?}");
@@ -795,7 +788,7 @@ fn inline_launch_type_checks_a_present_required_non_eager_value() {
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\nproducts: not-an-object\n---\nbody\n"),
     );
 
-    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None)
     .unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { ref problems, .. } if problems.iter().any(|p| p == "/products")),
@@ -814,7 +807,7 @@ fn a_caller_supplied_prompt_satisfies_the_eager_launch_gate_transiently() {
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nauthored body\n"));
     let overrides = serde_json::json!({ "prompt": "Research VoIP handsets" });
 
-    let pre = pre_validate_schema_for_mode(&source, Some(&overrides), None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
+    let pre = pre_validate_schema_for_mode(&source, Some(&overrides), None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None)
     .unwrap();
     let prepared = prepare_inline_with_schema(
         &pre.source,
@@ -841,7 +834,7 @@ fn status_report_for_inline_mode_defers_required_non_eager_gaps() {
         &dir,
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
     );
-    let inline = build_schema_status_report_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
+    let inline = build_schema_status_report_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None)
     .unwrap()
     .unwrap();
     let direct = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
@@ -1607,7 +1600,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         &dir,
         "---\n$schema:\n  label: 'string(eager)'\n---\nbody\n",
     );
-    pre_validate_schema_for_mode(&absent, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
+    pre_validate_schema_for_mode(&absent, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None)
     .expect("an eager-only property remains optional");
 
     let invalid = make_source(
@@ -1615,7 +1608,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         "---\n$schema:\n  label: 'string(eager)'\nlabel: []\n---\nbody\n",
     );
     assert!(matches!(
-        pre_validate_schema_for_mode(&invalid, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default()),
+        pre_validate_schema_for_mode(&invalid, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default(), None),
         Err(CompositionError::SchemaValidation { .. })
     ));
 }
@@ -2487,13 +2480,13 @@ fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
     let value = serde_json::json!({"count": "{{ n }}"});
 
     let authored = LayeredOverrides::from_parts(Some(&value), &Default::default());
-    pre_validate_layered_for_mode(&source, &authored, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default())
+    pre_validate_layered_for_mode(&source, &authored, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default(), None)
         .expect("an authored template is deferred to composition");
 
     let data_keys = std::collections::BTreeSet::from(["count".to_string()]);
     let data = LayeredOverrides::from_parts(Some(&value), &data_keys);
     let error =
-        pre_validate_layered_for_mode(&source, &data, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default())
+        pre_validate_layered_for_mode(&source, &data, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default(), None)
             .expect_err("a data string cannot satisfy `number`");
     assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
 }

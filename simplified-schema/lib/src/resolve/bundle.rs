@@ -32,6 +32,12 @@
 //! member rules, and nothing under the root is opened, probed, or
 //! canonicalized on the disk while the scope is in force.
 //!
+//! A template met under a scope keeps it
+//! ([`PendingSchema::verified_bundle`](crate::slots::PendingSchema::verified_bundle)):
+//! resolving it later re-enters the same bundle for the schema preparation
+//! after its slots are evaluated, and a reference a slot returned that the
+//! bundle refuses is refused at that slot.
+//!
 //! The scope is independent of the template read gate
 //! ([`crate::slots::TemplateReads`]): a returned definition's reads must pass
 //! both. It also covers reads a host makes through
@@ -60,6 +66,8 @@ pub struct BundleSources {
     identities: Vec<PathIdentity>,
     virtual_root: bool,
     members: Arc<BTreeMap<String, Arc<[u8]>>>,
+    /// Identifies the member bytes for a host's caches; see [`Self::revision`].
+    revision: Arc<str>,
 }
 
 /// Why a member table or root cannot form a bundle.
@@ -81,7 +89,7 @@ impl BundleSources {
     /// [`InvalidBundle`] for a relative root or a key that is empty, holds
     /// `\`, or has an empty, `.`, or `..` segment.
     pub fn on_disk(root: &Path, members: BTreeMap<String, Arc<[u8]>>) -> Result<Self, InvalidBundle> {
-        let label = biscuit_file::to_portable_string(root);
+        let label = biscuit_file::to_forward_slash_string(root);
         if !root.is_absolute() {
             return Err(InvalidBundle { bundle: label, message: "the bundle root must be an absolute directory".into() });
         }
@@ -130,7 +138,34 @@ impl BundleSources {
                 });
             }
         }
-        Ok(Self { label, root, identities, virtual_root, members: Arc::new(members) })
+        let mut fingerprint = Vec::new();
+        for (key, bytes) in &members {
+            fingerprint.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            fingerprint.extend_from_slice(key.as_bytes());
+            fingerprint.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+            fingerprint.extend_from_slice(bytes);
+        }
+        let revision = format!("{:016x}", biscuit_hash::xx_hash_bytes(&fingerprint)).into();
+        Ok(Self { label, root, identities, virtual_root, members: Arc::new(members), revision })
+    }
+
+    /// This bundle with `revision` as its [`Self::revision`]: a host that
+    /// verified the bytes under a revision of its own (a registration's
+    /// content digest) names them by it.
+    #[must_use]
+    pub fn with_revision(mut self, revision: &str) -> Self {
+        self.revision = revision.into();
+        self
+    }
+
+    /// What identifies the member bytes: the host's revision when it gave
+    /// one ([`Self::with_revision`]), else a digest of every member path and
+    /// its bytes. A result a host keeps across calls whose imports came from
+    /// this bundle ([`crate::slots::PendingSchema::verified_bundle`]) is
+    /// keyed on it together with [`Self::root`].
+    #[must_use]
+    pub fn revision(&self) -> &str {
+        &self.revision
     }
 
     /// The root every member's local path is under: the installed directory,
@@ -271,6 +306,23 @@ pub fn with<T>(sources: &BundleSources, resolve: impl FnOnce() -> T) -> (T, Bund
     (result, reads.unwrap_or_default())
 }
 
+/// The bundle in force on this thread, if any: what a template captures so
+/// that its later resolution reads the same verified bytes ([`reenter`]).
+pub(crate) fn current() -> Option<BundleSources> {
+    ACTIVE.with_borrow(|active| active.as_ref().map(|active| active.sources.clone()))
+}
+
+/// Runs `resolve` with `sources` in force, unless that same bundle already
+/// is (its decisions then stay with the enclosing [`with`]'s reads).
+pub(crate) fn reenter<T>(sources: &BundleSources, resolve: impl FnOnce() -> T) -> T {
+    let in_force = ACTIVE.with_borrow(|active| {
+        active.as_ref().is_some_and(|active| {
+            Arc::ptr_eq(&active.sources.members, &sources.members) && active.sources.root == sources.root
+        })
+    });
+    if in_force { resolve() } else { with(sources, resolve).0 }
+}
+
 /// The bundle's decision on one schema reference.
 pub(super) struct Decision {
     pub(super) outcome: Result<PathBuf, BundleBoundary>,
@@ -379,5 +431,6 @@ pub(crate) fn check_example(reference: &str, path: &Path, bytes: &[u8]) -> Resul
     Err(SchemaError::BundleBoundary {
         reference: reference.to_string(),
         boundary: BundleBoundary { bundle, refusal: BundleRefusal::ExampleMember, target: Some(path.to_path_buf()) },
+        site: None,
     })
 }

@@ -8,20 +8,22 @@ use std::fs;
 use crate::common;
 use common::{CliProcessFixture, strip_ansi, write_executable};
 
-/// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
-/// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
-/// exact spec message naming the offending command. This is the CI gate
-/// "working correctly".
+/// Non-TTY shell gate: an unapproved `::shell` command (no approval handler,
+/// no whitelist) makes a real `compose` exit non-zero naming the offending
+/// command before the provider starts. This is the CI gate "working
+/// correctly". The dry run asks for no approval: it runs no command, reports
+/// the directive as not checked, and exits 0.
 #[cfg(unix)]
 #[test]
-fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
+fn compose_non_tty_unapproved_shell_is_gated_and_the_dry_run_runs_nothing() {
     let fixture = CliProcessFixture::named("compose-dry-run-shell-gate");
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("template.md");
+    let marker = fixture.cwd().join("shell-ran");
     fs::write(
         &md_file,
-        "---\ntitle: dry-run gate\n---\n::shell echo dryrun-needs-approval\n",
+        format!("---\ntitle: shell gate\n---\n::shell touch {}\n", marker.display()),
     )
     .unwrap();
 
@@ -31,59 +33,55 @@ fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = fixture
+    let collapse = |stderr: &[u8]| {
+        // The prose renderer hard-wraps the styled error block inside a box,
+        // so drop the box-border glyphs and collapse whitespace runs before
+        // matching (wrapping width is terminal-dependent).
+        strip_ansi(&String::from_utf8_lossy(stderr))
+            .replace('┃', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let run = fixture.command().args(["compose", "--goose", md_file.to_str().unwrap()]).output().unwrap();
+    let collapsed = collapse(&run.stderr);
+    assert!(!run.status.success(), "the unapproved command must stop the run; stderr was:\n{collapsed}");
+    assert!(
+        collapsed.contains("requires approval but no approval handler is available"),
+        "expected the gate message; stderr was:\n{collapsed}"
+    );
+    assert!(
+        !collapsed.contains("provider should not run"),
+        "provider must not execute when the gate fires; stderr was:\n{collapsed}"
+    );
+
+    let dry_run = fixture
         .command()
-        .args([
-            "compose",
-            "--goose",
-            "--dry-run",
-            md_file.to_str().unwrap(),
-        ])
-        .assert()
-        .failure();
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-    let plain = strip_ansi(&stderr);
-    // The prose renderer hard-wraps the styled error block inside a box, so
-    // drop the box-border glyphs and collapse whitespace runs before matching
-    // the spec message (semantic check, not byte-for-byte — wrapping width is
-    // terminal-dependent).
-    let collapsed = plain
-        .replace('┃', " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    assert!(
-        collapsed.contains(
-            "Cannot dry-run: shell command 'echo dryrun-needs-approval' requires interactive \
-             approval."
-        ),
-        "expected the dry-run gate message naming the command; stderr was:\n{plain}"
-    );
-    assert!(
-        collapsed.contains("--yolo"),
-        "gate message should point at --yolo; stderr was:\n{plain}"
-    );
-    assert!(
-        !plain.contains("provider should not run"),
-        "provider must not execute when the dry-run gate fires; stderr was:\n{plain}"
-    );
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let collapsed = collapse(&dry_run.stderr);
+    assert_eq!(dry_run.status.code(), Some(0), "stderr was:\n{collapsed}");
+    assert!(collapsed.contains("not checked: `::shell` directive"), "stderr was:\n{collapsed}");
+    assert!(!collapsed.contains("provider should not run"), "stderr was:\n{collapsed}");
+    assert!(!marker.exists(), "neither run may execute the command");
 }
 
-/// `--dry-run --yolo` auto-approves shell commands so the gate is bypassed:
-/// the command runs for real and its output is interpolated into the body
-/// that lands on stdout.
+/// `--dry-run --yolo` still runs no shell command: `--yolo` approves
+/// commands for a real run, and the dry run runs none, so the directive is
+/// previewed unevaluated.
 #[cfg(unix)]
 #[test]
-fn compose_dry_run_yolo_bypasses_shell_gate() {
+fn compose_dry_run_yolo_runs_no_shell_command() {
     let fixture = CliProcessFixture::named("compose-dry-run-yolo");
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("template.md");
+    let marker = fixture.cwd().join("shell-ran");
     fs::write(
         &md_file,
-        "---\ntitle: yolo bypass\n---\n::shell echo yolo-marker\n",
+        format!("---\ntitle: yolo\n---\n::shell touch {}\n", marker.display()),
     )
     .unwrap();
 
@@ -104,13 +102,12 @@ fn compose_dry_run_yolo_bypasses_shell_gate() {
         .assert()
         .success();
 
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
-    let plain = strip_ansi(&stdout);
-
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
     assert!(
-        plain.contains("yolo-marker"),
-        "composed body on stdout should contain the executed command output; stdout was:\n{plain}"
+        plain.contains("[not evaluated in a dry run]"),
+        "the directive is previewed unevaluated; stdout was:\n{plain}"
     );
+    assert!(!marker.exists(), "the dry run must not run the command");
 }
 
 /// When the prompt file lives outside any git repo, `CompositionPrepContext`
@@ -152,21 +149,20 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
     );
 
     // Run in non-TTY mode (null stdin) from a CWD that is NOT a git repo.
-    let assert = fixture
+    let output = fixture
         .command()
-        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
-        .assert()
-        .success();
+        .args(["compose", "--dry-run", "--json", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
 
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-    let plain = strip_ansi(&stderr);
-
-    // With no agent hint and no explicit provider, dry-run shows the
-    // unresolved no-agent state rather than auto-selecting the favorite.
-    assert!(
-        plain.contains("didn't specify the Agent"),
-        "non-TTY compose dry-run should show the no-agent state; stderr was:\n{plain}"
-    );
+    // With no agent hint and no explicit provider, a non-interactive run
+    // has no provider: the check reports that rather than auto-selecting
+    // the favorite.
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(2), "{envelope}");
+    let codes: Vec<&str> =
+        envelope["diagnostics"].as_array().unwrap().iter().filter_map(|finding| finding["code"].as_str()).collect();
+    assert!(codes.contains(&"composition.provider_unresolved"), "{envelope}");
 }
 
 /// Proves `--interactive` flag is wired up for compose preflight with a

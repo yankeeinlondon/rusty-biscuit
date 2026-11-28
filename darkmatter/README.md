@@ -37,7 +37,7 @@ last_updated: 2026-11-06
 
   Guards narrow what a region may hold: inside `::block when="is_number(count)"` or `count ? min(count, 5) : 0`, `count` is known to be a number, and the call check, shell pre-flight, and DMLS all read the same facts without evaluating anything; see [What a Guard Proves](./docs/topics/darkmatter-expressions.md#what-a-guard-proves). Hosts such as Claudine can add their own [expression functions](./docs/topics/host-functions.md), which get the same checks.
 
-- Validate whole `.yaml`/`.yml` documents too: a document is judged by the `kind: yaml-schema` definition that claims its `kind`, or else by its root `$schema`, with `md schema validate` and in the editor; see [YAML documents](./docs/topics/schemas/definition.md#yaml-documents)
+- Validate whole `.yaml`/`.yml` documents too: a document is judged by the `kind: yaml-schema` definition that claims its `kind` (including `kind: expression-schema` and `kind: mutation-schema` callable catalogs, which share Darkmatter's catalog checks), or else by its root `$schema`, with `md schema validate` and in the editor. Expression catalog keys must work as call names. Overload sequences support YAML anchors and aliases, and conflicts report both declarations. See [YAML documents](./docs/topics/schemas/definition.md#yaml-documents)
 
 - One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
 - One [`--output` and `--width`](./docs/cli/output-and-width.md) on every command: print for a person (`terminal`, `plain`, `markdown`, `markdown-plus`, `html`) or as [data](./docs/cli/data-contracts.md) (`json`, `json5`, `yaml`, `toml`). For example, `md compose --output json` prints one value with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document
@@ -101,7 +101,7 @@ host OS input and take focus.
     - [Editing Plain YAML Files](./docs/topics/yaml-editing.md) — the library's in-place, comment-preserving edits of a whole `.yaml` file
     - [Configuration Files](./docs/topics/configuration.md) — `~/.darkmatter.yaml` and the repository's `.darkmatter.yaml`: settings, schema defaults, and loading a `ConfigSnapshot`
     - [Permissions](./docs/topics/permissions.md) — the `file-read`, `shell-commands`, and `network` policies, how the user and repository scopes combine, and current-run approvals
-    - [Host Registration](./docs/topics/host-registration.md) — `darkmatter-host` manifests a `register` entry names, and loading them into host profiles
+    - [Host Registration](./docs/topics/host-registration.md) — how a host such as Claudine publishes a digest-checked format 3 `darkmatter-host` bundle (triggers, namespaces, expression catalogs with derived `.facts.json` companions, and its lifecycle artifact) so `md` and DMLS can type its documents and merge compatible trigger rules, including narrower list item types
     - [Writing Configuration Files Safely](./docs/topics/config-writes.md) — locked, validated, atomic configuration saves shared by every writer, and the receipts that let a migration finish its cleanup
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)
@@ -110,6 +110,9 @@ host OS input and take focus.
     - [Context Variables provided to Composition](docs/topics/state-management/context-variables.md) — date/time, repo/monorepo, file changes, OS, hardware, and document discovery via `sniff`
     - [Error Rendering Conventions](./docs/errors/README.md) — `BlockError` body
       contract, `SourceContext`, snapshot tests
+    - [The Error-Message Standard](./docs/errors/message-standard.md) — what every
+      error and finding states (what, where, why, and how to fix it), shared with
+      Claudine, and the tests that enforce it
 
 ## License
 

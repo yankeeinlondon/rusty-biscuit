@@ -20,6 +20,7 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             source_path,
             mode,
             provided_overrides,
+            cause,
         } => {
             let file_link = super::render_file_link(source_path);
             let mode_label = match mode {
@@ -39,10 +40,9 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                 }
                 body.push(rows(overrides));
             }
+            body.push(empty_body_explanation(cause));
             body.push(Prose::new(
-                "The document composed without error, but every block in the body \
-                 was stripped by its `when` condition (or the body was empty to begin with). \
-                 The provider CLI would otherwise reject this as \"Input must be provided …\" \
+                "The provider CLI would otherwise reject this as \"Input must be provided …\" \
                  without naming the real cause.",
             ));
             StatusBlock::new(StatusState::Error)
@@ -51,11 +51,7 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                     "composed prompt is empty",
                 ))
                 .body(body)
-                .hint(
-                    "Check that the variables you passed match the `::block when=…` \
-                     conditions in the prompt, or verify there is body content outside any \
-                     conditional block.",
-                )
+                .hint(cause.hint())
         }
         CompositionError::ShellExpansionFailed { error, .. } => {
             // Delegate to the structured shell-expansion block so the
@@ -137,7 +133,7 @@ fn render_magic_no_match_body(
         code_span(payload),
     );
     for root in resolution.magic_search_roots() {
-        let path = biscuit_file::to_portable_string(root.path());
+        let path = biscuit_file::to_forward_slash_string(root.path());
         let marker = (root.provenance() == RootProvenance::Magic).then_some(" (*)");
         roots.push_str(&format!(
             "\n- <cyan>{}</cyan>{}",
@@ -165,7 +161,7 @@ fn render_candidate_no_match_body(
     let mut body = vec![Prose::new(format!(
         "Cannot resolve <cyan>{}</cyan> from launch directory <cyan>{}</cyan>.",
         code_span(reference),
-        code_span(&biscuit_file::to_portable_string(resolution.base_dir())),
+        code_span(&biscuit_file::to_forward_slash_string(resolution.base_dir())),
     ))];
 
     if !resolution.candidates().is_empty() {
@@ -182,7 +178,7 @@ fn render_candidate_no_match_body(
                 RootProvenance::Absolute => "absolute",
                 RootProvenance::LocalRoot => "local root",
             };
-            let path = biscuit_file::to_portable_string(probed.candidate().path());
+            let path = biscuit_file::to_forward_slash_string(probed.candidate().path());
             tried.push_str(&format!(
                 "\n- <b>{provenance}</b>: <cyan>{}</cyan>",
                 code_span(&path),
@@ -205,4 +201,25 @@ fn suggestions_rows(suggestions: &[String]) -> Option<Prose> {
         listed.push_str(&format!("\n- <cyan>{}</cyan>", code_span(path)));
     }
     Some(rows(listed))
+}
+
+/// What the composition proved about an empty body, in the author's terms:
+/// each excluded block by its line and condition, and no claim the cause does
+/// not carry.
+fn empty_body_explanation(cause: &darkmatter::findings::EmptyBodyCause) -> Prose {
+    use darkmatter::findings::EmptyBodyCause;
+    match cause {
+        EmptyBodyCause::AuthoredEmpty => Prose::new("The document has no body after its frontmatter."),
+        EmptyBodyCause::Whitespace => Prose::new("The document's body contains only whitespace."),
+        EmptyBodyCause::ExcludedBlocks { blocks } => {
+            let mut text = String::from("Every block of the body was left out because its condition was false:");
+            for block in blocks {
+                text.push_str(&format!("\n- line {}: {}", block.line, code_span(&block.condition)));
+            }
+            rows(text)
+        }
+        EmptyBodyCause::EmptyRendered => Prose::new(
+            "The body has content, but it rendered to nothing; the expressions and blocks it holds produced no text.",
+        ),
+    }
 }

@@ -1,6 +1,6 @@
 # Reviewed steering activation policy. Hand-owned; never generated.
 #
-# Research (`docs/research/steering/<slug>.md`) records what providers do and
+# Research (`docs/research/providers/steering/<slug>.md`) records what providers do and
 # what disposable tests established. This file records what Claudine has
 # reviewed and implemented. A steering case becomes selectable only when all
 # of these hold:

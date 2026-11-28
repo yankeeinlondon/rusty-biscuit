@@ -40,9 +40,9 @@ impl Fixture {
             fs::copy(real.join(rel), to)
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
         };
-        copy("docs/research/signals/_schema.yaml");
+        copy("docs/research/providers/signals/_schema.yaml");
         for slug in SIGNAL_SLUGS {
-            copy(&format!("docs/research/signals/{slug}.md"));
+            copy(&format!("docs/research/providers/signals/{slug}.md"));
         }
         Self { dir }
     }
@@ -51,7 +51,7 @@ impl Fixture {
         let path: PathBuf = self
             .dir
             .path()
-            .join(format!("docs/research/signals/{slug}.md"));
+            .join(format!("docs/research/providers/signals/{slug}.md"));
         let content = fs::read_to_string(&path).unwrap();
         assert!(
             content.contains(from),

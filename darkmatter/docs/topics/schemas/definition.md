@@ -77,6 +77,7 @@ envelopes:
 | informal `schema` | no `kind` | `$schema` (required), `types`, `description` (a string), `categories` |
 | `schema-trigger` | `kind: schema-trigger` | match rules and a `$schema` payload; see [Repository Trigger Schemas](#repository-trigger-schemas) |
 | `yaml-schema` | `kind: yaml-schema` | `$schema` (required), `types`, `description`, `categories`; it defines a YAML document kind and is never a `$schema` target; see [YAML Documents](#yaml-documents) |
+| `expression-schema`, `mutation-schema` | `kind: expression-schema`, `kind: mutation-schema` | `categories` and `types` (both required), `description`; a callable catalog, never a `$schema` target or an import source; see [Host Functions](../host-functions.md) |
 
 Any other top-level key is a malformed-envelope error. Only a document with
 a `$schema` property can be a Markdown document's `$schema` target; a
@@ -462,7 +463,7 @@ of preparing the text. It holds:
 | --- | --- |
 | the global catalog, `fm` included | `GlobalCatalog::darkmatter()` and the runtime baseline |
 | the baseline lowered to JSON Schema with its [validator-cache digest](#validator-cache), and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
-| the named types of each partial under `schemas/partials/` | `Name@darkmatter:<stem>` references |
+| the named types of each schema partial under `schemas/partials/` (not the callable catalogs `functions.yaml` and `mutations.yaml`) | `Name@darkmatter:<stem>` references |
 | the YAML document-kind definitions (Simplified Schema's `schema.yaml`, `yaml-schema.yaml`, and `schema-trigger.yaml`), prepared with Darkmatter's shipped sources | `shipped_kind_registry()`, and the shipped definitions `kind_host()` seeds every kind registry with |
 | the expression-function catalog (`functions.yaml`, with its file-form examples) | `expression_function_catalog()` |
 | the side-effect catalog (`mutations.yaml`) | `effect_function_catalog()` |
@@ -864,6 +865,9 @@ in one of two ways:
   every YAML document whose top-level `kind` names that kind is judged by the
   definition. This is the way to give a family of files one contract without
   each file pointing at it.
+  A registered host's `kind: yaml-schema` files claim kinds too, as the
+  lowest tier: a shipped or schema-root definition of the same kind wins (see
+  [Host Registration](../host-registration.md#whole-yaml-documents)).
 - **By a root `$schema`.** A document whose `kind` no definition claims can
   carry its own `$schema`, exactly as frontmatter does.
 
@@ -934,6 +938,16 @@ flowchart TD
   `kind: schema-trigger` file is validated against the trigger definition,
   never against its own `$schema` payload, which describes the Markdown
   documents it matches.
+- **A callable catalog is checked as a host reads it.** A
+  `kind: expression-schema` or `kind: mutation-schema` file is validated
+  against its shipped definition and then by Darkmatter's catalog reader:
+  every callable needs a declared category, names may not collide without
+  regard to ASCII case, a mutation may not use `narrows(...)`, and an
+  expression catalog other than `schemas/partials/functions.yaml` may not
+  reuse a built-in function's name. A failure is reported with code
+  `dm.schema.callable_catalog` at the failing declaration, plus the other
+  declaration when two conflict. The check never runs an example or resolves
+  a `{{ … }}` slot, and the catalog never falls back to a root `$schema`.
 - **An unclaimed document uses its root `$schema`**, in any form a frontmatter
   `$schema` accepts: an inline mapping, a root union, or a reference to a
   SimplifiedSchema or JSON Schema file (see
@@ -966,7 +980,8 @@ The file is read as exactly one YAML document:
   (such as `9007199254740993`, which no `f64` holds exactly) are load
   errors (`SchemaError::SchemaDocument` naming the file, with the byte span
   of the failure: where the parser stops, the `---` that starts a second
-  document, or the non-string key itself, even in a file with an alias). Quote a key such as `1:` or
+  document, the second spelling of a duplicate key, or the non-string key
+  itself, even in a file with an alias). Quote a key such as `1:` or
   `true:` to keep it as text.
 
 ```yaml
@@ -999,7 +1014,7 @@ platforms: []
 
 ### Kind Checks
 
-The three shipped kinds, which Simplified Schema defines and checks, have
+The four shipped kinds, which Simplified Schema defines and checks, have
 rules that their definitions cannot express, such as whether a trigger's
 `$path` glob is valid. Once a document satisfies its
 definition, these checks run on the same document and add their problems to
@@ -1010,11 +1025,32 @@ the same report:
 | `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves. A [template](./schema-slots.md) is then resolved through the same read approval a document naming it gets, and the resolved schema is checked; a slot that is refused or fails is a `slots` record (exit 1) |
 | `schema-trigger` | the trigger grammar: each `$path` glob, an empty `match` list, a vacuous match, `min-match` count bounds, and match-safe conditions (see [Repository Trigger Schemas](#repository-trigger-schemas)) |
 | `yaml-schema` | its exported `$schema` prepares and claims a finite set of kinds |
+| `namespace-schema` | the preparation a host's [registration](../host-registration.md#namespace-schemas) runs: `description` and `types` are not written as `null`, `$schema` is one mapping, and it resolves with the file's private `types`. A namespace file is still never a `$schema` target of another document |
 
 A kind check is an error in the file itself, with the problem code
 `KindCheck` (diagnostic code `dm.schema.kind_check`), located at the node it
 is about. A document that fails its definition reports only the definition's
 problems, so nothing is reported twice.
+
+A declaration that does not resolve or parse is located at the declaration
+itself, in the section that wrote it (`$schema` or `types`), and inside a
+union at the failing arm. In this namespace file the problem's path is
+`/$schema/count/1` at line 6, not `/$schema`, the first arm, or `label`:
+
+```yaml
+kind: namespace-schema
+namespace: run
+$schema:
+    count:
+        - number
+        - Missing        # line 6: unknown named type `Missing`
+    label: string
+```
+
+The same holds for a declaration your file's definition rejects while it
+reads a `$schema` or `types` value: a trigger whose second root-union arm
+writes `gadget: string(requird)` reports `/$schema/1/gadget` at the token
+`requird`, not the whole `$schema`. The editor publishes the same positions.
 
 Kind checks judge meaning, never shape. The selected definition alone
 decides which keys a document may have and what type each value is, and the
@@ -1026,7 +1062,9 @@ shipped one (see [Schema Discovery](./schema-discovery.md)): with the root
 `schema-trigger.yaml`, a trigger with an extra `note: hi` key passes, and
 its `$path` globs are still checked. What a document imports (`Name@file`)
 is loaded directly and is still checked against the definitions built into
-the binary. A kind defined in your own
+the binary. So is a `namespace-schema` file's check, because it is the
+check registration runs, which judges the file against the built-in
+definition. A kind defined in your own
 `yaml-schema` has no kind checks: its definition is its whole contract.
 
 ```yaml
@@ -1192,7 +1230,8 @@ md schema validate schemas/roster.yaml data/platforms.yaml
 - **Load errors exit `1`.** A file that is not one admissible YAML document
   (malformed YAML, a duplicate key, a second document) is reported as "is not
   a valid YAML document" with its location, and in JSON with
-  `"error": "yaml_parse"` plus `line` and `column`. A `$schema` naming a file
+  `"error": "yaml_parse"` plus `line` and `column` (one-based, the column
+  counting characters, not bytes). A `$schema` naming a file
   that fails to load is a schema error of the document (`"error": "schema"`),
   not a load error.
 - **Selection errors exit `1`.** A kind claimed by two definitions, or by a
@@ -1373,7 +1412,7 @@ The `layers` object says which schema layers judged the document, so a consumer 
 
 The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), a `schema` record for a callable catalog that fails the catalog reader has `code` `dm.schema.callable_catalog`, the failing declaration's `line`, `column` (in characters), and byte `span`, and `related`, one `{"message", "file", "line", "column", "span"}` object for each other location the failure involves (a built-in function's declaration names `darkmatter/schemas/partials/functions.yaml`, with coordinates from the embedded catalog and a local file path when the checkout source matches), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 
@@ -2040,10 +2079,54 @@ are an error rather than one shadowing the other (see
 [Schema Discovery](./schema-discovery.md)).
 
 - The package and package area are those of the **document**, not of the
-  directory you launched `md` from. `md` searches the roots only for a
-  document in a repository; DMLS searches them for any document inside an
-  open workspace folder. Outside a repository the file tree root is the tree
-  the document was opened in (often its own folder).
+  directory you launched `md` from. `md` searches the roots, for triggers and
+  for bare names alike, only for a document that is itself in a repository;
+  DMLS searches them for any document inside an open workspace folder.
+  Outside a repository the file tree root is the tree the document was opened
+  in (often its own folder).
+- That decision is made for **each** document, never inherited from the one
+  that reached it. A note outside every repository, such as `~/review.md`
+  with `$schema: review.yaml`, refuses the bare name whether you check it
+  directly, a repository document includes it (`::file ~/review.md`), or a
+  repository link points at a heading it generates
+  (`[go](~/review.md#review-heading)`): the note fails preparation, and that
+  link's fragment is reported missing. Spell the schema
+  `./schemas/review.yaml` or as an absolute path and it resolves everywhere.
+  Trigger files in the schema roots likewise never apply to such a note,
+  even while composing a repository document that includes it; a document
+  inside the repository is still matched by the same triggers, including
+  those in `~/schemas/`.
+- A document in **another** Git checkout uses that checkout's roots, however
+  it is reached. Run from `~/app`, a parent with `::file ~/notes/review.md`
+  (or `prologue:`/`epilogue:` naming it, a `::toc-linking` of it, or a link
+  to `~/notes/review.md#review-heading`) prepares the note exactly as
+  `md schema validate ~/notes/review.md` does: `$schema: review.yaml` and
+  `Name@types.yaml` resolve from `~/notes/schemas/`, a trigger there that
+  matches the note applies when the parent is composed, and a trigger in
+  `~/app/schemas/` never does. `@` references in the note still search the
+  launch folder's scope, and the run keeps the permissions it started with.
+
+  ```text
+  ~/app/root.md            ::file ~/notes/review.md
+  ~/notes/review.md        $schema: review.yaml       → ~/notes/schemas/review.yaml
+  ~/notes/schemas/gate.trigger.yaml (matches topic: review)  → applies to the note
+  ~/app/schemas/gate.trigger.yaml   (matches topic: review)  → never applies to the note
+  ```
+- A checkout is found by Git membership, not by folder nesting: a
+  document's repository is the nearest folder above it that holds a `.git`
+  folder or a `.git` file (the file a submodule or `git init
+  --separate-git-dir` leaves). A component checked out inside another
+  repository is therefore its own checkout. With `~/app/vendor` holding its
+  own `.git`, `md compose ./vendor/review.md` from `~/app` and
+  `md compose review.md` from `~/app/vendor` both resolve
+  `$schema: review.yaml` from `~/app/vendor/schemas/`, and only the triggers
+  there apply. The same holds for `~/notes/vendor` inside `~/notes`, in
+  whatever order a parent includes `~/notes/seed.md` and
+  `~/notes/vendor/review.md`.
+- Bare-name lookup does not depend on trigger schemas. `md validate refs`
+  and `md graph`, which apply no triggers, and a run with
+  `--disable schema-triggers` resolve `$schema: post.yaml` and
+  `Post@shared.yaml` from the same roots as `md compose`.
 - `SCHEMAS_DIR` names the schemas folder **itself**, which can be any folder
   you choose: with `SCHEMAS_DIR=/opt/team/dm-defs`, files are read from
   `/opt/team/dm-defs/`, never from `/opt/team/dm-defs/schemas/`. It must be an
@@ -2072,6 +2155,37 @@ are an error rather than one shadowing the other (see
 - Both values come from the environment the process started with. DMLS reads
   them when the editor starts the server, so a GUI editor that lacks a shell
   variable lacks `SCHEMAS_DIR` too; restart the server after changing it.
+
+#### What each kind of file does in a root
+
+A file's `kind` decides what it does in a schema root. Two kinds apply
+because of where they are placed. Every other schema file is only
+available, and applies to a document that names it.
+
+| File in a root | Applies to | Example |
+|---|---|---|
+| `kind: schema-trigger` | every Markdown document its `match` selects; never named in `$schema` | `schemas/report.yaml` types every document with `kind: report` |
+| `kind: yaml-schema` | every YAML document whose `kind` it claims; never named in `$schema` | `schemas/roster.yaml` validates every YAML file with `kind: roster` |
+| `kind: schema` or no `kind`, with a `$schema` | only a document whose `$schema` names it | `$schema: food.yaml` in one document; others are unaffected |
+| `kind: schema` with only `types` | nothing directly; it supplies types to the files that import them | `owner: person@people.yaml` |
+
+"Every document" is limited to the documents the root serves:
+
+| Root | Serves |
+|---|---|
+| `{package}/schemas/` | documents in that package |
+| `{package-area}/schemas/` | documents in that package area, never a sibling area |
+| `{root}/schemas/` | every document in the file tree |
+| `SCHEMAS_DIR` and `~/schemas/` | every document Darkmatter checks, in any repository |
+
+For example, in a monorepo with `claudine/schemas/sequence-trigger.yaml` and
+`darkmatter/schemas/food.yaml`:
+
+- the trigger can apply to `claudine/docs/plan.md`, but never to
+  `darkmatter/docs/notes.md`
+- `darkmatter/docs/notes.md` gets `food.yaml` only when it writes
+  `$schema: food.yaml`, and `claudine/docs/plan.md` cannot name it by bare
+  name, because `darkmatter/schemas/` is not one of its roots
 
 #### Matching a path with `$path`
 

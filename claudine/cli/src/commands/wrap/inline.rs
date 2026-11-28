@@ -51,7 +51,7 @@ pub(crate) fn report_inline_agent_status(
     term: &Terminal,
 ) {
     let provider_name = crate::output::capitalize_provider(provider);
-    let display_path = biscuit_file::to_portable_string(
+    let display_path = biscuit_file::to_forward_slash_string(
         source_path.strip_prefix(child_cwd).unwrap_or(source_path),
     );
     let was_interrupted = matches!(
@@ -117,7 +117,7 @@ pub(crate) fn report_inline_artifact(
     use biscuit_terminal::components::status::{Status, StatusState};
     use biscuit_terminal::prelude::TerminalRenderable;
 
-    let display_path = biscuit_file::to_portable_string(
+    let display_path = biscuit_file::to_forward_slash_string(
         source_path.strip_prefix(child_cwd).unwrap_or(source_path),
     );
     log::message(&crate::output::fm_check_ok(

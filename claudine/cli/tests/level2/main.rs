@@ -24,8 +24,6 @@ mod level2_drain_ctrl_c_tmux;
 #[cfg(unix)]
 mod level2_dry_run_approval_capture;
 #[cfg(unix)]
-mod level2_dry_run_metadata_capture;
-#[cfg(unix)]
 mod level2_edit_action;
 #[cfg(unix)]
 mod level2_edit_interactive_capture;

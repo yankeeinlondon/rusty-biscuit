@@ -153,9 +153,10 @@ impl ImplementPlan {
 
     /// Every argument vector `git` or `just` received, in order.
     ///
-    /// Leaves out `git --exec-path`: on Windows, repository discovery asks the
-    /// `git` on `PATH` (this stub) where its installation is; that is the
-    /// host's lookup, not a command the prompt ran.
+    /// Leaves out `git --exec-path` and `git config -lz --show-origin …`: on
+    /// Windows, repository discovery asks the `git` on `PATH` (this stub)
+    /// where its installation and its installation config are; those are the
+    /// host's lookups, not commands the prompt ran.
     fn runs(&self) -> Vec<Vec<String>> {
         if !self.records.exists() {
             return Vec::new();
@@ -164,6 +165,7 @@ impl ImplementPlan {
             .expect("the recorder writes whole records")
             .into_iter()
             .filter(|argv| argv.as_slice() != ["--exec-path"])
+            .filter(|argv| !(argv.first().is_some_and(|arg| arg == "config") && argv.iter().any(|arg| arg == "--show-origin")))
             .collect()
     }
 

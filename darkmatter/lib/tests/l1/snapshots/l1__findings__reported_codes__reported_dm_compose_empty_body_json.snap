@@ -1,0 +1,29 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.compose.empty_body",
+      "severity": "warning",
+      "message": "the document has no body",
+      "source": {
+        "file": "[ROOT]/work/doc.md",
+        "line": null,
+        "column": null,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "add the prompt text after the frontmatter"
+    }
+  ],
+  "counts": {
+    "errors": 0,
+    "warnings": 1,
+    "info": 0
+  }
+}

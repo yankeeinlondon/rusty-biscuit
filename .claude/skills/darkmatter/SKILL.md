@@ -15,7 +15,12 @@ extension.
 - Capture one request-scoped composition context. Pass the same
   `FileResolutionContext`, repository observation, remote policy, cache state,
   identity, and meta-schema controls through `ComposeOptions`; never recapture
-  CWD or repository state in a downstream resolver.
+  CWD or repository state in a downstream resolver. The one exception is
+  source admission: a source whose nearest Git checkout (its closest `.git`
+  directory or file, never containment under a known root) is a repository
+  the request's context does not name is discovered once per request
+  (`SourceRepositories`) and carried as `SourceDerivation::OwnRepository`;
+  see [requests.md](requests.md).
 - Resolve file-like values through `biscuit_file::FileReference`. Preserve its
   source context, explicit-vs-implicit syntax, and typed errors.
 - Read the home only through `biscuit_file::home_dir()` (`RequestSnapshot::from_process`
@@ -32,6 +37,21 @@ extension.
   (`FetchPolicy::allow_all()`, never a wildcard host). An invalid
   `permissions` block (`NetworkPermission::Invalid`) refuses every URL with
   its configuration error before any per-run host or approval is consulted.
+  `network: ask` (`NetworkPermission::Ask`, `requires_approval()`) projects
+  like `deny` into the `FetchPolicy`; a host the run did not allow is
+  `RemoteFetchRuntime::needs_approval`, which composition never asks for:
+  `check_allowed` returns `RemoteReadError::ApprovalRequired`,
+  `fetch_remote_text` `RemoteTextError::NeedsApproval` (passive:
+  `DeferralReason::NetworkNeedsApproval`, else `FileRefFailure::RemoteNeedsApproval`),
+  transclusion `TransclusionError::RemoteNeedsApproval` (dry run:
+  `engine.rs::defer_unapproved_fetch`, a `DeferredConstruct::Transclusion`).
+  Only the slot gate asks under `ask`; under `deny` it refuses a captured
+  session's URL with `GateRefusal::NetworkDenied` (`dm.schema.slot_network_denied`).
+  Tests: `lib/tests/l1/network_approval.rs`, `network_permission.rs`.
+  A refusal's remedy wording comes from `config::network::network_remedy()`
+  (`NetworkRemedy::PerRunHost`, `md`'s `--allow host=HOST`, by default; a host
+  without that flag installs `NetworkRemedy::Setting` once at startup, as
+  Claudine's `main.rs` does); never hard-code the flag in a shared message.
 - Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
   through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
   them, after every slot is admitted; nothing ever validates against a
@@ -68,8 +88,8 @@ definitions away from their references or replace them with placeholders.
 | Terminal rendering options | [terminal.md](terminal.md) |
 | Frontmatter model, shared views, literal tokens, in-place leaf edits, plain-YAML edits (`yaml_edit`) | [frontmatter.md](frontmatter.md) |
 | `.darkmatter.yaml` schema, `ConfigSnapshot` loading, locked config writes | [library-surfaces.md](library-surfaces.md), `docs/topics/configuration.md` |
-| Permission policy: `config::permissions::PermissionPolicy` (built once per `ConfigSnapshot` from the user layer plus the repository's `HEAD` and working-copy layers; an exclusion in any layer wins, otherwise user allows or both repository layers allow; `network: allow` only when every layer says so), saving an "always allow" entry (`config::permissions::persist::save_user_approval`, user scope only, through `ConfigTransaction`) | `docs/topics/permissions.md` |
-| Host registration: `darkmatter-host` manifests (format 2 is read by `config::registration::manifest::read_v2` and verified into a digest-checked `bundle::VerifiedSnapshot` by `bundle::load_snapshot`/`load_snapshot_with`, whose reader seam lets tests swap bytes between reads; format 1 is still loaded by the legacy profile path until host profiles are built from the snapshot; member imports resolve inside `simplified_schema::resolve::bundle::with`; registered YAML kinds enter through `simplified_schema::yaml_documents::select_with_registered`), `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes, a host's setup adding its own `register` entry (`config::init::register_manifest`, deduplicated by `config::registration::manifest_identity`; Claudine publishes its revision with `claudine::composition::registration` first), DMLS's per-document host view (`dmls/src/overlay/hosts.rs`, see [dmls.md](dmls.md)) | `docs/topics/host-registration.md` |
+| Permission policy: `config::permissions::PermissionPolicy` (built once per `ConfigSnapshot` from the user layer plus the repository's `HEAD` and working-copy layers; an exclusion in any layer wins, otherwise user allows or both repository layers allow; `network` the most restrictive layer, `deny` > `ask` > `allow`), saving an "always allow" entry (`config::permissions::persist::save_user_approval`, user scope only, through `ConfigTransaction`) | `docs/topics/permissions.md` |
+| Host registration: `darkmatter-host` manifests (format 3, seven closed fields `kind`/`format_version`/`host`/`version`/`files`/`lifecycle`/`digests`, no `functions`; `config::registration::manifest::read` checks the integer `format_version` before the contract and refuses 1, 2, or a later version as `ManifestRefusal::Unsupported` → `SnapshotRefusal::unsupported_format`, `unsupported host registration format version <n>; update Darkmatter and the host tool, then republish the registration`; an expression catalog's facts companion is derived, never listed, by `manifest::companion_spelling` over `host::facts_artifact_path` (last `.yaml`/`.yml` → `.facts.json`) and must be in `digests`, which must equal members ∪ companions; the manifest is verified into a digest-checked `bundle::VerifiedSnapshot` by one `attempt` shared by `bundle::load_snapshot`/`load_snapshot_with` (whose reader seam lets tests swap bytes between reads), `from_embedded`, and `verify_read`, in the order explicit members' digests → lenient `kind` classification → derive companions → exact digest set → companion bytes, every possible companion probed first so it is a watch candidate; `VerifiedSnapshot::companions()` (`BundleCompanion { catalog, facts }`) and `members()`, companions in the revision; `bundle::admit_manifest` applies the same envelope, digest-map, and lexical member-path admission without reading members, for a publisher deciding what its previous manifest lets it retire (it alone also admits a well-formed format 2 manifest through `manifest::read_for_cleanup`; `AdmittedManifest::format_version()`); `bundle::admit_installed_manifest` is the same admission with the installed reader's confined member resolution (a `../<bundle-dir>/…` re-entry is the in-bundle member, an escape is refused), for a diagnostic that reads the members itself (`claudine doctor`); `bundle::verify_read` (the same admission and digest checks over bytes a caller already read, nothing probed, shared `attempt` with `load_snapshot_with`) plus `registration::load_verified` (the `register` loader's `profile_of`) let a diagnostic learn whether a bundle loads without a `register` entry; `config::registration::load_manifest` classifies each member by `kind` (trigger, `yaml-schema`, `namespace-schema`, types-only library, `expression-schema`; `kind: mutation-schema` refused at `kind` with `member_envelope::MUTATION_REFUSAL`, `host-defined actions are not supported`) through the shared closed-envelope check `simplified_schema::member_envelope` (also Claudine's build check; a refused namespace, or a member refused before its kind is known, skips catalog and lifecycle preparation) and prepares it from verified bytes inside `simplified_schema::resolve::bundle::with`, then checks every `types` declaration, used or not, with `simplified_schema::resolve::check_declared_types` under the same scope (`registration::declared_types`; a namespace's before the catalog is used); `registration::namespaces::prepare_catalog` builds the `GlobalCatalog` and the lifecycle `catalog_hash`; each expression catalog loads once per installed revision through `registration::load_functions` (`HostFunctionCatalog::load` + `HostFunctions::analysis_only_at` over its companion, any incomplete function refusing the host) into `HostFunctionSet { bundle_path, catalog, facts, functions }`, and `name_collisions` refuses a later case-folded canonical name or alias across one host's catalogs (bundle-path order; another host may reuse it) with the earlier claim in `RegistrationDiagnostic::related` (`RegistrationRelated`, also carrying a catalog failure's `HostCatalogError::related()`); there is no process-wide host function cache or schema-root catalog discovery, and the selected profile's sets are entered (`HostFunctions::enter`) only for its documents (CLI `compose.rs`, DMLS `providers/dsl.rs`), an evaluated call failing `host function <name>() requires the host runtime`; every trigger identifies (no `identify` field) and must pass `admit_identifying_trigger`; registered YAML kinds are indexed by `RegisteredHosts::yaml_kinds()` and are the lowest tier of `prepare_yaml_contract` (`select_with_registered`; `YamlContract::registered()`), used by `md schema validate` and DMLS, whose contract key folds in the installed registrations' version), `config::registration` profiles, host selection (`RegisteredHosts`, `select` → `Selected{selection, matched}`, `HostSelection::{Registered, Ambiguous, Md}`; no schema-root host discovery remains), the registered trigger layer (`config::registration::merge::check` compares every pair of matched payloads (a narrowing's descriptions and rules at the union alternative and element/list level they govern, `merge::arms`, never pooled across alternatives; direction and rule pairing share `merge::covers` over resolved alternatives; a list stays one property alternative and compares item alternatives by coverage, with list and item rules kept separate, so a mixed list never narrows separate homogeneous lists) into one checked layer or a boxed `SchemaError::HostTriggerConflict`, code `dm.host.trigger_conflict`, whose `first_name`/`second_name` `TriggerConflict::into_error` fills from the profile's matched triggers so its message names each `name (path)`; `RegisteredHostProfile::checked_layer` memoizes static results per sorted matched set, a template payload resolves whole and bypasses it; the passive `DarkmatterSchemas::registered_trace` (`md schema triggers`) runs it over the matched concrete payloads only and reports `RegisteredTrace::conflict`, which fails that command; registered payloads may be one root union, `PayloadForm::ObjectOrUnion`, merged by `merged_trigger_schema`'s `merge_around_union`: lower layers go under each arm and every higher layer (root triggers, the document) over each arm through `merge_baseline`, so higher keys and root rules (`closed`) win in every arm, and a document root union yields the cross product, host arms major; the editor sees the union through `CheckedPayload::union_arms` (pruned like `shape`): `EffectiveSchema::trigger_shapes` holds every arm's merged view (`simplified_schema::root_union_property_shape`, shared declarations as written) and `property_shape`/`declared_property_shape` narrow it to the arms the frontmatter admits (`trigger_unions`, matched by `Arc` identity); a phase projection (`simplified_schema::phase::merge_with_effective`) merges an object document into every arm of such a union and a union document's arm `k % m` into effective arm `k`; a host can also register a bundle compiled into it (`bundle::VerifiedSnapshot::from_embedded`, `registration::load_embedded`, virtual root `<host>`, `TriggerSource::Embedded` provenance, duplicate check by embedded identity plus payload digest), which Claudine's in-process selection uses; `report_diagnostics::schema_error_diagnostics` is the record), every refusal located before it becomes a warning (`registration/locate.rs`: the most specific file and field of a typed `SchemaError`, a reference site through `simplified_schema::yaml_documents::declaration_segments` (union arms and the writing section kept), including the declaration a file-reference failure (`Unresolved`, `NoMatch`, `RemoteUnsupported`, `BundleBoundary`, `BareNameSiblingExists`, `InvalidExample`, `TriggerSchemaReferenced`) carries as `SchemaError::reference_site()`, recorded by the resolver where it first read the reference, and the declaration that named a listed file refused for its role (`NotASchemaDocument` with `NotSchemaReason::is_role()`, `UnsupportedJsonDialect`, `ReferenceCycle`/`ReferenceDepthExceeded`, and `TriggerPayloadCycle` after `refused_trigger_file`), attached by `SchemaError::refused_at` at the two load boundaries (`resolve_reference_in_context`, `ImportEngine::resolve_namespace`); a content refusal of the target stays in that file; the locator never searches text for a reference, and one with no site is file-level, a grammar failure at `locate_carrier_definition_failure`'s token, an importer's refusal moved to the imported member with `imported by` in the message, the member and each importer shown as `name (bundle path)` when its verified text declares a valid `name` (`registration::member_label` over `simplified_schema::member_envelope::declared_name`, the one lenient label rule ordinary discovery and Claudine's build share; never for a YAML kind, namespace, or a refusal before the bundle verifies; the embedded loader carries it as `SnapshotRefusal::label`) (a reference an imported file wrote arrives wrapped in `ReferencedSchema` naming it), a non-UTF-8 member at its manifest entry; lifecycle artifact reasons through `host::artifact::reason_site`, the inverse of the strict reader's field phrases, so a new lifecycle reader message keeps that form, while the facts reader records typed sites as it judges (`analysis_only_sited`: JSON pointer segments, or the strict parser's own line and column); `md` prints a positioned run notice as `path:line:column:` via `output::notice_text`), `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes, a host's setup adding its own `register` entry (`config::init::register_manifest`, deduplicated by `config::registration::manifest_identity`; `replace_manifest_registration` for a moved manifest, matching a missing old file through `registration::manifest_location_identity`, the old-manifest match public as `registration::entry_names_location` so a diagnostic (`claudine doctor`) reports exactly the entries the writer removes; `replace_manifest_registration_existing` is the same edit for a repair that never creates the file and refuses a changed one; `replace_manifest_refusal` dry-runs that planned edit with `TargetChange::edit_refusal` before the manifest is published (a missing manifest identified by location), so a host can report an inline `register` list or root it cannot edit in place before changing anything; `init::check_referenced_permissions` judges another program's would-be text as a `permissions` reference target; Claudine publishes with `claudine::composition::registration` first), DMLS's per-document host view (`dmls/src/overlay/hosts.rs`, see [dmls.md](dmls.md)) | `docs/topics/host-registration.md` |
 | Permission-widening comparison for CI (`config::widening`: `compare_revisions`, `WideningInputs` from `.github/ci/permission-inputs.json`, the `permission_widening` example the trusted CI job builds from the base commit, whose `--render` mode composes `.github/ci/permission-report.md` into the pull-request comment; commits read through `sniff`'s `committed_tree_at`, never checked out; resolution reuses `load::committed_layer`/`typed_block`, so a loader change is a checker-input change) | `docs/topics/configuration.md` ("The Cloned-Repository Risk"), repo `docs/topics/ci-cd.md` ("Permission-change report") |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
@@ -139,12 +159,21 @@ classifier is `parse_standalone_schema_document`; it recognizes an informal
 `$schema` document (optional `types`, `description`, `categories`), a `kind: schema`
 document with `$schema` and/or `types`, or a `kind: yaml-schema` (a YAML
 document kind, never a `$schema` target or import source: `SelectedByKind`),
-and admits each against the library's compiled envelope definitions. A `$schema` target must export
+and admits each against the library's compiled envelope definitions. The two
+callable catalogs (`kind: expression-schema`, `kind: mutation-schema`;
+`StandaloneSchemaEnvelope::is_callable_catalog`) are admitted strictly, are
+never a `$schema` target, import source, or `schema_files.rs` resolution
+(`NotSchemaReason::CallableCatalog`), and report callable failures as
+`SchemaError::CallableCatalog { path, message, span, related }` (code
+`dm.schema.callable_catalog`) from the one Darkmatter catalog reader that
+registration, `md schema validate`, and DMLS share (`library-surfaces.md`). A `$schema` target must export
 `$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
 `NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
 `types`-only file still serves `Name@file` imports. A loader refusal of a
-trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
-(`triggers::assemble::refused_trigger_file`).
+trigger file (`NotSchemaReason::TriggerEnvelope`) is reported as
+`TriggerSchemaReferenced`/`TriggerPayloadCycle`
+(`triggers::assemble::refused_trigger_file` returns the path and the
+declaration site; pass the site on, `trigger_schema_referenced(path, site)`).
 A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
@@ -156,8 +185,8 @@ resolves the scope type (`config::schema::resolve_host_config_type`; Claudine's
 schema is `include_str!`'d, never the claudine crate) and
 `DarkmatterSchemas::prepare_configuration_contract` makes a
 `Route::Configuration` contract whose `kind`/`$schema` are data.
-Ownership: the `simplified-schema` crate owns all three shipped definitions
-(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
+Ownership: the `simplified-schema` crate owns all six shipped definitions
+(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger,namespace-schema,expression-schema,mutation-schema}.yaml`),
 envelope admission, triggers (`simplified_schema::triggers`), schema roots
 (`roots`), `EmbeddedSchemaBundle` (`embedded`), and the YAML loader,
 `KindRegistry`, selection, and kind checks (`yaml_documents`); edit those
@@ -170,6 +199,16 @@ passed with `with_kind_registry`); it never fails as a whole, and a
 duplicate, reserved, or broken claim is a `KindSelection` error only for a
 document whose `kind` it could affect. A YAML file is never Markdown: a
 fenced `---`…`---` file is two documents and fails to load.
+
+Schema key findings: a `ValidationProblem` may carry `hint` (a removed
+key's replacement or an unknown key's did-you-mean); `ValidationReport::key_advice`
+holds `dm.schema.near_miss_key` advice, located like problems and never part
+of the verdict. Compose reports it as a warning
+(`ComposeWarning::schema_key_advice`, subject `WarningSubject::SchemaKey`,
+record from `report_diagnostics::key_advice_diagnostic`); DMLS chains it
+after `problems` in `diagnostics/frontmatter.rs` and appends the hint to the
+message (`problem_message`); `md schema validate` writes `hint` and a
+`hint:` row. `md clean`'s suggestion uses `simplified_schema::validation::suggest`.
 
 Important contracts:
 
@@ -240,7 +279,23 @@ Important contracts:
   `base_dir()`, `~/schemas`. Never walk ancestors or read the process
   environment for them. Every bare-name consumer (`$schema`, `Name@file`,
   `example(file)`, trigger payloads) selects through
-  `simplified_schema::resolve::select_schema_file`; never add another copy. `$path` patterns are `GlobReference`s; see
+  `simplified_schema::resolve::select_schema_file`; never add another copy.
+  Root lookup never depends on triggers: `DarkmatterSchemas` takes its roots
+  from the installed trigger registry or, without one,
+  `with_schema_root_lookup()`; `prepare_schemas`, `md clean`, and
+  `md schema validate` install it for a repository document whenever
+  triggers are off (the reference/graph commands, `--disable schema-triggers`).
+  Whether to search the roots at all (trigger discovery and bare lookup) is
+  decided from the **source document's** context
+  (`options.source_file_resolution_context().repository_root()`, the context
+  `DarkmatterSchemas` is built with), never from the enclosing request: a
+  `~`-opened child or link target outside Git refuses bare names and gets no
+  root triggers even under a repository parent, while one whose nearest
+  `.git` (directory or file, so a checkout nested in the launch tree too) is
+  a second Git checkout searches that checkout's roots (its context was
+  derived there at admission, `SourceDerivation::OwnRepository`) and never
+  the launch checkout's.
+  DMLS keeps its own workspace-boundary rule. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
@@ -345,7 +400,24 @@ passes); a nested `as_markdown` child's stop is restored on the caller
 (`NestedComposeSlot::take_blocked`), even when `||` absorbed the call;
 the last stages' warnings are checked by the CLI before writing. A new coded warning adds its
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
-naming the codes it governs.
+naming the codes it governs. The reference check (`compose.rs::check_references`, shared by the
+direct and lifecycle routes) lets a `missing-*` allowance recover an issue
+only when `ReferenceIssue::is_missing_target` (failure class `NoMatch`) holds;
+an invalid, unreadable, or malformed link, image, or inclusion target always
+refuses, whatever the kind's allowance. In the library, every walk that
+resolves an inclusion ahead of or inside composition (pre-flight body and
+`prologue`/`epilogue` lookups, the engine's body and section lookups, and its
+repeated-copy check `scoped_resolution`) decides whether an unresolved target
+is removed through the one `transclusion::skips_unresolved(options, markdown,
+&err)`: any failure when the writing document tolerates invalid references
+(request `ignore_invalid_references`, else its own frontmatter
+`ignore_invalid`, else the context's `IGNORE_INVALID`), else only an absence
+(`NoMatch`) under the missing-transclusion recovery; never add a walker that
+resolves an inclusion without it. A repeated copy pre-flight did not discover
+and composition does not remove fails with its own resolution error, as the
+written directive does. The CLI reference check does not read
+`ignore_invalid`: an absent or invalid inclusion target still needs its
+`--allow` or refuses there.
 
 Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
 `CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
@@ -370,10 +442,21 @@ A new leaf adds a row to `args/output.rs::COMMAND_LEAVES`, a schema file under
 that spell the schema path inside each `#[test]`;
 `every_leaf_has_a_schema_file_and_a_conformance_test` fails otherwise. A schema's
 named types are closed, unlike its root object, so a type must list every field.
-One Rust `Diagnostic` serializes into all 17 output schemas, so their
-`diagnostic` and `data-location` types are identical
-(`output_commands::every_schema_file_shares_one_diagnostic_type`); a new
-diagnostic field goes into every file. `DocumentEnvelope.read_set` is always an
+One Rust `Diagnostic` serializes into every output schema, so the
+`diagnostic` type and every named type it reaches are textually identical in
+each file (`output_commands::every_schema_file_shares_one_diagnostic_type`); a
+new diagnostic field goes into every file. `Diagnostic::trail` is the only
+stored iteration and inclusion context: a hand-written `Serialize` projects
+`iteration_path` and `included_via` from it (`Diagnostic::iteration_path()`,
+`included_via()`; a producer calls `set_iteration_path`/`with_iteration_path`
+or `Trail::included`), `ReferenceDetails::reports_inclusion` decides whether
+`included_via` is written, and `trail` itself is written whenever it has a
+frame (`md compose`/`md render` envelopes, Claudine). `CommandRun` (every other
+leaf) serializes through `LegacyTrailProjection`, which writes `trail` only
+with a host frame, and `md validate refs`/`md graph --validate` publish
+`reference_issue_legacy_diagnostic` (no resolver evidence or hint): their
+JSON bytes are pinned by `cli/tests/fixtures/reference_baselines/`. `with_trail` puts a host's frames
+outside the ones a record already has. `DocumentEnvelope.read_set` is always an
 array; `ReportSink::reads_from(&DataRuntime)` reads the command's runtime when
 the envelope is written, so every exit carries it without per-path pushes.
 A schema root is an object: a scalar result is judged under `value`.
@@ -393,8 +476,87 @@ after the inline stages (a link a stage wrote). `md render`, which does not
 compose, reads `Markdown::link_title_warnings` before cleanup and names the
 same codes through `RENDER_DIAGNOSTIC_CODES`.
 
-The reference report is `reference/validate.rs::ValidationReportView`, built in
-`reference/report.rs`, implementing `CommandOutput`. `ReferenceValidationReport`
+When a reference stop has company, `md compose` prints a combined
+`FindingReport` instead (`cli/src/commands/compose/combined.rs`): after a
+`ReferenceCheck::Refused` (`after_refusal`), a pre-flight inclusion stop
+(`after_inclusion_stop`), or a call/schema `Err` from the check itself
+(`after_check_failure`, retried with `ComposeOptions::without_call_check`), it
+runs one passive dry-run composition for the call, schema, and empty-body
+checks, and uses the combined report only when one of them contributes a
+finding or a not-checked row (a passive composition failing for another
+reason, such as `{{ 3 / 0 }}`, leaves the empty body not checked); otherwise
+the reference report prints unchanged. Every stop lists the reference
+report's reported warnings (`is_reported_warning`) beside its refusals, in
+report order; `after_inclusion_stop` takes `warnings_delivered` because a
+data output already holds the passed check's own (`sink.references`).
+Every row goes through
+`Collector::push_all`/`not_checked`, which mark the report as contributed;
+never push into its sink directly.
+A body that composes empty adds `dm.compose.empty_body` (`empty_body_warning`).
+In a passive dry run the schema never judges a value the session deferred
+(`schema_validation.rs`, `PassiveSession::deferred_value`), and sets aside a
+problem with a top-level value a host declared written at launch
+(`PassiveSession::defer_written`, `written_value`; a top-level name or member
+path such as `seq.outputs`), recording a `DeferredConstruct::SchemaCheck`
+deferral. A read is deferred by what it selects, never by its spelling:
+the evaluator's `select_node` (`expression/mod.rs`) builds the selected
+path of every `Variable`/`MemberAccess`/`Index`/`Paren` chain, computed keys
+resolved (`seq['out' + 'puts']` selects `seq.outputs`), and checks it with
+`passive::check_selected`, the same `check_value` rule `check_read` applies
+to a dotted variable; `caller_file_selection` does the same for a caller
+file argument. An explicit `fm.<name>` read whose bare `<name>` resolves to
+a host global (`reads_shadowed_property`) is the document's property, not
+the written global member. Never add a deferral check keyed on a node's
+syntactic shape. A file a host declares written
+(`PassiveSession::declare_initializer_write(path, InitializerChange, reason)`,
+`defer_created` for `CreatesIfAbsent`; `declare_unresolved_write(WritePattern)`
+for a destination the host cannot resolve; from `lifecycle::created_files` +
+`CreatedFile::target`/`target_as`/`pattern`, which drop a target outside the
+mutation root) is matched by identity (`passive.rs::created`:
+nearest existing ancestor's `FileIdentity` plus the remaining names, folded
+to lowercase only where the volume opens a case-swapped ancestor name), a
+pattern by text. Readers ask one rule: `initializer_changes(path)` for
+content (absent and may be created, or existing and appended →
+`ChangedAtLaunch`; `ensure_file` leaves an existing file alone),
+`created_among(probed_paths)` for a miss (`transclusion::created_before_read`
+in the engine and pre-flight collect, `reference/validate.rs`,
+`expression/functions/fs.rs::created_before_read` for `file_exists`/
+frontmatter readers and `load_data`; an existing file always exists), and
+`changes_listing` for `find_files`; a hit is checked in the engine,
+`transclusion::changed_before_read` (pre-flight collect), the graph's
+`load_inclusion`, `load_markdown`, `load_data`, and `validate_schema`'s
+`observed.read`/`searched` schema files. Deferrals record
+`CreatedAtLaunch`/`ChangedAtLaunch`. Tests: `lib/tests/l1/lifecycle_created_files.rs`. Tests: `lib/tests/l1/passive_compose.rs::a_written_member_*`,
+`a_collection_callback_reads_*`.
+The collection traversal (`collection_blocks/engine.rs`) turns an
+unavailable gate, source, callback, or option into `Halt::Unavailable`,
+never `dm.collection.callback_failed`: `collection()` rewinds the
+`ExpansionWriter` to its mark, records one `DeferredConstruct::Collection`
+(`authored` = region text) and copies the region with `copy_inert`, whose
+runs `inline/collection_blocks.rs` adds to `body.data` so later stages read
+it as data; a page block's unavailable gate there is a `BlockCondition`
+whose body is still expanded. A transclusion `when=` that is unavailable
+is a `Transclusion` deferral (`transclusion/engine.rs`). `md`'s
+`combined::without_deferred` drops a `Collection` region before the
+empty-body verdict. Tests: `passive_compose.rs::every_collection_option_*`,
+`a_collection_*`, `a_transclusion_condition_*`.
+A `::file`/`::code` line holding a `{{ … }}` span the session left as written,
+and a `prologue`/`epilogue` value that is deferred or holds one
+(`PassiveSession::deferred_span_in`, `deferred_reference`), names no target:
+the transclusion phase (`parse_directives_deferring`, `prepare_frontmatter_reference`)
+records a `DeferredConstruct::Transclusion` deferral and leaves it unread,
+and the reference graph and the pre-flight walk (`preflight/collect.rs`)
+skip it, never a parse or missing-file failure.
+
+The reference report is `reference/validate.rs::ValidationReportView`
+(`reference/report.rs`), a `CommandOutput` adapter that keeps the data form
+(`ValidationReportData`) and delegates every rendering to
+`findings::ReferencePresentation` (`findings/presentation/reference.rs`). The
+render tree and its layout helpers (`LinkStyle`, `rows_table`, `PathDisplay`,
+`markup`/`dim`) live in `findings/presentation/`, shared with
+`FindingReport::presentation()` (`FindingPresentation`, the generic subject →
+glyph-row tree); `FindingReport::render_human` stays string-built and shares
+its glyphs, details, and not-checked rows with it. `ReferenceValidationReport`
 keeps `documents` (one entry per inclusion, depth-first, empty documents
 included) so grouping by `(source, included_via)` and the document count never
 infer scope from issues; neither `documents` nor `references` is serialized, and
@@ -450,7 +612,25 @@ found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
 `::shell` (`prepare_content` never re-enables an operation the request
 disabled), and `ComposeOptions::for_reference_check` defers what only
 composition can judge (values waiting on a frontmatter command, an expression
-it cannot finish). A check that still fails (`check_references` returns
+it cannot finish, a failing `when=`, an inclusion whose parser fails, an
+included file that exists but cannot be loaded: composition rejects or
+tolerates them). Every other graph build (`md validate refs`, `md graph`, the
+library's graph, local query, and validation APIs) fails with composition's
+typed error on an inclusion parse error (`reference/graph.rs::parsed_inclusions`),
+an unloadable included file (`ReferenceAnalysisRuntime::load_inclusion`; a
+`::toc-linking` target's headings are read raw, as composition reads them, and a selected file that cannot be read is `transclusion::read_failure_at` at the directive's `InclusionSite` in both, as a child load is),
+and a failing `when=` (evaluated through `conditions::ConditionSite`, as the
+transclusion stage does), and on a target its directive's admission rule
+refuses: `transclusion::admit_local_target`/`admit_url_target`, the
+resolver's own passive checks, applied to a `::file`/`prologue`/`epilogue`
+child before it is opened (`graph.rs::admits_markdown_child`) and to `::code`
+and `::url` records in `validate.rs` before the kind branches and the remote
+batch (a `::url` record is always `RemoteUrl`; the local query is a lookup
+and admits nothing); never let a reference reader turn a failure into an
+absent inclusion. A `path#fragment` link into a file that cannot be loaded is
+the `UnreadableTarget` issue, and a link or image target that is no valid
+file reference (`[x](@)`) the `InvalidReference` issue at the link, never a
+`ReferenceError`. A check that still fails (`check_references` returns
 `Result`) is a composition failure with status 1, reported through
 `error_diagnostics`; its graph build leaves its warnings for
 `take_preflight_failure_warnings`. A `Diagnostic`'s `source.line`/`column` are
@@ -461,7 +641,8 @@ the composed document (`report_diagnostics::with_document_fallback`, applied by
 only `ComposeWarning::location` (never `line_number`, a current-body count) is
 published; `source.inserted` marks a construct that wrote the text; only a reference
 record has `reference_details`, flattened into `reason`, `construct`,
-`reference`, `failure`, and `included_via`. Skipped-trigger
+`reference`, `failure`, `included_via` (projected from the trail), `base`,
+`resolved`, `searched`, and `suggestions`. Skipped-trigger
 warnings found by a pass that runs ahead of the delivering report (reference
 validation via `ReferenceValidationReport::trigger_warnings`, which prepares
 each transcluded child in its own context; the lifecycle call check via

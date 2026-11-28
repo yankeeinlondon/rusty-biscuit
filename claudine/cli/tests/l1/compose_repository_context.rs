@@ -20,9 +20,19 @@ fn external_prompt_dry_run_preserves_repository_only_context() {
         &prompt,
         "---\nsuccess:\n  message: 'git commits in the **{{ctx.repo}}** repo has completed'\n---\nRepository=[{{ctx.repo}}]\n",
     );
+    // The check needs a chosen, installed provider for a clean preview; it
+    // never runs the stub.
+    let claude = fixture.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    write(&claude, "#!/bin/sh\nexit 0\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let output = fixture.command()
-        .args(["compose", "--dry-run"])
+        .args(["compose"])
         .arg(&prompt)
+        .args(["--claude", "--dry-run"])
         .assert()
         .success()
         .get_output()

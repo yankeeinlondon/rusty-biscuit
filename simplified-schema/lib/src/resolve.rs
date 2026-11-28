@@ -45,13 +45,14 @@ use std::fs;
 use biscuit_file::FileResolutionContext;
 
 use crate::shipped::PreparationMode;
+use example_sites::ExampleSites;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
     SchemaAdvisory, SchemaArm,
-    embedded::{self, EmbeddedDocument, ShippedSources}, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
+    embedded::{self, EmbeddedDocument, ShippedSources}, KeyDeclarations, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
     StandaloneSchemaEnvelope,
     errors::{DRAFT_2020_12_DIALECT, NotSchemaReason, SchemaError},
     simplified::{
@@ -380,6 +381,100 @@ pub(crate) fn resolve_trigger_payload_value(
     )
 }
 
+/// Resolves the `$schema` object of the `kind: namespace-schema` file at
+/// `path`, whose text is `text`, beside the file's private `types`: the one
+/// global the file declares, as a document schema whose properties are the
+/// namespace's members. The file is the import base and the owner of its
+/// inline named types, as a trigger file is of its payload's, so no other
+/// file reaches them. An empty `$schema: {}` resolves to an object with no
+/// members.
+///
+/// Envelope admission is the caller's
+/// ([`crate::parse_namespace_schema_document`]); this reads only `$schema`
+/// and `types`.
+///
+/// ## Errors
+///
+/// [`SchemaError::SchemaDocument`] when `text` is not one YAML mapping with a
+/// mapping `$schema`; otherwise every resolver error of the payload and its
+/// imports.
+pub fn resolve_namespace_payload(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let refuse = |message: String| SchemaError::SchemaDocument { path: path.to_path_buf(), message, source: None, span: None };
+    let root: YamlValue = serde_yaml_ng::from_str(text).map_err(|error| refuse(error.to_string()))?;
+    let Some(payload) = root.get("$schema").filter(|value| value.is_mapping()) else {
+        return Err(refuse("a namespace's `$schema` must be one mapping".into()));
+    };
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    resolve_trigger_payload_value(payload, root.get("types"), path, None, base_dir, &[], request_context, shipped)
+}
+
+/// A `kind: namespace-schema` file admitted and resolved by
+/// [`prepare_namespace_document`].
+#[derive(Debug, Clone)]
+pub struct PreparedNamespaceDocument {
+    #[allow(missing_docs)]
+    pub document: crate::NamespaceSchemaDocument,
+    /// The namespace's value: its `$schema` object, resolved.
+    pub shape: SchemaShape,
+    /// The whole resolution of `$schema`, whose `definitions` the shape's
+    /// references name.
+    pub resolved: ResolvedSchema,
+}
+
+/// Why [`prepare_namespace_document`] refused a namespace file.
+#[derive(Debug)]
+pub enum NamespaceDocumentError {
+    /// The envelope, a label, or the payload or `types` grammar is invalid
+    /// ([`crate::parse_namespace_schema_document`]); located by its span.
+    Invalid(SchemaError),
+    /// `$schema` does not resolve.
+    Unresolved(SchemaError),
+    /// `$schema` resolved to something other than one object.
+    NotOneObject,
+}
+
+impl std::fmt::Display for NamespaceDocumentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(error) => write!(formatter, "the namespace schema is invalid: {error}"),
+            Self::Unresolved(error) => write!(formatter, "the namespace's `$schema` does not resolve: {error}"),
+            Self::NotOneObject => formatter.write_str("the namespace's `$schema` must be one object"),
+        }
+    }
+}
+
+/// Admits the `kind: namespace-schema` file at `path` (text `text`) and
+/// resolves its value: the one check every reader of a namespace file runs,
+/// so a host's registration and a direct check of the file (`md schema
+/// validate`, the editor) refuse the same files. Reserved-name checks on
+/// the namespace are the host's. `Ok(None)` when `text` does not claim
+/// `kind: namespace-schema`.
+///
+/// ## Errors
+///
+/// [`NamespaceDocumentError`].
+pub fn prepare_namespace_document(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<Option<PreparedNamespaceDocument>, NamespaceDocumentError> {
+    let Some(document) = crate::parse_namespace_schema_document(text, path).map_err(NamespaceDocumentError::Invalid)? else {
+        return Ok(None);
+    };
+    let resolved =
+        resolve_namespace_payload(text, path, request_context, shipped).map_err(NamespaceDocumentError::Unresolved)?;
+    let Some(SchemaRoot::Single(shape)) = resolved.simplified.clone() else {
+        return Err(NamespaceDocumentError::NotOneObject);
+    };
+    Ok(Some(PreparedNamespaceDocument { document, shape, resolved }))
+}
+
 /// A trigger's `types` table as the named types its payload resolves with.
 pub(crate) fn parse_trigger_types(types: &YamlValue) -> Result<SchemaShape, SchemaError> {
     match crate::simplified::parse_schema_table(types)? {
@@ -498,6 +593,7 @@ fn resolve_owned_value(
         YamlValue::String(reference) => {
             resolve_reference_in_context(
                 reference,
+                Some(SchemaReferenceSite { source: owner.root().source_id(), path: SchemaSourcePath::root() }),
                 base_dir,
                 schema_roots,
                 request_context,
@@ -516,7 +612,7 @@ fn resolve_owned_value(
             shipped,
         ),
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, owner, located, base_dir, schema_roots, request_context, &mut stack, shipped)
+            resolve_root_union(items, owner, local_types, located, base_dir, schema_roots, request_context, &mut stack, shipped)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -568,6 +664,7 @@ fn resolve_inline_mapping(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
+    let mut example_sites = ExampleSites::default();
     let (mut schema, imports, default_files) = expand_imports(
         schema,
         local_types,
@@ -578,6 +675,7 @@ fn resolve_inline_mapping(
         Sharing::Automatic,
         &mut searched,
         &mut definitions,
+        &mut example_sites,
         shipped,
     )?;
     let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
@@ -593,6 +691,7 @@ fn resolve_inline_mapping(
         schema_roots,
         request_context,
         &mut searched,
+        &example_sites,
     )?;
     let mut imports = imports;
     late.merge_into(&mut imports, &mut examples, &mut searched);
@@ -649,6 +748,9 @@ pub struct NamedTypeExpansion {
     /// The stored definitions the schema reaches; empty when nothing recurses
     /// or is shared.
     pub definitions: Arc<DefinitionTable>,
+    /// The declaration that wrote each example reference the expanded
+    /// schema holds, for the pass that loads them.
+    pub(crate) example_sites: ExampleSites,
 }
 
 /// Expands the named-type references in `schema`, as resolving it would, and
@@ -720,6 +822,7 @@ pub(crate) fn expand_named_types_searched(
                 Some(path) => DefNamespace::File(canonical_path(path)),
                 None => DefNamespace::InlineRoot,
             };
+            let mut example_sites = ExampleSites::default();
             let (schema, imports, _) = expand_document_imports(
                 schema.clone(),
                 local_types,
@@ -730,17 +833,20 @@ pub(crate) fn expand_named_types_searched(
                 request_context,
                 searched,
                 &mut definitions,
+                &mut example_sites,
                 shipped,
             )?;
             Ok(NamedTypeExpansion {
                 schema,
                 imports,
                 definitions: Arc::new(definitions),
+                example_sites,
             })
         }
         SchemaRoot::Union(arms) => {
             let mut imports = BTreeSet::new();
             let mut expanded = Vec::with_capacity(arms.len());
+            let mut example_sites = ExampleSites::default();
             for (index, arm) in arms.iter().enumerate() {
                 let SchemaArm::Inline(shape) = arm else {
                     expanded.push(arm.clone());
@@ -760,6 +866,7 @@ pub(crate) fn expand_named_types_searched(
                     request_context,
                     searched,
                     &mut definitions,
+                    &mut example_sites,
                     shipped,
                 )?;
                 imports.extend(found);
@@ -772,6 +879,7 @@ pub(crate) fn expand_named_types_searched(
                 schema: SchemaRoot::Union(expanded),
                 imports: imports.into_iter().collect(),
                 definitions: Arc::new(definitions),
+                example_sites,
             })
         }
     }
@@ -783,13 +891,24 @@ pub(crate) fn expand_named_types_searched(
 ///
 /// ## Errors
 ///
-/// The same named-type resolution errors as [`expand_named_types`].
+/// The same named-type resolution errors as [`expand_named_types`], and
+/// [`NotSchemaReason::CallableCatalog`] for a callable catalog, whose types
+/// are checked by the host's catalog reader, never expanded here.
 pub fn check_standalone_named_types(
     document: &StandaloneSchemaDocument,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<Vec<PathBuf>, SchemaError> {
+    // A callable catalog's helpers are private and its callables are not
+    // types: it is never expanded as an import library.
+    if document.envelope.is_callable_catalog() {
+        return Err(SchemaError::NotASchemaDocument {
+            path: document.path.clone(),
+            reason: NotSchemaReason::CallableCatalog,
+            site: None,
+        });
+    }
     let base_dir = document.path.parent().unwrap_or_else(|| Path::new("."));
     let mut imports = BTreeSet::new();
     if let Some(schema) = document.schema() {
@@ -799,27 +918,121 @@ pub fn check_standalone_named_types(
         )?.imports);
     }
     if let Some(types) = &document.local_types {
-        let (_, read, _) = expand_imports(
-            SchemaRoot::Single(types.clone()),
-            Some(types),
-            base_dir,
-            DefNamespace::File(canonical_path(&document.path)),
-            &SchemaSourcePath::root().property("types"),
-            NamespaceSource::Files { schema_roots: schema_roots.to_vec(), context: Box::new(request_context.clone()) },
-            Sharing::Automatic,
-            &mut BTreeSet::new(),
-            &mut DefinitionTable::default(),
-            shipped,
-        )?;
-        imports.extend(read);
+        let root = SchemaSourcePath::root().property("types");
+        imports.extend(expand_local_types(types, &document.path, &root, schema_roots, request_context, shipped, &mut BTreeSet::new())?);
     }
     Ok(imports.into_iter().collect())
+}
+
+/// Every named type `types` (the `types` table of the file at `path`)
+/// declares, expanded as one object so a declaration no export reaches is
+/// resolved too: its imports, `Name@this` references, `$extends`, spreads,
+/// and union arms. `root` is the table's path in the diagnostics a failure
+/// reports. Returns the files imported.
+fn expand_local_types(
+    types: &SchemaShape,
+    path: &Path,
+    root: &SchemaSourcePath,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let (_, read, _) = expand_imports(
+        SchemaRoot::Single(types.clone()),
+        Some(types),
+        path.parent().unwrap_or_else(|| Path::new(".")),
+        DefNamespace::File(canonical_path(path)),
+        root,
+        NamespaceSource::Files { schema_roots: schema_roots.to_vec(), context: Box::new(request_context.clone()) },
+        Sharing::Automatic,
+        searched,
+        &mut DefinitionTable::default(),
+        &mut ExampleSites::default(),
+        shipped,
+    )?;
+    Ok(read)
+}
+
+/// Checks every declaration in the `types` table of the schema file `text`
+/// (read from `path`: a type library, a trigger, a `yaml-schema`, or a
+/// namespace), whether or not anything the file exports uses it: each
+/// named-type import resolves (the [`check_standalone_named_types`]
+/// traversal) and each file-backed `example(...)` reference selects its
+/// file. Inside [`bundle::with`] that is the bundle's boundary, so an unused
+/// declaration cannot carry an unlisted, escaping, or remote reference into
+/// an admitted bundle. Passive: no template is evaluated, and an example
+/// file is selected, not read. Returns the files imported; a file without
+/// `types`, or with a null one, checks nothing.
+///
+/// Runs after the member envelope ([`crate::member_envelope::admit_member`])
+/// admitted the file, and judges no shape of `types` that envelope owns: a
+/// null table is the absent one, as every load path of a `yaml-schema` reads
+/// it, and the kinds that refuse a null table refuse it there first.
+///
+/// ## Errors
+///
+/// [`SchemaError::SchemaDocument`] when `text` is not YAML; the `types`
+/// grammar's errors; every resolution error of an import or example
+/// reference, such as [`SchemaError::BundleBoundary`].
+pub fn check_declared_types(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let root: YamlValue = serde_yaml_ng::from_str(text).map_err(|error| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+        source: None,
+        span: None,
+    })?;
+    let Some(types) = root.get("types").filter(|types| !types.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let types = parse_trigger_types(types)?;
+    let mut searched = BTreeSet::new();
+    // A failure names the declaration's path inside `types`, as a payload's
+    // names its path inside `$schema`, so a host locates both alike.
+    let imports = expand_local_types(&types, path, &SchemaSourcePath::root(), &[], request_context, shipped, &mut searched)?;
+    // A declaration's own examples stay as authored through expansion (only
+    // a definition inlined elsewhere is rehomed), so each is selected here.
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let source = SchemaSourceId::File(canonical_path(path));
+    let mut examples = ExampleRehome {
+        base_dir,
+        this_file: Some(path),
+        schema_roots: &[],
+        request_context,
+        searched: &mut searched,
+        gate: None,
+        sites: None,
+    };
+    let mut declared = types;
+    let declarations = declared
+        .properties
+        .iter_mut()
+        .map(|(name, def)| (name.clone(), def))
+        .chain(declared.pattern_keys.iter_mut().map(|pattern| (pattern_key_source_name(&pattern.key), &mut pattern.def)));
+    for (name, def) in declarations {
+        let at = SchemaSourcePath::root().property(name);
+        match def {
+            PropertyDef::Single(atom) => examples.rehome(atom, Some(&SchemaReferenceSite { source: source.clone(), path: at }))?,
+            PropertyDef::Union(arms) => {
+                for (index, atom) in arms.iter_mut().enumerate() {
+                    examples.rehome(atom, Some(&SchemaReferenceSite { source: source.clone(), path: at.union_arm(index) }))?;
+                }
+            }
+        }
+    }
+    Ok(imports)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_root_union(
     items: &[YamlValue],
     owner: InlineOwner<'_>,
+    local_types: Option<&SchemaShape>,
     located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
@@ -855,19 +1068,27 @@ pub(crate) fn resolve_root_union(
                     debug_assert!(projected.is_ok(), "{projected:?}");
                 }
                 // Named-type imports are inlined per arm before conversion.
-                let (mut arm_schema, arm_imports, arm_default_files) =
-                    expand_document_imports(
-                        arm_schema,
-                        None,
-                        base_dir,
-                        owner.union_arm(index),
-                        &SchemaSourcePath::root().union_arm(index),
-                        schema_roots,
-                        request_context,
-                        &mut searched,
-                        &mut definitions,
-                        shipped,
-                    )?;
+                let mut example_sites = ExampleSites::default();
+                // A trigger's private `types` serve every inline arm, as
+                // they serve an object payload (`resolve_inline_mapping`),
+                // so the arm's paths stay relative to the payload.
+                let source = NamespaceSource::Files {
+                    schema_roots: schema_roots.to_vec(),
+                    context: Box::new(request_context.clone()),
+                };
+                let (mut arm_schema, arm_imports, arm_default_files) = expand_imports(
+                    arm_schema,
+                    local_types,
+                    base_dir,
+                    owner.union_arm(index),
+                    &SchemaSourcePath::root().union_arm(index),
+                    source,
+                    Sharing::Automatic,
+                    &mut searched,
+                    &mut definitions,
+                    &mut example_sites,
+                    shipped,
+                )?;
                 imports.extend(arm_imports);
                 for (path, file) in arm_default_files {
                     default_files.entry(path).or_insert(file);
@@ -892,6 +1113,7 @@ pub(crate) fn resolve_root_union(
                     schema_roots,
                     request_context,
                     &mut searched,
+                    &example_sites,
                 )?);
                 hoist_definitions(&mut arm_json, &mut root_defs);
                 if let SchemaRoot::Single(shape) = &arm_schema {
@@ -914,6 +1136,7 @@ pub(crate) fn resolve_root_union(
             YamlValue::String(reference) => {
                 let resolved = match resolve_reference_in_context(
                     reference,
+                    Some(SchemaReferenceSite { source: owner.root().source_id(), path: SchemaSourcePath::root().union_arm(index) }),
                     base_dir,
                     schema_roots,
                     request_context,
@@ -1090,12 +1313,14 @@ impl ReferenceStack {
         if self.frames.iter().any(|frame| frame == canonical) {
             return Err(SchemaError::ReferenceCycle {
                 chain: self.describe(canonical),
+                site: None,
             });
         }
         if self.frames.len() >= MAX_REFERENCE_DEPTH {
             return Err(SchemaError::ReferenceDepthExceeded {
                 limit: MAX_REFERENCE_DEPTH,
                 chain: self.describe(canonical),
+                site: None,
             });
         }
         self.frames.push(canonical.to_path_buf());
@@ -1139,8 +1364,16 @@ fn attribute_origin(resolved: &mut ResolvedSchema, path: &Path) {
     }
 }
 
+/// Resolves the `$schema` file reference `reference`, written by the
+/// declaration `written` when one did: a failure to select its file, a
+/// selected file refused as a document schema (not a schema document, an
+/// unsupported or invalid JSON Schema), and a file that closes a reference
+/// cycle carry it ([`SchemaError::reference_site`]); a failure inside the
+/// file it names carries that file's own, and a parse failure its own
+/// position.
 pub(crate) fn resolve_reference_in_context(
     reference: &str,
+    written: Option<SchemaReferenceSite>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -1149,15 +1382,23 @@ pub(crate) fn resolve_reference_in_context(
 ) -> Result<ResolvedSchema, SchemaError> {
     let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
     let searched: BTreeSet<PathBuf> = selection.attempted.iter().cloned().collect();
-    let path = selection.into_result()?;
+    let path = selection.into_result().map_err(|error| match &written {
+        Some(site) => error.written_at(|| site.clone()),
+        None => error,
+    })?;
 
     let mut resolved = load_guarded_in_context(
         &path,
+        written.as_ref(),
         schema_roots,
         request_context,
         stack,
         shipped,
-    )?;
+    )
+    .map_err(|error| match &written {
+        Some(site) => error.refused_at(&path, || site.clone()),
+        None => error,
+    })?;
     // The schema was loaded from a file — record the resolved path so
     // diagnostics can point `relatedInformation` at the referenced source.
     attribute_origin(&mut resolved, &path);
@@ -1171,15 +1412,23 @@ pub(crate) fn resolve_reference_in_context(
 
 /// Loads one schema file with a cycle/depth frame open. The request context is
 /// passed through unchanged, and the frame is closed on success or failure.
+/// A frame refused because `path` closes a cycle or exceeds the depth cap
+/// carries `written`, the declaration that named it.
 fn load_guarded_in_context(
     path: &Path,
+    written: Option<&SchemaReferenceSite>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let canonical = canonical_path(path);
-    stack.enter(&canonical)?;
+    stack.enter(&canonical).map_err(|mut error| {
+        if let SchemaError::ReferenceCycle { site, .. } | SchemaError::ReferenceDepthExceeded { site, .. } = &mut error {
+            *site = written.cloned().map(Box::new);
+        }
+        error
+    })?;
     let loaded = load_schema_from_path_in_context(
         path,
         schema_roots,
@@ -1334,6 +1583,7 @@ fn load_schema_from_path_in_context(
             let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
             resolve_reference_in_context(
                 reference.file_reference().raw(),
+                Some(SchemaReferenceSite { source: SchemaSourceId::File(canonical_path(path)), path: SchemaSourcePath::root() }),
                 file_dir,
                 schema_roots,
                 request_context,
@@ -1365,12 +1615,15 @@ pub(crate) fn is_json_schema_path(path: &Path) -> bool {
 ///   `$schema` is a `json-schema.org` URI, the raw JSON Schema form).
 /// - [`SchemaError::NotASchemaDocument`] with
 ///   [`NotSchemaReason::TypesOnly`] for a `types`-only tagged document,
-///   [`NotSchemaReason::NotAMapping`] for a non-mapping, and
-///   [`NotSchemaReason::NoSchemaProperty`] for any other mapping.
+///   [`NotSchemaReason::TriggerEnvelope`] for a file claiming the
+///   `kind: schema-trigger` envelope, [`NotSchemaReason::NotAMapping`] for a
+///   non-mapping, and [`NotSchemaReason::NoSchemaProperty`] for any other
+///   mapping. Its `site` is unset; the caller that named the file fills it.
 pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<StandaloneSchemaDocument, SchemaError> {
     let not_schema = |reason| SchemaError::NotASchemaDocument {
         path: path.to_path_buf(),
         reason,
+        site: None,
     };
     if let Some(document) = parse_referenced_schema_document(text, path)? {
         return if document.exports_schema {
@@ -1378,6 +1631,9 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
         } else {
             Err(not_schema(NotSchemaReason::TypesOnly))
         };
+    }
+    if claims_trigger_envelope(text) {
+        return Err(not_schema(NotSchemaReason::TriggerEnvelope));
     }
     // The standalone parser already rejected text that is not YAML, so this
     // second load only explains why no envelope claimed the document.
@@ -1416,18 +1672,20 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
 /// [`parse_standalone_schema_document`] for a file named as a `$schema`
 /// target or a `Name@file` import source, where a `kind: yaml-schema`
 /// document is refused as selected by `kind`
-/// ([`NotSchemaReason::SelectedByKind`]) and a `kind: namespace-schema`
-/// document as a catalog input ([`NotSchemaReason::NamespaceCatalog`]),
-/// whether or not its envelope is well formed: naming it is the mistake to
-/// report. Hosts reading a
+/// ([`NotSchemaReason::SelectedByKind`]), a `kind: namespace-schema`
+/// document as a catalog input ([`NotSchemaReason::NamespaceCatalog`]), and a
+/// `kind: expression-schema` or `kind: mutation-schema` document as a
+/// callable catalog ([`NotSchemaReason::CallableCatalog`]), whether or not
+/// its envelope is well formed: naming it is the mistake to report. Every
+/// disk, embedded, and bundle read of a referenced file goes through here. Hosts reading a
 /// referenced file themselves (an editor's import catalog) use this too.
 ///
 /// ## Errors
 ///
 /// As [`parse_standalone_schema_document`], plus
 /// [`SchemaError::NotASchemaDocument`] with
-/// [`NotSchemaReason::SelectedByKind`] or
-/// [`NotSchemaReason::NamespaceCatalog`].
+/// [`NotSchemaReason::SelectedByKind`], [`NotSchemaReason::NamespaceCatalog`],
+/// or [`NotSchemaReason::CallableCatalog`].
 pub fn parse_referenced_schema_document(
     text: &str,
     path: &Path,
@@ -1450,15 +1708,27 @@ pub fn parse_referenced_schema_document_with_mode(
         let reason = match envelope {
             StandaloneSchemaEnvelope::YamlSchema => NotSchemaReason::SelectedByKind,
             StandaloneSchemaEnvelope::NamespaceSchema => NotSchemaReason::NamespaceCatalog,
+            StandaloneSchemaEnvelope::ExpressionSchema | StandaloneSchemaEnvelope::MutationSchema => {
+                NotSchemaReason::CallableCatalog
+            }
             StandaloneSchemaEnvelope::Pure | StandaloneSchemaEnvelope::Tagged => return None,
         };
-        Some(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason })
+        Some(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason, site: None })
     };
     match crate::simplified::parse_standalone_schema_document_with_mode(text, path, mode) {
         Ok(Some(document)) => refused(document.envelope).map_or(Ok(Some(document)), Err),
         Err(error) => Err(crate::simplified::standalone::claimed_envelope(text).and_then(refused).unwrap_or(error)),
         other => other,
     }
+}
+
+/// Whether `text` names the trigger envelope in its top-level `kind`
+/// ([`crate::triggers::claims_trigger_envelope`]): such a file is refused
+/// for its kind ([`NotSchemaReason::TriggerEnvelope`]), whether or not its
+/// envelope is well formed. A `kind` that is null or not a string claims
+/// nothing here.
+fn claims_trigger_envelope(text: &str) -> bool {
+    crate::triggers::claims_trigger_envelope(text)
 }
 
 /// Whether `value` is a `json-schema.org` dialect URI.
@@ -1501,6 +1771,7 @@ pub(crate) fn classify_json_schema_text(path: &Path, text: &str) -> Result<Value
     let not_schema = |reason| SchemaError::NotASchemaDocument {
         path: path.to_path_buf(),
         reason,
+        site: None,
     };
     let Some(object) = value.as_object() else {
         return Err(not_schema(NotSchemaReason::NotAMapping));
@@ -1512,6 +1783,7 @@ pub(crate) fn classify_json_schema_text(path: &Path, text: &str) -> Result<Value
         return Err(SchemaError::UnsupportedJsonDialect {
             path: path.to_path_buf(),
             declared: declared.clone(),
+            site: None,
         });
     }
     if let Err(error) = jsonschema::draft202012::meta::validate(&value) {
@@ -1555,6 +1827,7 @@ fn resolve_standalone_schema(
         SchemaRoot::Single(_) => {
             let mut searched = BTreeSet::new();
             let mut definitions = DefinitionTable::default();
+            let mut example_sites = ExampleSites::default();
             let (mut schema, imports, default_files) = expand_document_imports(
                 schema,
                 local_types,
@@ -1565,6 +1838,7 @@ fn resolve_standalone_schema(
                 request_context,
                 &mut searched,
                 &mut definitions,
+                &mut example_sites,
                 shipped,
             )?;
             let site = crate::slots::ExpansionSite { base_dir: file_dir, schema_roots, request_context, shipped };
@@ -1577,6 +1851,7 @@ fn resolve_standalone_schema(
                 schema_roots,
                 request_context,
                 &mut searched,
+                &example_sites,
             )?;
             let mut imports = imports;
             late.merge_into(&mut imports, &mut examples, &mut searched);
@@ -1667,6 +1942,7 @@ pub fn prepare_embedded_schema_with_mode(
         return Err(SchemaError::NotASchemaDocument {
             path: PathBuf::from(path),
             reason: NotSchemaReason::NoSchemaProperty,
+            site: None,
         });
     };
     let schema = match standalone.declaration {
@@ -1720,6 +1996,7 @@ pub fn prepare_embedded_yaml_schema_with_mode(
     let refused = || SchemaError::NotASchemaDocument {
         path: PathBuf::from(path),
         reason: NotSchemaReason::NoSchemaProperty,
+        site: None,
     };
     let document = embedded::find(documents, path).ok_or_else(|| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
@@ -1768,6 +2045,7 @@ pub fn prepare_yaml_schema_text(
     let standalone = parse_standalone_schema_document(text, path)?.ok_or_else(|| SchemaError::NotASchemaDocument {
         path: path.to_path_buf(),
         reason: NotSchemaReason::NoSchemaProperty,
+        site: None,
     })?;
     prepare_standalone_yaml_schema(standalone, schema_roots, request_context, shipped)
 }
@@ -1815,7 +2093,7 @@ fn prepare_standalone_document(
     let StandaloneSchemaDocument { path, envelope, declaration, local_types, .. } = document;
     let path = path.as_path();
     if *envelope != StandaloneSchemaEnvelope::YamlSchema {
-        return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
+        return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty, site: None });
     }
     let canonical = canonical_path(path);
     let mut stack = ReferenceStack::default();
@@ -1832,6 +2110,7 @@ fn prepare_standalone_document(
         ),
         SchemaDeclaration::Reference(reference) => resolve_reference_in_context(
             reference.file_reference().raw(),
+            Some(SchemaReferenceSite { source: SchemaSourceId::File(canonical.clone()), path: SchemaSourcePath::root() }),
             path.parent().unwrap_or_else(|| Path::new(".")),
             schema_roots,
             request_context,
@@ -1981,6 +2260,7 @@ fn lower_embedded_schema(
         // Embedded imports resolve lexically in the table and probe no disk.
         &mut BTreeSet::new(),
         &mut definitions,
+        &mut ExampleSites::default(),
         shipped,
     )?;
     // An embedded schema is a build input: nothing could resolve a slot in
@@ -2073,7 +2353,7 @@ fn reference_arm_names(
     stack: &mut ReferenceStack,
     shipped: ShippedSources,
 ) -> Vec<String> {
-    match resolve_reference_in_context(reference, base_dir, schema_roots, request_context, stack, shipped) {
+    match resolve_reference_in_context(reference, None, base_dir, schema_roots, request_context, stack, shipped) {
         Ok(resolved) => json_property_names(&resolved.json_schema),
         Err(SchemaError::UnresolvedSlots(unresolved)) => {
             unresolved.template.as_ref().map(crate::slots::Template::single_object_names).unwrap_or_default()
@@ -2155,6 +2435,7 @@ pub(crate) fn resolve_standalone_root_union(
         match arm {
             SchemaArm::Inline(shape) => {
                 let schema = SchemaRoot::Single(shape.clone());
+                let mut example_sites = ExampleSites::default();
                 let (mut schema, arm_imports, arm_default_files) = expand_document_imports(
                     schema,
                     local_types,
@@ -2165,6 +2446,7 @@ pub(crate) fn resolve_standalone_root_union(
                     request_context,
                     &mut searched,
                     &mut definitions,
+                    &mut example_sites,
                     shipped,
                 )?;
                 imports.extend(arm_imports);
@@ -2195,6 +2477,7 @@ pub(crate) fn resolve_standalone_root_union(
                     schema_roots,
                     request_context,
                     &mut searched,
+                    &example_sites,
                 )?);
                 hoist_definitions(&mut arm_json, &mut root_defs);
                 super::simplified::convert::attach_root_union_match(
@@ -2209,6 +2492,10 @@ pub(crate) fn resolve_standalone_root_union(
             SchemaArm::FileRef(reference) => {
                 let resolved = match resolve_reference_in_context(
                     reference,
+                    Some(SchemaReferenceSite {
+                        source: SchemaSourceId::File(canonical_path(path)),
+                        path: SchemaSourcePath::root().union_arm(index),
+                    }),
                     base_dir,
                     schema_roots,
                     request_context,
@@ -2311,6 +2598,7 @@ pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<Resolve
         return Err(SchemaError::NotASchemaDocument {
             path: path.to_path_buf(),
             reason: NotSchemaReason::NotAMapping,
+            site: None,
         });
     }
     Ok(ResolvedSchema {
@@ -2399,6 +2687,9 @@ struct ImportEngine<'a> {
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
     dependencies: BTreeSet<PathBuf>,
+    /// The declaration that wrote each example reference a rehomed
+    /// definition holds, under the path it was rehomed to.
+    example_sites: ExampleSites,
     /// Locations probed while selecting import targets and rehoming their
     /// examples (see [`ResolvedSchema::searched`]). Every import site resolves
     /// its reference before `namespace_cache` is consulted, so a cached
@@ -2491,6 +2782,7 @@ impl<'a> ImportEngine<'a> {
         Self {
             stack: Vec::new(),
             dependencies: BTreeSet::new(),
+            example_sites: ExampleSites::default(),
             searched: BTreeSet::new(),
             source,
             shipped,
@@ -2734,6 +3026,7 @@ fn expand_document_imports(
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
+    example_sites: &mut ExampleSites,
     shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>, DefaultFiles), SchemaError> {
     let source = NamespaceSource::Files {
@@ -2741,7 +3034,7 @@ fn expand_document_imports(
         context: Box::new(request_context.clone()),
     };
     let root = if local_types.is_some() { SchemaSourcePath::root().property("$schema").join(root) } else { root.clone() };
-    expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions, shipped)
+    expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions, example_sites, shipped)
 }
 
 /// The name a template type's returned definition takes in the namespace its
@@ -2820,6 +3113,7 @@ pub(crate) fn expand_template_definition(
             Sharing::Automatic,
             &mut searched,
             definitions,
+            &mut ExampleSites::default(),
             site.shipped,
         )
     })?;
@@ -2850,8 +3144,17 @@ pub(crate) fn rehome_returned_examples(
             PropertyDef::Single(atom) => std::slice::from_mut(atom),
             PropertyDef::Union(arms) => arms,
         };
+        let mut examples = ExampleRehome {
+            base_dir: site.base_dir,
+            this_file: None,
+            schema_roots: site.schema_roots,
+            request_context: site.request_context,
+            searched,
+            gate: gate.as_ref(),
+            sites: None,
+        };
         for atom in atoms {
-            rehome_atom_examples(atom, site.base_dir, None, site.schema_roots, site.request_context, searched, gate.as_ref())?;
+            examples.rehome(atom, None)?;
         }
         Ok(())
     })
@@ -2893,9 +3196,26 @@ fn expand_imports(
     sharing: Sharing,
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
+    example_sites: &mut ExampleSites,
     shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>, DefaultFiles), SchemaError> {
     let mut schema = schema;
+    // The document's own declarations keep their examples as written; a
+    // definition inlined from a file records its own when it is rehomed.
+    let types_root = SchemaSourcePath::root().property("types");
+    if let Some(types) = local_types {
+        example_sites.read_shape(types, &key.source_id(), &types_root);
+    }
+    match &schema {
+        SchemaRoot::Single(shape) => example_sites.read_shape(shape, &key.source_id(), root),
+        SchemaRoot::Union(arms) => {
+            for (index, arm) in arms.iter().enumerate() {
+                if let SchemaArm::Inline(shape) = arm {
+                    example_sites.read_shape(shape, &key.source_id(), &root.union_arm(index));
+                }
+            }
+        }
+    }
     // A slot evaluates in the file it was written in: stamp the root's own
     // slots here and each lifted definition's in `rehome_definition`.
     if let Some(file) = key.file() {
@@ -2907,7 +3227,7 @@ fn expand_imports(
     // `@this` resolves against the document's own (unexpanded) named types.
     // `schema` is consumed by expansion below, so this is the one copy.
     let named_types = Arc::new(NamedTypes {
-        root: if local_types.is_some() { SchemaSourcePath::root().property("types") } else { SchemaSourcePath::root() },
+        root: if local_types.is_some() { types_root } else { SchemaSourcePath::root() },
         properties: match local_types {
             Some(shape) => shape.properties.clone(),
             None => match &schema {
@@ -2944,6 +3264,7 @@ fn expand_imports(
         expanded
     };
     let default_files = authored.map(|authored| engine.default_files(&authored, &current)).unwrap_or_default();
+    example_sites.extend(std::mem::take(&mut engine.example_sites));
     searched.extend(engine.searched);
     Ok((expanded, engine.dependencies.into_iter().collect(), default_files))
 }
@@ -2986,7 +3307,8 @@ impl ImportEngine<'_> {
         path: &SchemaSourcePath,
     ) -> Result<SchemaShape, SchemaError> {
         if let Some(assembled) = self.assemble(&shape, current, path)? {
-            return self.expand_assembled(assembled, shape.constraints, current);
+            let advise_unknown_keys = shape.advise_unknown_keys().map(<[String]>::to_vec);
+            return self.expand_assembled(assembled, shape.constraints, advise_unknown_keys, current);
         }
         let mut properties = IndexMap::with_capacity(shape.properties.len());
         for (name, def) in shape.properties {
@@ -3006,6 +3328,7 @@ impl ImportEngine<'_> {
             properties,
             pattern_keys,
             constraints: shape.constraints,
+            key_declarations: shape.key_declarations,
             ..SchemaShape::default()
         })
     }
@@ -3019,9 +3342,11 @@ impl ImportEngine<'_> {
         &mut self,
         assembled: composition::Assembled,
         constraints: Vec<Constraint>,
+        advise_unknown_keys: Option<Vec<String>>,
         current: &Namespace,
     ) -> Result<SchemaShape, SchemaError> {
         let composed_sites = assembled.sites();
+        let removed = assembled.removed;
         let mut properties = IndexMap::with_capacity(assembled.literals.len());
         for (name, member) in assembled.literals {
             properties.insert(name, self.expand_member(member, current)?);
@@ -3030,7 +3355,7 @@ impl ImportEngine<'_> {
         for (key, member) in assembled.patterns {
             pattern_keys.push(PatternKeyDef { key, def: self.expand_member(member, current)? });
         }
-        Ok(SchemaShape { properties, pattern_keys, constraints, composition: None, composed_sites })
+        Ok(SchemaShape { properties, pattern_keys, constraints, composition: None, composed_sites, key_declarations: KeyDeclarations::boxed(removed, advise_unknown_keys) })
     }
 
     fn expand_member(&mut self, member: composition::Member, current: &Namespace) -> Result<PropertyDef, SchemaError> {
@@ -3042,7 +3367,7 @@ impl ImportEngine<'_> {
             PropertyDef::Single(atom) => ExpandedDef::Single(Box::new(atom), AtomProvenance::default()),
             PropertyDef::Union(arms) => ExpandedDef::Union(arms),
         };
-        Ok(self.rehome_definition(expanded, &member.namespace.key)?.into_def())
+        Ok(self.rehome_definition(expanded, &member.namespace.key, &member.path)?.into_def())
     }
 
     fn expand_property_def(
@@ -3297,7 +3622,7 @@ impl ImportEngine<'_> {
                 }
             }
             TypeExpr::Imported { name, reference } => {
-                if let Ok(target) = self.resolve_namespace(reference, current) {
+                if let Ok(target) = self.resolve_namespace(reference, current, &SchemaSourcePath::root()) {
                     out.extend(self.definition_default_files(&target, name, walk));
                 }
             }
@@ -3364,7 +3689,7 @@ impl ImportEngine<'_> {
             });
         }
 
-        let target = self.resolve_namespace(&reference.reference, current)?;
+        let target = self.resolve_namespace(&reference.reference, current, path)?;
         let site = SchemaReferenceSite {
             source: current.key.source_id(),
             path: path.clone(),
@@ -3439,7 +3764,7 @@ impl ImportEngine<'_> {
         };
         self.stack.pop();
 
-        let base = self.rehome_definition(base, &target.key)?;
+        let base = self.rehome_definition(base, &target.key, definition_path)?;
         let cache = if force_inline { &mut self.forced_cache } else { &mut self.expanded_cache };
         cache.insert(frame.clone(), base.clone());
         Ok(base)
@@ -3454,6 +3779,7 @@ impl ImportEngine<'_> {
         &mut self,
         mut base: ExpandedDef,
         namespace: &DefNamespace,
+        path: &SchemaSourcePath,
     ) -> Result<ExpandedDef, SchemaError> {
         if let Some(file) = namespace.file() {
             match &mut base {
@@ -3463,7 +3789,7 @@ impl ImportEngine<'_> {
         }
         match namespace {
             DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) => {
-                self.rehome_examples(base, &file.clone())
+                self.rehome_examples(base, &file.clone(), path).map_err(|error| self.written_in_import(namespace, error))
             }
             // An embedded definition's examples are rejected once the
             // embedded schema is lowered (`prepare_embedded_schema`).
@@ -3473,6 +3799,33 @@ impl ImportEngine<'_> {
             | DefNamespace::TriggerPayloadUnionArm(..)
             | DefNamespace::Embedded(_)
             | DefNamespace::Shipped(_) => Ok(base),
+        }
+    }
+
+    /// `error`, raised by a reference written in `namespace`, as a failure of
+    /// that file when it is one this expansion imported: a host then reports
+    /// the reference where it is written, in the imported file, instead of
+    /// in the document being prepared. A reference the document itself
+    /// wrote is returned unchanged.
+    fn written_in_import(&self, namespace: &DefNamespace, error: SchemaError) -> SchemaError {
+        match namespace {
+            DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) if self.namespace_cache.contains_key(file) => {
+                match error {
+                    SchemaError::BundleBoundary { .. }
+                    | SchemaError::NoMatch { .. }
+                    | SchemaError::Unresolved { .. }
+                    | SchemaError::RemoteUnsupported { .. }
+                    | SchemaError::BareNameSiblingExists { .. }
+                    | SchemaError::InvalidExample { .. }
+                    | SchemaError::NotASchemaDocument { .. }
+                    | SchemaError::UnsupportedJsonDialect { .. }
+                    | SchemaError::InvalidJsonSchema { .. } => {
+                        SchemaError::ReferencedSchema { path: file.clone(), source: Box::new(error) }
+                    }
+                    other => other,
+                }
+            }
+            _ => error,
         }
     }
 
@@ -3486,24 +3839,27 @@ impl ImportEngine<'_> {
     /// and replaced by the resolved absolute path, which resolves to itself
     /// from any directory. A missing example fails here with the error the
     /// later pass would have raised.
-    fn rehome_examples(&mut self, base: ExpandedDef, file: &Path) -> Result<ExpandedDef, SchemaError> {
+    ///
+    /// `path` is the definition's declaration in `file`: each reference is
+    /// recorded as written there, at the declaration holding it, for the
+    /// later pass and for a failure here ([`SchemaError::reference_site`]).
+    fn rehome_examples(&mut self, base: ExpandedDef, file: &Path, path: &SchemaSourcePath) -> Result<ExpandedDef, SchemaError> {
         let NamespaceSource::Files { schema_roots, context } = &self.source else {
             unreachable!("a file namespace is only loaded from the file source")
         };
         let searched = &mut self.searched;
         let gate = self.template_gate.as_ref();
         let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
-        let mut rehome = |atom: &mut PropertyAtom| {
-            rehome_atom_examples(atom, base_dir, Some(file), schema_roots, context, searched, gate)
-        };
+        let source = SchemaSourceId::File(file.to_path_buf());
+        let mut examples = ExampleRehome { base_dir, this_file: Some(file), schema_roots, request_context: context, searched, gate, sites: Some(&mut self.example_sites) };
         Ok(match base {
             ExpandedDef::Single(mut atom, provenance) => {
-                rehome(&mut atom)?;
+                examples.rehome(&mut atom, Some(&SchemaReferenceSite { source, path: path.clone() }))?;
                 ExpandedDef::Single(atom, provenance)
             }
             ExpandedDef::Union(mut arms) => {
-                for atom in &mut arms {
-                    rehome(atom)?;
+                for (index, atom) in arms.iter_mut().enumerate() {
+                    examples.rehome(atom, Some(&SchemaReferenceSite { source: source.clone(), path: path.union_arm(index) }))?;
                 }
                 ExpandedDef::Union(arms)
             }
@@ -3519,11 +3875,17 @@ impl ImportEngine<'_> {
     /// (mirroring `$schema` file-ref resolution). Bare-name references (no
     /// path component) resolve against the schema-root context nearest-first
     /// when roots are configured (Phase 3).
+    ///
+    /// `at` is the path, in `current`, of the declaration that wrote the
+    /// reference: a failure to select its file carries it as the
+    /// reference's site ([`SchemaError::reference_site`]).
     fn resolve_namespace(
         &mut self,
         reference: &str,
         current: &Namespace,
+        at: &SchemaSourcePath,
     ) -> Result<Namespace, SchemaError> {
+        let written = || SchemaReferenceSite { source: current.key.source_id(), path: at.clone() };
         let trimmed = reference.trim();
         if trimmed == "this" {
             return Ok(Namespace {
@@ -3536,6 +3898,7 @@ impl ImportEngine<'_> {
             let document = self.shipped.partial(stem).ok_or_else(|| SchemaError::NoMatch {
                 reference: trimmed.to_string(),
                 bare_name: false,
+                site: Some(Box::new(written())),
             })?;
             return self.shipped_namespace(document.path);
         }
@@ -3567,7 +3930,7 @@ impl ImportEngine<'_> {
                         None => named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed),
                     };
                     self.searched.extend(probed.iter().cloned());
-                    let path = selected?;
+                    let path = selected.map_err(|error| self.written_in_import(&current.key, error.written_at(written)))?;
                     let canonical = canonical_path(&path);
                     self.selected_files.insert(
                         site,
@@ -3585,7 +3948,9 @@ impl ImportEngine<'_> {
                 let DefNamespace::Embedded(importer) = &current.key else {
                     unreachable!("an embedded expansion holds only embedded namespaces")
                 };
-                return self.resolve_embedded_namespace(documents, bundle, importer, reference, mode);
+                return self
+                    .resolve_embedded_namespace(documents, bundle, importer, reference, mode, &written)
+                    .map_err(|error| error.written_at(written));
             }
         };
 
@@ -3611,10 +3976,13 @@ impl ImportEngine<'_> {
                 named_types: Arc::clone(&cached.named_types),
             });
         }
+        // A listed file that cannot serve as a types library is refused at
+        // the import that named it, in the file that wrote the import.
         let named_types = match gated_bytes {
-            Some(bytes) => load_named_types_from(&path, Ok(bytes))?,
-            None => load_named_types(&path)?,
-        };
+            Some(bytes) => load_named_types_from(&path, Ok(bytes)),
+            None => load_named_types(&path),
+        }
+        .map_err(|error| self.written_in_import(&current.key, error.refused_at(&path, written)))?;
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -3637,6 +4005,9 @@ impl ImportEngine<'_> {
     /// against the embedded table only. The target is recorded as a virtual
     /// path, the embedded expansion's read set; it is never a file
     /// dependency edge, since embedded documents are immutable build inputs.
+    ///
+    /// `written` is the declaration that wrote `reference`: a document that
+    /// cannot serve as a types library is refused there.
     fn resolve_embedded_namespace(
         &mut self,
         documents: &[EmbeddedDocument<'_>],
@@ -3644,6 +4015,7 @@ impl ImportEngine<'_> {
         importer: &str,
         reference: &str,
         mode: PreparationMode<'_>,
+        written: &dyn Fn() -> SchemaReferenceSite,
     ) -> Result<Namespace, SchemaError> {
         let invalid = |reason: String| SchemaError::SchemaDocument {
             path: PathBuf::from(importer),
@@ -3664,8 +4036,10 @@ impl ImportEngine<'_> {
                 let document = embedded::find(documents, &target).ok_or_else(|| {
                     invalid(format!("`{target}` is not an embedded schema document"))
                 })?;
-                let named_types =
-                    Arc::new(named_types_from_text_in(document.text, Path::new(document.path), mode)?);
+                let named_types = Arc::new(
+                    named_types_from_text_in(document.text, Path::new(document.path), mode)
+                        .map_err(|error| error.refused_at(Path::new(document.path), written))?,
+                );
                 self.embedded_cache.insert(target.clone(), Arc::clone(&named_types));
                 named_types
             }
@@ -3839,82 +4213,124 @@ fn gated_schema_file_path(
     selection.into_result()
 }
 
-/// Rewrites every `example(...)` reference in `atom`, including those of
-/// nested inline-object properties, union arms, tuple elements, and the tuple
-/// spread, to the path it resolves to from `base_dir` (see
-/// [`ImportEngine::rehome_examples`]). A path that is not
-/// valid UTF-8 cannot be spelled as a reference and is left as authored.
+/// One pass that rewrites `example(...)` references to the paths they
+/// resolve to from `base_dir` (see [`ImportEngine::rehome_examples`]).
 ///
 /// With a `gate` (a template type's returned definition), each location is
 /// admitted immediately before the selection probes it and the selected file
 /// before it is read and reported here; the read at lowering is the same
 /// path.
-pub(crate) fn rehome_atom_examples(
-    atom: &mut PropertyAtom,
-    base_dir: &Path,
-    this_file: Option<&Path>,
-    schema_roots: &[PathBuf],
-    request_context: &FileResolutionContext,
-    searched: &mut BTreeSet<PathBuf>,
-    gate: Option<&crate::slots::reads::ReadGate>,
-) -> Result<(), SchemaError> {
-    for constraint in atom
-        .constraints
-        .iter_mut()
-        .chain(atom.array_constraints.iter_mut())
-    {
-        if let Constraint::Example(references) = constraint {
-            for reference in references.iter_mut() {
-                let path = match gate {
-                    Some(gate) if reference.trim() != "this" => {
-                        let path =
-                            gated_schema_file_path(gate, reference, base_dir, schema_roots, request_context, searched)?;
-                        gate.read(&path)?;
-                        path
+pub(crate) struct ExampleRehome<'a> {
+    pub(crate) base_dir: &'a Path,
+    pub(crate) this_file: Option<&'a Path>,
+    pub(crate) schema_roots: &'a [PathBuf],
+    pub(crate) request_context: &'a FileResolutionContext,
+    pub(crate) searched: &'a mut BTreeSet<PathBuf>,
+    pub(crate) gate: Option<&'a crate::slots::reads::ReadGate>,
+    /// Where each rewritten reference's writer is recorded, when a later
+    /// pass loads the examples ([`ExampleSites`]).
+    pub(crate) sites: Option<&'a mut ExampleSites>,
+}
+
+impl ExampleRehome<'_> {
+    /// Rewrites every `example(...)` reference in `atom`, the declaration
+    /// at `site`, including those of nested inline-object properties, union
+    /// arms, tuple elements, and the tuple spread. A path that is not valid
+    /// UTF-8 cannot be spelled as a reference and is left as authored. A
+    /// reference that fails to select its file fails with the declaration
+    /// holding it as its site; with no `site` (a template type's returned
+    /// definition, written in no file), none is recorded.
+    pub(crate) fn rehome(&mut self, atom: &mut PropertyAtom, site: Option<&SchemaReferenceSite>) -> Result<(), SchemaError> {
+        for constraint in atom
+            .constraints
+            .iter_mut()
+            .chain(atom.array_constraints.iter_mut())
+        {
+            if let Constraint::Example(references) = constraint {
+                for reference in references.iter_mut() {
+                    let path = self
+                        .example_path(reference)
+                        .map_err(|error| match site {
+                            Some(site) => error.written_at(|| site.clone()),
+                            None => error,
+                        })?;
+                    bundle::note_rehomed(&path);
+                    if let Some(resolved) = path.to_str() {
+                        if let (Some(sites), Some(site)) = (self.sites.as_deref_mut(), site) {
+                            // An arm inlined from another file was already
+                            // rehomed there, by the declaration that wrote it.
+                            if resolved == reference.as_str() {
+                                sites.carried(resolved, site);
+                            } else {
+                                sites.read(resolved, site);
+                            }
+                        }
+                        *reference = resolved.to_string();
                     }
-                    _ => resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?,
-                };
-                bundle::note_rehomed(&path);
-                if let Some(resolved) = path.to_str() {
-                    *reference = resolved.to_string();
                 }
             }
         }
+        fn def_atoms(def: &mut PropertyDef, path: SchemaSourcePath) -> Vec<(&mut PropertyAtom, SchemaSourcePath)> {
+            match def {
+                PropertyDef::Single(inner) => vec![(inner, path)],
+                PropertyDef::Union(arms) => arms.iter_mut().enumerate().map(|(index, arm)| (arm, path.union_arm(index))).collect(),
+            }
+        }
+        let path = site.map(|site| site.path.clone()).unwrap_or_default();
+        let at = |path: SchemaSourcePath| site.map(|site| SchemaReferenceSite { source: site.source.clone(), path });
+        match &mut atom.ty {
+            // An arm inlined from another file was already rehomed there; its
+            // absolute paths resolve to themselves.
+            TypeExpr::Union(arms) => {
+                for (index, arm) in arms.iter_mut().enumerate() {
+                    self.rehome(arm, at(path.union_arm(index)).as_ref())?;
+                }
+            }
+            TypeExpr::InlineObject(shape) => {
+                let mut nested: Vec<(&mut PropertyAtom, SchemaSourcePath)> = Vec::new();
+                for (name, def) in shape.properties.iter_mut() {
+                    nested.extend(def_atoms(def, path.property(name.as_str())));
+                }
+                for pattern in shape.pattern_keys.iter_mut() {
+                    nested.extend(def_atoms(&mut pattern.def, path.property(pattern_key_source_name(&pattern.key))));
+                }
+                for (atom, path) in nested {
+                    self.rehome(atom, at(path).as_ref())?;
+                }
+            }
+            TypeExpr::Tuple(tuple) => {
+                let count = tuple.elements.len();
+                for (index, element) in tuple.elements.iter_mut().enumerate() {
+                    for (atom, path) in def_atoms(&mut element.def, path.union_arm(index)) {
+                        self.rehome(atom, at(path).as_ref())?;
+                    }
+                }
+                if let Some(spread) = tuple.spread.as_deref_mut() {
+                    self.rehome(spread, at(path.union_arm(count)).as_ref())?;
+                }
+            }
+            // A signature never lowers, so its parameters' examples are never
+            // loaded; a function's own `example(file)` is in `constraints` above.
+            TypeExpr::Primitive(_)
+            | TypeExpr::Imported { .. }
+            | TypeExpr::Ref(_)
+            | TypeExpr::Function(_)
+            | TypeExpr::Slot(_) => {}
+        }
+        Ok(())
     }
-    let mut rehome = |atom: &mut PropertyAtom| {
-        rehome_atom_examples(atom, base_dir, this_file, schema_roots, request_context, searched, gate)
-    };
-    fn def_atoms(def: &mut PropertyDef) -> &mut [PropertyAtom] {
-        match def {
-            PropertyDef::Single(inner) => std::slice::from_mut(inner),
-            PropertyDef::Union(arms) => arms,
+
+    /// The file `reference` names, admitted by the gate when there is one.
+    fn example_path(&mut self, reference: &str) -> Result<PathBuf, SchemaError> {
+        match self.gate {
+            Some(gate) if reference.trim() != "this" => {
+                let path = gated_schema_file_path(gate, reference, self.base_dir, self.schema_roots, self.request_context, self.searched)?;
+                gate.read(&path)?;
+                Ok(path)
+            }
+            _ => resolve_example_path(reference, self.base_dir, self.this_file, self.schema_roots, self.request_context, self.searched),
         }
     }
-    match &mut atom.ty {
-        // An arm inlined from another file was already rehomed there; its
-        // absolute paths resolve to themselves.
-        TypeExpr::Union(arms) => arms.iter_mut().try_for_each(&mut rehome)?,
-        TypeExpr::InlineObject(shape) => shape
-            .properties
-            .values_mut()
-            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def))
-            .flat_map(def_atoms)
-            .try_for_each(&mut rehome)?,
-        TypeExpr::Tuple(tuple) => tuple
-            .elements
-            .iter_mut()
-            .flat_map(|element| def_atoms(&mut element.def))
-            .chain(tuple.spread.as_deref_mut())
-            .try_for_each(&mut rehome)?,
-        // A signature never lowers, so its parameters' examples are never
-        // loaded; a function's own `example(file)` is in `constraints` above.
-        TypeExpr::Primitive(_)
-        | TypeExpr::Imported { .. }
-        | TypeExpr::Ref(_)
-        | TypeExpr::Function(_)
-        | TypeExpr::Slot(_) => {}
-    }
-    Ok(())
 }
 
 /// Canonicalizes `path` for stable cycle-detection identity, falling back to
@@ -4011,31 +4427,23 @@ pub(crate) fn named_types_from_text_in(
     path: &Path,
     mode: PreparationMode<'_>,
 ) -> Result<NamedTypes, SchemaError> {
+    let refused = |reason| SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason, site: None };
     let Some(document) = parse_referenced_schema_document_with_mode(text, path, mode)? else {
-        return Err(SchemaError::NotASchemaDocument {
-            path: path.to_path_buf(),
-            reason: NotSchemaReason::NoSchemaProperty,
-        });
+        return Err(refused(if claims_trigger_envelope(text) {
+            NotSchemaReason::TriggerEnvelope
+        } else {
+            NotSchemaReason::NoSchemaProperty
+        }));
     };
     if let Some(types) = document.local_types {
         return Ok(NamedTypes { properties: types.properties, root: SchemaSourcePath::root().property("types") });
     }
     match document.declaration {
         SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => Ok(NamedTypes { properties: shape.properties, root: SchemaSourcePath::root() }),
-        SchemaDeclaration::Schema(SchemaRoot::Union(_)) => Err(SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message: "root-union schema documents cannot supply named imports".into(),
-            source: None,
-            span: None,
-        }),
+        SchemaDeclaration::Schema(SchemaRoot::Union(_)) => Err(refused(NotSchemaReason::RootUnionImport)),
         // A whole-file reference declares no named types of its own; imports
         // are defined only among a file's own top-level entries.
-        SchemaDeclaration::Reference(_) => Err(SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message: "whole-file reference schema documents cannot supply named imports".into(),
-            source: None,
-            span: None,
-        }),
+        SchemaDeclaration::Reference(_) => Err(refused(NotSchemaReason::ReferenceImport)),
     }
 }
 
@@ -4676,6 +5084,7 @@ fn is_flag(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::NotEmpty
+            | Constraint::NoCoerce
             | Constraint::Integer
             | Constraint::Unique
             | Constraint::Eager
@@ -4942,6 +5351,10 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
 ///
 /// Fast path: a schema with no `x-darkmatter-example` annotation returns an
 /// empty `Vec` and leaves `json` byte-equivalent.
+///
+/// A failure carries the declaration `sites` records for its reference's
+/// spelling ([`SchemaError::reference_site`]); the lowered JSON keeps the
+/// spelling only.
 pub(crate) fn resolve_document_examples(
     json: &mut Value,
     base_dir: &Path,
@@ -4949,6 +5362,7 @@ pub(crate) fn resolve_document_examples(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
+    sites: &ExampleSites,
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
     let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
@@ -4965,6 +5379,7 @@ pub(crate) fn resolve_document_examples(
         &mut deps,
         &mut reads,
         searched,
+        sites,
     )?;
     Ok(deps.into_iter().collect())
 }
@@ -4980,6 +5395,7 @@ fn resolve_examples_in_json(
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
     searched: &mut BTreeSet<PathBuf>,
+    sites: &ExampleSites,
 ) -> Result<(), SchemaError> {
     match value {
         Value::Object(map) => {
@@ -5001,7 +5417,7 @@ fn resolve_examples_in_json(
                 let mut resolved = Vec::with_capacity(items.len());
                 for item in items {
                     let reference = item.as_str().expect("all-string checked above");
-                    resolved.push(resolve_one_example(
+                    let example = resolve_one_example(
                         reference,
                         base_dir,
                         this_file,
@@ -5011,7 +5427,11 @@ fn resolve_examples_in_json(
                         deps,
                         reads,
                         searched,
-                    )?);
+                    );
+                    resolved.push(example.map_err(|error| match sites.of(reference) {
+                        Some(site) => error.written_at(|| site.clone()),
+                        None => error,
+                    })?);
                 }
                 map.insert("x-darkmatter-example".into(), Value::Array(resolved));
             }
@@ -5032,6 +5452,7 @@ fn resolve_examples_in_json(
                     deps,
                     reads,
                     searched,
+                    sites,
                 )?;
             }
         }
@@ -5047,6 +5468,7 @@ fn resolve_examples_in_json(
                     deps,
                     reads,
                     searched,
+                    sites,
                 )?;
             }
         }
@@ -5070,6 +5492,7 @@ fn resolve_example_path(
         return this_file.map(Path::to_path_buf).ok_or_else(|| SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: "`this` example reference has no target (the schema is inline, not a file)".into(),
+            site: None,
         });
     }
     let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
@@ -5290,9 +5713,19 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
 
+    // A removed key's advice is the owning object's annotation, so it moves
+    // with the `false` property the document does not itself declare.
+    let removed_key = crate::validation::REMOVED_KEYS_ANNOTATION;
+    let baseline_removed = baseline_obj.get(removed_key).and_then(Value::as_object);
     if let Some(baseline_props) = baseline_props {
         for (key, baseline_schema) in baseline_props {
             if !doc_props.contains_key(key) {
+                if let Some(advice) = baseline_removed.and_then(|removed| removed.get(key)) {
+                    let entry = document_obj.entry(removed_key).or_insert_with(|| Value::Object(Map::new()));
+                    if let Value::Object(removed) = entry {
+                        removed.insert(key.clone(), advice.clone());
+                    }
+                }
                 doc_props.insert(key.clone(), baseline_schema.clone());
                 if baseline_required.contains(key.as_str()) && !doc_required.contains(key) {
                     doc_required.push(key.clone());
@@ -5389,6 +5822,8 @@ pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result
         "description",
         "title",
         "$defs",
+        crate::validation::REMOVED_KEYS_ANNOTATION,
+        crate::validation::ADVISE_UNKNOWN_KEYS_ANNOTATION,
     ];
 
     if let Some(ty) = schema.get("type") {
@@ -5760,7 +6195,7 @@ mod tests {
         );
         let err = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
         match err {
-            SchemaError::NotASchemaDocument { path: rejected, reason: NotSchemaReason::NoSchemaProperty } => {
+            SchemaError::NotASchemaDocument { path: rejected, reason: NotSchemaReason::NoSchemaProperty, .. } => {
                 assert_eq!(rejected, path);
             }
             other => panic!("expected NotASchemaDocument, got {other:?}"),
@@ -5820,7 +6255,7 @@ mod tests {
             .unwrap_err();
             let mut cause: &dyn std::error::Error = &err;
             let rejected = loop {
-                if let Some(SchemaError::NotASchemaDocument { path, reason }) = cause.downcast_ref::<SchemaError>() {
+                if let Some(SchemaError::NotASchemaDocument { path, reason, .. }) = cause.downcast_ref::<SchemaError>() {
                     break Some((path.clone(), *reason));
                 }
                 match cause.source() {
@@ -6539,6 +6974,7 @@ mod schema_plus_phase1 {
             &[],
             &FileResolutionContext::new(dir.path()),
             &mut BTreeSet::new(),
+            &ExampleSites::default(),
         )
             .expect("`this` example must resolve");
         assert_eq!(
@@ -7017,6 +7453,7 @@ mod bare_name_phase3 {
             SchemaError::BareNameSiblingExists {
                 reference,
                 suggestion,
+                ..
             } => {
                 assert_eq!(reference, "local.yaml");
                 assert_eq!(suggestion, "./local.yaml");
@@ -7214,6 +7651,7 @@ mod bare_name_phase3 {
         let err = SchemaError::BareNameSiblingExists {
             reference: "types.yaml".into(),
             suggestion: "./types.yaml".into(),
+            site: None,
         };
         let msg = err.to_string();
         assert!(msg.contains("types.yaml"));
@@ -7392,7 +7830,7 @@ mod shared_type_tables {
             let mut engine = engine(dir.path());
             let root = root_namespace(dir.path(), IndexMap::new());
 
-            let first = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let first = engine.resolve_namespace("./types.yaml", &root, &SchemaSourcePath::root()).unwrap();
             let canonical = canonical_path(&types);
             assert_eq!(first.key, DefNamespace::File(canonical.clone()));
             let cached = &engine.namespace_cache[&canonical];
@@ -7404,10 +7842,10 @@ mod shared_type_tables {
             // Two later imports, selecting distinct names and spelling the
             // reference differently, reach the same canonical cache entry.
             engine.dependencies.clear();
-            let for_a = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let for_a = engine.resolve_namespace("./types.yaml", &root, &SchemaSourcePath::root()).unwrap();
             assert!(engine.dependencies.contains(&canonical), "a cache hit records its dependency");
             engine.dependencies.clear();
-            let for_b = engine.resolve_namespace("types.yaml", &root).unwrap();
+            let for_b = engine.resolve_namespace("types.yaml", &root, &SchemaSourcePath::root()).unwrap();
             assert!(engine.dependencies.contains(&canonical), "an alternate spelling records its dependency");
             assert!(for_a.named_types.contains_key("A"), "tagged={tagged}");
             assert!(for_b.named_types.contains_key("B"), "tagged={tagged}");
@@ -7442,7 +7880,7 @@ mod shared_type_tables {
         let mut engine = engine(dir.path());
 
         for _ in 0..2 {
-            let this = engine.resolve_namespace("this", &root).unwrap();
+            let this = engine.resolve_namespace("this", &root, &SchemaSourcePath::root()).unwrap();
             assert_eq!(this.key, DefNamespace::InlineRoot);
             assert!(
                 Arc::ptr_eq(&this.named_types, &root.named_types),
@@ -7461,10 +7899,10 @@ mod shared_type_tables {
             let types = write_types(dir.path(), tagged, "  name: string\n");
             let mut engine = engine(dir.path());
             let root = root_namespace(dir.path(), IndexMap::new());
-            let file = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let file = engine.resolve_namespace("./types.yaml", &root, &SchemaSourcePath::root()).unwrap();
 
             for _ in 0..2 {
-                let this = engine.resolve_namespace("this", &file).unwrap();
+                let this = engine.resolve_namespace("this", &file, &SchemaSourcePath::root()).unwrap();
                 assert_eq!(this.key, DefNamespace::File(canonical_path(&types)));
                 assert!(
                     Arc::ptr_eq(&this.named_types, &file.named_types),
@@ -7487,12 +7925,13 @@ mod shared_type_tables {
         let mut engine = engine(dir.path());
         let root = root_namespace(dir.path(), IndexMap::new());
 
-        let error = engine.resolve_namespace("./types.yaml", &root).err().expect("a reference is no namespace");
-        let SchemaError::SchemaDocument { path, message, .. } = error else {
-            panic!("expected a schema-document error, got {error:?}");
+        let error = engine.resolve_namespace("./types.yaml", &root, &SchemaSourcePath::root().property("x")).err().expect("a reference is no namespace");
+        assert!(error.to_string().contains("cannot supply named imports"), "{error}");
+        let SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::ReferenceImport, site: Some(site) } = error else {
+            panic!("expected a refused import source, got {error:?}");
         };
         assert_eq!(path, dir.path().join("types.yaml"));
-        assert_eq!(message, "whole-file reference schema documents cannot supply named imports");
+        assert_eq!(site.path, SchemaSourcePath::root().property("x"), "refused at the import that named it");
         assert!(engine.namespace_cache.is_empty(), "a rejected namespace must not enter the cache");
     }
 
@@ -7730,6 +8169,7 @@ mod searched_tests;
 pub mod buffers;
 pub mod bundle;
 mod composition;
+mod example_sites;
 mod graph;
 mod inspect;
 mod select;

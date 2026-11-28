@@ -275,10 +275,10 @@ build artifacts (`cargo sweep`: uninstalled toolchains, then anything untouched
 for 14 days, then a 120 GB per-root cap only when the target filesystem has
 less than 100 GiB free). With a warm kache store,
 swept artifacts return as link-restores rather than recompiles, and a lean
-`target/` keeps kache's per-crate keying fast. Schedule it per host — launchd
-on macOS, `just install-windows-sweep` on Windows, and cron or a systemd timer
-on Linux. The Windows task uses an 80 GB cap and can be inspected with
-`just windows-sweep-status`. The decisions and sizing evidence live in
+`target/` keeps kache's per-crate keying fast. Run `just install-sweep` from
+a durable checkout to register the appropriate local scheduler. Use
+`just sweep-status` to see the projected savings and schedule. Both commands
+that run or preview a sweep accept an SSH destination or `all`. See
 `docs/kache-strategy.md`.
 
 Judge the cache with `kache stats` (hit rate, time saved), not `kache doctor`

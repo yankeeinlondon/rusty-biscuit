@@ -644,7 +644,9 @@ early stop is used.
 
 Every subprocess goes through `process::run_with_timeout` or its builder-capable
 `process::run_command_with_timeout` form, which own the deadline, concurrent pipe draining, and
-process-tree termination/reaping. The builder form preserves caller-configured working directories
+process-tree termination/reaping. A probe that must also choose its Windows creation flags (the
+windowless [shell lookups](topics/windows-shells.md)) uses the same core with its own `TreeConfig`.
+The builder form preserves caller-configured working directories
 and environments. The process tree is owned by the public `sniff::process::ProcessTree` (a dedicated
 process group on Unix, a kill-on-close Job Object attached before the child runs on Windows), so
 descendant-held pipe handles cannot extend the helper's deadline. **Never poll `try_wait()` over a

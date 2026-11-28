@@ -76,35 +76,38 @@ in this order:
 flowchart TD
     D[document with frontmatter] --> R{how many registered hosts<br/>identify it?}
     R -- one --> H[that host: its schemas, globals,<br/>functions, and lifecycle]
-    R -- several, or a host whose<br/>two manifests disagree --> A[md, with a dm.host.* warning;<br/>no legacy catalog is used]
-    R -- none --> L{a host catalog in the schema roots<br/>whose host is not registered?}
-    L -- yes --> G[that legacy catalog]
-    L -- no --> M[md]
+    R -- several, or a host whose<br/>two manifests disagree --> A[md, with a dm.host.* warning]
+    R -- none --> M[md]
 ```
 
 - **Registered hosts** come from the `register` entries of the document's
   configuration (the home's `.darkmatter.yaml` and the repository's), loaded
   read-only off the request thread, once per configuration. See
   [Host Registration](../../docs/topics/host-registration.md).
-- **Legacy catalogs** are the host catalogs in the document's schema roots
-  (`globals.yaml` beside its `globals.lifecycle.json`), used only when no
-  registered host identifies the document, and never for a registered host's
-  own catalog. Their first usable [lifecycle
-  artifact](../../docs/topics/lifecycle/host-artifact.md) gives the stacks;
-  when none is usable, every catalog's reason is reported.
+- Nothing in a schema root supplies a host: a lifecycle artifact or
+  function catalog found there is an ordinary file. A host is chosen only
+  by the ordinary `match:` of a registered trigger; with no match the
+  document stays an `md` document.
 - A document with no frontmatter is selected the same way, as if its
-  frontmatter were empty: a registered host's root catalog beside it is
-  never its legacy catalog. It never waits for its configuration's
+  frontmatter were empty. It never waits for its configuration's
   registrations to load (startup loads every workspace folder's); until
   they have, it is analyzed as `md`, and it is refreshed when they load.
 
 The choice is kept with the document's schema and made again only when an
-input changes: the text, a schema or catalog file, the trigger registry, the
+input changes: the text, a schema file, the trigger registry, the
 context, or the configuration's registrations. A registration whose files
 change but whose content does not (a save with the same bytes) keeps every
-document's choice. A changed or broken registration replaces it at once: a
-document is never analyzed under the host a broken registration used to
-give, and the new failure is reported on the file that is wrong. Every file
+document's choice. A changed or broken registration replaces it once its
+files have been quiet for 300 ms and the reload completes. A publish
+rewrites about a dozen files and the editor reports them in several
+batches, so every reported change restarts the 300 ms wait and the burst
+gives one reload. While DMLS waits, open Markdown and YAML documents keep
+the last loaded view; when the reload completes, the latest completed view
+is installed for both. After that, a document is never analyzed under the
+host a broken registration used to give, the new failure is reported on
+the file that is wrong, and once the files are repaired the next reload
+clears the warning without a restart. An editor that cannot watch the
+registration's folders gets the same wait after each save instead. Every file
 a registration reads is watched, so a deleted, recreated, or replaced file,
 and a commit or checkout in the repository, take effect without a restart;
 see [Host Registration](../../docs/topics/host-registration.md#changes-are-followed-without-a-restart).
@@ -256,25 +259,26 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
 | `dm.schema.constraint` | A non-type constraint failed (range, length, pattern, enum, …). |
 | `dm.schema.missing_required` | A required key is absent. **Strict mode only** in frontmatter; always in a whole YAML document — see [Severity](#severity). |
-| `dm.schema.unknown_key` | A key the schema does not declare is present. |
-| `dm.schema.deprecated_key` | A deprecated key is present. |
+| `dm.schema.unknown_key` | A key the schema does not declare is present. When one declared key is near it, the message ends ``; did you mean `name`?``. |
+| `dm.schema.removed_key` | A key the schema declares `removed(<replacement>)` is present, whatever its value. Ranged on the key; the message ends with the replacement (``key `fail_fast` has been removed; set fail_fast on a group object``). |
+| `dm.schema.near_miss_key` | **Warning**, on an open object that opts in with `$advise-unknown-keys`: an undeclared key is near exactly one declared key (`promt` beside `prompt`). The value is still accepted; ranged on the key. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
+| `dm.schema.callable_catalog` | A callable catalog (`kind: expression-schema` or `kind: mutation-schema`) fails the catalog reader `md schema validate` also runs. The error marks the failing declaration. An invalid type reference marks the reference or its enclosing expression, such as the signature of the failing overload. For an aliased YAML arm, the error marks the alias token. Conflicts and references to a callable used as a type link the other declaration when its source is available. For an embedded built-in without matching local source, the message gives the embedded file label, line, and column. |
 | `dm.schema.kind_check` | A YAML document of one of Darkmatter's kinds (`schema`, `schema-trigger`, `yaml-schema`) fails a check its definition cannot state, such as an invalid trigger `$path` glob. Ranged on the node the library located. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
-| `dm.schema.host_catalog` | **Warning.** A host global catalog in the document's schema roots (a `kind: schema` file with a `$schema` mapping of globals and no `types`, such as Claudine's `globals.yaml`) failed to load. The message names the file, the field, and the reason; it is placed at the top of the document. The globals that catalog declares are unknown to this document, so expressions reading them are checked as document properties; every catalog that did load keeps working. The same warning reports a host **function** catalog in those roots (a `kind: schema` file with `categories:` and `function(...)` `types:`) that fails to load or declares a function a built-in already names; its functions stay unknown to this document. Source `darkmatter.schema`. |
 | `dm.host.registration` | **Warning**, on the file whose problem keeps a `register` entry from being used, at the problem's line and column (the top when it has none), whether that file is open or not: the configuration file, at the entry, when the manifest cannot be found, the manifest for its own shape or a member it cannot resolve, otherwise the member (missing, invalid, or remote, or an artifact that is refused). Two manifests that claim one host with different content put it on each manifest, and again at the top of every document such a host identifies. Nothing of that entry is used. An open file keeps its own diagnostics beside it, and the warning is cleared once the problem is fixed. Source `darkmatter.schema`. |
 | `dm.host.identify_too_broad` | **Warning**, on the identifying trigger, like `dm.host.registration`: a registered host's identifying trigger could match on keys `md` owns alone, so the host is not used. |
-| `dm.host.ambiguous` | **Warning**, at the top of the document: two or more registered hosts identify it. It is analyzed as an `md` document; no host's schemas, globals, functions, or lifecycle apply, and no legacy catalog is used either. Source `darkmatter.schema`. |
+| `dm.host.trigger_conflict` | **Error**, on the document's frontmatter: two of the selected host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one host layer ([When two triggers declare one property](../../docs/topics/host-registration.md#when-two-triggers-declare-one-property)). The message names the host, the property or "the root rules", and both trigger files, and each trigger file is related information. No schema applies to the document until the bundle is fixed; a higher layer does not clear it. Source `darkmatter.schema`. |
+| `dm.host.ambiguous` | **Warning**, at the top of the document: two or more registered hosts identify it. It is analyzed as an `md` document; no host's schemas, globals, functions, or lifecycle apply. Source `darkmatter.schema`. |
 | `dm.lifecycle.unknown_host` | **Warning**, at the key. A root key is a lifecycle event only a registered host has (Claudine's `success`, say), but that host does not identify the document, so the key is ordinary data here and its stack never runs as one. The message names the host. A key no registered host uses as an event is never reported. Source `darkmatter.schema`. |
-| `dm.lifecycle.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. No host catalog in the document's schema roots has a usable [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md) (`<catalog stem>.lifecycle.json` beside it): the artifact is absent, unreadable, invalid, written for another version of the catalog, or records a registration the registry refuses. The document's lifecycle stacks are analyzed as the `md` host's, so a host-only event is plain frontmatter, checked unguarded, and a host-only verb's operand is checked on its own. One per host catalog, at the top of a document with frontmatter; the message names the artifact and the reason. Regenerating the artifact clears it. Source `darkmatter.schema`. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
-| `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. A root is classified against the binding view of its site: inside a lifecycle stack of the document's host (md's `initialize`, `composed`, `failed`, `cancelled`, `finalize`, or a host's events from its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), such as Claudine's `start` and `success`) that event's view, which declares `err` and `timing`; elsewhere Darkmatter's baseline view, where `err` and `timing` are document properties like any other. A global the document's host declares (a registered host's global catalog, or a host catalog in its schema roots: Claudine's `seq`, `loop`, and `group`) is never reported, inside a stack or not. `current` is a reserved namespace and is never reported. |
+| `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. A root is classified against the binding view of its site: inside a lifecycle stack of the document's host (md's `initialize`, `composed`, `failed`, `cancelled`, `finalize`, or a host's events from its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), such as Claudine's `start` and `success`) that event's view, which declares `err` and `timing`; elsewhere Darkmatter's baseline view, where `err` and `timing` are document properties like any other. A global the document's host declares (a registered host's global catalog, its `namespace-schema` files: Claudine's `seq`, `loop`, and `group`) is never reported, inside a stack or not. `current` is a reserved namespace and is never reported. |
 | `dm.expression.undeclared_member` | **Warning (advisory)**, matching `md compose`'s code, message, and severity, under both `expressions.strict` settings. A constant member read (`server.nmae`, `fm.server.nmae`, `server["nmae"]`) whose base's known type is a closed object, or a union of closed objects and `null`, that does not declare the member, in a frontmatter `{{ … }}` span, an `expression`-typed value, or the condition or either value branch of a top-level frontmatter `$( … )` ternary. Ranged on the member name (on the quoted key of a bracket read). Every branch and callback body is checked, including ones composition would not run, by the same classifier and absence rules as `md compose` (see [Misspelled members](../../docs/topics/darkmatter-expressions.md#misspelled-members)). While the document's schema still has unresolved slots and no resolved schema has been published, members are checked against the unresolved schema, whose declarations slots never change. Both value branches of a `$( … )` ternary are checked without running anything, as is a piece holding a `{{ … }}` placeholder inside a quoted string (the placeholder is checked as its own span, once); a piece whose placeholder sits outside a string is skipped, as composition skips it. Ternary pieces get member warnings only, never call findings, as in composition. Not reported inside a lifecycle stack. |
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. Also checked in every `{{ … }}` span and `when` condition inside a lifecycle stack of the document's host. |
-| `dm.expression.unavailable_global` | **Error.** A read, inside a lifecycle stack of the document's host, of a global the event's binding view declares unavailable: `err` in md's `initialize` or `composed` (Claudine's `initialize`, `start`, `success`, or `loop`), which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A host-catalog global is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
+| `dm.expression.unavailable_global` | **Error.** A read, inside a lifecycle stack of the document's host, of a global the event's binding view declares unavailable: `err` in md's `initialize` or `composed` (Claudine's `initialize`, `start`, `success`, or `loop`), which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A global from the host's namespace catalog is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
 | `dm.expression.incompatible_call` | **Error.** A function call Darkmatter's design-time check proves wrong, so `md compose` rejects the document: an argument that can never bind (`min(flag, 5)` with `flag: boolean(required)`), a wrong argument count, or an ambiguous overload. Ranged on the argument, or on the whole call for a count or overload problem. Checked in every branch, including ones that never run. Emitted on Expression-typed values, every frontmatter `{{ … }}` span, and `when` conditions inside lifecycle stacks. Inside a lifecycle stack each call is typed at its site exactly as the document's host types it before launch (`md compose`, or a host such as Claudine through its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)): narrowed by the enclosing `when:` items, until a `set` writes the guarded property, and never across events. Under a host, its own events (Claudine's `start`, `success`, `blocked`, `failure`, and `loop` gate) and its verbs' operands (`say`, `speak`, `effect`, `notify`, `retry`/`proxy`/`prep` `with:` values, `resume`, `break`, `defer`) are such sites; a Darkmatter spelling the host renamed (`composed` under Claudine) is not a stack, and the host refuses the document before launch. |
 | `dm.collection.malformed` | A malformed `::map` / `::filter` region or opener: an unpaired or crossed wrapper, a bad source, an unknown or duplicate option, a bare flag, an unquoted or empty value, `while` with `until`, or `sort-order` without `sort`. Ranged on the offending token. |
 | `dm.collection.untyped_map_source` / `dm.collection.untyped_filter_source` | A source with no iterable declaration in the effective schema. An error unless the untyped-source recovery is allowed, which the editor does not assume. |
@@ -285,7 +289,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.collection.invalid_sort_key` | A `sort=` key that is provably not a number or a string. |
 | `dm.expression.uncertain_call` | **Warning.** A call argument that might not bind, such as typed text passed to a number (`min(count, 5)` with `count: string`). With `expressions.strict`, also an argument that may be `null` where the parameter rejects it, or whose type is unknown. |
 | `dm.expression.always_false_call` | **Warning**, matching `md compose`, which reports the same warning and still composes. A `file_exists` (or `fileexists`) call whose argument is literal text that is not a well-formed file reference (`file_exists("https://")`, `file_exists("")`), so the call can only return `false`; ranged at the literal. A variable argument, even one of type `string`, never warns, and nothing is read to decide it. Shown under both `expressions.strict` settings. |
-| `dm.expression.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. A call to a host function whose facts DMLS cannot trust: the facts artifact (`<catalog stem>.facts.json` beside the host's function catalog in the document's schema roots) is absent, unreadable, invalid, generated from another version of the catalog, or lacks a valid entry for the function. The call is still a known function, but it gets no argument-type category and its guard narrows nothing, because only the host's runtime knows its facts. The message names the function and the reason. Ranged on the whole call, on every surface that gets call diagnostics. Regenerating the artifact clears it. See [Host Expression Functions](../../docs/topics/host-functions.md). |
+| `dm.expression.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. A call to a host function whose facts cannot be trusted: the facts artifact is absent, unreadable, invalid, generated from another version of the catalog, or lacks a valid entry for the function. A registered host never produces it in the editor: a registration whose facts artifact has any of these problems is refused whole with `dm.host.registration`, so none of its functions applies. It comes from a host function set a tool builds for analysis only. The call is still a known function, but it gets no argument-type category and its guard narrows nothing, because only the host's runtime knows its facts. The message names the function and the reason. Ranged on the whole call, on every surface that gets call diagnostics. Regenerating the artifact clears it. See [Host Expression Functions](../../docs/topics/host-functions.md). |
 | `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked wherever the selected host's recursive lifecycle schema types it as an expression, including nested `then`/`else` bodies. The editor does not enforce the five-level conditional limit; the runtime parser rejects a sixth level before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Every schema-validation diagnostic (`dm.schema.type_mismatch`,
@@ -325,10 +329,22 @@ judged by its scope's configuration contract instead, whatever its `kind` or
 ([Configuration files](../../docs/topics/schemas/dmls-schema-support.md#configuration-files)):
 
 - a file that is not one admissible YAML document gets one
-  `dm.frontmatter.yaml_parse` error and nothing else;
-- a `kind` that cannot select its definition (claimed twice, reserved by a
-  failed definition, unavailable) is one `dm.schema.prepare` error on the
-  `kind` value, with the definition files as related information;
+  `dm.frontmatter.yaml_parse` error and nothing else; for a repeated key it
+  is ranged on the repetition, with the key's first spelling as related
+  information;
+- a callable catalog stays claimed by its kind even when it fails: its
+  callable failures are `dm.schema.callable_catalog` errors, a root `$schema`
+  in it is ordinary data, never a fallback, and a `Name@file` in it is refused
+  without reading the file. While it fails, `kind`-field completion and hover
+  are unavailable; type-grammar authoring inside `types` still works;
+- a `kind` only a registered host's `kind: yaml-schema` file claims is
+  judged by that definition, below the built-in and local definitions, under
+  the registrations installed for the file's configuration; a registration
+  change re-prepares the file without a restart;
+- a `kind` that cannot select its definition (claimed twice, including by
+  two registered hosts that define it differently, reserved by a failed
+  definition, unavailable) is one `dm.schema.prepare` error on the `kind`
+  value, with the definition files as related information;
 - a problem with the document is coded and ranged as in frontmatter, and a
   missing required key and an undeclared key are errors in either mode;
 - each problem is published once: in a claimed `kind: schema` or
@@ -455,9 +471,9 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.uncertain_call` | Warning (the call may fail for some values) |
 | `dm.expression.always_false_call` | Warning (the call is valid but can only return `false`) |
 | `dm.expression.incomplete_analysis` | Warning (nothing is known about the call; it may still be right) |
-| `dm.lifecycle.incomplete_analysis` | Warning (lifecycle stacks are analyzed as the `md` host's, which may not be the document's host) |
 | `dm.lifecycle.unknown_host` | Warning (the key is data here, which may be what the author meant) |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | Warning (analysis continues as `md`) |
+| `dm.host.trigger_conflict` | Error (the host's schema cannot be prepared; `md` refuses the document too) |
 
 ### Call diagnostics
 
@@ -829,6 +845,12 @@ Some diagnostics attach secondary locations:
   document's reference into that file and relates the failing operand there.
   Two operands into the same file are told apart by position, so only the
   failing one is ranged.
+- `dm.host.trigger_conflict` relates the top of each of the two conflicting
+  trigger files.
+- A `dm.host.registration` warning for a repeated function name or facts
+  alias links the earlier claim in its catalog or facts companion. A
+  built-in conflict includes the embedded declaration's file label and
+  coordinates in the message.
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 - A schema failure of an [observed property value](#observed-property-values)
   that comes straight from a local data file points at the failing value in

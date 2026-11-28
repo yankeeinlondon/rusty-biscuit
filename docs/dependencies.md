@@ -247,6 +247,10 @@
   the lockfile gains one edge and no package. `src/xvfb.rs` uses it to focus a
   window and press keys through XTEST on a private `Xvfb` display, which
   avoids depending on an installed `xdotool`.
+- `sniff` moves `tempfile` 3 from a dev-dependency to a regular one
+  (2026-11-24) for the private profile folder of a Windows PowerShell shell
+  probe. It was already in sniff's graph through `gix-odb`, so no package is
+  added. See `sniff/docs/dependencies.md`.
 - `sniff` adds `jsonc-parser` 0.33.2 (`serde` feature) (2026-09-26,
   `2026-09-26-lockfile-corroboration`) for `bun.lock`, `rush.json`, and Rush
   configuration, all JSON with comments. It is the only new crate in the
@@ -655,7 +659,7 @@ This is a Rust workspace with the following modules:
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
 - `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
-- `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
+- `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting (ignore for missing-reference basename suggestions)
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
 - `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)

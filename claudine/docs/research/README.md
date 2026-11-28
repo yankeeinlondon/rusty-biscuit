@@ -66,23 +66,23 @@ mindmap
 
 #### Shared Assets
 
-- [**Agent Skills**](./skills/_fleet.md)
-- [**MCP**](./mcp/_fleet.md)
+- [**Agent Skills**](./providers/skills/_fleet.md)
+- [**MCP**](./providers/mcp/_fleet.md)
 - [**Hooks**](./hooks/_fleet.md)
-- [**Prompts**](./slash-commands/_fleet.md)
-- [**Sub Agent Defn**](./subagents/_fleet.md)
+- [**Prompts**](./providers/slash-commands/_fleet.md)
+- [**Sub Agent Defn**](./providers/subagents/_fleet.md)
 
 #### Interface
 
 - **API**
-- [**CLI**](./agent-cli/_fleet.md)
+- [**CLI**](./providers/agent-cli/_fleet.md)
 - **Desktop App**
-- [**ACP**](./acp/_fleet.md)
+- [**ACP**](./providers/acp/_fleet.md)
 
 #### Configuration
 
-- [**Models**](./model-config/_fleet.md)
-- [**Reasoning Level**](./reasoning-level/_fleet.md)
+- [**Models**](./providers/model-config/_fleet.md)
+- [**Reasoning Level**](./providers/reasoning-level/_fleet.md)
 - **System Prompt**
 - **Permissions**
 

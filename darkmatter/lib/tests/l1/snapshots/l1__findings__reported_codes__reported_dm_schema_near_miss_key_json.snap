@@ -1,0 +1,29 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&json, &root)"
+---
+{
+  "diagnostics": [
+    {
+      "code": "dm.schema.near_miss_key",
+      "severity": "warning",
+      "message": "key `promt` is not a declared field, so it is kept as data",
+      "source": {
+        "file": "[ROOT]/work/doc.md",
+        "line": 6,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "did you mean `prompt`?"
+    }
+  ],
+  "counts": {
+    "errors": 0,
+    "warnings": 1,
+    "info": 0
+  }
+}

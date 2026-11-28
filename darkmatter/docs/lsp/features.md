@@ -202,7 +202,6 @@ Expression diagnostics follow one severity policy:
 | `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
 | `dm.expression.incompatible_call` | Error | Darkmatter's design-time call check proves no value of the argument's type can bind (or the argument count is wrong), so `md compose` rejects the document. |
 | `dm.expression.uncertain_call` | Warning | The argument may not convert to the parameter's type for some values; with `expressions.strict`, also an argument that may be `null` or whose type is unknown. |
-| `dm.lifecycle.incomplete_analysis` | Warning | No host catalog's lifecycle artifact is usable, so lifecycle stacks are analyzed as the `md` host's; the document may still be right for its host. |
 | `dm.lifecycle.unknown_host` | Warning | A root key is a lifecycle event only a registered host has, but that host does not identify the document, so the key is data here; the message names the host. |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | Warning | A registration cannot be used, or two registered hosts identify the document; analysis continues as `md`. |
 

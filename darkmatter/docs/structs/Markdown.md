@@ -210,9 +210,9 @@ A document can reference external assets through hyperlinks, images, media, fram
 
 ### Transclusion Queries
 
-**`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).
+**`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`). It counts only inclusions that parse: one malformed directive hides the valid directives of its kind (a bare `::file` beside `::file ./intro.md` gives `false`), so use `transclusions_with_options` or a graph to see the error.
 
-**`transclusions_with_options(&ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance, each target resolved through the request's file-resolution context. This is a local query; use `transclusion_graph()` for recursive traversal.
+**`transclusions_with_options(&ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance, each target resolved through the request's file-resolution context. This is a local query; use `transclusion_graph()` for recursive traversal. A malformed inclusion of any kind (a directive with no target, `::toc-linking ... level=h9`, `::file-links --depth two`, or a `prologue`/`epilogue` that is not a string or list of strings) is returned as the error composition raises for it; an omitted field or `prologue: []` lists nothing. A `prologue`/`epilogue` value composition inserts as text (prose, a Markdown link, multiline or empty text) is listed with that text as `raw_target` and `resolved_target: None`, and no file resolution is attempted for it. A `::toc-linking` entry lists its authored chain (`./a.md | ./b.md`) and is not resolved.
 
 Each `TransclusionRef` includes:
 
@@ -234,7 +234,7 @@ Graph methods follow transclusion directives recursively and collect references 
 
 Each graph record's `origin` has two coordinate frames. `line` and `span` index the prepared body (frontmatter removed, `replace:` values, `{{ … }}`, and `::block` regions applied). `authored` is the position in the loaded file: `line`, character `column`, byte `span`, and `inserted`, which is `true` when an expression, a shell step, or a `replace:` value wrote the reference, so the position names that construct. For example, a `[x](./x.md)` that `{{ link }}` wrote on line 9, column 7 reports `authored: { line: 9, column: 7, inserted: true }`. `authored` is `None` for a document built in memory or fetched from a URL. `section` is the final anchor slug of the nearest heading at or before the reference, and is available for those documents too.
 
-**`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node).
+**`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node). Both graph builders fail with composition's error on a malformed inclusion in any visited document, on an included file that exists but cannot be loaded, and on a `when=` condition that fails to evaluate, so `composed_references()` and `validate_references()` never report a clean result for a document they could not inspect. A request prepared with `ComposeOptions::for_reference_check` leaves those three to composition instead and omits the inclusion.
 
 This includes `::toc-linking` as a dependency source and surfaces the generated markdown links those directives add to the effective composed document.
 
@@ -330,7 +330,7 @@ assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
 
 Helper methods: `is_valid()`, `error_count()`.
 
-Issue codes include `MissingLocalTarget`, `EmptyTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteDisallowed`, `MissingSourceContext`, `UnsupportedScheme`, and `MissingFragmentTarget`.
+Issue codes include `MissingLocalTarget`, `EmptyTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteDisallowed`, `MissingSourceContext`, `UnsupportedScheme`, `InvalidReference`, `MissingFragmentTarget`, and `UnreadableTarget`. A link or image target whose file reference fails to resolve is an `InvalidReference` (or, for an I/O failure, `UnreadableTarget`) issue at the link, its failure class in `ReferenceIssue::failure`; an inclusion's failing target is the error composition raises.
 
 ```rust
 let options = ReferenceValidationOptions {

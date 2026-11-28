@@ -84,7 +84,9 @@ fn launched_spelling(path: &Path) -> PathBuf {
 
 /// Escape: ambient context. Every test in this file is *about* the launch
 /// directory, so each run is pinned to a directory the test built itself.
+/// The check requires the chosen provider on `PATH` and never runs it.
 fn run_dry_run(fixture: &CliProcessFixture, launch_dir: &Path, doc: &Path) -> String {
+    write_command_stub(fixture.bin_dir(), "claude", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n");
     let output = fixture
         .command_builder()
         .ambient_context(launch_dir)
@@ -119,7 +121,7 @@ fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
         assert!(
             output.contains(&format!(
                 "CWD={}",
-                biscuit_file::to_portable_string(&launched_spelling(&launch_dir))
+                biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir))
             )),
             "launch CWD must be reported for {}\noutput:\n{output}",
             doc.display()
@@ -226,7 +228,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
         provider.contains("AREA=alpha") && provider.contains("FILE=true"),
         "provider-bound body must contain launch area and source-owned eager file: {provider}"
     );
-    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+    let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
     assert!(provider.contains(&format!("CWD={expected_cwd}")), "{provider}");
     assert!(
         provider.contains("SOURCE-BODY") && !provider.contains("LAUNCH-FRAGMENT"),
@@ -325,7 +327,7 @@ mod caller_file_anchor_survives_direct_and_proxy_success_guards {
             .assert()
             .success();
 
-        let expected = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
+        let expected = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_spec));
         let provider = fs::read_to_string(&provider_log).unwrap_or_default();
         assert_eq!(provider.matches("TARGET SPEC=").count(), 1, "{provider}");
         assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
@@ -338,7 +340,7 @@ mod caller_file_anchor_survives_direct_and_proxy_success_guards {
             .collect::<PathBuf>()
             .display()
             .to_string();
-        let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+        let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
         assert_eq!(
             events
                 .matches(&format!("anchored={expected_spec_native} cwd={expected_cwd}"))
@@ -400,8 +402,8 @@ mod loop_route_keeps_launch_area_for_root_and_package_documents {
 
         let provider = fs::read_to_string(&provider_log).unwrap_or_default();
         assert!(provider.contains(&format!("{label}:AREA=alpha")), "{provider}");
-        let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
-        let expected_spec = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
+        let expected_cwd = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_dir));
+        let expected_spec = biscuit_file::to_forward_slash_string(&launched_spelling(&launch_spec));
         assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 2);
         assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 2);
         assert_eq!(
@@ -468,7 +470,7 @@ fn dry_run_external_source_and_outside_launch_matrix() {
         "no launch package area exists outside every repository\noutput:\n{output}"
     );
     assert!(
-        !output.contains(&format!("REPO={}", biscuit_file::to_portable_string(&root))),
+        !output.contains(&format!("REPO={}", biscuit_file::to_forward_slash_string(&root))),
         "no launch repository exists outside every repository; the prompt's own \
          repository must not be substituted\noutput:\n{output}"
     );
@@ -542,43 +544,41 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
 
 /// AC5/AC11: the real compose CLI constructs exactly one launch capture per
 /// document epoch with zero ambient fallbacks — asserted through the `--perf`
-/// work note, which projects the invocation owner's counters.
+/// work note's per-epoch breakdown, which projects the invocation owner's
+/// counters. The run's total also counts captures outside the document epoch.
 #[test]
 fn perf_reports_one_launch_capture_and_zero_ambient_fallbacks() {
     let (fixture, root) = staged_fixture("ctx-anchor-perf");
     let launch_dir = root.join("alpha/lib");
     let at_root = root.join("probe-root.md");
     write_probe(&at_root);
+    // `--perf` reports on a real run; the passive dry run prints no perf note.
+    write_command_stub(fixture.bin_dir(), "claude", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n");
 
     // Escape: ambient context — the launch capture is the subject.
     let output = fixture
         .command_builder()
         .ambient_context(&launch_dir)
         .build()
-        .args([
-            "compose",
-            "--claude",
-            "--dry-run",
-            "--perf",
-            &at_root.to_string_lossy(),
-        ])
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .args(["compose", "--claude", "--perf", &at_root.to_string_lossy()])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&output.get_output().stderr);
-    let plain = common::strip_ansi(&stderr);
+    // The note hard-wraps behind a gutter; compare it as one line.
+    let plain = common::strip_ansi(&stderr).replace('▌', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        plain.contains("launch captures 1 (extensions 0)"),
+        plain.contains("document epochs [0: captures 1 (extensions 0), fallbacks 0,"),
         "one document epoch must construct exactly one launch capture with no \
-         extension; perf note:\n{plain}"
+         extension and no fallback; perf note:\n{plain}"
     );
     assert!(
         plain.contains("ambient fallbacks 0"),
         "no stage may fall through to darkmatter's ambient capture; perf note:\n{plain}"
     );
     assert!(
-        plain.contains("prepared consumers")
-            && plain.contains("[body, effective-frontmatter, preflight]"),
-        "the direct dry-run route must report its exact prepared-context consumer set; \
+        plain.contains("prepared consumers [body (2), effective-frontmatter (2), lifecycle, preflight]"),
+        "the direct route must report its exact prepared-context consumer set; \
          perf note:\n{plain}"
     );
 }

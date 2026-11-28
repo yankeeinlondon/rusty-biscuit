@@ -37,6 +37,38 @@ pub enum SchemaRoot {
     Union(Vec<SchemaArm>),
 }
 
+/// An object's key declarations ([`SchemaShape::key_declarations`]).
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyDeclarations {
+    /// Named properties declared `removed(<replacement>)`: the key is
+    /// refused whenever it is present, even with a `null` value, and the
+    /// replacement text is the advice the problem carries. Kept apart from
+    /// [`SchemaShape::properties`] so a removed key is never a completion,
+    /// suggestion, or default candidate. Lowered as a `false` property
+    /// schema plus the owning object's `x-darkmatter-removed` annotation
+    /// ([`crate::validation::REMOVED_KEYS_ANNOTATION`]).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub removed: IndexMap<String, String>,
+
+    /// The object's `$advise-unknown-keys` opt-in: `Some` asks validation to
+    /// advise on an undeclared key that closely resembles a declared one,
+    /// with the listed names never advised on. `Some(vec![])` opts in with no
+    /// exclusions; `None` (absent) disables the advice. Only meaningful on an
+    /// open object, where an undeclared key is otherwise accepted silently.
+    /// Read from the object's own declaration only; composition does not
+    /// carry it from an operand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advise_unknown_keys: Option<Vec<String>>,
+}
+
+impl KeyDeclarations {
+    /// `Some` boxed declarations, or `None` when there are none.
+    pub fn boxed(removed: IndexMap<String, String>, advise_unknown_keys: Option<Vec<String>>) -> Option<Box<Self>> {
+        (!removed.is_empty() || advise_unknown_keys.is_some()).then(|| Box::new(Self { removed, advise_unknown_keys }))
+    }
+}
+
 /// A single object schema body — a map of property names to (possibly union)
 /// property definitions.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -72,6 +104,14 @@ pub struct SchemaShape {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Box<ObjectComposition>>,
 
+    /// The object's key declarations: named properties declared
+    /// `removed(<replacement>)` and the `$advise-unknown-keys` opt-in. `None`
+    /// when it has neither, which is also omitted when serialized. Boxed so
+    /// an ordinary shape (and every atom holding one) stays small; read it
+    /// through [`Self::removed`] and [`Self::advise_unknown_keys`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_declarations: Option<Box<KeyDeclarations>>,
+
     /// Set only by resolution, on a shape it assembled from a composition:
     /// where each member copied from another object was declared, so a
     /// lowering failure inside one names its declaration. Never serialized,
@@ -80,6 +120,21 @@ pub struct SchemaShape {
     #[doc(hidden)]
     #[serde(skip)]
     pub composed_sites: ComposedSites,
+}
+
+impl SchemaShape {
+    /// The named properties declared `removed(<replacement>)`, in
+    /// declaration order.
+    pub fn removed(&self) -> &IndexMap<String, String> {
+        static EMPTY: std::sync::LazyLock<IndexMap<String, String>> = std::sync::LazyLock::new(IndexMap::new);
+        self.key_declarations.as_ref().map_or(&EMPTY, |keys| &keys.removed)
+    }
+
+    /// The `$advise-unknown-keys` exclusions, `None` when the object does
+    /// not opt in.
+    pub fn advise_unknown_keys(&self) -> Option<&[String]> {
+        self.key_declarations.as_ref()?.advise_unknown_keys.as_deref()
+    }
 }
 
 /// The declarations of the members a resolved object copied through
@@ -1259,6 +1314,12 @@ pub enum Constraint {
     /// which have no "empty".
     NotEmpty,
 
+    /// `no-coerce` on `string`: only text as written is accepted; a native
+    /// number or boolean is a type mismatch instead of converting to its text.
+    /// Lowers to `x-darkmatter-no-coerce: true`, which only conversion reads;
+    /// strict validation already refuses a non-string.
+    NoCoerce,
+
     /// ECMA-262 regex the value must match.
     Pattern(String),
 
@@ -1541,6 +1602,7 @@ impl Constraint {
             Constraint::MinLen(_) => "min",
             Constraint::MaxLen(_) => "max",
             Constraint::NotEmpty => "not-empty",
+            Constraint::NoCoerce => "no-coerce",
             Constraint::Pattern(_) => "pattern",
             Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",

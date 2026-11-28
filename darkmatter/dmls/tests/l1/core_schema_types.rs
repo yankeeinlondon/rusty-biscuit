@@ -582,7 +582,7 @@ fn a_shell_action_is_diagnosed_under_initialize_and_accepted_under_start() {
     let mut fixture = start(&workspace);
     std::fs::write(workspace.path().join("actions.yaml"), ACTION_TYPES).unwrap();
     std::fs::write(workspace.path().join("lifecycle.yaml"), LIFECYCLE_SCHEMA).unwrap();
-    for (index, (body, expected, offending)) in LIFECYCLE_ROWS.into_iter().enumerate() {
+    for (index, (body, expected, offending, unknown)) in LIFECYCLE_ROWS.into_iter().enumerate() {
         let text = format!("---\n$schema: ./lifecycle.yaml\n{body}---\nBody\n");
         let buffer = Buffer::open(&fixture, &workspace, &format!("doc{index}.md"), "---\n---\n", &text);
         let diagnostics = fixture.wait_for_diagnostics(&buffer.uri);
@@ -592,7 +592,13 @@ fn a_shell_action_is_diagnosed_under_initialize_and_accepted_under_start() {
         assert_eq!(library_accepts(workspace.path(), &saved), expected, "library: {body}");
         assert_eq!(diagnostics.is_empty(), expected, "DMLS agrees with the library: {body}{diagnostics:?}");
 
-        if let Some(item) = offending {
+        if let Some(key) = unknown {
+            // A key no arm of the item union declares is reported at the key.
+            assert_eq!(diagnostics.len(), 1, "{body}{diagnostics:?}");
+            assert_eq!(diagnostics[0]["code"], json!("dm.schema.unknown_key"), "{body}");
+            let start = buffer.start_of(key, 0);
+            assert_eq!(diagnostics[0]["range"], range(&buffer.text, start, start + key.len()), "{body}");
+        } else if let Some(item) = offending {
             assert_eq!(diagnostics.len(), 1, "{body}{diagnostics:?}");
             assert_eq!(diagnostics[0]["code"], json!("dm.schema.constraint"), "{body}");
             let start = buffer.after("  - ", 0);
@@ -623,13 +629,16 @@ const LIFECYCLE_SCHEMA: &str = "$schema:\n  \
 /// `(frontmatter after the $schema line, valid, end of the rejected item)`.
 /// A rejected block mapping item runs from after its `- ` through its last
 /// line's line break; a rejected `{}` is exactly the braces.
-const LIFECYCLE_ROWS: [(&str, bool, Option<&str>); 8] = [
-    ("initialize:\n  - say: hi\n  - set: { a: 1 }\n", true, None),
-    ("initialize:\n  - shell: echo hi\n", false, Some("echo hi\n")),
-    ("initialize:\n  - say: hi\n    shell: echo hi\n", false, Some("echo hi\n")),
-    ("initialize:\n  - {}\n", false, Some("{}")),
-    ("start:\n  - shell: ls | wc -l; echo done\n", true, None),
-    ("start:\n  - say: hi\n  - shell: echo hi\n", true, None),
-    ("start:\n  - say: hi\n    shell: echo hi\n", false, Some("echo hi\n")),
-    ("start:\n  - {}\n", false, Some("{}")),
+/// `(frontmatter, accepted, offending item, unknown key)`: an item every
+/// arm rejects for one key no arm declares is reported at that key; one the
+/// arms reject for different reasons is reported as the whole item.
+const LIFECYCLE_ROWS: [(&str, bool, Option<&str>, Option<&str>); 8] = [
+    ("initialize:\n  - say: hi\n  - set: { a: 1 }\n", true, None, None),
+    ("initialize:\n  - shell: echo hi\n", false, None, Some("shell")),
+    ("initialize:\n  - say: hi\n    shell: echo hi\n", false, None, Some("shell")),
+    ("initialize:\n  - {}\n", false, Some("{}"), None),
+    ("start:\n  - shell: ls | wc -l; echo done\n", true, None, None),
+    ("start:\n  - say: hi\n  - shell: echo hi\n", true, None, None),
+    ("start:\n  - say: hi\n    shell: echo hi\n", false, Some("echo hi\n"), None),
+    ("start:\n  - {}\n", false, Some("{}"), None),
 ];

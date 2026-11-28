@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{resolve::{resolve_schema_with_roots, resolve_yaml_schema}};
+use darkmatter::markdown::{
+    Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::{resolve_schema_with_roots, resolve_yaml_schema}},
+};
 use simplified_schema::triggers::{MatchExpr, PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::{
@@ -40,6 +42,8 @@ use simplified_schema::{
     parse_schema_declaration, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 use serde_yaml_ng::Value as YamlValue;
+
+use crate::git_prefilter;
 
 fn repo_root() -> PathBuf {
     biscuit_test_harness::manifest_dir!().join("../..")
@@ -69,8 +73,9 @@ enum Class {
     /// A `kind: schema-trigger` envelope: never a standalone schema, and its
     /// `$schema` payload parses and resolves inline from its own directory.
     Trigger,
-    /// A global catalog (`kind: schema` with `$schema` declarations), which
-    /// a host registers through its own loader. Its envelope parses as an
+    /// A global catalog (`kind: schema` with `$schema` declarations) or a
+    /// host namespace (`kind: namespace-schema`), which a host registers
+    /// through its own loader. Its envelope parses as an
     /// ordinary tagged schema document, and its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
@@ -79,11 +84,10 @@ enum Class {
     /// a trigger, and it is refused as a `$schema` target because it is
     /// selected by `kind`. Every definition it carries parses passively.
     YamlSchemaDefinition,
-    /// A function catalog (`kind: schema` with `categories:` and `function`
-    /// types, and no `$schema`): it parses as a standalone schema, but as a
-    /// `types`-only document it is never a `$schema` target; each of its
-    /// other named types imports and lowers.
-    FunctionCatalog,
+    /// A standalone `expression-schema` or `mutation-schema` document with
+    /// private types. Schema resolution refuses both `$schema` targets and
+    /// named-type imports from these catalogs.
+    CallableCatalog,
 }
 
 struct Exception {
@@ -112,6 +116,14 @@ const fn exception(
 
 /// Every shipped schema artifact that does not load through `$schema: ./file`.
 const EXCEPTIONS: &[Exception] = &[
+    // claudine/schemas: a master sheet of provider research, still a draft:
+    // its `$provider` header key is not part of the `kind: schema` envelope.
+    exception(
+        "claudine/schemas",
+        "provider-research.yaml",
+        Class::EnvelopeRejected,
+        "a draft master sheet whose `$provider` header the envelope does not admit",
+    ),
     // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
@@ -120,7 +132,7 @@ const EXCEPTIONS: &[Exception] = &[
         "Darkmatter's global catalog, registered explicitly",
     ),
     // simplified-schema/schemas: the shipped `kind: yaml-schema` definitions
-    // (the three envelope definitions and the trigger definition). The
+    // (the five envelope definitions and the trigger definition). The
     // library's corpus admits them; here Darkmatter's resolver must refuse
     // each as a `$schema` target, since a definition is selected by `kind`.
     exception(
@@ -148,16 +160,28 @@ const EXCEPTIONS: &[Exception] = &[
         "the definition of `kind: yaml-schema` documents, applied by `kind`",
     ),
     exception(
+        "simplified-schema/schemas",
+        "expression-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: expression-schema` callable catalogs, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
+        "mutation-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: mutation-schema` callable catalogs, applied by `kind`",
+    ),
+    exception(
         "darkmatter/schemas",
         "partials/functions.yaml",
-        Class::FunctionCatalog,
-        "the expression-function catalog, embedded by Darkmatter's catalog loader",
+        Class::CallableCatalog,
+        "the built-in expression-schema catalog",
     ),
     exception(
         "darkmatter/schemas",
         "partials/mutations.yaml",
-        Class::FunctionCatalog,
-        "the mutation-function catalog",
+        Class::CallableCatalog,
+        "the built-in mutation-schema catalog",
     ),
     exception(
         "darkmatter/schemas",
@@ -183,36 +207,66 @@ const EXCEPTIONS: &[Exception] = &[
         Class::NotASchema,
         "a `kind: example` artifact embedded by the expression-function catalog",
     ),
-    // claudine/schemas
+    // claudine/registration
     exception(
-        "claudine/schemas",
-        "globals.yaml",
-        Class::GlobalCatalog,
-        "Claudine's host catalog of `seq`, `loop`, and `group`, registered explicitly",
-    ),
-    exception(
-        "claudine/schemas",
-        "claudine.yaml",
+        "claudine/registration",
+        "composition.yaml",
         Class::Trigger,
         "Claudine's frontmatter catalog, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "inline-compose.yaml",
+        "claudine/registration",
+        "inline-composition.yaml",
         Class::Trigger,
         "inline-compose's document metadata, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "sequence.yaml",
+        "claudine/registration",
+        "sequence-document.yaml",
         Class::Trigger,
         "the sequence document's catalog, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "claudine-document.yaml",
-        Class::Trigger,
-        "Claudine's identifying trigger, named by its `darkmatter-host` manifest; its payload is empty",
+        "claudine/registration",
+        "group.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `group` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "loop.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `loop` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "seq.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `seq` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "formal-sequence-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: sequence` YAML file, applied by `kind`",
+    ),
+    exception(
+        "claudine/registration",
+        "task-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: task` YAML file, applied by `kind`",
+    ),
+    exception(
+        "claudine/registration",
+        "group-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: group` YAML file, applied by `kind`",
+    ),
+    exception(
+        "claudine/registration",
+        "group-catalog-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: group-catalog` YAML file, applied by `kind`",
     ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
@@ -291,18 +345,21 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     // The md profile's open keys and loose bodies.
     ("darkmatter/schemas/partials/md-lifecycle.yaml", &["unknown"]),
     // `cancelled-stop`'s short forms; the rest is referenced from Darkmatter.
-    ("claudine/schemas/action.yaml", &["null", "unknown"]),
+    ("claudine/registration/action.yaml", &["null", "unknown"]),
     // Loose bodies and loop-action values.
-    ("claudine/schemas/lifecycle.yaml", &["unknown"]),
+    ("claudine/registration/lifecycle-events.yaml", &["unknown"]),
     // The `null`-typed Darkmatter event names.
-    ("claudine/schemas/claudine.yaml", &["null"]),
+    ("claudine/registration/shared.yaml", &["null"]),
+    // Each inline arm types the other arm's key as `null`.
+    ("claudine/registration/inline-composition.yaml", &["null"]),
     // The hash payload, which both metadata triggers import.
-    ("claudine/schemas/document.yaml", &["unknown"]),
+    ("claudine/registration/document.yaml", &["unknown"]),
     // Step outputs, loop results, and leg payloads are any value.
-    ("claudine/schemas/globals.yaml", &["unknown"]),
-    // Removed root `fail_fast`, and the parser-checked task and step fields.
-    ("claudine/schemas/sequence.yaml", &["null"]),
-    ("claudine/schemas/sequence-types.yaml", &["unknown"]),
+    ("claudine/registration/group.yaml", &["unknown"]),
+    ("claudine/registration/loop.yaml", &["unknown"]),
+    ("claudine/registration/seq.yaml", &["unknown"]),
+    // The parser-checked task and step fields.
+    ("claudine/registration/sequence.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
     (
@@ -331,13 +388,19 @@ impl Artifact {
 /// dependencies, and fixture directories (`tests/fixtures`, a spike's `fixtures`)
 /// are not shipped and are skipped.
 fn files_below(dir: &Path, ext: &str) -> Vec<PathBuf> {
+    typed_files_below(dir, ext).into_iter().map(|(path, _)| path).collect()
+}
+
+/// [`files_below`] with each file's no-follow type, as `DirEntry` reports it.
+fn typed_files_below(dir: &Path, ext: &str) -> Vec<(PathBuf, fs::FileType)> {
     let mut found = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(current) = pending.pop() {
         let entries = fs::read_dir(&current)
             .unwrap_or_else(|error| panic!("{} is unreadable: {error}", current.display()));
         for entry in entries {
-            let path = entry.expect("directory entry").path();
+            let entry = entry.expect("directory entry");
+            let path = entry.path();
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -347,11 +410,11 @@ fn files_below(dir: &Path, ext: &str) -> Vec<PathBuf> {
                     pending.push(path);
                 }
             } else if path.extension().is_some_and(|extension| extension == ext) {
-                found.push(path);
+                found.push((path, entry.file_type().expect("file type")));
             }
         }
     }
-    found.sort();
+    found.sort_by(|(a, _), (b, _)| a.cmp(b));
     found
 }
 
@@ -503,7 +566,9 @@ fn parse_bodies(document: &YamlValue) -> Result<Vec<PropertyDef>, Vec<String>> {
         for map in mappings {
             for (name, value) in map {
                 let Some(name) = name.as_str() else { continue };
-                if name.starts_with('$') {
+                // A `removed(…)` key declaration belongs to its object, not
+                // to a property definition.
+                if name.starts_with('$') || value.as_str().is_some_and(|text| text.starts_with("removed(")) {
                     continue;
                 }
                 match parse_property_definition(name, value) {
@@ -673,6 +738,7 @@ fn shipped_schema_artifacts_parse_passively() {
             root.join("content-policy/schemas"),
         ),
         ("schemas", root.join("schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         (".claudine/schemas", root.join(".claudine/schemas")),
         (
@@ -685,7 +751,11 @@ fn shipped_schema_artifacts_parse_passively() {
     // A single top-level directory is too coarse for CI's test-input index, so
     // the repository-root schemas are also named file by file.
     for file in [
+        "schemas/ci-evidence.yaml",
         "schemas/feature-review.yaml",
+        "schemas/kind.yaml",
+        "schemas/review-fix-cycle.yaml",
+        "schemas/specification.yaml",
         "schemas/suggestion-review.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
@@ -736,7 +806,7 @@ fn shipped_schema_artifacts_parse_passively() {
                 record_core_types(&mut core_type_users, &label, &parsed);
                 loadable += 1;
             }
-            Class::FunctionCatalog => {
+            Class::CallableCatalog => {
                 let Ok(Some(parsed_document)) = &outcome else {
                     panic!("{label} must parse as a standalone schema: {outcome:?}");
                 };
@@ -873,6 +943,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
             root.join("content-policy/schemas"),
         ),
         ("schemas", root.join("schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         (".claudine/schemas", root.join(".claudine/schemas")),
         (
@@ -883,7 +954,11 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     ];
     let artifacts = collect_artifacts(&groups);
     for file in [
+        "schemas/ci-evidence.yaml",
         "schemas/feature-review.yaml",
+        "schemas/kind.yaml",
+        "schemas/review-fix-cycle.yaml",
+        "schemas/specification.yaml",
         "schemas/suggestion-review.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
@@ -968,12 +1043,14 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     "{label}: {error}"
                 );
             }
-            Class::FunctionCatalog => {
+            Class::CallableCatalog => {
+                // A callable catalog is private: never a document schema, and
+                // none of its entries (helpers included) is an import source.
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                     .expect_err(&format!("{label} must never apply as a document schema"));
                 assert!(
-                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }),
-                    "{label} must be refused as a `types`-only document: {error}"
+                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::CallableCatalog, .. }),
+                    "{label} must be refused as a callable catalog: {error}"
                 );
                 let types = yaml_key(&document, "types")
                     .and_then(YamlValue::as_mapping)
@@ -990,9 +1067,9 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                         artifact.path.file_name().and_then(|file| file.to_str()).expect("UTF-8 file name")
                     ))
                     .expect("YAML");
-                    let resolved = resolve_yaml_schema(&import, dir, &context)
-                        .unwrap_or_else(|error| panic!("{label} `{name}` must import: {error}"));
-                    assert_lowered(&resolved, &format!("{label} `{name}`"));
+                    let error = resolve_yaml_schema(&import, dir, &context)
+                        .expect_err(&format!("{label} `{name}` is a private helper"));
+                    assert!(error.to_string().contains("callable catalog"), "{label} `{name}`: {error}");
                     inline_bodies += 1;
                 }
             }
@@ -1010,6 +1087,130 @@ fn loadable_shipped_schemas_resolve_and_lower() {
         inline_bodies >= 9,
         "only {inline_bodies} rejected-envelope bodies resolved inline"
     );
+}
+
+#[test]
+fn repository_kind_schema_validates_markdown_catalog_kinds() {
+    let schema = repo_root().join("schemas/kind.yaml");
+    let source = ComposeSource::File(schema.with_file_name("kind-validation.md"));
+    let scratch = tempfile::tempdir().expect("isolated validation context");
+    let context = FileResolutionContext::new(scratch.path()).without_home_dir();
+    let api = DarkmatterSchemas::new(context);
+    let validate = |kind: &str| {
+        let document = Markdown::from(format!(
+            "---\n$schema: ./kind.yaml\nkind: {kind}\n---\n# Catalog\n"
+        ))
+        .with_source(source.clone());
+        api.validate(&document).expect("resolve the repository kind schema")
+    };
+
+    for kind in ["expression-schema", "mutation-schema"] {
+        let report = validate(kind);
+        assert!(report.valid && report.problems.is_empty(), "{kind}: {:?}", report.problems);
+    }
+
+    let report = validate("unsupported-catalog");
+    assert!(!report.valid);
+    let [problem] = report.problems.as_slice() else {
+        panic!("expected one kind error: {:?}", report.problems);
+    };
+    assert_eq!(problem.path, "/kind");
+    assert_eq!(problem.code, simplified_schema::ValidationProblemCode::ConstraintViolation);
+    assert_eq!((problem.line, problem.column), (Some(3), Some(7)));
+}
+
+#[test]
+fn review_fix_cycle_inputs_require_an_existing_specification_file() {
+    let schema = include_str!("../../../../schemas/review-fix-cycle.yaml");
+    let dir = tempfile::tempdir().expect("review workspace");
+    fs::write(dir.path().join("review-fix-cycle.yaml"), schema).expect("write schema");
+    for name in ["spec.md", "plan.md", "implementation-log.md"] {
+        fs::write(dir.path().join(name), "# Fixture\n").expect("write referenced document");
+    }
+    let api = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()).without_home_dir());
+    let validate = |fields: &str| {
+        let document = Markdown::from(format!("---\n$schema: ./review-fix-cycle.yaml\n{fields}---\n# Review\n"))
+            .with_source(ComposeSource::File(dir.path().join("review.md")));
+        api.validate(&document).expect("validate against the review schema")
+    };
+    let rejected_at = |fields: &str, path: &str| {
+        let report = validate(fields);
+        assert!(!report.valid, "{fields:?} must be rejected");
+        assert!(
+            report.problems.iter().any(|problem| problem.path == path),
+            "{fields:?}: expected a problem at {path}: {:?}",
+            report.problems
+        );
+    };
+
+    for spec in ["spec.md", "./spec.md"] {
+        let report = validate(&format!("spec: {spec}\n"));
+        assert!(report.valid, "{spec}: {:?}", report.problems);
+    }
+    // An existing file outside `match(**/*spec*.md)` is refused, not only
+    // left out of completion.
+    rejected_at("spec: ./plan.md\n", "/spec");
+    rejected_at("spec: ./missing-spec.md\n", "/spec");
+    let missing = validate("plan: ./plan.md\n");
+    assert!(!missing.valid, "spec is required");
+    assert!(
+        missing.problems.iter().any(|problem| problem.property.as_deref() == Some("spec")),
+        "{:?}",
+        missing.problems
+    );
+
+    for key in ["plan", "implementation-log"] {
+        for value in ["", " null", " \"\"", " ./plan.md"] {
+            let report = validate(&format!("spec: ./spec.md\n{key}:{value}\n"));
+            assert!(report.valid, "{key}:{value:?}: {:?}", report.problems);
+        }
+        rejected_at(&format!("spec: ./spec.md\n{key}: [./plan.md]\n"), &format!("/{key}"));
+    }
+}
+
+#[test]
+fn specification_schema_validates_its_imported_cycle_fields() {
+    let dir = tempfile::tempdir().expect("specification workspace");
+    fs::write(
+        dir.path().join("review-fix-cycle.yaml"),
+        include_str!("../../../../schemas/review-fix-cycle.yaml"),
+    )
+    .expect("write cycle schema");
+    fs::write(
+        dir.path().join("specification.yaml"),
+        include_str!("../../../../schemas/specification.yaml"),
+    )
+    .expect("write specification schema");
+    let api = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()).without_home_dir());
+    let validate = |fields: &str| {
+        let document = Markdown::from(format!("---\n$schema: ./specification.yaml\n{fields}---\n# Spec\n"))
+            .with_source(ComposeSource::File(dir.path().join("spec.md")));
+        api.validate(&document).expect("validate against the specification schema")
+    };
+    let good = "\
+cycle-verdict: extend
+blast-radius:
+    packages: [darkmatter]
+pipeline:
+    name: schemas
+";
+    let report = validate(good);
+    assert!(report.valid, "{:?}", report.problems);
+
+    for (bad, path) in [
+        (good.replace("extend", "maybe"), "/cycle-verdict"),
+        (good.replace("[darkmatter]", "{package: darkmatter}"), "/blast-radius/packages"),
+        (good.replace("name: schemas", "next: other"), "/pipeline"),
+    ] {
+        let report = validate(&bad);
+        assert!(!report.valid, "{bad:?} must be rejected");
+        let problem = report
+            .problems
+            .iter()
+            .find(|problem| problem.path.starts_with(path))
+            .unwrap_or_else(|| panic!("{bad:?}: expected a problem at {path}: {:?}", report.problems));
+        assert!(problem.line.is_some(), "{bad:?}: the problem is located: {problem:?}");
+    }
 }
 
 struct InlineSchema {
@@ -1052,23 +1253,34 @@ fn authored_schema_value(frontmatter: &str) -> Option<String> {
 }
 
 /// The `$schema` value of every Markdown file below `dirs` whose frontmatter
-/// declares one. Files without the `$schema` needle are never YAML-decoded.
+/// declares one. A regular file Git reports free of the `$schema` needle is
+/// never opened (a link always is), and a frontmatter without it is never YAML-decoded.
 fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
+    let pathspecs: Vec<String> = dirs
+        .iter()
+        .map(|dir| format!(":(glob){}/**/*.md", relative(dir, root)))
+        .collect();
+    let pathspecs: Vec<&str> = pathspecs.iter().map(String::as_str).collect();
+    let skippable = git_prefilter::clean_tracked_files_without(root, &["$schema"], &pathspecs);
     let mut found = Vec::new();
     for dir in dirs {
-        for path in files_below(dir, "md") {
+        for (path, kind) in typed_files_below(dir, "md") {
+            let label = relative(&path, root);
+            if skippable.skips(&label, kind) {
+                continue;
+            }
             let Ok(text) = fs::read_to_string(&path) else {
                 continue;
             };
-            if !text.contains("$schema") {
-                continue;
-            }
             let Some(frontmatter_text) = text
                 .strip_prefix("---\n")
                 .and_then(|rest| rest.find("\n---").map(|end| &rest[..end]))
             else {
                 continue;
             };
+            if !frontmatter_text.contains("$schema") {
+                continue;
+            }
             let Ok(frontmatter) = serde_yaml_ng::from_str::<YamlValue>(frontmatter_text) else {
                 continue;
             };
@@ -1076,7 +1288,7 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
                 continue;
             };
             found.push(InlineSchema {
-                label: relative(&path, root),
+                label,
                 declaration: declaration.clone(),
                 authored: authored_schema_value(frontmatter_text),
                 path,
@@ -1091,39 +1303,158 @@ fn has_named_reference(declaration: &SchemaDeclaration) -> bool {
         && format!("{declaration:?}").contains("Imported {")
 }
 
-/// Every inline `$schema` in shipped documentation, and in the darkmatter,
-/// claudine, and messenger planning trees (where every inline named-type
-/// reference lives), parses passively, and the source-aware declaration parser
-/// returns the same declaration or the same error. The internal `prompts/`
-/// folders and fixture directories are outside the scope.
+/// One slice of the inline-schema scope: every shipped documentation tree,
+/// and the darkmatter, claudine, and messenger planning trees (where every
+/// inline named-type reference lives). The internal `prompts/` folders and
+/// fixture directories are outside the scope.
+///
+/// Each group is checked by one test in each of the
+/// `shipped_markdown_inline_schemas_parse_passively` and
+/// `shipped_markdown_named_type_references_resolve` modules, so nextest
+/// spreads the walk of about 3,800 documents, and the opening and frontmatter
+/// decoding of the third that Git does not rule out, over separate processes;
+/// done in one process without Git's answer, each took over 6 s on native
+/// Windows. [`inline_groups_cover_the_scope_once`] holds the groups to the
+/// scope and the floors to the corpus-wide minimums.
+struct InlineGroup {
+    name: &'static str,
+    /// Repository-relative directories, as the group's tests join them.
+    dirs: &'static [&'static str],
+    /// Minimum inline schemas found, and minimum parsed source-aware.
+    min_schemas: usize,
+    /// Minimum schemas with named-type references resolved.
+    min_resolved: usize,
+}
+
+/// The whole scope, in the order the groups split it.
+const INLINE_SCOPE: [&str; 16] = [
+    "darkmatter/docs",
+    "darkmatter/example-docs",
+    "content-policy/docs",
+    "biscuit-terminal/docs",
+    "biscuit-file/docs",
+    "sniff/docs",
+    "homelab/docs",
+    "docs/topics",
+    "docs/cicd",
+    "claudine/docs",
+    ".claude/skills",
+    "darkmatter/features",
+    "darkmatter/fixes",
+    "messenger/features",
+    "claudine/features",
+    "claudine/fixes",
+];
+
+/// Corpus-wide minimums the group floors must add up to.
+const MIN_INLINE_SCHEMAS: usize = 500;
+const MIN_NAMED_RESOLVED: usize = 4;
+
+const INLINE_GROUPS: &[InlineGroup] = &[
+    InlineGroup {
+        name: "package_docs",
+        dirs: &[
+            "darkmatter/docs",
+            "darkmatter/example-docs",
+            "content-policy/docs",
+            "biscuit-terminal/docs",
+            "biscuit-file/docs",
+            "sniff/docs",
+            "homelab/docs",
+            "docs/topics",
+            "docs/cicd",
+        ],
+        min_schemas: 25,
+        min_resolved: 1,
+    },
+    InlineGroup {
+        name: "claudine_docs",
+        dirs: &["claudine/docs"],
+        min_schemas: 127,
+        min_resolved: 0,
+    },
+    InlineGroup {
+        name: "skills",
+        dirs: &[".claude/skills"],
+        // The skills' own frontmatter declares no `$schema`; those found here
+        // are reached through symlinks into `claudine/docs`, which a checkout
+        // without symlinks (native Windows) holds as plain files.
+        min_schemas: 0,
+        min_resolved: 0,
+    },
+    InlineGroup {
+        name: "darkmatter_features",
+        dirs: &["darkmatter/features"],
+        min_schemas: 103,
+        min_resolved: 0,
+    },
+    InlineGroup {
+        name: "darkmatter_fixes_and_messenger_features",
+        dirs: &["darkmatter/fixes", "messenger/features"],
+        min_schemas: 82,
+        min_resolved: 3,
+    },
+    InlineGroup {
+        name: "claudine_features",
+        dirs: &["claudine/features"],
+        min_schemas: 87,
+        min_resolved: 0,
+    },
+    InlineGroup {
+        name: "claudine_fixes",
+        dirs: &["claudine/fixes"],
+        min_schemas: 76,
+        min_resolved: 0,
+    },
+];
+
+/// The group `name`, after checking that its test joined exactly the group's
+/// directories onto `root`.
+fn inline_group(root: &Path, name: &str, dirs: &[PathBuf]) -> &'static InlineGroup {
+    let group = INLINE_GROUPS
+        .iter()
+        .find(|group| group.name == name)
+        .unwrap_or_else(|| panic!("no inline group `{name}`"));
+    let joined: Vec<String> = dirs.iter().map(|dir| relative(dir, root)).collect();
+    assert_eq!(joined, group.dirs, "the `{name}` test must join exactly its group's directories");
+    group
+}
+
+/// Every group is checked by one test in each module, the groups split
+/// [`INLINE_SCOPE`] once and in order, and their floors add up to the
+/// corpus-wide minimums.
 #[test]
-fn shipped_markdown_inline_schemas_parse_passively() {
-    let root = repo_root();
-    let dirs = [
-        root.join("darkmatter/docs"),
-        root.join("darkmatter/example-docs"),
-        root.join("claudine/docs"),
-        root.join("content-policy/docs"),
-        root.join("biscuit-terminal/docs"),
-        root.join("biscuit-file/docs"),
-        root.join("sniff/docs"),
-        root.join("homelab/docs"),
-        root.join("docs/topics"),
-        root.join("docs/cicd"),
-        root.join(".claude/skills"),
-        root.join("darkmatter/features"),
-        root.join("darkmatter/fixes"),
-        root.join("claudine/features"),
-        root.join("claudine/fixes"),
-        root.join("messenger/features"),
-    ];
-    // A spike probe recording that an unquoted parenthesized pattern does not
-    // parse.
-    let expected_failures = [(
-        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p12_pattern_parens.md",
-        "expected `,` or `)` in argument list",
-    )];
-    let schemas = inline_schemas(&root, &dirs);
+fn inline_groups_cover_the_scope_once() {
+    let source = include_str!("shipped_schema_corpus.rs");
+    for group in INLINE_GROUPS {
+        let test = format!("    fn {}() {{", group.name);
+        assert_eq!(
+            source.matches(&test).count(),
+            2,
+            "group `{}` needs one test in each inline-schema module",
+            group.name
+        );
+    }
+    let split: Vec<&str> = INLINE_GROUPS.iter().flat_map(|group| group.dirs.iter().copied()).collect();
+    assert_eq!(split, INLINE_SCOPE, "the groups must split the scope once, in order");
+    assert!(INLINE_GROUPS.iter().map(|group| group.min_schemas).sum::<usize>() >= MIN_INLINE_SCHEMAS);
+    assert!(INLINE_GROUPS.iter().map(|group| group.min_resolved).sum::<usize>() >= MIN_NAMED_RESOLVED);
+}
+
+/// Every inline `$schema` in the group's directories parses passively, and the
+/// source-aware declaration parser returns the same declaration or the same
+/// error. Each `named` label must parse with a named-type reference; each
+/// `expected_failures` label must fail with an error containing its fragment.
+/// The test passes the labels so that CI's test-input index ties each file to
+/// that test alone.
+fn assert_inline_schemas_parse_passively(
+    root: &Path,
+    group: &InlineGroup,
+    dirs: &[PathBuf],
+    named_labels: &[&str],
+    expected_failures: &[(&str, &str)],
+) {
+    let schemas = inline_schemas(root, dirs);
     let before = fingerprint(schemas.iter().map(|schema| schema.path.as_path()));
     let counters = effect_counters();
 
@@ -1195,59 +1526,121 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         failed, expected_failed,
         "an expected failure now parses; remove it"
     );
-    for label in [
-        "darkmatter/docs/research/parsing/_fleet_future.md",
-        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_import.md",
-        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_one_line.md",
-        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_single_quoted.md",
-    ] {
+    for label in named_labels {
         assert!(
-            named.contains(&label),
+            named.contains(label),
             "{label} must parse with a named-type reference; found {named:#?}"
         );
     }
     assert!(
-        schemas.len() >= 500,
-        "the inline-schema corpus shrank to {}",
+        schemas.len() >= group.min_schemas,
+        "the `{}` inline-schema corpus shrank to {}",
+        group.name,
         schemas.len()
     );
     assert!(
-        source_aware >= 500,
-        "only {source_aware} inline schemas were parsed source-aware"
+        source_aware >= group.min_schemas,
+        "only {source_aware} `{}` inline schemas were parsed source-aware",
+        group.name
     );
 }
 
-/// Every shipped inline `$schema` carrying a named-type reference resolves
-/// without a constraint conflict. The only unknown name is
+/// Every inline `$schema` in shipped documentation and planning trees parses
+/// passively ([`assert_inline_schemas_parse_passively`]), one test per
+/// [`InlineGroup`].
+mod shipped_markdown_inline_schemas_parse_passively {
+    use super::*;
+
+    #[test]
+    fn package_docs() {
+        let root = repo_root();
+        let dirs = [
+            root.join("darkmatter/docs"),
+            root.join("darkmatter/example-docs"),
+            root.join("content-policy/docs"),
+            root.join("biscuit-terminal/docs"),
+            root.join("biscuit-file/docs"),
+            root.join("sniff/docs"),
+            root.join("homelab/docs"),
+            root.join("docs/topics"),
+            root.join("docs/cicd"),
+        ];
+        let group = inline_group(&root, "package_docs", &dirs);
+        assert_inline_schemas_parse_passively(
+            &root,
+            group,
+            &dirs,
+            &["darkmatter/docs/research/parsing/_fleet_future.md"],
+            &[],
+        );
+    }
+
+    #[test]
+    fn claudine_docs() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/docs")];
+        assert_inline_schemas_parse_passively(&root, inline_group(&root, "claudine_docs", &dirs), &dirs, &[], &[]);
+    }
+
+    #[test]
+    fn skills() {
+        let root = repo_root();
+        let dirs = [root.join(".claude/skills")];
+        assert_inline_schemas_parse_passively(&root, inline_group(&root, "skills", &dirs), &dirs, &[], &[]);
+    }
+
+    #[test]
+    fn darkmatter_features() {
+        let root = repo_root();
+        let dirs = [root.join("darkmatter/features")];
+        assert_inline_schemas_parse_passively(&root, inline_group(&root, "darkmatter_features", &dirs), &dirs, &[], &[]);
+    }
+
+    #[test]
+    fn darkmatter_fixes_and_messenger_features() {
+        let root = repo_root();
+        let dirs = [root.join("darkmatter/fixes"), root.join("messenger/features")];
+        let group = inline_group(&root, "darkmatter_fixes_and_messenger_features", &dirs);
+        let named = [
+            "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_import.md",
+            "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_one_line.md",
+            "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_single_quoted.md",
+        ];
+        // A spike probe recording that an unquoted parenthesized pattern does
+        // not parse.
+        let expected_failures = [(
+            "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p12_pattern_parens.md",
+            "expected `,` or `)` in argument list",
+        )];
+        assert_inline_schemas_parse_passively(&root, group, &dirs, &named, &expected_failures);
+    }
+
+    #[test]
+    fn claudine_features() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/features")];
+        assert_inline_schemas_parse_passively(&root, inline_group(&root, "claudine_features", &dirs), &dirs, &[], &[]);
+    }
+
+    #[test]
+    fn claudine_fixes() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/fixes")];
+        assert_inline_schemas_parse_passively(&root, inline_group(&root, "claudine_fixes", &dirs), &dirs, &[], &[]);
+    }
+}
+
+/// Every inline `$schema` in the group's directories carrying a named-type
+/// reference resolves without a constraint conflict. The only unknown name is
 /// `_fleet_future.md`'s bare `crate`, which that document defines under
-/// `$types:` rather than in its `$schema`.
-#[test]
-fn shipped_markdown_named_type_references_resolve() {
-    let root = repo_root();
-    let dirs = [
-        root.join("darkmatter/docs"),
-        root.join("darkmatter/example-docs"),
-        root.join("claudine/docs"),
-        root.join("content-policy/docs"),
-        root.join("biscuit-terminal/docs"),
-        root.join("biscuit-file/docs"),
-        root.join("sniff/docs"),
-        root.join("homelab/docs"),
-        root.join("docs/topics"),
-        root.join("docs/cicd"),
-        root.join(".claude/skills"),
-        root.join("darkmatter/features"),
-        root.join("darkmatter/fixes"),
-        root.join("claudine/features"),
-        root.join("claudine/fixes"),
-        root.join("messenger/features"),
-    ];
-    let fleet_future = "darkmatter/docs/research/parsing/_fleet_future.md";
+/// `$types:` rather than in its `$schema`; its test passes that label as
+/// `fleet_future`.
+fn assert_named_type_references_resolve(root: &Path, group: &InlineGroup, dirs: &[PathBuf], fleet_future: Option<&str>) {
     let scratch = tempfile::tempdir().expect("scratch dir");
     let context = FileResolutionContext::new(scratch.path());
 
     let mut resolved = 0usize;
-    for schema in inline_schemas(&root, &dirs) {
+    for schema in inline_schemas(root, dirs) {
         let Ok(declaration) = parse_schema_declaration(&schema.declaration) else {
             continue;
         };
@@ -1256,10 +1649,10 @@ fn shipped_markdown_named_type_references_resolve() {
         }
         let dir = schema.path.parent().expect("document directory");
         let outcome = resolve_yaml_schema(&schema.declaration, dir, &context);
-        if schema.label == fleet_future {
+        if Some(schema.label.as_str()) == fleet_future {
             match outcome {
                 Err(SchemaError::UnknownNamedType { name, .. }) => assert_eq!(name, "crate"),
-                other => panic!("{fleet_future} must report the unknown `crate`: {other:?}"),
+                other => panic!("{} must report the unknown `crate`: {other:?}", schema.label),
             }
         } else {
             match outcome {
@@ -1274,9 +1667,78 @@ fn shipped_markdown_named_type_references_resolve() {
         resolved += 1;
     }
     assert!(
-        resolved >= 4,
-        "only {resolved} inline schemas carry named-type references"
+        resolved >= group.min_resolved,
+        "only {resolved} `{}` inline schemas carry named-type references",
+        group.name
     );
+}
+
+/// Every shipped inline `$schema` carrying a named-type reference resolves
+/// ([`assert_named_type_references_resolve`]), one test per [`InlineGroup`].
+mod shipped_markdown_named_type_references_resolve {
+    use super::*;
+
+    #[test]
+    fn package_docs() {
+        let root = repo_root();
+        let dirs = [
+            root.join("darkmatter/docs"),
+            root.join("darkmatter/example-docs"),
+            root.join("content-policy/docs"),
+            root.join("biscuit-terminal/docs"),
+            root.join("biscuit-file/docs"),
+            root.join("sniff/docs"),
+            root.join("homelab/docs"),
+            root.join("docs/topics"),
+            root.join("docs/cicd"),
+        ];
+        let group = inline_group(&root, "package_docs", &dirs);
+        let fleet_future = "darkmatter/docs/research/parsing/_fleet_future.md";
+        assert_named_type_references_resolve(&root, group, &dirs, Some(fleet_future));
+    }
+
+    #[test]
+    fn claudine_docs() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/docs")];
+        assert_named_type_references_resolve(&root, inline_group(&root, "claudine_docs", &dirs), &dirs, None);
+    }
+
+    #[test]
+    fn skills() {
+        let root = repo_root();
+        let dirs = [root.join(".claude/skills")];
+        assert_named_type_references_resolve(&root, inline_group(&root, "skills", &dirs), &dirs, None);
+    }
+
+    #[test]
+    fn darkmatter_features() {
+        let root = repo_root();
+        let dirs = [root.join("darkmatter/features")];
+        assert_named_type_references_resolve(&root, inline_group(&root, "darkmatter_features", &dirs), &dirs, None);
+    }
+
+    #[test]
+    fn darkmatter_fixes_and_messenger_features() {
+        let root = repo_root();
+        let dirs = [root.join("darkmatter/fixes"), root.join("messenger/features")];
+        let group = inline_group(&root, "darkmatter_fixes_and_messenger_features", &dirs);
+        assert_named_type_references_resolve(&root, group, &dirs, None);
+    }
+
+    #[test]
+    fn claudine_features() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/features")];
+        assert_named_type_references_resolve(&root, inline_group(&root, "claudine_features", &dirs), &dirs, None);
+    }
+
+    #[test]
+    fn claudine_fixes() {
+        let root = repo_root();
+        let dirs = [root.join("claudine/fixes")];
+        assert_named_type_references_resolve(&root, inline_group(&root, "claudine_fixes", &dirs), &dirs, None);
+    }
 }
 
 /// Research contracts are the largest shipped users of named types, and they
@@ -1387,7 +1849,7 @@ fn inline_shape<'a>(definition: &'a PropertyDef, label: &str) -> &'a SchemaShape
 fn migrated_shipped_definitions_declare_their_presence() {
     let root = repo_root();
     let side_effect_path = root.join("claudine/docs/schemas/partials/side-effect.yaml");
-    let claudine_path = root.join("claudine/schemas/claudine.yaml");
+    let claudine_path = root.join("claudine/registration/shared.yaml");
     let before = fingerprint([side_effect_path.as_path(), claudine_path.as_path()]);
     let counters = effect_counters();
 
@@ -1431,7 +1893,8 @@ fn migrated_shipped_definitions_declare_their_presence() {
     let claudine: YamlValue =
         serde_yaml_ng::from_str(&fs::read_to_string(&claudine_path).expect("readable"))
             .expect("Claudine's catalog is YAML");
-    let schema = yaml_key(&claudine, "$schema").expect("the trigger has a `$schema` payload");
+    let schema = yaml_key(yaml_key(&claudine, "types").expect("the library has `types`"), "common-attributes")
+        .expect("the catalog's common attributes");
     let property = |key: &str| {
         parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
             .unwrap_or_else(|error| panic!("`{key}`: {error}"))
@@ -1666,6 +2129,7 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         ("darkmatter/example-docs/schemas", root.join("darkmatter/example-docs/schemas")),
         ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
         ("content-policy/schemas", root.join("content-policy/schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
         ("claudine/docs/research", root.join("claudine/docs/research")),
@@ -1740,18 +2204,18 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
 /// it reports the slot unresolved rather than producing a schema.
 #[test]
 fn the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving() {
-    let text = include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let text = include_str!("../../../../claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml");
     let root = repo_root();
-    let path = root.join("claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let path = root.join("claudine/docs/research/providers/sandboxing/providers/sandboxing.yaml");
     let source = simplified_schema::SchemaSource::from(path.as_path())
         .bound(FileResolutionContext::new(path.parent().expect("the schema's folder")))
         .with_text(text);
     let schema = simplified_schema::SimplifiedSchema::try_from_yaml(source).expect("the template is admitted");
     assert!(!schema.is_resolved(), "the schema holds a slot");
     let slots: Vec<&str> = schema.pending_slots().iter().map(|slot| slot.expression.as_str()).collect();
-    assert_eq!(slots, [r#"load_data("../../../os.yaml", "string[]")"#]);
+    assert_eq!(slots, [r#"load_data("../../../../os.yaml", "string[]")"#]);
     assert_eq!(
-        biscuit_file::canonicalize_simplified(&path.parent().unwrap().join("../../../os.yaml")).ok(),
+        biscuit_file::canonicalize_simplified(&path.parent().unwrap().join("../../../../os.yaml")).ok(),
         biscuit_file::canonicalize_simplified(&root.join("claudine/docs/os.yaml")).ok(),
         "the slot names the shipped OS list"
     );

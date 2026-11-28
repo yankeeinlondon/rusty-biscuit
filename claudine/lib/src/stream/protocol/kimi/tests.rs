@@ -607,7 +607,7 @@ fn prompt_result_decodes_steps_from_max_steps_fixture() {
     // Wire sample from the signals corpus (kimi.md record
     // `stream-turn_limit_reached-max_steps`).
     const MAX_STEPS_LINE: &str = include_str!(
-        "../../../../../docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
+        "../../../../../docs/research/providers/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
     );
     let value: Value = serde_json::from_str(MAX_STEPS_LINE.trim()).unwrap();
     let env = KimiEnvelope::classify(value).expect("classified");
@@ -628,7 +628,7 @@ fn question_request_decodes_current_nested_shape() {
     // Wire sample from the signals corpus (kimi.md record
     // `stream-human_input_requested-question_request`, Wire >= 1.4).
     const QUESTION_LINE: &str = include_str!(
-        "../../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        "../../../../../docs/research/providers/signals/fixtures/kimi/wire-question-request.jsonl"
     );
     let value: Value = serde_json::from_str(QUESTION_LINE.trim()).unwrap();
     let env = KimiEnvelope::classify(value).expect("classified");

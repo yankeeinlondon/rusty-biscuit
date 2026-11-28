@@ -20,6 +20,13 @@ const fn ambient(path: &'static str, identifier: &'static str, count: usize, rea
 const HOME_CONFIG: &str = "locates a provider's or Claudine's own configuration under the user's home";
 
 const ALLOWLIST: &[Allowance] = &[
+    Allowance {
+        gate: Gate::Construction,
+        path: "composition/inventory.rs",
+        identifier: "FileResolutionContext::from_snapshot",
+        count: 1,
+        reason: "`bundle_context`: a detached context at the embedded inventory's virtual root, for preparations that read only the compiled-in bundle; it names no file and captures no process state",
+    },
     ambient(
         "child_environment.rs",
         "std::env::current_dir",
@@ -57,10 +64,28 @@ const ALLOWLIST: &[Allowance] = &[
         "`PLAYA_DRY_RUN` disables TTS pre-warm before its worker starts, as it does playback",
     ),
     ambient(
+        "composition/registration/access_log.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records the registration module's file-system calls for CLI tests",
+    ),
+    ambient(
+        "composition/source_open_log.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records every shared source open and schema preparation for CLI read-once tests",
+    ),
+    ambient(
         "composition/sequence/task/group/branch.rs",
         "std::env::var",
         1,
         "`test-fixtures` hook that records a group attempt's branch counts for CLI tests",
+    ),
+    ambient(
+        "doctor/path.rs",
+        "std::env::var_os",
+        1,
+        "`test-fixtures` hook that lets `claudine doctor` CLI tests skip the host's real Windows shell probes",
     ),
     ambient("config/antigravity.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),
     ambient("config/backup.rs", "biscuit_file::home_dir", 1, "locates Claudine's configuration backups under the user's home"),

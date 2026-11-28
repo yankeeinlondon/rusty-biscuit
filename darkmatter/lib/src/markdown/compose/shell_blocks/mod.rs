@@ -151,15 +151,13 @@ fn run_shell_blocks(
     let source_file = source_file_from_options(options);
 
     // Scan for block pairs (both page and shell)
-    let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
-        let line = e.line();
-        ShellBlockError::Parse {
-            line,
-            message: e.to_string(),
-            excerpt: SourceExcerpt::default(),
-            source_file: source_file.clone(),
-            note: e.note(),
-        }
+    let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| ShellBlockError::Parse {
+        line: e.line() + line_offset,
+        message: e.to_string(),
+        excerpt: SourceExcerpt::default(),
+        source_file: source_file.clone(),
+        note: e.note_with(|line| Some(line + line_offset)),
+        authored: None,
     })?;
 
     // Filter for shell blocks only
@@ -191,9 +189,9 @@ fn run_shell_blocks(
 
     for pair in shell_pairs {
         enter(pair.span.start);
-        let region = parser::parse_shell_block_region(content, &pair)?;
+        let region = parser::parse_shell_block_region(content, &pair).map_err(|error| error.shifted(line_offset))?;
         let body_text = &content[pair.body_span.clone()];
-        let resolved = body::split_logical_commands(body_text, pair.start_line + 1).and_then(|commands| {
+        let resolved = split_block_commands(body_text, pair.start_line + 1, line_offset).and_then(|commands| {
             if let Some(data) = data.filter(|data| data.intersects(&pair.body_span)) {
                 reject_data_shaped_commands(
                     &commands,
@@ -289,7 +287,7 @@ fn run_shell_blocks(
                         enter(pair.span.start);
                         return Err(error);
                     }
-                    let single = body::split_logical_commands(&raw.raw_command, command_line)?;
+                    let single = split_block_commands(&raw.raw_command, command_line, line_offset)?;
                     for command in &single {
                         commands.push((Ok(directive_of(command)), None, command_line, offset));
                     }
@@ -428,6 +426,17 @@ fn block_site<'a>(
         })
 }
 
+/// [`body::split_logical_commands`] of a block body starting on body line
+/// `body_start_line`, a failure counted past `line_offset` header lines as
+/// every shell-block failure leaving the stage is.
+pub(crate) fn split_block_commands(
+    body_text: &str,
+    body_start_line: usize,
+    line_offset: usize,
+) -> Result<Vec<types::ShellBlockCommand>, ShellBlockError> {
+    body::split_logical_commands(body_text, body_start_line).map_err(|error| error.shifted(line_offset))
+}
+
 /// Fails when inserted data shaped a block's commands: split or joined a
 /// command, or supplied an executable, chain operator, or redirection.
 ///
@@ -451,6 +460,7 @@ pub(crate) fn reject_data_shaped_commands(
         excerpt: SourceExcerpt::from_text(body_text, line, body_start_line, 2),
         source_file: source_file.clone(),
         note: None,
+        authored: None,
     };
     let (masked_groups, _) = body::group_logical_commands(masked_body, body_start_line);
     let spans_match = masked_groups.len() == commands.len()
@@ -841,16 +851,20 @@ mod tests {
         assert!(result.contains("hello"), "Expected hello output: {result}");
     }
 
+    /// An absolute document path on every OS: a rootless `/tmp/…` resolves
+    /// against the current drive on Windows.
+    const TEST_SOURCE: &str = if cfg!(windows) { "C:/tmp/test.md" } else { "/tmp/test.md" };
+
     #[test]
     fn source_file_in_error() {
         let content = "::shell-block\nfalse\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
-        let options = options.with_source_file("/tmp/test.md");
+        let options = options.with_source_file(TEST_SOURCE);
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
         match err {
             ShellBlockError::Command { source_file, .. } => {
-                assert_eq!(source_file, Some(std::path::PathBuf::from("/tmp/test.md")));
+                assert_eq!(source_file, Some(std::path::PathBuf::from(TEST_SOURCE)));
             }
             other => panic!("Expected Command error, got: {other:?}"),
         }
@@ -862,14 +876,14 @@ mod tests {
     #[test]
     fn every_block_error_names_the_source_file() {
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
-        let options = options.with_source_file("/tmp/test.md");
+        let options = options.with_source_file(TEST_SOURCE);
         for content in ["::shell-block timeout=bad\ntrue\n::end-block\n", "::shell-block\ntrue\n"] {
             let mut runtime = ShellExpansionRuntime::new();
             let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
             let (ShellBlockError::Parse { source_file, .. }
             | ShellBlockError::Unterminated { source_file, .. }
             | ShellBlockError::Command { source_file, .. }) = &err;
-            assert_eq!(source_file.as_deref(), Some(std::path::Path::new("/tmp/test.md")), "{content:?}: {err:?}");
+            assert_eq!(source_file.as_deref(), Some(std::path::Path::new(TEST_SOURCE)), "{content:?}: {err:?}");
         }
     }
 

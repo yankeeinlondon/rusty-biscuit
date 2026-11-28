@@ -112,7 +112,7 @@ impl Repo {
 
     /// The template as a fresh resolution reads it now.
     fn pending(&self) -> PendingSchema {
-        let reference = serde_yaml_ng::Value::String(biscuit_file::to_portable_string(&self.path(SCHEMA)));
+        let reference = serde_yaml_ng::Value::String(biscuit_file::to_forward_slash_string(&self.path(SCHEMA)));
         match simplified_schema::resolve::resolve_yaml_schema(
             &reference,
             &self.root,
@@ -203,7 +203,7 @@ mod reuse {
         let warm = repo.session_with(warm_data.clone());
         let (_, runs) = evaluations(|| resolve(&warm, &repo, &[]).unwrap());
         assert_eq!(runs, 0);
-        let expected = vec![biscuit_file::to_portable_string(&repo.path(DATA))];
+        let expected = vec![biscuit_file::to_forward_slash_string(&repo.path(DATA))];
         assert_eq!(cold_data.read_set(), expected);
         assert_eq!(warm_data.read_set(), expected);
     }
@@ -391,7 +391,7 @@ fn a_cross_command_check_trusts_an_unchanged_stat_and_rehashes_a_changed_one() {
     let path = biscuit_file::canonicalize_simplified(temp.path()).unwrap().join("os.yaml");
     std::fs::write(&path, "abc\n").unwrap();
     let observation = Observation {
-        entry: biscuit_file::to_portable_string(&path),
+        entry: biscuit_file::to_forward_slash_string(&path),
         kind: ObservationKind::File,
         hash: Some(biscuit_hash::blake3_hash_bytes(b"abc\n")),
     };
@@ -434,7 +434,7 @@ fn an_open_buffer_with_other_text_fails_the_check_though_the_stat_is_unchanged()
     let path = biscuit_file::canonicalize_simplified(temp.path()).unwrap().join("os.yaml");
     std::fs::write(&path, "- Linux\n").unwrap();
     let check = InputCheck::capture(Observation {
-        entry: biscuit_file::to_portable_string(&path),
+        entry: biscuit_file::to_forward_slash_string(&path),
         kind: ObservationKind::File,
         hash: Some(biscuit_hash::blake3_hash_bytes(b"- Linux\n")),
     });
@@ -461,7 +461,7 @@ fn a_read_of_an_open_buffer_is_rehashed_once_the_buffer_closes() {
     open.insert(&path, std::sync::Arc::from(unsaved));
     let check = buffers::with(&open, || {
         InputCheck::capture(Observation {
-            entry: biscuit_file::to_portable_string(&path),
+            entry: biscuit_file::to_forward_slash_string(&path),
             kind: ObservationKind::File,
             hash: Some(biscuit_hash::blake3_hash_bytes(unsaved.as_bytes())),
         })
@@ -663,7 +663,7 @@ mod consumed {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        biscuit_file::to_portable_string(&path)
+        biscuit_file::to_forward_slash_string(&path)
     }
 
     /// R2-F1.2 and R2-F1.3: `has_command` and `has_binary` share one probe;
@@ -827,10 +827,10 @@ mod nested_grants {
             let probe = Repo::new("kind: schema\n");
             let shared = probe.root.parent().unwrap().join("shared");
             let fill = |text: &str| {
-                text.replace("{repo}", &biscuit_file::to_portable_string(&probe.root))
-                    .replace("{shared}", &biscuit_file::to_portable_string(&shared))
+                text.replace("{repo}", &biscuit_file::to_forward_slash_string(&probe.root))
+                    .replace("{shared}", &biscuit_file::to_forward_slash_string(&shared))
             };
-            let contract = format!("Os@{}", biscuit_file::to_portable_string(&shared.join("types.yaml")));
+            let contract = format!("Os@{}", biscuit_file::to_forward_slash_string(&shared.join("types.yaml")));
             probe.write(SCHEMA, &schema_with(&format!("load_data(\"../data/os.yaml\", \"{contract}\")")));
             probe.write(PATTERN, "- '.*'\n");
             git(&probe.root, &["add", "-A"]);
@@ -945,7 +945,7 @@ mod nested_grants {
         let direct = "kind: schema\n$schema:\n    os: enum({{ load_data(\"{repo}/data/pattern.yaml\", \"string[]\") }}; required)\n";
         let run = |fixture: &Shared, session: &Arc<SlotSession>| {
             let path = fixture.shared.join("direct.yaml");
-            let reference = serde_yaml_ng::Value::String(biscuit_file::to_portable_string(&path));
+            let reference = serde_yaml_ng::Value::String(biscuit_file::to_forward_slash_string(&path));
             let pending = match simplified_schema::resolve::resolve_yaml_schema(
                 &reference,
                 &fixture.repo.root,

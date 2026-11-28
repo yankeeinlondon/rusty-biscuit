@@ -46,7 +46,7 @@ fn write(dir: &Path, name: &str, content: impl AsRef<[u8]>) -> PathBuf {
 /// The read-set spelling of `name` in `dir`.
 fn entry(dir: &Path, name: &str) -> String {
     let canonical = biscuit_file::canonicalize_simplified(dir).expect("canonical dir");
-    biscuit_file::to_portable_string(&canonical.join(name))
+    biscuit_file::to_forward_slash_string(&canonical.join(name))
 }
 
 /// A fresh fixture directory holding `fallback.json`.
@@ -772,7 +772,7 @@ fn unresolved_miss_gets_no_canonical_entry() {
     for recorded in &report.read_set {
         assert!(!Path::new(recorded).exists(), "{recorded} names nothing that exists");
         assert!(recorded.ends_with(name), "{recorded}");
-        let probed = biscuit_file::to_portable_string(&dir.path().join(name));
+        let probed = biscuit_file::to_forward_slash_string(&dir.path().join(name));
         if probed != canonical {
             assert_ne!(recorded, &canonical, "an absent file was given a canonical identity");
         }

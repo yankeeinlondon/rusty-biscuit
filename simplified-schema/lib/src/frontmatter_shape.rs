@@ -40,14 +40,16 @@ static NO_DEFINITIONS: LazyLock<DefinitionTable> = LazyLock::new(DefinitionTable
 /// `$schema` (document > trigger > extension > base, the compose precedence).
 ///
 /// A root `$schema` union overlays the arm its shared literal discriminant
-/// selects in `frontmatter`; when no arm is unambiguously selected, every
-/// inline arm's properties merge, and a key contributed by more than one arm
-/// resolves to the union of those arms' atoms. A file-reference arm
-/// contributes no properties.
+/// selects in `frontmatter`; when no arm is unambiguously selected, the
+/// inline arms that admit what `frontmatter` writes (or every inline arm,
+/// when none does) merge, and a key contributed by more than one arm
+/// resolves to the union of those arms' atoms
+/// ([`root_union_property_shape`]). A file-reference arm contributes no
+/// properties.
 ///
 /// `frontmatter` is the authored frontmatter mapping as JSON; pass
-/// [`Value::Null`] when none is available, which disables discriminant
-/// narrowing. A host supplies its own baseline as `base`.
+/// [`Value::Null`] when none is available, which disables narrowing. A host
+/// supplies its own baseline as `base`.
 pub fn layered_property_shape(
     base: SchemaShape,
     extension_shapes: &[SchemaShape],
@@ -307,43 +309,69 @@ fn alternatives_of<'a>(def: &'a PropertyDef, definitions: &'a DefinitionTable) -
 }
 
 fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter: &Value) {
-    let arm_json: Vec<Value> = arms.iter().map(root_arm_discriminant_json).collect();
-    match select_literal_discriminant_arm(&arm_json, frontmatter) {
-        Some(index) => {
-            if let SchemaArm::Inline(arm_shape) = &arms[index] {
-                for (name, def) in &arm_shape.properties {
-                    shape.properties.insert(name.clone(), def.clone());
-                }
-            }
-        }
-        // The merge is across arms only; the merged document shape still takes
-        // precedence over the base/extension baseline it overlays.
-        None => {
-            for (name, def) in merged_root_arm_shape(arms).properties {
-                shape.properties.insert(name, def);
-            }
-        }
+    let arms: Vec<Option<&SchemaShape>> = arms
+        .iter()
+        .map(|arm| match arm {
+            SchemaArm::Inline(shape) => Some(shape),
+            SchemaArm::FileRef(_) => None,
+        })
+        .collect();
+    // The view is across arms only; it still takes precedence over the
+    // base/extension baseline it overlays.
+    for (name, def) in union_view(&arms, frontmatter).properties {
+        shape.properties.insert(name, def);
     }
 }
 
-fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
+/// The editor's property view of a root union whose inline arms are `arms`,
+/// for the authored `frontmatter`, by the rule a document `$schema` union
+/// follows in [`layered_property_shape`]: the arm a shared literal
+/// discriminant selects; otherwise every arm that admits what is written,
+/// merged (or every arm, when none does). An arm refuses what is written when
+/// it types a key the document writes with a non-`null` value as `null` alone,
+/// so a written branch key (`prompt: hi`) leaves the arms of that branch.
+///
+/// Merging keeps a declaration every arm shares exactly as written, and a key
+/// several arms declare differently resolves to the union of their atoms. A
+/// host layers the result as one trigger shape; pass [`Value::Null`] for the
+/// view of every arm.
+pub fn root_union_property_shape(arms: &[SchemaShape], frontmatter: &Value) -> SchemaShape {
+    let arms: Vec<Option<&SchemaShape>> = arms.iter().map(Some).collect();
+    union_view(&arms, frontmatter)
+}
+
+/// `arms` keeps a file-reference arm's slot (`None`) so the discriminant
+/// selector's index maps back.
+fn union_view(arms: &[Option<&SchemaShape>], frontmatter: &Value) -> SchemaShape {
+    let arm_json: Vec<Value> = arms
+        .iter()
+        .map(|arm| arm.map_or_else(|| serde_json::json!({}), shape_discriminant_json))
+        .collect();
     let mut merged = SchemaShape::default();
-    for arm in arms {
-        let SchemaArm::Inline(arm_shape) = arm else {
-            continue;
-        };
-        merge_properties_into(&mut merged, arm_shape);
+    if let Some(index) = select_literal_discriminant_arm(&arm_json, frontmatter) {
+        if let Some(arm) = arms[index] {
+            merged.properties = arm.properties.clone();
+        }
+        return merged;
+    }
+    let inline: Vec<&SchemaShape> = arms.iter().flatten().copied().collect();
+    let admitting: Vec<&SchemaShape> = inline.iter().copied().filter(|arm| !refuses_written_key(arm, frontmatter)).collect();
+    for arm in if admitting.is_empty() { inline } else { admitting } {
+        merge_properties_into(&mut merged, arm);
     }
     merged
 }
 
-/// Aligned by index with the arm slice so the selector's returned index maps
-/// back; a file-reference arm still occupies its slot.
-fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
-    match arm {
-        SchemaArm::Inline(shape) => shape_discriminant_json(shape),
-        SchemaArm::FileRef(_) => serde_json::json!({}),
-    }
+/// Whether `arm` types a key `frontmatter` writes with a non-`null` value as
+/// a scalar `null` alone.
+fn refuses_written_key(arm: &SchemaShape, frontmatter: &Value) -> bool {
+    let Some(written) = frontmatter.as_object() else { return false };
+    arm.properties.iter().any(|(key, def)| {
+        written.get(key).is_some_and(|value| !value.is_null())
+            && atoms_of(def)
+                .iter()
+                .all(|atom| !atom.is_array && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Null)))
+    })
 }
 
 /// Projects a property-union arm to the minimal JSON the discriminant selector
@@ -512,5 +540,38 @@ mod tests {
 
         assert_eq!(paths(&frontmatter_expression_values(&shape, &check)), ["step.run"]);
         assert!(frontmatter_expression_values(&shape, &note).is_empty());
+    }
+
+    /// A branch union with no literal discriminant: every arm's view keeps
+    /// the shared declaration as written; a written branch key leaves only
+    /// the arms that admit it; a value no arm admits keeps every arm.
+    #[test]
+    fn a_root_union_narrows_to_the_arms_admitting_written_keys() {
+        let SchemaRoot::Union(arms) = schema(
+            "- agent: string -> the agent\n  prompt: string(required) -> the prompt\n  sections: null\n\
+             - agent: string -> the agent\n  sections: object(required) -> the sections\n  prompt: null\n",
+        ) else {
+            panic!("a root union")
+        };
+        let arms: Vec<SchemaShape> =
+            arms.into_iter().map(|arm| match arm { SchemaArm::Inline(shape) => shape, SchemaArm::FileRef(_) => unreachable!() }).collect();
+        let description = |shape: &SchemaShape, key: &str| -> Vec<Option<String>> {
+            atoms_of(&shape.properties[key]).iter().map(|atom| atom.description.clone()).collect()
+        };
+
+        let every = root_union_property_shape(&arms, &Value::Null);
+        assert_eq!(every.properties["agent"], arms[0].properties["agent"], "shared as written");
+        assert_eq!(description(&every, "prompt").len(), 2, "both arms' `prompt`");
+
+        let prompt = root_union_property_shape(&arms, &serde_json::json!({ "prompt": "hi" }));
+        assert_eq!(prompt.properties, arms[0].properties);
+        let sections = root_union_property_shape(&arms, &serde_json::json!({ "sections": {}, "prompt": null }));
+        assert_eq!(sections.properties, arms[1].properties);
+        let both = root_union_property_shape(&arms, &serde_json::json!({ "sections": {}, "prompt": "hi" }));
+        assert_eq!(description(&both, "prompt").len(), 2, "no arm admits both: every arm");
+
+        let document = SchemaRoot::Union(arms.iter().cloned().map(SchemaArm::Inline).collect());
+        let frontmatter = serde_json::json!({ "prompt": "hi" });
+        assert_eq!(effective_property_shape(&[], Some(&document), &frontmatter).properties, arms[0].properties);
     }
 }

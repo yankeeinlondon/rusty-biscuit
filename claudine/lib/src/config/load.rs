@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use simplified_schema::yaml_documents::{LoadedYaml, load_yaml_document, locating_problem};
-use simplified_schema::{AppliedDefault, SchemaError, ValidationFailure, ValidationProblem};
+use simplified_schema::{AppliedDefault, SchemaError, ValidationFailure, ValidationProblem, ValidationProblemCode};
 
 use super::schema::{ConfigScope, contract};
 use crate::error::{ClaudineError, Result};
@@ -44,11 +44,46 @@ pub struct ConfigProblem {
     pub column: Option<usize>,
     /// What is wrong.
     pub message: String,
+    /// Which kind of problem this is.
+    pub kind: ConfigProblemKind,
+}
+
+/// What kind of problem a [`ConfigProblem`] is, for a caller that reports
+/// it without its message (which can quote authored values).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ConfigProblemKind {
+    /// A key the scope's schema does not declare. [`ConfigProblem::pointer`]
+    /// names the key itself, and the line and column are the key's.
+    UnknownKey,
+    /// The file is not one admissible YAML (or JSON5) document, or not a
+    /// mapping, so no key in it was judged.
+    Syntax,
+    /// A value the schema or a configuration rule refuses, or a file that
+    /// cannot be read as configuration.
+    InvalidSetting,
 }
 
 impl ConfigProblem {
-    pub(crate) fn whole(file: Option<&Path>, message: impl Into<String>) -> Self {
-        Self { file: file.map(Path::to_path_buf), pointer: String::new(), line: None, column: None, message: message.into() }
+    pub(crate) fn whole(file: Option<&Path>, kind: ConfigProblemKind, message: impl Into<String>) -> Self {
+        Self {
+            file: file.map(Path::to_path_buf),
+            pointer: String::new(),
+            line: None,
+            column: None,
+            message: message.into(),
+            kind,
+        }
+    }
+
+    /// The unknown key this problem names, for a
+    /// [`ConfigProblemKind::UnknownKey`] problem.
+    #[must_use]
+    pub fn unknown_key(&self) -> Option<String> {
+        if self.kind != ConfigProblemKind::UnknownKey {
+            return None;
+        }
+        simplified_schema::JsonPointer::parse(&self.pointer).segments().last().cloned()
     }
 }
 
@@ -124,6 +159,7 @@ pub(crate) fn document_from_bytes(bytes: &[u8], path: &Path, scope: ConfigScope)
             line: Some(line),
             column: Some(column),
             message: "the file is not valid UTF-8".into(),
+            kind: ConfigProblemKind::Syntax,
         }])
     })?;
     let loaded = load_yaml_document(text, path).map_err(|error| {
@@ -138,11 +174,13 @@ pub(crate) fn document_from_bytes(bytes: &[u8], path: &Path, scope: ConfigScope)
             line: at.map(|(line, _)| line),
             column: at.map(|(_, column)| column),
             message,
+            kind: ConfigProblemKind::Syntax,
         }])
     })?;
     let locator = Locator { path, text, loaded: &loaded };
-    let (effective, defaults) = project(scope, &loaded.json, &|segments, message| locator.problem(segments, message))
-        .map_err(invalid)?;
+    let (effective, defaults) =
+        project(scope, &loaded.json, &|segments, kind, message| locator.problem(segments, kind, message))
+            .map_err(invalid)?;
     Ok(ConfigDocument { path: path.to_path_buf(), scope, authored: loaded.json.clone(), effective, defaults })
 }
 
@@ -152,17 +190,20 @@ pub(crate) fn document_from_bytes(bytes: &[u8], path: &Path, scope: ConfigScope)
 ///
 /// [`ClaudineError::ConfigInvalid`] with each problem's JSON pointer.
 pub(crate) fn project_value(scope: ConfigScope, document: &Value) -> Result<Value> {
-    let unlocated = |segments: &[String], message: String| ConfigProblem {
+    let unlocated = |segments: &[String], kind: ConfigProblemKind, message: String| ConfigProblem {
         file: None,
         pointer: pointer_of(segments),
         line: None,
         column: None,
         message,
+        kind,
     };
     project(scope, document, &unlocated).map(|(effective, _)| effective).map_err(|problems| ClaudineError::ConfigInvalid { problems })
 }
 
-type Problem<'a> = dyn Fn(&[String], String) -> ConfigProblem + 'a;
+/// Builds the problem at `segments` (for [`ConfigProblemKind::UnknownKey`],
+/// the path of the key itself).
+type Problem<'a> = dyn Fn(&[String], ConfigProblemKind, String) -> ConfigProblem + 'a;
 
 /// The effective document and its defaults, or every problem in it.
 fn project(
@@ -174,33 +215,49 @@ fn project(
         let what = if document.is_null() { "is empty" } else { "is not a mapping" };
         return Err(vec![problem(
             &[],
+            ConfigProblemKind::Syntax,
             format!("the configuration {what}; write `{{}}` for one that keeps every default"),
         )]);
     };
-    let flat = flat_entry_problems(document, problem);
-    let defaults = match contract(scope).validate_strict(document) {
-        Ok(success) if flat.is_empty() => success.defaults,
-        Ok(_) => return Err(flat),
-        Err(failure) => {
-            // A flat action or route fails every keyed arm; its migration
-            // message replaces what the union reports about it.
-            let mut problems = failure_problems(&failure, problem);
-            problems.retain(|found| !flat.iter().any(|entry| is_at_or_below(&found.pointer, &entry.pointer)));
-            problems.extend(flat);
-            return Err(problems);
+    let flat = super::wire::flat_entries(document);
+    // The document-level rules below are judged whatever the schema or the
+    // entries' form says, so one diagnosis never hides another: correcting
+    // the reported problems must not reveal a further one.
+    let (defaults, mut problems) = if flat.is_empty() {
+        match contract(scope).validate_strict(document) {
+            Ok(success) => (Some(success.defaults), Vec::new()),
+            Err(failure) => (None, failure_problems(&failure, problem)),
         }
+    } else {
+        // A flat action or route fails every keyed arm, so the document is
+        // judged in its keyed view instead: the migration message is the
+        // entry's one diagnosis of its form, and whatever else is wrong in
+        // it (a misspelled setting, a wrong type) is still reported, at the
+        // key the file wrote.
+        let mut keyed = document.clone();
+        super::wire::upgrade_flat(&mut keyed);
+        let authored = |segments: &[String], kind: ConfigProblemKind, message: String| {
+            let segments = flat.iter().find_map(|entry| entry.authored(segments)).unwrap_or_else(|| segments.to_vec());
+            problem(&segments, kind, message)
+        };
+        let mut problems = match contract(scope).validate_strict(&keyed) {
+            Ok(_) => Vec::new(),
+            Err(failure) => failure_problems(&failure, &authored),
+        };
+        problems.extend(flat.into_iter().map(|entry| problem(&entry.segments, ConfigProblemKind::InvalidSetting, entry.message)));
+        (None, problems)
     };
-    let mut problems = Vec::new();
     if map.contains_key("preferred_agent") && map.contains_key("favorite_agent") {
         problems.push(problem(
             &["favorite_agent".to_string()],
+            ConfigProblemKind::InvalidSetting,
             "`favorite_agent` is the former name of `preferred_agent`; write only one of them".into(),
         ));
     }
     exit_expression_problems(map.get("exit_expressions"), problem, &mut problems);
-    if !problems.is_empty() {
+    let Some(defaults) = defaults.filter(|_| problems.is_empty()) else {
         return Err(problems);
-    }
+    };
 
     let mut effective = document.clone();
     for default in &defaults {
@@ -218,17 +275,6 @@ fn project(
         }
     }
     Ok((effective, defaults))
-}
-
-/// A migration problem for every action or route still written in the flat
-/// form (`type: bash`, `provider: discord`), with its keyed spelling.
-fn flat_entry_problems(document: &Value, problem: &Problem<'_>) -> Vec<ConfigProblem> {
-    super::wire::flat_entries(document).into_iter().map(|(segments, message)| problem(&segments, message)).collect()
-}
-
-/// Whether JSON pointer `pointer` is `parent` or inside it.
-fn is_at_or_below(pointer: &str, parent: &str) -> bool {
-    pointer.strip_prefix(parent).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// An exit-expression entry writes exactly one of `pattern` and `patterns`,
@@ -251,7 +297,7 @@ fn exit_expression_problems(value: Option<&Value>, problem: &Problem<'_>, out: &
         };
         let mut segments = prefix.clone();
         segments.push(index.to_string());
-        out.push(problem(&segments, message.into()));
+        out.push(problem(&segments, ConfigProblemKind::InvalidSetting, message.into()));
     }
 }
 
@@ -267,21 +313,28 @@ fn failure_problems(failure: &ValidationFailure, problem: &Problem<'_>) -> Vec<C
                 } else {
                     found.offending_properties.iter().collect()
                 };
-                if found.message.contains("Additional properties") && !unknown.is_empty() {
+                let is_unknown = found.code == ValidationProblemCode::UnknownKey
+                    || found.message.contains("Additional properties");
+                if is_unknown && !unknown.is_empty() {
                     for key in unknown {
                         let mut at = segments.clone();
                         at.push(key.clone());
-                        located.push(problem(&at, format!("`{key}` is not a setting here")));
+                        located.push(problem(&at, ConfigProblemKind::UnknownKey, format!("`{key}` is not a setting here")));
                     }
                 } else {
-                    located.push(problem(&segments, describe(found)));
+                    located.push(problem(&segments, ConfigProblemKind::InvalidSetting, describe(found)));
                 }
             }
-            located.dedup();
+            let mut seen = std::collections::HashSet::new();
+            located.retain(|found| seen.insert((found.kind, found.pointer.clone(), found.message.clone())));
             located
         }
-        ValidationFailure::Unprepared { error } => vec![problem(&[], format!("the configuration schema cannot be prepared: {error}"))],
-        other => vec![problem(&[], format!("{other:?}"))],
+        ValidationFailure::Unprepared { error } => vec![problem(
+            &[],
+            ConfigProblemKind::InvalidSetting,
+            format!("the configuration schema cannot be prepared: {error}"),
+        )],
+        other => vec![problem(&[], ConfigProblemKind::InvalidSetting, format!("{other:?}"))],
     }
 }
 
@@ -326,15 +379,28 @@ struct Locator<'a> {
 }
 
 impl Locator<'_> {
-    fn problem(&self, segments: &[String], message: String) -> ConfigProblem {
-        let at = self.range(segments).map(|range| line_column(self.text, range.start));
+    fn problem(&self, segments: &[String], kind: ConfigProblemKind, message: String) -> ConfigProblem {
+        let located = match (kind, segments.split_last()) {
+            (ConfigProblemKind::UnknownKey, Some((key, parent))) => self.key_range(parent, key),
+            _ => None,
+        };
+        let at = located.or_else(|| self.range(segments)).map(|range| line_column(self.text, range.start));
         ConfigProblem {
             file: Some(self.path.to_path_buf()),
             pointer: pointer_of(segments),
             line: Some(at.map_or(1, |(line, _)| line)),
             column: Some(at.map_or(1, |(_, column)| column)),
             message,
+            kind,
         }
+    }
+
+    /// The text of the key `key` in the mapping at `parent`.
+    fn key_range(&self, parent: &[String], key: &str) -> Option<Range<usize>> {
+        let mut problem = locating_problem(parent);
+        problem.code = ValidationProblemCode::UnknownKey;
+        problem.offending_property = Some(key.to_string());
+        self.loaded.byte_range(&problem)
     }
 
     /// The text of the value at `segments`, or of its nearest located parent.

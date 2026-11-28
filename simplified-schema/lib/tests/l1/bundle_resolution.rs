@@ -19,7 +19,7 @@ use biscuit_file::FileResolutionContext;
 use serde_json::{Value, json};
 use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};
 use simplified_schema::resolve::bundle::{self, BundleReads, BundleRefusal, BundleSources};
-use simplified_schema::resolve::{ResolvedSchema, resolve_yaml_schema, resolve_yaml_schema_with_roots};
+use simplified_schema::resolve::{ResolvedSchema, check_declared_types, resolve_yaml_schema, resolve_yaml_schema_with_roots};
 use simplified_schema::slots::{
     SchemaRead, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError,
     SlotRunRequest, TemplateReads,
@@ -215,7 +215,7 @@ fn a_remote_reference_is_refused_without_fetching() {
 fn bare_names_and_rooted_references_are_refused_even_with_schema_roots() {
     let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[]);
     let roots = [fixture.root().join("schemas")];
-    let absolute = biscuit_file::to_portable_string(&roots[0].join("types.yaml"));
+    let absolute = biscuit_file::to_forward_slash_string(&roots[0].join("types.yaml"));
     for reference in ["types.yaml", "&bundle/schemas/types.yaml", "~/types.yaml", "%./types.yaml", absolute.as_str()] {
         let schema = yaml(&format!("owner: \"Owner@{reference}\"\n"));
         let (resolved, reads) = bundle::with(&fixture.sources, || {
@@ -262,6 +262,84 @@ fn file_backed_examples_face_the_boundary_and_their_envelope_check() {
 
     let (not_example, _) = fixture.resolve("name: string(example(./types.yaml))\n");
     assert!(matches!(not_example, Err(SchemaError::InvalidExample { .. })), "{not_example:?}");
+}
+
+/// `check_declared_types` judges every declaration of a file's `types`
+/// table against the bundle, including declarations nothing uses: each
+/// import, `$extends`, spread, union arm, and `Name@this` chain, and each
+/// file-backed example. Listed members and built-ins still resolve.
+#[test]
+fn every_declared_type_faces_the_boundary_used_or_not() {
+    let fixture = Fixture::new(
+        &[
+            ("schemas/types.yaml", NUMBER_OWNER),
+            ("schemas/base.yaml", "kind: schema\ntypes:\n  Base:\n    id: string\n"),
+            ("schemas/lib.yaml", "kind: schema\ntypes:\n  a: string\n"),
+        ],
+        &[("schemas/unlisted.yaml", STRING_OWNER)],
+    );
+    write(fixture.dir.path(), "outside.yaml", STRING_OWNER);
+    let path = fixture.root().join("schemas/lib.yaml");
+    let check = |declarations: &str| {
+        let text = format!("kind: schema\ntypes:\n  used: Owner@./types.yaml\n{declarations}");
+        bundle::with(&fixture.sources, || check_declared_types(&text, &path, &fixture.context(), HOST))
+    };
+
+    for listed in [
+        "  unused: Owner@./types.yaml\n",
+        "  unused: Owner@host:owner\n",
+        "  unused:\n    $extends: Base@./base.yaml\n",
+        "  unused: Owner@this\n  Owner: string(example(this))\n",
+    ] {
+        let (checked, reads) = check(listed);
+        checked.unwrap_or_else(|error| panic!("{listed}: {error}"));
+        assert!(reads.missing.is_empty(), "{listed}: {reads:?}");
+    }
+
+    for (unused, expected) in [
+        ("  unused: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: Owner@../../outside.yaml\n", BundleRefusal::Escapes),
+        ("  unused:\n    $extends: Base@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused:\n    ...: base\n  base:\n    o: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: string | Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: Hidden@this\n  Hidden: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: string(example(./unlisted.yaml))\n", BundleRefusal::Unlisted),
+        ("  unused:\n    nested: string(example(../../outside.yaml))\n", BundleRefusal::Escapes),
+    ] {
+        let (checked, _) = check(unused);
+        let error = checked.expect_err(unused);
+        assert_eq!(refusal(&error), Some(expected), "{unused}: {error:?}");
+    }
+
+    let (remote, reads) = check("  unused: Owner@https://example.invalid/types.yaml\n");
+    assert!(matches!(remote, Err(SchemaError::RemoteUnsupported { .. })), "{remote:?}");
+    assert!(reads.served.iter().all(|member| member == "schemas/types.yaml"), "nothing remote is read: {reads:?}");
+
+    let (none, _) = bundle::with(&fixture.sources, || {
+        check_declared_types("kind: schema-trigger\nmatch:\n  a: string(required)\n", &path, &fixture.context(), HOST)
+    });
+    assert_eq!(none.expect("a file without types checks nothing"), Vec::<PathBuf>::new());
+}
+
+/// A null `types` is the absent table the member envelope admitted for a
+/// `yaml-schema` (blank or written `null`): the declaration check reads it
+/// as no named types, never as a table, while a written table is still
+/// judged.
+#[test]
+fn a_null_types_table_declares_nothing_to_check() {
+    let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[]);
+    let path = fixture.root().join("schemas/kind.yaml");
+    let head = "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\n";
+    let check = |types: &str| {
+        let text = format!("{head}{types}");
+        bundle::with(&fixture.sources, || check_declared_types(&text, &path, &fixture.context(), HOST)).0
+    };
+    for blank in ["types:\n", "types: null\n", "types: ~\n"] {
+        assert_eq!(check(blank).unwrap_or_else(|error| panic!("{blank:?}: {error}")), Vec::<PathBuf>::new(), "{blank:?}");
+    }
+    check("types:\n  used: Owner@./types.yaml\n").expect("a listed import");
+    let unlisted = check("types:\n  unused: Owner@./unlisted.yaml\n").expect_err("an unlisted import");
+    assert_eq!(refusal(&unlisted), Some(BundleRefusal::Unlisted), "{unlisted:?}");
 }
 
 #[test]
@@ -379,9 +457,42 @@ fn a_template_types_returned_import_faces_both_the_gate_and_the_bundle() {
 
     let (unlisted, reads, admitted) = run("Owner@./other.yaml");
     match unlisted.expect_err("unlisted import refused") {
-        SlotResolutionError::Schema(error) => assert_eq!(refusal(&error), Some(BundleRefusal::Unlisted), "{error:?}"),
-        other => panic!("expected a schema failure, got {other:?}"),
+        SlotResolutionError::Refused(refused) => {
+            let [(slot, refusal)] = refused.as_slice() else { panic!("one refused slot: {refused:?}") };
+            assert_eq!(slot.expression, "t", "refused at the slot that returned the import");
+            assert!(refusal.message.contains("no listed member"), "{refusal:?}");
+        }
+        other => panic!("expected a refusal at the slot, got {other:?}"),
     }
     assert!(admitted.is_empty(), "a refused target is never offered to the gate: {admitted:?}");
     assert!(reads.served.is_empty());
+}
+
+/// A template met under a scope carries it: resolved later, outside any
+/// scope, its returned import still reads the table, not the disk, and the
+/// bundle's revision identifies the bytes it read.
+#[test]
+fn a_template_resolved_after_its_scope_closed_still_reads_the_bundle() {
+    let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[("schemas/other.yaml", STRING_OWNER)]);
+    write(&fixture.root(), "schemas/types.yaml", STRING_OWNER);
+    let sources = fixture.sources.clone().with_revision("rev-1");
+    let base = fixture.root().join("schemas");
+    let (met, _) = bundle::with(&sources, || resolve_yaml_schema(&yaml("owner: \"{{ t }}\"\n"), &base, &fixture.context(), HOST));
+    let Err(SchemaError::UnresolvedSlots(unresolved)) = met else { panic!("expected a template, got {met:?}") };
+    let pending = unresolved.pending.expect("pending schema");
+    let carried = pending.verified_bundle().expect("the scope is carried");
+    assert_eq!((carried.root(), carried.revision()), (fixture.root().as_path(), "rev-1"));
+
+    let resolve = |answer: &'static str| {
+        pending.resolve(&Host { answer, gate: Rc::default() }, &SlotRunRequest { context: fixture.context() })
+    };
+    assert_eq!(owner_type(&resolve("Owner@./types.yaml").expect("listed import resolves")), json!("number"));
+    assert!(matches!(resolve("Owner@./other.yaml"), Err(SlotResolutionError::Refused(_))), "unlisted is refused");
+    assert!(matches!(resolve("Owner@../../outside.yaml"), Err(SlotResolutionError::Refused(_))), "escaping is refused");
+
+    let outside = match resolve_yaml_schema(&yaml("owner: \"{{ t }}\"\n"), &base, &fixture.context(), HOST) {
+        Err(SchemaError::UnresolvedSlots(unresolved)) => unresolved.pending.expect("pending schema"),
+        other => panic!("expected a template, got {other:?}"),
+    };
+    assert!(outside.verified_bundle().is_none(), "a template met outside a scope carries none");
 }

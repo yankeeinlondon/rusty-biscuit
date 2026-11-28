@@ -50,7 +50,7 @@ pub use source::{
     SchemaConstraintParticipant, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
-    locate_standalone_definition_failure,
+    locate_carrier_definition_failure, locate_standalone_definition_failure,
     mapping_separator,
     parse_property_definition_with_source, parse_schema_declaration_with_source, parse_schema_table_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
@@ -64,7 +64,7 @@ pub use standalone::{
 };
 pub use types::{
     CallExample, CompositionOperand, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, Extends, FunctionParameter,
-    FunctionParameters, FunctionType, InlineSpread, LOCAL_REFERENCE, ObjectComposition, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaShape,
+    FunctionParameters, FunctionType, InlineSpread, KeyDeclarations, LOCAL_REFERENCE, ObjectComposition, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaShape,
     SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, TemplateConstraintKind, operands_verb,
 };
 #[cfg(feature = "work-counters")]
@@ -425,6 +425,8 @@ fn parse_schema_shape(
     let mut pattern_keys: Vec<types::PatternKeyDef> = Vec::new();
     let mut constraints: Vec<Constraint> = Vec::new();
     let mut composition = None;
+    let mut removed: IndexMap<String, String> = IndexMap::new();
+    let mut advise_unknown_keys: Option<Vec<String>> = None;
     for (key, val) in map {
         let key_str = key.as_str().ok_or_else(|| {
             DefinitionFailure::at(path)(SchemaError::Grammar {
@@ -460,6 +462,14 @@ fn parse_schema_shape(
                     related: Vec::new(),
                 }));
             }
+        }
+        if key_str == ADVISE_UNKNOWN_KEYS && mode == MappingMode::Object {
+            advise_unknown_keys = Some(parse_advise_unknown_keys(val, &path.property(key_str))?);
+            continue;
+        }
+        if let Some(replacement) = removed_declaration(key_str, val, path, mode)? {
+            removed.insert(key_str.to_string(), replacement);
+            continue;
         }
         if key_str == "$constraints" {
             constraints.append(&mut parse_dollar_constraints(
@@ -509,8 +519,108 @@ fn parse_schema_shape(
         pattern_keys,
         constraints,
         composition,
+        key_declarations: KeyDeclarations::boxed(removed, advise_unknown_keys),
         ..Default::default()
     })
+}
+
+/// The reserved object metadata key opting an open object into near-miss key
+/// advice ([`SchemaShape::advise_unknown_keys`]).
+pub const ADVISE_UNKNOWN_KEYS: &str = "$advise-unknown-keys";
+
+/// The keyword of a removed-property declaration, `removed(<replacement>)`.
+pub const REMOVED_KEYWORD: &str = "removed";
+
+/// The replacement of a `removed(<replacement>)` declaration written as
+/// `key`'s whole value, `None` for any other value.
+///
+/// The declaration names an object property, so it is refused on a pattern
+/// key, in a `types` table, and with an empty replacement. Its replacement is
+/// free text up to the final `)`, so it may hold backticks, `;`, and
+/// parentheses of its own.
+fn removed_declaration(
+    key: &str,
+    value: &YamlValue,
+    path: &SchemaSourcePath,
+    mode: MappingMode,
+) -> Result<Option<String>, DefinitionFailure> {
+    let Some(replacement) = value.as_str().and_then(removed_replacement) else {
+        return Ok(None);
+    };
+    let refuse = |message: String| {
+        Err(DefinitionFailure::at(&path.property(key))(SchemaError::Grammar {
+            property: key.to_string(),
+            message,
+            span: 0..0,
+            related: Vec::new(),
+        }))
+    };
+    if mode == MappingMode::Table {
+        return refuse(format!(
+            "`{REMOVED_KEYWORD}(…)` declares a removed object property; a `types` table entry is a type, so declare it inside an object"
+        ));
+    }
+    if types::PatternKey::is_pattern_key(key) || key.starts_with('$') {
+        return refuse(format!(
+            "`{REMOVED_KEYWORD}(…)` applies only to a named property, not to `{key}`"
+        ));
+    }
+    let replacement = replacement.trim();
+    if replacement.is_empty() {
+        return refuse(format!(
+            "`{REMOVED_KEYWORD}()` needs replacement advice, such as `{REMOVED_KEYWORD}(use `other_key`)`"
+        ));
+    }
+    Ok(Some(replacement.to_string()))
+}
+
+/// The text between `removed(` and the final `)` of a whole value, or `None`
+/// when `text` is not a removed declaration.
+pub(crate) fn removed_replacement(text: &str) -> Option<&str> {
+    text.trim()
+        .strip_prefix(REMOVED_KEYWORD)?
+        .trim_start()
+        .strip_prefix('(')?
+        .strip_suffix(')')
+}
+
+/// Parses `$advise-unknown-keys`: a list, possibly empty, of the exact key
+/// names never advised on. A `null`, a non-list, or a non-string or empty
+/// item is refused at its own path.
+fn parse_advise_unknown_keys(value: &YamlValue, path: &SchemaSourcePath) -> Result<Vec<String>, DefinitionFailure> {
+    let refuse_at = |at: &SchemaSourcePath, message: String| {
+        DefinitionFailure::at(at)(SchemaError::Grammar {
+            property: ADVISE_UNKNOWN_KEYS.into(),
+            message,
+            span: 0..0,
+            related: Vec::new(),
+        })
+    };
+    let YamlValue::Sequence(items) = value else {
+        return Err(refuse_at(
+            path,
+            format!(
+                "`{ADVISE_UNKNOWN_KEYS}` must be a list of the key names never advised on (`[]` for none), got {}",
+                describe_yaml(value)
+            ),
+        ));
+    };
+    let mut names = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        match item.as_str() {
+            Some(name) if !name.trim().is_empty() => names.push(name.to_string()),
+            _ => {
+                return Err(refuse_at(
+                    &path.union_arm(index),
+                    format!(
+                        "`{ADVISE_UNKNOWN_KEYS}` item [{index}] must be a nonempty key name, got {}",
+                        describe_yaml(item)
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(names)
 }
 
 /// The label a `$extends` operand's errors name.
@@ -829,7 +939,15 @@ fn list_union_failure(
                 arm: (duplicate.first_arm != duplicate.arm).then_some(duplicate.first_arm),
             }],
         ),
-        grammar::UnionInvariant::DuplicateOverload { arm, message } => (arm, message, 0..0, Vec::new()),
+        grammar::UnionInvariant::DuplicateOverload { first, arm, message } => (
+            arm,
+            message,
+            whole(arm).unwrap_or(0..0),
+            whole(first)
+                .map(|span| GrammarRelated { message: grammar::FIRST_OVERLOAD.into(), span, arm: Some(first) })
+                .into_iter()
+                .collect(),
+        ),
         grammar::UnionInvariant::Narrows(problem) => {
             let related = problem
                 .related

@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how the runners differ: per-OS binaries and installs, API surfaces (OpenAI/Anthropic compatibility), detection probes, configuration, model-id grammar, and notable traps
   - close with a point of view on the implications for Claudine's model-config bridging story and future runner detection
 
-  As background material we have local-runner research documents for each runner that Claudine supports. They can be found at `@claudine/docs/research/local_runners/*.md`.
+  As background material we have local-runner research documents for each runner that Claudine supports. They can be found at `@claudine/docs/research/local-ai/local_runners/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

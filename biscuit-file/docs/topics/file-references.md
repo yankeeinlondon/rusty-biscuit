@@ -67,7 +67,7 @@ Rust but nothing about this library.
    Resolution joins the path onto each base in order and takes the **first
    existing regular file**. There is no cross-kind fallback: a missed `./foo`
    is never retried as a magic path, a missed `@foo` never falls back to a
-   bare-path search.
+   implicit lookup.
 
 4. **Three outcomes, cleanly separated.**
    - `Ok(Some(path))` — a candidate matched.
@@ -87,7 +87,7 @@ Rust but nothing about this library.
 | Prefix                | Kind                  | Resolves against                                                | Example                            |
 |-----------------------|-----------------------|-----------------------------------------------------------------|------------------------------------|
 | `./` or `../`         | **Explicit relative** | The working directory (`cwd`) only; no fallback; stays in the [file tree](#the-file-tree-base_dir-and-the-relative-boundary) | `./src/main.rs`, `../a.md`         |
-| _(none)_              | **Implicit relative** | The working directory (`cwd`), then the git repository root; stays in the file tree | `README.md`, `docs/spec.md`        |
+| _(none)_              | **Implicit relative** | [Authoring or launch bases](#implicit-relative-paths), in lookup order | `README.md`, `docs/spec.md`        |
 | `/`, drive, or UNC    | **Absolute**          | Used verbatim                                                   | `/etc/config.toml`, `C:\\cfg.toml` |
 | `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)            | `~/.config/app.toml`               |
 | `@` or `@/`           | **Magic**             | Local-tier roots (package, package area, local root), then HOME | `@docs/spec.md`                    |
@@ -117,7 +117,7 @@ implicit reference.
 | The file's identity is…                              | Write        |
 |------------------------------------------------------|--------------|
 | "belongs to this document" (moves with it)           | `./` / `../` |
-| "try beside this document, then at the repository"   | bare path    |
+| "find it using the selected lookup bases"            | implicit relative path |
 | "belongs exactly at a repository path"               | `&`          |
 | "belongs to the nearest repository sub-project"      | `^`          |
 | "find it in the usual places"                        | `@`          |
@@ -125,9 +125,14 @@ implicit reference.
 | "lives in my notes/knowledge-base vault"             | `vault:`     |
 | "is exactly this path"                               | absolute     |
 
-Bare paths are `cwd`-first, so a document-local copy shadows the repository
-copy. Use `&README.md` when the repository-root identity is required, or
-`^README.md` for package → package-area → repository fallback.
+Use `&README.md` when the repository-root identity is required, or
+`^README.md` for package, package area, and repository fallback.
+
+| Term | Meaning | Example |
+| --- | --- | --- |
+| Explicit relative path | Relative to the directory of the document that wrote it | `./x.md`, `../x.md` |
+| Implicit relative path | A relative path without an explicit prefix | `feat/x.md` |
+| Launch directory | Where a command started, or the directory a library caller supplied | `<repo>/tools` |
 
 ## Reference Kinds
 
@@ -148,31 +153,62 @@ With an explicit context, a relative reference may not leave the
 [file tree](#the-file-tree-base_dir-and-the-relative-boundary): `../` that
 climbs above the tree root is a `RelativeTreeEscape` error, not a lookup.
 
-### Implicit Relative (bare path)
+### Implicit relative paths
 
-A bare path with no recognized prefix gets two candidates, in this order:
+Use an implicit relative path when you want the context's lookup policy to
+choose a base. For example, the default `ImplicitBases::Authoring` tries
+`docs/spec.md` beside the authoring document and then at its repository root.
 
-1. the **working directory** (`cwd`), then
-2. the **root of the enclosing git repository** (when one is known).
-
-```text
-docs/spec.md        → <cwd>/docs/spec.md, then <git_root>/docs/spec.md
-```
-
-If no repository is known, the
-working directory is the only candidate. When `cwd` *is* the repository root,
-the two candidates collapse into one. A miss returns `Ok(None)`.
+For a project input supplied at launch, choose `ImplicitBases::Launch`.
+From `<repo>/darkmatter/lib/tools`, the following example tries `docs/spec.md`
+under `tools`, `lib`, `darkmatter`, and the repository root, in that order.
+A child document inherits the launch bases even when it lives in another
+checkout. Its explicit relative paths still start beside that child.
 
 ```rust,no_run
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileResolutionContext, ImplicitBases};
 
-// From <repo>/some/deep/dir, this tries the deep directory before the repo root.
-let path = FileReference::new("README.md")?.resolve()?;
+let ctx = FileResolutionContext::new("/work/repo/darkmatter/lib/tools")
+    .with_repository_root("/work/repo")
+    .with_package_area("/work/repo/darkmatter")
+    .with_package_root("/work/repo/darkmatter/lib")
+    .with_implicit_bases(ImplicitBases::Launch);
+let source = ctx.for_source("/work/repo/prompts/task.md");
+let path = FileReference::new("docs/spec.md")?.resolve_in_context(&source)?;
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
 
-**Use it when** the file has a stable repository-level address (`CLAUDE.md`,
-`docs/architecture.md`, a root `justfile`).
+Absent and duplicate bases are skipped in order. Outside a repository, each
+policy uses only its initial directory. Implicit `%` searches, implicit
+globs, and implicit completion use the same bases. Environment interpolation
+is applied before the resolver chooses how to anchor a local path.
+
+```mermaid
+flowchart TD
+    A["Implicit relative lookup"] --> B["Launch directory"]
+    B -->|missing| C["Package root, if present"]
+    C -->|missing| D["Package area root, if present"]
+    D -->|missing| E["Repository root, if present"]
+    B & C & D & E -->|match| F["Return the entry"]
+    B & C & D & E -->|containment or I/O failure| G["Return the error"]
+    E -->|missing| H["No match"]
+```
+
+### Resolve a directory or plan a missing target
+
+By default, resolution finds regular files. Call
+`resolve_detailed_as(&ctx, EntryKind::Directory)` to find a directory. A
+same-named file in a nearer base is skipped.
+
+Use `plan_target(&ctx, EntryKind::File)` for an output path. It first searches
+for an existing entry. On an implicit launch miss it chooses the first base
+where the candidate's parent is a directory. From `<repo>/darkmatter`,
+`darkmatter/features/x/review-3.md` plans at the repository root when only
+`<repo>/darkmatter/features/x` exists. `features/new.md` plans in the package
+area when `<repo>/darkmatter/features` exists. If no parent exists, planning
+uses the launch directory. Other forms fall back to their first candidate.
+Planning returns the path, the base's provenance, and whether it existed.
+A recursive reference such as `%spec.md` has no single planned target.
 
 ### Absolute
 
@@ -387,7 +423,7 @@ directories as local prepends, and home convention directories as user-tier
 roots that sit behind the whole local tree.
 
 In an explicit context the local root and its package anchors come from the
-[launch `@` scope](#the-launch--scope), which survives derivation, so `@`
+[launch `@` scope](#the-launch-scope), which survives derivation, so `@`
 inside a nested document still searches the tree the request was launched
 from.
 
@@ -612,8 +648,8 @@ data snapshot.
 Every directory the context treats as a location must be absolute: the
 request and document `cwd`, `with_base_dir`, the repository, package, and
 package-area roots, a captured home, and every directory of the
-[launch `@` scope](#the-launch--scope), including its request directory when
-the scope was replaced with `with_launch_magic_scope`. Building or deriving a context never
+[launch `@` scope](#the-launch-scope), including its request directory when
+the scope was replaced with `with_launch_scope`. Building or deriving a context never
 fails, but `validate()` (which every resolver entry point and `PortablePath`
 run first) rejects a relative one with `RelativeContextDirectory`, naming
 which `ContextAnchor` it was:
@@ -685,7 +721,7 @@ A context describes a file tree with two directories:
 
 | Term | Meaning |
 |------|---------|
-| `cwd()` | Where `./`, `../`, and bare references start — usually the authoring document's directory |
+| `cwd()` | The authoring directory for explicit relative paths and default implicit lookup |
 | `base_dir()` | The root of the whole tree, and the boundary relative references must stay inside |
 
 ```rust,no_run
@@ -734,9 +770,10 @@ flowchart TD
   `resolve()` / `resolve_from()` / `complete_partial()` methods carry no tree
   at all, so they behave like a fallback root.
 
-**The boundary.** When the tree root is a boundary, an explicit or bare
-relative reference must stay inside it, both as written and where it really
-lands:
+**The boundary.** An explicit relative reference and an implicit reference
+using authoring lookup follow the source tree. Implicit launch lookup uses
+the frozen launch tree. When the tree is a boundary, the path must stay
+inside it as written and through links:
 
 ```text
 tree: /work/repo          cwd: /work/repo/docs
@@ -748,9 +785,10 @@ docs/current → docs/v2       (in-tree symlink)   ./current/x.md  allowed
 docs/shared → /opt/team-docs (out-of-tree link)  ./shared/x.md   RelativeTreeEscape
 ```
 
-- Every candidate is checked before any is probed. A bare reference whose
-  repository-root fallback candidate would leave the tree is rejected even if
-  the `cwd` candidate exists; resolution never silently skips to another root.
+- The written path of each candidate is checked before probing begins. A
+  repository-root fallback that would leave the tree is rejected even if a
+  nearer candidate exists. Real-landing checks run as each candidate is
+  reached.
 - The "where it lands" check canonicalizes the existing target, or its
   deepest existing ancestor for a file not yet created, so a symlink,
   junction, or reparse point leading out of the tree is an escape. It shares
@@ -770,19 +808,19 @@ default and copied to every derived context. It does not excuse an invalid
 `cwd`, authorize opening a file, or relax `&`/`^`.
 `external_relative_allowed()` reports it.
 
-### The launch `@` scope
+### The launch scope
 
-Recomputed anchors serve `./`, bare, `&`, and `^` references, which mean
-"relative to the document that wrote me." `@` means "the usual places for this
-request," so it reads a separate, immutable `LaunchMagicScope`: the request
+Explicit relative paths, authoring-mode implicit paths, `&`, and `^` use
+anchors selected for the authoring document. The separate `LaunchScope`
+serves `@` and launch-mode implicit paths. It stores the launch
 directory plus the repository, package, and package-area roots selected for
 it. `new` captures it, and the anchor builders (`with_repository_root`,
 `with_repository_scope_catalog`, `with_package_root`, `with_package_area`)
 keep it in sync. `for_source`, `for_cwd`, and both trusted-external
 derivations copy it unchanged. A prompt loaded from `~/.myapp/prompts` or
 another repository that writes `@x.md` therefore searches the launch tree
-first, while its `./x.md`, `x.md`, `&x.md`, and `^x.md` keep their
-source-specific anchors.
+first. Its `./x.md`, `&x.md`, and `^x.md` still use the source anchors.
+`LaunchScope::bases()` returns the ordered bases for implicit launch lookup.
 
 A caller that rebuilds a context around an external source, instead of
 deriving it, seeds the launch scope explicitly:
@@ -790,9 +828,9 @@ deriving it, seeds the launch scope explicitly:
 ```rust,no_run
 # use biscuit_file::FileResolutionContext;
 # let launch = FileResolutionContext::new("/work/repo");
-let scope = launch.launch_magic_scope().clone();
+let scope = launch.launch_scope().clone();
 let source = FileResolutionContext::new("/other/repo/prompts")
-    .with_launch_magic_scope(scope); // `@` keeps searching /work/repo first
+    .with_launch_scope(scope); // `@` keeps searching /work/repo first
 ```
 
 `magic_search_roots()` returns the resulting ordered, deduplicated `@` roots
@@ -891,10 +929,10 @@ does not exist is `Io`.
 | `add_magic_path(path, position)` | Add an authoritative magic root, tier inferred from containment in the local root |
 | `add_magic_path_with_tier(path, position, tier)` | Add a magic root with an explicit `MagicPathTier` (`User` forces the user tier) |
 | `add_vault(path)` | Add an authoritative vault root |
-| `with_launch_magic_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
+| `with_launch_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
 | `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `repository_scope_catalog()`, `home_dir()`, `env()` | Inspect captured inputs |
 | `base_dir()`, `base_dir_origin()`, `base_dir_is_boundary()`, `external_relative_allowed()` | Inspect the file tree and the reader opt-in |
-| `launch_magic_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
+| `launch_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
 | `magic_search_roots()` | The ordered, deduplicated `@` roots with provenance |
 | `validate()` | Report a failure retained from the originating context, then check that every context and launch-scope directory is absolute, tree containment of request and derived `cwd`s, and an explicit root against the repository |
 
@@ -1063,7 +1101,7 @@ Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 `PackageArea`, `Home`, `Magic`, `Vault`, `Absolute`, and `LocalRoot`.
 `LocalRoot` marks the request directory serving as an `@` chain's local root
 when there is no repository; it is deliberately distinct from `Source` (the
-authoring `cwd` of bare and explicit-relative references), so
+authoring `cwd` of explicit relative references and default implicit lookup), so
 `CandidatePlanOrder::AuthoringBaseFirst` never promotes it. Every attempted
 `ProbedCandidate` adds a
 `ProbeDisposition`:
@@ -1126,7 +1164,7 @@ The complete `FileReferenceError` vocabulary:
 | `CwdOutsideBaseDir { base_dir, cwd }` | The request `cwd` or a normal derived `cwd` is outside a non-repository boundary tree |
 | `RelativeContextDirectory { anchor, path }` | A context directory or tree anchor (`ContextAnchor`: request directory, working directory, base directory, repository/package/package-area root, home) is relative |
 | `BaseDirNotRepositoryRoot { base_dir, repository_root }` | `with_base_dir` names a directory other than the supplied repository root |
-| `RelativeTreeEscape { base_dir, candidate, reference }` | An explicit or bare relative reference leaves the file tree, as written or through a link |
+| `RelativeTreeEscape { base_dir, candidate, reference }` | An explicit or implicit relative reference leaves the file tree, as written or through a link |
 | `RelativePath { from, to }` | `resolve_relative()` cannot produce the requested lexical relative path |
 | `Io { path, source }` | A direct candidate metadata probe failed; records the candidate path |
 | `RemoteNotLocal(raw)` | A remote URL was passed to local-path resolution |
@@ -1160,7 +1198,7 @@ which belongs to the optional fetching API rather than local resolution.
    | Effective/authored kind | Direct candidate or recursive-root order |
    |-------------------------|------------------------------------------|
    | Explicit relative | `cwd` only |
-   | Implicit relative | `cwd`, then repository root |
+   | Implicit relative | The [selected lookup policy](#implicit-relative-paths) |
    | Absolute | The authored path only |
    | Home | Home directory only |
    | Magic | Local prepends, package, package area, local root, local appends, user prepends, home, user appends |
@@ -1375,7 +1413,7 @@ what it scans. Modules declared by a macro, and files pulled in with
 A `FileReference` names **one** file and never reads glob syntax: `[`, `]`,
 `*`, and `?` are legal file-name characters, so `pages/[id].md` is a literal
 name. When you want **a set** of files, build a `GlobReference`. Each pattern
-is `[!][prefix]glob`: the prefix is any file-reference prefix (`./`, bare,
+is `[!][prefix]glob`: the prefix is any file-reference prefix (`./`, implicit,
 `&`, `^`, `@`, `~`, `vault:`, absolute, `{{VAR}}`), and it searches exactly
 the roots that prefix resolves against.
 
@@ -1402,8 +1440,8 @@ let roots = specs.roots(&ctx);              // for callers that walk themselves
 | `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
 | `lists_file(&path, &ctx)` | `bool` | whether `list_files` would list an existing file its walk reached: `matches`, except that a file symlink whose target leaves the tree (a skipped entry) is not listed. For a caller that walks `roots` itself with its own filters, as Claudine's completion does, and must offer exactly what a listing would |
 | `prepare(&ctx)` | `Option<PreparedGlobReference>` | the patterns resolved once (`None` for an invalid context), for a caller that walks the roots itself and judges many files: `roots()`, `lists_file(&path)` as above without resolving again, and `may_list_below(&dir)`, which is `false` for a directory below which no positive pattern can admit a file, so the walk may skip it (see below) |
-| `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
-| `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
+| `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: implicit patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
+| `with_file_name_view()` | `GlobReference` | also match a file name without directories at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
 | `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
 | `patterns()` | iterator of `&str` | the patterns as authored, `!` included |
 
@@ -1508,7 +1546,7 @@ For example, with `^**/intro.md` launched in package `pkg` of area `area`:
 
 ### The relative boundary and symlinks
 
-Bare, `./`, and `../` patterns keep the same
+Implicit relative, `./`, and `../` patterns keep the same
 [relative boundary](#the-file-tree-base_dir-and-the-relative-boundary) as a
 single reference: a search directory outside the tree is a
 `RelativeTreeEscape` error unless the context opted in with
@@ -1528,7 +1566,7 @@ that expands to an absolute path (one that expands to a relative path is a
 relative pattern and is bound). `&` and `^` stay inside the repository.
 
 A search never follows a directory symlink. When the context enforces the
-boundary, a bare, `./`, or `../` pattern that matches a **file** symlink whose
+boundary, an implicit relative, `./`, or `../` pattern that matches a **file** symlink whose
 target lies outside the tree leaves it out of `matches` and reports it in
 `GlobListing::skipped` as a `SkippedEntry { link, target }`, so a caller can
 say why it is missing. With `allow_external_relative()` the link is listed
@@ -1555,7 +1593,7 @@ Each variant that concerns one pattern names it as authored, `!` included.
 | `MalformedPrefix { pattern, source }` | text the reference grammar rejects, an empty pattern, or a prefix with no glob after it (`&`, `docs/`) | `new` |
 | `InvalidGlob { pattern, message }` | invalid glob syntax after the prefix (`*.{md`) | `new` |
 | `NoPositivePattern` | an empty list, or only `!` exclusions | `new` |
-| `RelativeTreeEscape { pattern, base_dir, candidate }` | a bare, `./`, or `../` search directory outside the tree | `list_files`, `take_first` |
+| `RelativeTreeEscape { pattern, base_dir, candidate }` | an implicit relative, `./`, or `../` search directory outside the tree | `list_files`, `take_first` |
 | `OutsideRepository { pattern, sigil, reference_cwd }` | a `&` or `^` pattern with no repository containing `cwd` | `list_files`, `take_first` |
 | `Unresolvable { pattern, source }` | a missing home, vault, or environment variable, a repository escape, or an injected sigil | `list_files`, `take_first` |
 | `InvalidContext(source)` | the context fails `validate()` | `list_files`, `take_first` |
@@ -1687,9 +1725,9 @@ flowchart TD
     T -- "no single target" --> U[Err: UnresolvableInput]
     T -- yes --> G{"Can this preference<br/>spell the target?"}
     G -- "no: NotApplicable" --> P
-    G -- yes --> V{"Resolve the spelling in the same context:<br/>same file, inside the tree?"}
-    V -- "no: Shadowed / Rejected" --> P
-    V -- "lookup failed (I/O)" --> F["Err: ProbeFailed<br/>(this preference's attempt recorded last)"]
+    G -- yes --> V{"Verify the spelling in this context"}
+    V -- "shadow or unusable spelling" --> P
+    V -- "required lookup failed (I/O)" --> F["Err: ProbeFailed<br/>(this preference's attempt recorded last)"]
     V -- yes --> M["Ok: PortableReference<br/>(reference, strategy, attempts, findings)"]
 ```
 
@@ -1704,7 +1742,7 @@ turn; the first whose reference verifies wins. The default:
 | # | Preference | Writes | Applies when |
 | - | ---------- | ------ | ------------ |
 | 1 | `AuthoredIntent(IntentForms::ALL)` | the input, unchanged | a reference input is `~`, `@`, `^`, `&`, `vault:`, a URL, a `%` search, or starts with a portable `{{VAR}}` |
-| 2 | `TreeRootRelative` | `docs/topics/x.md` | a bare path from `base_dir` resolves to the intended target |
+| 2 | `TreeRootRelative` | `docs/topics/x.md` | an implicit path from `base_dir` resolves to the intended target |
 | 3 | `SameDirRelative` | `./x.md` (`./` for `cwd` itself) | the target's parent is `cwd` |
 | 4 | `ChildDir` | `./a/b/x.md` | the target is below a subdirectory of `cwd` |
 | 5 | `PeerDir` | `../sibling/x.md` | one hop up, then down |
@@ -1714,12 +1752,10 @@ turn; the first whose reference verifies wins. The default:
 | 9 | `HomeDir` | `~/x.md` | the target is under the home directory |
 | 10 | `AbsolutePath` | the absolute path | always; the caller's cue to warn |
 
-The bare-root preference uses the repository root inside a repository. It does
-not change lookup precedence: bare references still check `cwd` before the
-repository root. If `docs/topics/x.md` finds a different local file first,
-the attempt is recorded as `Shadowed` and the next preference runs. Outside a
-repository, a tree-root spelling is used only when the existing lookup reaches
-the target; the preference does not add a new lookup root.
+`TreeRootRelative` writes the target's path from the repository root and
+verifies it under the configured lookup policy. A different file found first
+produces a `Shadowed` attempt. Outside a repository, the preference can use a
+tree-root spelling when existing lookup already reaches the target.
 
 The relative preferences only write a route that stays inside the file tree
 (`base_dir`). Under a [fallback tree](#the-file-tree-base_dir-and-the-relative-boundary),
@@ -1750,14 +1786,67 @@ sigil"; after `SameDirRelative` means "keep sigils unless `./x` reaches the
 same file"; absent means "normalize everything" (URLs and `%` searches are
 then refused with `NormalizationUnsupported`, never rewritten).
 
+### Spell values for launch lookup
+
+Use `PortabilityPreference::VALUE_STRATEGY` when a file or directory value
+will be read under `ImplicitBases::Launch`. It tries the following forms
+in order.
+
+| Preference | Example |
+| --- | --- |
+| `LaunchRelative` | `feat/x.md` |
+| `EnvRootedPath` | `{{WORKSPACE}}/feat/x.md` |
+| `HomeDir` | `~/work/repo/feat/x.md` |
+| `AbsolutePath` | `/work/repo/feat/x.md` |
+
+```rust,no_run
+use biscuit_file::{FileResolutionContext, ImplicitBases, PortabilityPreference, PortablePath};
+
+let ctx = FileResolutionContext::new("/work/repo/tools")
+    .with_repository_root("/work/repo")
+    .with_implicit_bases(ImplicitBases::Launch);
+let value = PortablePath::from_path("/work/repo/feat/x.md")
+    .with_ctx(&ctx)
+    .with_strategy(PortabilityPreference::VALUE_STRATEGY.iter().cloned())
+    .file_reference()?;
+# Ok::<(), biscuit_file::PortablePathError>(())
+```
+
+The repository directory itself, a path outside that repository, and a
+target under a caller-supplied `with_foreign_checkouts` root use the
+fallbacks. A launch outside a repository also uses the fallbacks. For a
+missing target, pass the path returned by `plan_target`.
+
+A nearer base can change what the short spelling selects. From `tools/`,
+an existing `tools/feat/x.md` shadows `feat/x.md`. For a missing target,
+`tools/feat/` can shadow the planned destination even before `x.md`
+exists. Share a `ShadowCache` with `with_shadow_cache` to check a first
+component such as `tools/feat` once per run. A one-component missing path
+can be planned directly in a nearer base, so its parent is checked even
+when the name is absent.
+
+```mermaid
+flowchart TD
+    A["Target has an eligible launch-relative spelling"] --> B["Check the first component in each nearer base"]
+    B -->|absent| C["Advance to the next base"]
+    B -->|present or single-component missing target| D["Check the entry or the prospective parent"]
+    D -->|no shadow| C
+    B & D -->|refusal or error| E["Record the attempt and use a fallback"]
+    D -->|shadow| E
+    C -->|all bases cleared and target is reachable| F["Emit the implicit relative path"]
+```
+
+Use a custom `ShadowProbe` to apply a caller's read policy. A probe error
+is recorded on the `LaunchRelative` attempt and the next preference runs.
+
 ### Reference inputs
 
 | Input | Treatment |
 | ----- | --------- |
 | intent forms (above) | kept exactly as written, with findings for problems |
-| `./`, `../`, bare, absolute, a non-portable `{{VAR}}` | resolved to one target, then run through the strategy |
+| `./`, `../`, implicit, absolute, a non-portable `{{VAR}}` | resolved to one target, then run through the strategy |
 
-- A verified bare tree-root link keeps that form. For example, an authored
+- A verified implicit tree-root link keeps that form. For example, an authored
   `docs/topics/x.md` stays `docs/topics/x.md`; a nearby `./x.md` becomes that
   root spelling when it reaches the same target. Custom strategies can still
   prefer nearby relative links.
@@ -1767,7 +1856,7 @@ then refused with `NormalizationUnsupported`, never rewritten).
   with two candidate roots, `@missing.md` when not kept), a boundary escape, a
   missing anchor, or an I/O failure gives `UnresolvableInput`; keep the link
   as authored and report the finding.
-- Directory links may use bare root spellings too. If no regular file matches,
+- Directory links may use implicit root spellings too. If no regular file matches,
   the first existing non-file candidate supplies the directory identity and
   the result carries `TargetNotFile` as a finding.
 - `PortablePath` takes a path only. A link layer splits `#fragment`, `?query`,
@@ -1775,8 +1864,9 @@ then refused with `NormalizationUnsupported`, never rewritten).
 
 ### Verification
 
-Every candidate is parsed back with `FileReference` and resolved in the same
-context, including the boundary and its symlink check:
+Candidates are parsed back with `FileReference` and verified in the same
+context. `LaunchRelative` uses the shadow check above. Other preferences
+resolve the spelling back to its target:
 
 - single-location forms (`./`, `../`, `&`, `~`, absolute, an absolute
   `{{VAR}}`) may name a file that does not exist yet;
@@ -1785,10 +1875,11 @@ context, including the boundary and its symlink check:
 - a target reached through a symlink that leads out of the tree cannot be
   written relative; it falls through to a later preference.
 
-A generated spelling is refused when its text would not read back as the same
-names: a Unix name containing `\`, `{{…}}` inside a name, a non-Unicode name
-(`UnrenderableTarget`, even with `AbsolutePath`). A name starting with a sigil
-is protected by `./` (`./@notes.md`).
+Generated spellings use forward slashes when that preserves the names. A
+Unix name containing `\` uses the native spelling if the reference grammar
+reads it faithfully. A `{{…}}` inside a literal name can prevent a verified
+spelling. A non-Unicode name returns `UnrenderableTarget`. A name starting
+with a sigil can be protected by `./`, as in `./@notes.md`.
 
 ### Portable environment variables
 

@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 
 use super::canonical::{
     CanonicalPolicy, MappingFidelity, PolicyCertainty, PolicyEffect, PolicyWarning, TernaryState,
@@ -949,7 +949,7 @@ impl ResolvedPathQuery {
     }
 
     fn subject(&self) -> String {
-        let normalized_path = to_portable_string(&self.normalized_path);
+        let normalized_path = to_forward_slash_string(&self.normalized_path);
         if self.original_path == self.normalized_path {
             format!(
                 "`{}` ({})",
@@ -959,7 +959,7 @@ impl ResolvedPathQuery {
         } else {
             format!(
                 "`{}` -> `{}` ({})",
-                to_portable_string(&self.original_path),
+                to_forward_slash_string(&self.original_path),
                 normalized_path,
                 path_classification_label(self.classification),
             )
@@ -973,7 +973,7 @@ impl ResolvedPathQuery {
             message: format!(
                 "{prefix} {} scope at `{}`.",
                 path_classification_label(self.classification),
-                to_portable_string(&self.normalized_path),
+                to_forward_slash_string(&self.normalized_path),
             ),
             fidelity: MappingFidelity::Exact,
         }

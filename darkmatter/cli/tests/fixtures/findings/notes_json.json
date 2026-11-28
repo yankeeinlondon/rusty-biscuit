@@ -1,0 +1,57 @@
+{
+  "file": "<WS>/cwd/notes.md",
+  "outcome": "failure",
+  "document": null,
+  "diagnostics": [
+    {
+      "code": "dm.reference.missing_transclusion",
+      "severity": "error",
+      "message": "file not found in `::file`",
+      "source": {
+        "file": "<WS>/cwd/notes.md",
+        "line": 6,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 63,
+        "end": 83
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "::file",
+      "reference": "./missing.md",
+      "failure": "no-match",
+      "included_via": [],
+      "base": "<WS>/cwd",
+      "resolved": "<WS>/cwd/missing.md",
+      "hint": "create missing.md, or correct the reference"
+    },
+    {
+      "code": "dm.compose.empty_body",
+      "severity": "warning",
+      "message": "the body would be empty: the document rendered to nothing: every block was left out because its condition was false: `draft` (line 5)",
+      "source": {
+        "file": "<WS>/cwd/notes.md",
+        "line": 5,
+        "column": 1,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "pass the values those conditions read, or add body content outside the conditional blocks"
+    }
+  ],
+  "summary": {
+    "references": 0,
+    "documents": 1,
+    "ok": 0,
+    "broken": 0
+  },
+  "lifecycle_output": [],
+  "read_set": []
+}

@@ -14,7 +14,7 @@ prompt: |-
   - and then shift its focus to how each provider's logging differs: where logs live, what record types exist, what formats they use, and any time-semantics gotchas (units, zones, precision)
   - close with a point of view on how Claudine could leverage provider logs alongside its own JSONL/SQLite reporting
 
-  As background material we have agent-logging research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/agent-logging/*.md`.
+  As background material we have agent-logging research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/providers/agent-logging/*.md`.
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 

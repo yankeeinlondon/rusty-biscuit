@@ -1,15 +1,15 @@
 //! The entry-point parity matrix's claudine-cli runner. Table 1's documents
-//! run through Claudine composition (`claudine compose --dry-run`), launched
-//! from the fixture repository root. Table 2's values, from the repository
+//! run through Claudine composition (`claudine compose <document> --claude
+//! --dry-run`, the passive check), launched from the fixture repository root. Table 2's values, from the repository
 //! root and from the package, run through three entry points:
 //!
 //! - completion (`claudine __complete … compose <value> resolved=`): the value
 //!   is the committed prompt, and the `resolved` suggestions name the target
 //!   it resolved to;
-//! - the prompt argument composed (`claudine compose --dry-run <value>`), the
+//! - the prompt argument composed (`claudine compose <value> --dry-run`), the
 //!   execution of the same value, which also compares a failure's class;
-//! - a supplied schema `file` value (`claudine compose --dry-run <document>
-//!   target=<value>`).
+//! - a supplied schema `file` value (`claudine compose <document>
+//!   target=<value> --dry-run`).
 //!
 //! Completion and the prompt argument run in their own fixture, whose every
 //! target declares `$schema: { resolved: enum(t<N>) }` (`N` its index in
@@ -27,10 +27,13 @@
 //! `HOME` (`USERPROFILE` on Windows) and the fixture `HOME` of the matrix; the
 //! binary captures that process as its request snapshot on every OS. The
 //! matrix's configured extra `@` root is Claudine's own user prompt root
-//! (`~/.claudine/prompts`), which the binary registers from that home. A
-//! failure's class is read only from the
-//! stable `failure: <name>` row of the rendered file-reference error, never
-//! from message text.
+//! (`~/.claudine/prompts`), which the binary registers from that home.
+//!
+//! Every dry run chooses `--claude`, with a stub `claude` on the fixture
+//! `PATH` that the check never runs, so a clean check exits 0 and its stdout
+//! is the composed preview alone. A run that does not exit 0 is run again
+//! with `--json`: a failure's class is read only from the first diagnostic's
+//! stable `failure` field, never from message text.
 
 #[path = "../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs"]
 mod matrix;
@@ -38,7 +41,7 @@ mod matrix;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use biscuit_file::{ResolutionFailure, to_portable_string};
+use biscuit_file::{ResolutionFailure, to_forward_slash_string};
 use matrix::{
     Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, GlobConsumer, GlobDocumentCell, GlobValueCell,
     LAUNCH_MAGIC, Observed, Owner, ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
@@ -46,15 +49,9 @@ use matrix::{
 
 use crate::common::{CliProcessFixture, strip_ansi};
 
-/// The class named by the first `failure: <name>` row in `text`.
-fn failure_row(text: &str) -> Option<ResolutionFailure> {
-    let (_, rest) = text.split_once("failure:")?;
-    let name: String = rest
-        .trim_start()
-        .chars()
-        .take_while(|c| c.is_ascii_lowercase() || *c == '-')
-        .collect();
-    match name.as_str() {
+/// The class named by a check diagnostic's `failure` field.
+fn failure_class(name: &str) -> Option<ResolutionFailure> {
+    match name {
         "invalid-reference" => Some(ResolutionFailure::InvalidReference),
         "missing-context" => Some(ResolutionFailure::MissingContext),
         "no-match" => Some(ResolutionFailure::NoMatch),
@@ -64,24 +61,69 @@ fn failure_row(text: &str) -> Option<ResolutionFailure> {
     }
 }
 
-/// The composed body of a dry run: stdout up to the separator that opens the
-/// resolved-frontmatter report, which names the document but no target.
-fn composed_body(stdout: &str) -> &str {
-    stdout.split('\u{254c}').next().unwrap_or(stdout)
+/// An executable `claude` on the fixture's `PATH`: the check needs a chosen,
+/// installed provider to report a clean preview, and never runs it.
+fn install_claude_stub(cli: &CliProcessFixture) {
+    let path = cli.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write the claude stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("make the stub executable");
+    }
 }
 
-/// The result of one dry run. A run whose output names a failure reports its
-/// class, whatever the exit status.
-fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output: &Output) -> Observed {
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    if let Some(failure) = failure_row(&stderr).or_else(|| failure_row(&stdout)) {
-        return Observed::Failure(failure);
+/// `claudine compose <document> <setters…> --claude --dry-run [extra…]` from
+/// `launch`.
+fn check(cli: &CliProcessFixture, launch: &Path, document: &std::ffi::OsStr, setters: &[String], extra: &[&str]) -> Output {
+    cli.command_builder()
+        // The launch directory decides relative and `@` resolution, which is
+        // the subject.
+        .ambient_context(launch)
+        .build()
+        .arg("compose")
+        .arg(document)
+        .args(setters)
+        .args(["--claude", "--dry-run"])
+        .args(extra)
+        .output()
+        .expect("run claudine compose --dry-run")
+}
+
+/// A dry run's composed preview on success, or else the failure class the
+/// `--json` report's first diagnostic names.
+fn checked_body(
+    cli: &CliProcessFixture,
+    launch: &Path,
+    document: &std::ffi::OsStr,
+    setters: &[String],
+) -> Result<String, Observed> {
+    let output = check(cli, launch, document, setters, &[]);
+    if output.status.success() {
+        return Ok(strip_ansi(&String::from_utf8_lossy(&output.stdout)));
     }
-    if !output.status.success() {
-        return Observed::Unexpected(format!("{} without a failure row: {stderr}", output.status));
+    let human = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let json = check(cli, launch, document, setters, &["--json"]);
+    let report: serde_json::Value = match serde_json::from_slice(&json.stdout) {
+        Ok(report) => report,
+        Err(error) => return Err(Observed::Unexpected(format!("{}: no JSON report ({error}): {human}", json.status))),
+    };
+    let first = &report["diagnostics"][0];
+    match first["failure"].as_str() {
+        Some(name) => Err(failure_class(name)
+            .map_or_else(|| Observed::Unexpected(format!("unknown failure class {name:?}: {first}")), Observed::Failure)),
+        None => Err(Observed::Unexpected(format!("{} without a failure class: {first}\n{human}", output.status))),
     }
-    let body = composed_body(&stdout);
+}
+
+/// The result of one dry run: the target its preview names, or its failure
+/// class.
+fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, checked: Result<String, Observed>) -> Observed {
+    let body = match checked {
+        Ok(body) => body,
+        Err(observed) => return observed,
+    };
+    let body = body.as_str();
     let targets = match consumer {
         Consumer::SchemaFile => fixture.stored_value_targets(body, tree_root),
         Consumer::File | Consumer::Code | Consumer::TocLinking | Consumer::MarkdownLink => {
@@ -90,7 +132,7 @@ fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output
     };
     match targets.as_slice() {
         [path] => Observed::File(path.clone()),
-        _ => Observed::Unexpected(format!("{} targets in stdout {stdout:?}", targets.len())),
+        _ => Observed::Unexpected(format!("{} targets in stdout {body:?}", targets.len())),
     }
 }
 
@@ -98,22 +140,15 @@ fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output
 /// the repository, absolute outside it.
 fn document_argument(fixture: &ParityFixture, document: &Path) -> String {
     match document.strip_prefix(fixture.repo()) {
-        Ok(relative) => to_portable_string(relative),
+        Ok(relative) => to_forward_slash_string(relative),
         Err(_) => document.to_string_lossy().into_owned(),
     }
 }
 
 fn compose(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &DocumentCell) -> Observed {
     let document = fixture.write_document(cell);
-    let output = cli
-        .command_builder()
-        .ambient_context(&fixture.repo())
-        .build()
-        .args(["compose", "--dry-run"])
-        .arg(document_argument(fixture, &document))
-        .output()
-        .expect("run claudine compose --dry-run");
-    observe(fixture, cell.consumer, &fixture.tree_root(cell), &output)
+    let checked = checked_body(cli, &fixture.repo(), document_argument(fixture, &document).as_ref(), &[]);
+    observe(fixture, cell.consumer, &fixture.tree_root(cell), checked)
 }
 
 /// The document every Table 2 value is supplied to: one eager `file`
@@ -179,35 +214,25 @@ fn completion(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &ValueCell
     }
 }
 
-/// `claudine compose --dry-run <value>` from the cell's launch directory: the
+/// `claudine compose <value> --dry-run` from the cell's launch directory: the
 /// prompt argument completion resolves, composed.
 fn prompt_argument(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &ValueCell) -> Observed {
     let value = fixture.value(cell);
-    let output = cli
-        .command_builder()
-        .ambient_context(&fixture.launch_dir(cell.launch))
-        .build()
-        .args(["compose", "--dry-run"])
-        .arg(&value)
-        .output()
-        .expect("run claudine compose --dry-run with a prompt argument");
-    observe(fixture, Consumer::File, &fixture.repo(), &output)
+    let checked = checked_body(cli, &fixture.launch_dir(cell.launch), value.as_ref(), &[]);
+    observe(fixture, Consumer::File, &fixture.repo(), checked)
 }
 
-/// `claudine compose --dry-run <document> target=<value>` from the cell's
+/// `claudine compose <document> target=<value> --dry-run` from the cell's
 /// launch directory.
 fn supplied_value(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &ValueCell) -> Observed {
     let value = fixture.value(cell);
-    let output = cli
-        .command_builder()
-        .ambient_context(&fixture.launch_dir(cell.launch))
-        .build()
-        .args(["compose", "--dry-run"])
-        .arg(value_document(fixture))
-        .arg(format!("target={value}"))
-        .output()
-        .expect("run claudine compose --dry-run with a supplied value");
-    observe(fixture, Consumer::SchemaFile, &fixture.repo(), &output)
+    let checked = checked_body(
+        cli,
+        &fixture.launch_dir(cell.launch),
+        value_document(fixture).as_os_str(),
+        &[format!("target={value}")],
+    );
+    observe(fixture, Consumer::SchemaFile, &fixture.repo(), checked)
 }
 
 /// A failed run's output, for [`matrix::validation_verdicts`].
@@ -233,15 +258,9 @@ fn spawn_each<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec
     })
 }
 
-/// `claudine compose --dry-run <document>` from the repository root.
+/// `claudine compose <document> --dry-run` from the repository root.
 fn dry_run(cli: &CliProcessFixture, fixture: &ParityFixture, document: &Path) -> Output {
-    cli.command_builder()
-        .ambient_context(&fixture.repo())
-        .build()
-        .args(["compose", "--dry-run"])
-        .arg(document_argument(fixture, document))
-        .output()
-        .expect("run claudine compose --dry-run")
+    check(cli, &fixture.repo(), document_argument(fixture, document).as_ref(), &[], &[])
 }
 
 /// Composition of a Table 1 glob cell: the files `::file-links` or
@@ -255,16 +274,12 @@ fn compose_glob(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobDoc
             .collect();
         return matrix::validation_verdicts(outcomes);
     }
-    let output = dry_run(cli, fixture, &fixture.glob_document(cell));
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    if let Some(failure) = failure_row(&stderr).or_else(|| failure_row(&stdout)) {
-        return Observed::Failure(failure);
-    }
-    if !output.status.success() {
-        return Observed::Unexpected(format!("{} without a failure row: {stderr}", output.status));
-    }
-    let body = composed_body(&stdout);
+    let document = document_argument(fixture, &fixture.glob_document(cell));
+    let body = match checked_body(cli, &fixture.repo(), document.as_ref(), &[]) {
+        Ok(body) => body,
+        Err(observed) => return observed,
+    };
+    let body = body.as_str();
     match cell.consumer {
         GlobConsumer::FileLinks => match fixture.file_links_listed(body) {
             files if files.is_empty() => Observed::Unexpected(format!("no `::file-links` tree in {body:?}")),
@@ -303,7 +318,7 @@ fn complete_glob(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobVa
     if files.is_empty() { Observed::Unresolved } else { Observed::Files(files) }
 }
 
-/// `claudine compose --dry-run <prompt> spec=<candidate>` from the cell's
+/// `claudine compose <prompt> spec=<candidate> --dry-run` from the cell's
 /// launch directory, for each candidate in `keep`.
 fn supplied_glob_value(
     cli: &CliProcessFixture,
@@ -317,15 +332,8 @@ fn supplied_glob_value(
         .into_iter()
         .filter(|candidate| keep.contains(candidate))
         .map(|candidate| {
-            let output = cli
-                .command_builder()
-                .ambient_context(&fixture.launch_dir(cell.launch))
-                .build()
-                .args(["compose", "--dry-run"])
-                .arg(&prompt)
-                .arg(format!("spec={}", to_portable_string(&candidate)))
-                .output()
-                .expect("run claudine compose --dry-run with a supplied value");
+            let setter = format!("spec={}", to_forward_slash_string(&candidate));
+            let output = check(cli, &fixture.launch_dir(cell.launch), prompt.as_os_str(), &[setter], &[]);
             (candidate, outcome(&output))
         })
         .collect();
@@ -426,10 +434,12 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
 
 fn fixtures() -> Fixtures {
     let plain_cli = CliProcessFixture::named("entry_point_parity");
+    install_claude_stub(&plain_cli);
     let plain = ParityFixture::create(plain_cli.workspace_path());
     std::fs::write(value_document(&plain), Consumer::SchemaFile.document("placeholder"))
         .expect("write the value document");
     let declared_cli = CliProcessFixture::named("entry_point_parity_completion");
+    install_claude_stub(&declared_cli);
     let declared = ParityFixture::create(declared_cli.workspace_path());
     declare_target_schemas(&declared);
     Fixtures { plain: (plain_cli, plain), declared: (declared_cli, declared) }
@@ -763,10 +773,11 @@ fn external_prompt_schema_completion_keeps_both_anchors() {
 fn external_prompt_composition_keeps_both_anchors() {
     let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
     let cli = CliProcessFixture::named("cross_repository_composition");
+    install_claude_stub(&cli);
     let fixture = CrossRepositoryFixture::create(cli.workspace_path());
 
     let document = fixture.write_magic_document();
-    let output = claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), document.as_os_str()]);
+    let output = check(&cli, &fixture.launch(), document.as_os_str(), &[], &[]);
     let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     assert!(
         output.status.success() && stdout.contains(LAUNCH_MAGIC) && !stdout.contains(SOURCE_MAGIC),
@@ -782,8 +793,7 @@ fn external_prompt_composition_keeps_both_anchors() {
             &reference,
             &format!("zebra: {}\n", owner.zebra_values()[0]),
         );
-        let output =
-            claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), prompt.as_os_str()]);
+        let output = check(&cli, &fixture.launch(), prompt.as_os_str(), &[], &[]);
         (!output.status.success()).then(|| {
             format!("{label} `{reference}` ({owner:?}): {}", strip_ansi(&String::from_utf8_lossy(&output.stderr)))
         })

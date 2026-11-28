@@ -56,6 +56,12 @@ impl Markdown {
         mut options: crate::markdown::compose::ComposeRequest,
         hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> (MarkdownResult<ComposeReport>, Vec<ComposeWarning>) {
+        if let std::borrow::Cow::Owned(rooted) = options.root_document(self) {
+            *self = rooted;
+        }
+        if let std::borrow::Cow::Owned(rooted) = options.rooted_at(self) {
+            options = rooted;
+        }
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
@@ -68,6 +74,11 @@ impl Markdown {
         // walk and this pass fetch each URL once); otherwise build one whose
         // persistent store holds raw remote bodies. It is the only persistent
         // store a compose run uses (R18).
+        // A dry run reads and writes no compose or shell cache, whatever the
+        // caller set after `with_dry_run`.
+        if options.is_dry_run() {
+            options.cache_access_mode = crate::markdown::compose::CacheAccessMode::Off;
+        }
         let remote_fetch = options.remote_fetch_runtime();
         options.remote_fetch = Some(remote_fetch.clone());
         // The same reuse rule for the data memo and read set: a caller's
@@ -87,6 +98,10 @@ impl Markdown {
             remote_fetch,
         )
         .with_iteration_limits(options.iteration_limits());
+        // A dry run reads each local source once for all of its passes.
+        runtime.cache = runtime.cache.clone().with_shared_reads(
+            options.passive_session().map(|session| session.observations().local_reads().clone()),
+        );
         // Discovery reads collections to find children; it consumes none of
         // the execution allowances.
         if options.nested_compose.is_discovery() {
@@ -95,7 +110,7 @@ impl Markdown {
         runtime.context_epoch.seed(options.context());
         runtime.root_source = Some((
             options.source.clone(),
-            options.source_derivation,
+            options.source_derivation.clone(),
             options.source_opening.clone(),
         ));
 
@@ -228,6 +243,11 @@ impl Markdown {
         mut hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> MarkdownResult<ComposeReport> {
         let entered = node.is_some();
+        // A dry run's schema files, and every other source this node reads
+        // on this thread, come from its one observation of local files.
+        let _shared_reads = options.passive_session().map(|session| {
+            simplified_schema::resolve::buffers::enter_shared_reads(session.observations().local_reads().clone())
+        });
         if let Some((id, path)) = node {
             runtime.transclusion.enter(id, path, 1)?;
         }
@@ -262,6 +282,14 @@ impl Markdown {
                     report_link_titles(self, origin, &options, &mut report)?;
                 }
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
+                // A dry run leaves the body's commands as written; it records
+                // them once, before the first stage that would run one.
+                if *operation == ComposeOperation::ShellExpansion
+                    && options.is_dry_run()
+                    && let Some(body) = body.as_ref()
+                {
+                    crate::markdown::compose::inline::shell_expansion::record_deferred_command_sites(self, &body.data, &options);
+                }
                 if !options.is_enabled(*operation) {
                     continue;
                 }

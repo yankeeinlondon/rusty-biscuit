@@ -203,7 +203,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     let config_path = write_with_darkmatter_setup(repo_scope, &config)?;
     log::message(&format!(
         "Wrote config to {}",
-        biscuit_file::to_portable_string(&config_path)
+        biscuit_file::to_forward_slash_string(&config_path)
     ));
 
     // Handle .gitignore in repo mode
@@ -406,7 +406,7 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     let config_path = write_with_darkmatter_setup(repo_scope, &config)?;
     log::message(&format!(
         "  Wrote config to {}",
-        biscuit_file::to_portable_string(&config_path)
+        biscuit_file::to_forward_slash_string(&config_path)
     ));
 
     // Register with providers

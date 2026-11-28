@@ -6,7 +6,7 @@
 //! lock, the same sink — and `claudine signals check` replays the identical
 //! detector code over the research corpus's evidence fixtures via
 //! [`bespoke_replayer`]. Semantics authority: each record's
-//! `bespoke_rationale:` / notes in `docs/research/signals/<provider>.md`.
+//! `bespoke_rationale:` / notes in `docs/research/providers/signals/<provider>.md`.
 
 use claudine_catalog_types::{QwenLoopType, SignalEvent, SignalSource};
 use serde_json::{Value, json};

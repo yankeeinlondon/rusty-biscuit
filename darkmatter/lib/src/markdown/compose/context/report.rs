@@ -54,6 +54,12 @@ pub struct ComposeReport {
     /// Number of page blocks that evaluated to false and were skipped.
     pub page_blocks_skipped: usize,
 
+    /// The `::block` regions of this document's own body whose condition
+    /// evaluated false, in document order: the evidence an empty body's
+    /// [`EmptyBodyCause`](crate::findings::EmptyBodyCause) is proven from. A
+    /// transcluded child's blocks are its own and are not merged in.
+    pub excluded_blocks: Vec<crate::findings::ExcludedBlock>,
+
     /// Number of transclusions applied.
     pub transclusions_applied: usize,
 
@@ -730,6 +736,15 @@ pub(crate) enum WarningSubject {
         scope: Option<String>,
         origin: ExpressionOrigin,
     },
+    /// One near-miss key on one object, once per source document however
+    /// many verdicts a composition runs.
+    SchemaKey {
+        /// Source document; `None` until the document's pipeline attributes it.
+        document: Option<PathBuf>,
+        /// The owning object's JSON Pointer.
+        path: String,
+        key: String,
+    },
     /// One link's title, once per source document however many times a pass
     /// reaches it (a repeated `::map` copy, a second scan of the same body).
     LinkTitle {
@@ -755,7 +770,10 @@ impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
             Self::Path(_) | Self::Embedded { .. } => {}
-            Self::Root { document, .. } | Self::Expression { document, .. } | Self::LinkTitle { document, .. } => {
+            Self::Root { document, .. }
+            | Self::Expression { document, .. }
+            | Self::LinkTitle { document, .. }
+            | Self::SchemaKey { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
                 }
@@ -878,11 +896,14 @@ impl ComposeWarning {
             expected_type: None,
             actual_type: None,
             span: None,
-            iteration_path: Default::default(),
             reference_details: None,
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -941,11 +962,14 @@ impl ComposeWarning {
             expected_type: None,
             actual_type: None,
             span,
-            iteration_path: Default::default(),
             reference_details: None,
             data_location: None,
             grants_needed: None,
             schema_default: None,
+            related: Vec::new(),
+            hint: None,
+            notes: Vec::new(),
+            trail: crate::findings::Trail::default(),
         };
         Self {
             stage: "link_titles".to_string(),
@@ -979,7 +1003,10 @@ impl ComposeWarning {
                 bundle: bundle.clone(),
                 name: name.clone(),
             }),
-            WarningSubject::Root { .. } | WarningSubject::Expression { .. } | WarningSubject::LinkTitle { .. } => None,
+            WarningSubject::Root { .. }
+            | WarningSubject::Expression { .. }
+            | WarningSubject::LinkTitle { .. }
+            | WarningSubject::SchemaKey { .. } => None,
         }
     }
 
@@ -1031,6 +1058,39 @@ impl ComposeWarning {
         }
     }
 
+    /// Near-miss key advice ([`simplified_schema::ValidationProblemCode::NearMissKey`])
+    /// on `document`'s frontmatter: a warning that never fails the verdict,
+    /// with the same record DMLS reports.
+    pub(crate) fn schema_key_advice(problem: &simplified_schema::ValidationProblem, document: &std::path::Path) -> Self {
+        let diagnostic = crate::markdown::compose::report_diagnostics::key_advice_diagnostic(problem, document);
+        let message = match &problem.hint {
+            Some(hint) => format!("{}; {hint}", problem.message),
+            None => problem.message.clone(),
+        };
+        let location = problem.line.map(|line| WarningLocation {
+            line: line as usize,
+            column: problem.column.map(|column| column as usize),
+            span: None,
+        });
+        Self {
+            source: Some("darkmatter.schema".to_string()),
+            code: Some(diagnostic.code.clone()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::SchemaKey {
+                    document: None,
+                    path: problem.path.clone(),
+                    key: problem.offending_property.clone().unwrap_or_default(),
+                },
+            }),
+            line_number: location.as_ref().map(|location| location.line),
+            location,
+            document: diagnostic.source.as_ref().and_then(|source| source.file.clone()),
+            path: diagnostic.source.as_ref().and_then(|source| source.file.clone()),
+            diagnostic: Some(Box::new(diagnostic)),
+            ..Self::new("schema_validation", message)
+        }
+    }
+
     /// A lenient expression parse or evaluation failure at `origin` in the
     /// scanned text.
     pub(crate) fn expression_failure(
@@ -1056,8 +1116,8 @@ impl ComposeWarning {
     /// target lies outside the file tree. One per link: the same link reached
     /// by two globs, or by one glob evaluated twice, is one issue.
     pub(crate) fn skipped_symlink(stage: impl Into<String>, entry: &biscuit_file::SkippedEntry) -> Self {
-        let link = biscuit_file::to_portable_string(&entry.link);
-        let target = biscuit_file::to_portable_string(&entry.target);
+        let link = biscuit_file::to_forward_slash_string(&entry.link);
+        let target = biscuit_file::to_forward_slash_string(&entry.target);
         Self {
             code: Some(Self::GLOB_SKIPPED_SYMLINK_CODE.to_string()),
             identity: Some(WarningIdentity {

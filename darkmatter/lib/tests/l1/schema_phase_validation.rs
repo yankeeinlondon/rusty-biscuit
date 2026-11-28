@@ -404,7 +404,7 @@ use simplified_schema::SchemaError;
         let error = parse_trigger_envelope_from_str(&source)
             .expect_err("trigger match eager must be rejected");
         assert!(
-            matches!(error, SchemaError::TriggerForbiddenConstraint { ref property, ref constraint }
+            matches!(error, SchemaError::TriggerForbiddenConstraint { ref property, ref constraint, .. }
                 if property == "candidate" && constraint == "eager"),
             "{definition}: {error:?}",
         );
@@ -558,6 +558,7 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
     let root = repo_root();
     let schema_dirs = [
         root.join("darkmatter/docs/schemas"),
+        root.join("claudine/registration"),
         root.join("claudine/schemas"),
         root.join("claudine/docs/schemas"),
         root.join("schemas"),
@@ -593,9 +594,12 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
 
             for (name, value) in body {
                 let Some(name) = name.as_str() else { continue };
-                // Trigger envelopes and object-arity metadata are not property
-                // definitions.
-                if name == "$constraints" {
+                // Trigger envelopes, object-arity metadata, composition, and
+                // key declarations (advice opt-in, `removed(…)`) belong to the
+                // object, not to a property definition.
+                if matches!(name, "$constraints" | "$extends" | "$advise-unknown-keys")
+                    || value.as_str().is_some_and(|text| text.starts_with("removed("))
+                {
                     continue;
                 }
                 parse_property_definition(name, value).unwrap_or_else(|error| {

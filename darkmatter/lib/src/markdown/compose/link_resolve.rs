@@ -17,7 +17,7 @@ use crate::markdown::reference::{
     local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::{MarkdownError, MarkdownResult};
-use biscuit_file::try_portable_string;
+use biscuit_file::try_forward_slash_string;
 use std::path::Path;
 use tracing::trace;
 
@@ -119,7 +119,7 @@ pub(crate) fn link_resolve_with_edits(
 
         // 2.5 Resolve to absolute path
         if let Some(abs_path) = resolve_absolute(&raw_target, cwd, options) {
-            let Some(abs_path_str) = try_portable_string(&abs_path) else {
+            let Some(abs_path_str) = try_forward_slash_string(&abs_path) else {
                 return Err(MarkdownError::Transform(format!(
                     "link target '{raw_target}' resolves to '{}', which has no faithful portable Markdown destination. CommonMark consumes backslash escapes inside a link destination, so the native Windows spelling would not survive a parse, and leaving the authored target would retarget it once this document is transcluded.",
                     abs_path.display()
@@ -234,7 +234,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
@@ -270,7 +270,7 @@ mod tests {
         }
 
         result.unwrap();
-        let expected = biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
+        let expected = biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
         assert!(
             markdown.content().contains(&expected),
             "{}",
@@ -310,7 +310,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let expected =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&package_target).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&package_target).unwrap());
         assert!(
             md.content().contains(&expected),
             "{}",
@@ -335,7 +335,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
@@ -357,7 +357,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
     }
@@ -382,11 +382,11 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_css =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_css).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_css).unwrap());
         let resolved_font =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_font).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_font).unwrap());
         let resolved_script =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_script).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_script).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_css)),
@@ -431,13 +431,13 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_parens =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_parens).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_parens).unwrap());
         let resolved_quotes =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_quotes).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_quotes).unwrap());
         let resolved_mixed =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_mixed).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_mixed).unwrap());
         let resolved_multi =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_multi).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target_multi).unwrap());
 
         assert!(
             md.content().contains(&format!("(<{}>)", resolved_parens)),
@@ -489,7 +489,7 @@ mod tests {
         // shape is `<source_dir>/./b.md`. This flows through `FileReference`'s
         // candidate plan, not a private `dir.join(raw)` fallback.
         let joined = dir.path().join("./b.md");
-        let resolved_path = biscuit_file::to_portable_string(&joined);
+        let resolved_path = biscuit_file::to_forward_slash_string(&joined);
 
         assert!(
             md.content().contains(&format!("({})", resolved_path)),
@@ -523,8 +523,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let repo_candidate = biscuit_file::to_portable_string(&dir.path().join("missing.md"));
-        let source_first = biscuit_file::to_portable_string(&nested.join("missing.md"));
+        let repo_candidate = biscuit_file::to_forward_slash_string(&dir.path().join("missing.md"));
+        let source_first = biscuit_file::to_forward_slash_string(&nested.join("missing.md"));
         assert!(
             md.content().contains(&format!("({source_first})")),
             "expected document-first shape {source_first}. Content: {}",
@@ -554,7 +554,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&logo).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&logo).unwrap());
 
         // src should be resolved to absolute path
         assert!(
@@ -587,7 +587,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -613,7 +613,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&movie).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&movie).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -642,11 +642,11 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_b =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         let resolved_movie =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_movie).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_movie).unwrap());
         let resolved_css =
-            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_css).unwrap());
+            biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(&file_css).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_b)),

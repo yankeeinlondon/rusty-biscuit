@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ✗ key `setup` has been removed
+      at doc.md:7:1
+      hint: use a preceding `side_effect:` task

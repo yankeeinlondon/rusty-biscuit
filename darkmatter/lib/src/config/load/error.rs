@@ -59,6 +59,11 @@ pub struct ConfigProblem {
     pub column: Option<usize>,
     /// What is wrong.
     pub message: String,
+    /// For a problem with a `permissions` reference that names a file, that
+    /// file, as resolved (or as written when it could not be resolved): a
+    /// host that reports that file's own problems can tell this one follows
+    /// from them. `None` for every other problem.
+    pub reference_target: Option<PathBuf>,
 }
 
 impl fmt::Display for ConfigProblem {
@@ -119,6 +124,15 @@ impl ConfigError {
         Self { kind, problems }
     }
 
+    /// This error, its problems naming `target` as the file their
+    /// `permissions` reference names.
+    pub(crate) fn with_reference_target(mut self, target: &Path) -> Self {
+        for problem in &mut self.problems {
+            problem.reference_target = Some(target.to_path_buf());
+        }
+        self
+    }
+
     pub(crate) fn one(kind: ConfigErrorKind, problem: ConfigProblem) -> Self {
         Self::new(kind, vec![problem])
     }
@@ -126,7 +140,15 @@ impl ConfigError {
     pub(crate) fn unlocated(kind: ConfigErrorKind, file: &Path, revision: ConfigRevision, message: String) -> Self {
         Self::one(
             kind,
-            ConfigProblem { file: file.to_path_buf(), revision, pointer: String::new(), line: None, column: None, message },
+            ConfigProblem {
+                file: file.to_path_buf(),
+                revision,
+                pointer: String::new(),
+                line: None,
+                column: None,
+                message,
+                reference_target: None,
+            },
         )
     }
 

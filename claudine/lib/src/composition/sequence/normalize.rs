@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::json_util::json_type_name;
 use super::model::{
     ExecutableField, SequencePlan, SequenceSource, SequenceStep, StepExecutable, StepState,
@@ -83,7 +83,7 @@ pub fn normalize_plan_at(
     // Task grammar names the file that holds the list, which for a
     // referenced source is not the invoking document.
     let declaring_path = match &source {
-        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.as_path(),
+        SequenceSource::External { path } | SequenceSource::DataFile { path, .. } => path.as_path(),
         _ => invocation_path,
     };
     let parsed: Vec<ParsedStep> = items
@@ -91,10 +91,87 @@ pub fn normalize_plan_at(
         .enumerate()
         .map(|(index, item)| {
             let property = format!("{list_property}[{index}]");
-            parse_item(index, item, strictness, declaring_path, &property)
+            parse_item(index, item, strictness, declaring_path, &property, true)
         })
         .collect::<Result<_, _>>()?;
+    Ok(assemble_plan(parsed, source, invocation_path, document_fail_fast))
+}
 
+/// One authored item [`normalize_plan_recovering_at`] could not read, with
+/// its zero-based position in the authored list.
+#[derive(Debug)]
+pub struct ItemFailure {
+    /// The item's zero-based position in the authored list.
+    pub index: usize,
+    /// Why it could not be read.
+    pub error: CompositionError,
+}
+
+/// A plan built from the items of a list that could be read, and why the
+/// others could not.
+#[derive(Debug)]
+pub struct RecoveredPlan {
+    /// The readable items, in authored order. Generated state (`id`,
+    /// `index`, `count`) describes this plan, not the authored list.
+    pub plan: SequencePlan,
+    /// `ordinals[i]` is the authored position of `plan.steps[i]`.
+    pub ordinals: Vec<usize>,
+    /// The unreadable items, in authored order.
+    pub failures: Vec<ItemFailure>,
+}
+
+impl RecoveredPlan {
+    /// A plan read with nothing set aside.
+    #[must_use]
+    pub fn whole(plan: SequencePlan) -> Self {
+        let ordinals = (0..plan.steps.len()).collect();
+        Self { plan, ordinals, failures: Vec::new() }
+    }
+}
+
+/// [`normalize_plan_at`] that sets an unreadable item aside instead of
+/// failing the list, for a check that reports every item: each item is read
+/// exactly as [`normalize_plan_at`] reads it.
+#[must_use]
+pub fn normalize_plan_recovering_at(
+    items: &[Value],
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    list_property: &str,
+) -> RecoveredPlan {
+    let strictness = source.strictness();
+    let declaring_path = match &source {
+        SequenceSource::External { path } | SequenceSource::DataFile { path, .. } => path.clone(),
+        _ => invocation_path.to_path_buf(),
+    };
+    let mut parsed = Vec::with_capacity(items.len());
+    let mut ordinals = Vec::with_capacity(items.len());
+    let mut failures = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let property = format!("{list_property}[{index}]");
+        // Each item is judged alone; its legs and nested items are read,
+        // and judged, one by one where the walk reaches them.
+        match parse_item(index, item, strictness, &declaring_path, &property, false) {
+            Ok(step) => {
+                parsed.push(step);
+                ordinals.push(index);
+            }
+            Err(error) => failures.push(ItemFailure { index, error }),
+        }
+    }
+    let plan = assemble_plan(parsed, source, invocation_path, document_fail_fast);
+    RecoveredPlan { plan, ordinals, failures }
+}
+
+/// The plan of `parsed` items: generated ids, positions, and the shared
+/// `sequence_id`.
+fn assemble_plan(
+    parsed: Vec<ParsedStep>,
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+) -> SequencePlan {
     let ids = generate_ids(parsed.iter().map(|p| p.name.as_str()));
     let sequence_id = generate_sequence_id(invocation_path, &ids);
     let count = parsed.len();
@@ -124,7 +201,7 @@ pub fn normalize_plan_at(
         })
         .collect();
 
-    Ok(SequencePlan {
+    SequencePlan {
         source,
         steps,
         document_fail_fast,
@@ -133,7 +210,7 @@ pub fn normalize_plan_at(
         // list and whether that document recorded authored key order at all.
         authored: AuthoredOrder::default(),
         document_scope: None,
-    })
+    }
 }
 
 /// Parse a single authored item into its name, executable, and state portion.
@@ -143,6 +220,7 @@ fn parse_item(
     strictness: Strictness,
     origin: &Path,
     property: &str,
+    descend: bool,
 ) -> Result<ParsedStep, CompositionError> {
     match item {
         Value::String(s) => Ok(ParsedStep {
@@ -151,10 +229,10 @@ fn parse_item(
             extra: Map::new(),
             executable: None,
         }),
-        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property),
+        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property, descend),
         // `null` is a typed error under both contracts: leniency coerces a
         // value that *is* something into a name, it does not invent one.
-        Value::Null => Err(CompositionError::SequenceNullItem { index }),
+        Value::Null => Err(CompositionError::SequenceNullItem { index, site: Box::new(SequenceSite::at(origin, property)) }),
         Value::Number(_) | Value::Bool(_) if strictness == Strictness::Lenient => {
             let name = scalar_name(item);
             Ok(ParsedStep {
@@ -164,10 +242,10 @@ fn parse_item(
                 executable: None,
             })
         }
-        other => Err(CompositionError::SequenceInvalid(format!(
-            "step at index {index} must be a string or object, got {}",
-            json_type_name(other)
-        ))),
+        other => Err(CompositionError::sequence_invalid(
+            format!("step {} must be a string or object, got {}", index + 1, json_type_name(other)),
+            SequenceSite::at(origin, property),
+        )),
     }
 }
 
@@ -189,8 +267,13 @@ fn parse_object_step(
     strictness: Strictness,
     origin: &Path,
     property: &str,
+    descend: bool,
 ) -> Result<ParsedStep, CompositionError> {
-    super::grammar::validate_task_grammar(map, origin, property)?;
+    if descend {
+        super::grammar::validate_task_grammar(map, origin, property)?;
+    } else {
+        super::grammar::validate_task_grammar_shallow(map, origin, property)?;
+    }
     let name = match map.get("name") {
         Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
         // Foreign data may carry a non-string `name` (a numeric id, say); a
@@ -202,12 +285,15 @@ fn parse_object_step(
             return Err(CompositionError::SequenceStepNameWrongType {
                 index,
                 found: json_type_name(other).to_string(),
+                site: Box::new(SequenceSite::at(origin, &format!("{property}.name"))),
             });
         }
         // A nameless foreign object gets its one-based ordinal, which then
         // dasherizes into an id exactly as an authored name would.
         None if strictness == Strictness::Lenient => (index + 1).to_string(),
-        None => return Err(CompositionError::SequenceStepNameMissing { index }),
+        None => {
+            return Err(CompositionError::SequenceStepNameMissing { index, site: Box::new(SequenceSite::at(origin, property)) });
+        }
     };
 
     // Exactly-one executable field.
@@ -220,6 +306,7 @@ fn parse_object_step(
         return Err(CompositionError::SequenceExclusiveExecutable {
             index,
             fields: executable_keys.iter().map(|s| (*s).to_string()).collect(),
+            site: Box::new(SequenceSite::at(origin, property).in_task(name.clone())),
         });
     }
     let executable_field = executable_keys
@@ -239,6 +326,7 @@ fn parse_object_step(
             return Err(CompositionError::SequenceReservedStateKey {
                 index,
                 key: key.clone(),
+                site: Box::new(SequenceSite::at(origin, &format!("{property}.{key}")).in_task(name.clone())),
             });
         } else {
             extra.insert(key.clone(), value.clone());
@@ -254,6 +342,7 @@ fn parse_object_step(
                         index,
                         field: option_key.clone(),
                         executable: field.key().to_string(),
+                        site: Box::new(SequenceSite::at(origin, &format!("{property}.{option_key}")).in_task(name.clone())),
                     });
                 }
             }

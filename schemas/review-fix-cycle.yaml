@@ -1,0 +1,52 @@
+kind: schema
+description: |-
+    The contract shared by the documents of the review/fix cycle: the inputs
+    every cycle prompt takes, and the types the specification and review
+    schemas import.
+
+    Where each fact of the cycle lives:
+
+    - the **specification** carries the state the cycle is driven by: `ready`,
+      `human-review`, and `cycle-verdict` (see `specification.yaml`)
+    - each **review** (`review-N.md`) carries its findings and, once repaired,
+      the result of each one; the latest review is found with
+      `find_last_index`, never from a stored path
+    - the **implementation log** records the implementation of the plan only,
+      never the fix rounds
+# A one-arm root union, not a plain mapping: only inside a root union arm does
+# `match(...)` on a file reject an existing file outside its globs. In a single
+# mapping it only guides completion, and `spec: ./plan.md` would validate.
+$schema:
+    - $extends: cycle-inputs
+types:
+    # The inputs a prompt of the cycle takes. Everything else is derived from
+    # `spec`: the plan and the implementation log are its siblings.
+    cycle-inputs:
+        spec: file(required;eager;match(**/*spec*.md)) -> the specification providing the primary contract for what should be implemented
+        plan: file -> the plan used during implementation; `plan.md` beside the spec
+        implementation-log: file -> the log of the plan's implementation; `implementation-log.md` beside the spec
+    finding:
+        id: "string(required) -> a short name for the finding, unique within its review"
+        priority: "enum(high, medium, low; required)"
+        blocked: "boolean(default(false)) -> whether a human ruling is required before this finding can be repaired"
+        description: "string(required)"
+        result: "finding-result -> what the repair of this review did about the finding; absent until the review is repaired"
+    finding-result: "enum(fixed, already-fixed, blocked, unresolved, disputed)"
+    cycle-verdict: |-
+        enum(extend, needs-human, stop)
+        -> The decision reached after a round of review/fix cycles ended
+        without a production-ready review: `extend` runs another round,
+        `needs-human` stops for the author, and `stop` gives up.
+    # The scope of change of a spec's implementation.
+    blast-radius:
+        packages: string[] -> the packages which had source code changed in them (or config files which impacted the compilation of the package)
+        mutated-symbols: string[](default([])) -> the existing symbols this implementation changed
+        new-symbols: string[](default([])) -> the symbols this implementation created
+    # A pipeline is a grouping of specs chained together to achieve a larger
+    # goal.
+    pipeline:
+        name: string(required) -> a short name for the pipeline of specs which have been grouped together
+        next: string -> the next spec after this one in the pipeline
+        previous: string -> the previous spec in the pipeline
+        depends-on: string[] -> the specs that must be completed before this one
+        description: string -> an optional summary describing what the pipeline is about

@@ -123,11 +123,14 @@ fn a_warning_keeps_its_record_or_its_code() {
                 expected_type: None,
                 actual_type: None,
                 span: None,
-                iteration_path: Default::default(),
                 reference_details: None,
                 data_location: None,
                 grants_needed: None,
                 schema_default: None,
+                related: Vec::new(),
+                hint: None,
+                notes: Vec::new(),
+                trail: darkmatter::findings::Trail::default(),
             }
         );
     }
@@ -427,4 +430,20 @@ mod passive_history {
             [row(ALWAYS_FALSE_CALL_CODE, 1), row(ALWAYS_FALSE_CALL_CODE, 3)]
         );
     }
+}
+
+/// A schema problem about a `file` value carries the value and its failure
+/// class, as a host's `failure:` row prints it.
+#[test]
+fn a_file_value_schema_problem_carries_its_failure_class() {
+    let dir = TempDir::new().unwrap();
+    let content = "---\n$schema:\n  target: file(eager)\ntarget: absent.md\n---\nbody\n";
+    let (_, failure) = failure(dir.path(), "doc.md", content);
+
+    let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+
+    assert_eq!(diagnostic.code, simplified_schema::SCHEMA_INVALID_FILE_REFERENCE_CODE, "{diagnostic:#?}");
+    let details = diagnostic.reference_details.as_ref().expect("the record names its reference");
+    assert_eq!((details.reference.as_deref(), details.failure.as_deref()), (Some("absent.md"), Some("no-match")));
+    assert_eq!(serde_json::to_value(&diagnostic).unwrap()["failure"], json!("no-match"));
 }

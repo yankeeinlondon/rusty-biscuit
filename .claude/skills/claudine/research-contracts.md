@@ -4,7 +4,7 @@ How Claudine's provider research is specified, run, and checked. Read this
 before writing or changing a research contract, a fleet prompt, or the
 `research` recipe.
 
-Reasoning level (`claudine/docs/research/reasoning-level/`) is the reference
+Reasoning level (`claudine/docs/research/providers/reasoning-level/`) is the reference
 topic. Copy its files when starting or narrowing another topic. Agent CLI
 (`agent-cli/`) is the reference for a topic the generator reads: its
 relations gate also runs the generator over the document.

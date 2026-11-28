@@ -12,25 +12,30 @@
 // shape they need to keep.
 #![allow(clippy::result_large_err)]
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, FileReferenceKind, to_portable_string};
-use ignore::WalkBuilder;
+use biscuit_file::{FileReference, FileReferenceKind, to_forward_slash_string};
 use biscuit_tui::components::choose::ChoiceOption;
 use claudine::composition::{
     CompositionError, FileDetail, extract_markdown_detail, extract_yaml_sequence_detail,
 };
+use darkmatter::findings::reference::BasenameBounds;
 
 use super::autocomplete_ui::{choose_one_file, confirm_one_file};
 use super::frontmatter;
 use super::scopes::{self, ComposeMode, ScopeContext};
 use super::walker::{self, WalkOutcome, MAX_CANDIDATES};
 
-const SUGGESTION_ENTRY_BUDGET: usize = 20_000;
-const MAX_SUGGESTIONS: usize = 5;
+/// An operation-file miss offers up to five same-named files, more than a
+/// reference finding's three nearby names: these come from anywhere in the
+/// repository, so the author may need more of them to recognize the one meant.
+const SUGGESTION_BOUNDS: BasenameBounds = BasenameBounds {
+    entry_budget: BasenameBounds::ENTRY_BUDGET,
+    max_matches: 5,
+};
 
 /// Whether a clean operation-file miss may fall back to interactive discovery.
 ///
@@ -83,49 +88,12 @@ fn operation_file_basename(reference: &str) -> Option<&OsStr> {
     (!filename.is_empty()).then(|| OsStr::new(filename))
 }
 
-#[derive(Debug)]
-struct SuggestionEntry {
-    relative_path: PathBuf,
-    file_name: OsString,
-    is_file: bool,
-}
-
-enum SuggestionWalkItem {
-    Root,
-    Error,
-    Entry(SuggestionEntry),
-}
-
-fn collect_repository_suggestions<I>(filename: &OsStr, entries: I) -> Vec<String>
-where
-    I: IntoIterator<Item = SuggestionWalkItem>,
-{
-    if filename.is_empty() {
-        return Vec::new();
-    }
-
-    let mut matches = BTreeSet::new();
-    for item in entries.into_iter().take(SUGGESTION_ENTRY_BUDGET) {
-        let SuggestionWalkItem::Entry(entry) = item else {
-            continue;
-        };
-        if entry.is_file && entry.file_name == filename {
-            matches.insert(to_portable_string(&entry.relative_path));
-            if matches.len() == MAX_SUGGESTIONS {
-                break;
-            }
-        }
-    }
-
-    matches.into_iter().collect()
-}
-
-/// Find repository-relative files whose complete basename equals `filename`.
+/// Repository-relative files whose whole file name equals `filename`, through
+/// Darkmatter's bounded basename search with the completion walker's subtree
+/// filter (no `_`-prefixed entries, no [`walker::SKIP_DIRS`]).
 ///
-/// This is advisory recovery only: an unusable root returns no suggestions,
-/// while entry failures are skipped and count toward the bounded walk. Reaching
-/// the budget retains matches already found. Directory symlinks are not
-/// followed.
+/// Advisory recovery only: a missing input or an unusable root gives no
+/// suggestions.
 pub(crate) fn repository_basename_suggestions(
     repository_root: Option<&Path>,
     filename: Option<&OsStr>,
@@ -133,46 +101,12 @@ pub(crate) fn repository_basename_suggestions(
     let (Some(repository_root), Some(filename)) = (repository_root, filename) else {
         return Vec::new();
     };
-    if filename.is_empty() || !repository_root.is_dir() {
-        return Vec::new();
-    }
-
-    let mut builder = WalkBuilder::new(repository_root);
-    builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .follow_links(false)
-        .filter_entry(walker::entry_passes_filters)
-        .sort_by_file_path(|left, right| left.cmp(right));
-    let walker = builder.build();
-
-    let entries = walker.map(|result| match result {
-        Ok(entry) if entry.depth() == 0 => SuggestionWalkItem::Root,
-        Ok(entry) => {
-            let relative_path = match entry.path().strip_prefix(repository_root) {
-                Ok(path) => path.to_path_buf(),
-                Err(_) => return SuggestionWalkItem::Error,
-            };
-            let is_file = match entry.file_type() {
-                Some(kind) if kind.is_file() => true,
-                Some(kind) if kind.is_symlink() => match std::fs::metadata(entry.path()) {
-                    Ok(metadata) => metadata.is_file(),
-                    Err(_) => return SuggestionWalkItem::Error,
-                },
-                _ => false,
-            };
-            SuggestionWalkItem::Entry(SuggestionEntry {
-                relative_path,
-                file_name: entry.file_name().to_os_string(),
-                is_file,
-            })
-        }
-        Err(_) => SuggestionWalkItem::Error,
-    });
-
-    collect_repository_suggestions(filename, entries)
+    darkmatter::findings::reference::basename_matches(
+        repository_root,
+        filename,
+        SUGGESTION_BOUNDS,
+        walker::name_passes_filters,
+    )
 }
 
 /// The only two allowed outcomes after a structured operation-file no-match.
@@ -193,12 +127,12 @@ pub(crate) fn recover_operation_file(
     reference: &str,
     no_match: CompositionError,
 ) -> OperationFileRecovery {
+    if attempts_autocomplete(reference, &no_match) {
+        return OperationFileRecovery::AttemptAutocomplete;
+    }
     let Some((retained_reference, resolution, _)) = no_match.file_reference_no_match() else {
         return OperationFileRecovery::ExplicitNoMatch(no_match);
     };
-    if is_operation_file_autocomplete_eligible(reference) && no_match.glob_hint().is_none() {
-        return OperationFileRecovery::AttemptAutocomplete;
-    }
 
     let suggestions = repository_basename_suggestions(
         resolution.repository_root(),
@@ -207,6 +141,32 @@ pub(crate) fn recover_operation_file(
     OperationFileRecovery::ExplicitNoMatch(
         no_match.with_file_reference_suggestions(suggestions),
     )
+}
+
+/// Whether [`recover_operation_file`] hands `no_match` for `reference` to the
+/// picker, read without searching anything: a structured no-match of an
+/// eligible bare name whose text carries no literal-glob hint.
+pub(crate) fn attempts_autocomplete(reference: &str, no_match: &CompositionError) -> bool {
+    no_match.file_reference_no_match().is_some()
+        && is_operation_file_autocomplete_eligible(reference)
+        && no_match.glob_hint().is_none()
+}
+
+/// The picker's candidates for `query`, spelled as it lists them, found by
+/// the same read-only search ([`gather_candidates`]) and shown nothing.
+pub(crate) fn candidate_references(
+    query: &str,
+    mode: ComposeMode,
+    ctx: &ScopeContext,
+) -> Result<Vec<String>, CompositionError> {
+    let candidates = gather_candidates(query, mode, ctx)?;
+    Ok(candidates.iter().map(|path| format_relative_insert(path, ctx)).collect())
+}
+
+/// Whether the picker may ask: it needs stdin **and** stderr on a terminal,
+/// whatever `--silent` says.
+pub(crate) fn picker_can_ask(stdin_is_tty: bool, stderr_is_tty: bool) -> bool {
+    stdin_is_tty && stderr_is_tty
 }
 
 /// Interactively resolve an operation-file reference when the original
@@ -237,13 +197,15 @@ pub(crate) fn autocomplete_operation_file(
     present_and_select(candidates, query, mode, &ctx)
 }
 
-/// Collect query-matching candidates across the mode's scope set.
+/// Collect query-matching candidates across the mode's scope set: the
+/// passive half of autocomplete. It reads the file system only, never the
+/// terminal, so it runs without one; [`present_and_select`] is the chooser.
 ///
 /// Both the query substring filter and the active-mode contract are pushed
 /// into the walk so the cap counts candidates that satisfy both predicates,
 /// not raw query matches. The walker is capped at [`MAX_CANDIDATES`] + 1 so
 /// we can early-abort as soon as the valid count exceeds the cap.
-fn gather_candidates(
+pub(crate) fn gather_candidates(
     query: &str,
     mode: ComposeMode,
     ctx: &ScopeContext,
@@ -353,7 +315,7 @@ fn present_and_select(
 }
 
 fn is_interactive() -> bool {
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+    picker_can_ask(std::io::stdin().is_terminal(), std::io::stderr().is_terminal())
 }
 
 fn badge_for_mode(mode: ComposeMode) -> &'static str {
@@ -402,7 +364,7 @@ fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(root)
         && !rel.as_os_str().is_empty()
     {
-        return to_portable_string(rel);
+        return to_forward_slash_string(rel);
     }
 
     if let Some(home) = &ctx.home
@@ -410,10 +372,10 @@ fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(home)
         && !rel.as_os_str().is_empty()
     {
-        return format!("~/{}", to_portable_string(rel));
+        return format!("~/{}", to_forward_slash_string(rel));
     }
 
-    to_portable_string(path)
+    to_forward_slash_string(path)
 }
 
 #[cfg(test)]

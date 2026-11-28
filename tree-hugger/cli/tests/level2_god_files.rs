@@ -100,7 +100,7 @@ fn write_moderate_fixture(dir: &Path) {
 /// shell (Git Bash / MSYS) expects on Windows; single quotes then keep spaces
 /// in a temp-dir path from splitting the word.
 fn shell_word(path: &Path) -> String {
-    let portable = biscuit_file::to_portable_string(path);
+    let portable = biscuit_file::to_forward_slash_string(path);
     format!("'{}'", portable.replace('\'', "'\\''"))
 }
 

@@ -26,6 +26,8 @@ mod format_detection;
 mod glob_reference;
 #[cfg(feature = "file-reference")]
 mod implicit_relative;
+#[cfg(feature = "file-reference")]
+mod launch_lookup;
 mod json_lines;
 #[cfg(feature = "file-reference")]
 mod magic_local_roots;
@@ -45,6 +47,8 @@ mod round_trip;
 mod source_position;
 mod span_compat;
 mod structural_validation;
+#[cfg(feature = "file-reference")]
+mod value_spelling;
 mod test_layout;
 mod yaml_corpus;
 mod yaml_mutation;

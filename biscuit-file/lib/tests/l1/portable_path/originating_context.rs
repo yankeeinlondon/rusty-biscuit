@@ -15,7 +15,7 @@
 
 use biscuit_file::{
     CandidatePlanOrder, ConfigurationProblem, ContextAnchor, DetailedOutcome, FileReferenceError,
-    LaunchMagicScope, PackageAreaFallback, PathPosition, PortabilityPreference as P,
+    LaunchScope, PackageAreaFallback, PathPosition, PortabilityPreference as P,
     RepositoryScopeCatalog,
 };
 
@@ -132,8 +132,8 @@ fn setup() -> Fixture {
 }
 
 /// A launch scope whose own anchors are all absolute.
-fn valid_launch_scope(fx: &Fixture) -> LaunchMagicScope {
-    fx.ctx(&fx.path("repo/docs"), &[]).launch_magic_scope().clone()
+fn valid_launch_scope(fx: &Fixture) -> LaunchScope {
+    fx.ctx(&fx.path("repo/docs"), &[]).launch_scope().clone()
 }
 
 /// Every derivation wrapper to an in-repository document, and the trusted
@@ -195,10 +195,10 @@ fn a_replacement_launch_scope_is_validated_like_every_other_anchor() {
         ),
     ];
     for (case, launch, expected) in cases {
-        let ctx = base.clone().with_launch_magic_scope(launch.launch_magic_scope().clone());
+        let ctx = base.clone().with_launch_scope(launch.launch_scope().clone());
         assert_rejected(case, &fx, &ctx, &expected);
     }
-    assert_accepted("valid replacement launch scope", &fx, &base.with_launch_magic_scope(valid_launch_scope(&fx)));
+    assert_accepted("valid replacement launch scope", &fx, &base.with_launch_scope(valid_launch_scope(&fx)));
 }
 
 // --- Invalid explicit tree root --------------------------------------------
@@ -250,7 +250,7 @@ fn every_derivation_keeps_a_relative_repository_or_package_anchor() {
             ("no catalog", fx.ctx(&docs, &[])),
         ];
         for (source, origin) in origins {
-            let origin = edit(origin).with_launch_magic_scope(valid_launch_scope(&fx));
+            let origin = edit(origin).with_launch_scope(valid_launch_scope(&fx));
             let case = format!("relative {anchor}, {source}");
             assert_rejected(&format!("{case}: origin"), &fx, &origin, &expected);
             for (wrapper, derived) in derivations(&fx, &origin) {
@@ -369,7 +369,7 @@ mod process_directory {
         let second = fx.dir("second");
         let ctx = fx
             .ctx(&fx.path("repo/docs"), &[])
-            .with_launch_magic_scope(snapshot(&fx, "relative").launch_magic_scope().clone());
+            .with_launch_scope(snapshot(&fx, "relative").launch_scope().clone());
         let expected = Expected::Relative(ContextAnchor::RequestDirectory, "relative");
         for dir in [&first, &second] {
             let _guard = CwdGuard::set(dir);

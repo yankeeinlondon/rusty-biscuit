@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/l1/findings.rs
+expression: "portable(&plain, &root)"
+---
+doc.md
+  ℹ not checked: ::file http://127.0.0.1:9/child.md (fetching
+    `http://127.0.0.1:9/child.md` needs network approval (`permissions.network:
+    ask`), which a dry run does not ask for)

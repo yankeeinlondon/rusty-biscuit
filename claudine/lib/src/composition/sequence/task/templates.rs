@@ -16,6 +16,7 @@ impl TaskExecution<'_> {
             task: self.label(),
             message: error.to_string(),
             source: Some(Box::new(MarkdownError::ShellExpansion(Box::new(error)))),
+            site: Box::new(self.task.error_site()),
         }
     }
 
@@ -25,6 +26,7 @@ impl TaskExecution<'_> {
             return Err(CompositionError::SequenceShellResolution {
                 command: site.authored.clone(), task: self.label(),
                 message: "the authored template was not approved at sequence preflight".to_string(), source: None,
+                site: Box::new(self.task.error_site()),
             });
         }
         let approved = LifecycleShellTemplate::approved(template.clone());
@@ -47,6 +49,7 @@ impl TaskExecution<'_> {
             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()
             .map_err(|error| CompositionError::SequenceShellResolution {
                 command: site.authored.clone(), task: self.label(), message: error.to_string(), source: Some(Box::new(MarkdownError::CtxMerge(error))),
+                site: Box::new(self.task.error_site()),
             })?;
         let resolution = super::super::super::document_expression_resolution_context(
             &self.task.origin_path, self.stack.prepared_context, self.stack.file_resolution_context, self.stack.ctx_base_dir,

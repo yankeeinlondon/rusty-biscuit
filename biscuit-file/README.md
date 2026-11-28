@@ -78,12 +78,15 @@ assert_eq!(found.reference().raw(), "foo.md");
 # Ok::<(), biscuit_file::PortablePathError>(())
 ```
 
-After preserving authored intent, verified bare tree-root paths come first,
-then nearby relative links, the repository root (`&`), a declared
-portable environment variable (`{{VAR}}`), and home (`~`); an absolute path is
-a visible last resort. See
-[Portable References](./docs/topics/file-references.md#portable-references-portablepath)
-and [the file tree](./docs/topics/file-references.md#the-file-tree-base_dir-and-the-relative-boundary).
+The default strategy preserves authored intent, then tries implicit
+tree-root paths, nearby relative links, the repository root (`&`), a
+declared environment root, home, and absolute paths. See
+[Portable References](./docs/topics/file-references.md#portable-references-portablepath).
+
+For file and directory values read from launch bases, use
+`ImplicitBases::Launch` with `PortabilityPreference::VALUE_STRATEGY`.
+See [launch lookup](./docs/topics/file-references.md#implicit-relative-paths)
+and [value spelling](./docs/topics/file-references.md#spell-values-for-launch-lookup).
 
 ## Portable Path Text
 
@@ -94,21 +97,21 @@ even with `--no-default-features`:
 
 ```rust
 use std::path::Path;
-use biscuit_file::{to_portable_string, try_portable_string};
+use biscuit_file::{to_forward_slash_string, try_forward_slash_string};
 
 // Separators are normalized; a safely reducible `\\?\` prefix is removed.
-assert_eq!(to_portable_string(Path::new(r"docs\file.md")), "docs/file.md");
+assert_eq!(to_forward_slash_string(Path::new(r"docs\file.md")), "docs/file.md");
 ```
 
-`to_portable_string` renders portable text when a faithful slash-separated
+`to_forward_slash_string` renders portable text when a faithful slash-separated
 spelling exists and otherwise returns the **native** spelling unchanged.
-`try_portable_string` is the same function with the fallback exposed as `None`
+`try_forward_slash_string` is the same function with the fallback exposed as `None`
 so a caller can act on it.
 
-Reach for `try_portable_string` when a native spelling would be wrong output —
+Reach for `try_forward_slash_string` when a native spelling would be wrong output —
 a Markdown link destination, for instance, where CommonMark's backslash escapes
 mean `\\server\share\f.md` does not survive a parse. Reach for
-`to_portable_string` when native text is still correct for the consumer:
+`to_forward_slash_string` when native text is still correct for the consumer:
 diagnostics, completions, YAML scalars.
 
 A path is declined when it is a Windows UNC, device-namespace, or verbatim path

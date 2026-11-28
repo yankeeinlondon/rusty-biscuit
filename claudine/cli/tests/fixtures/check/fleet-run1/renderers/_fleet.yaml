@@ -1,0 +1,11 @@
+kind: sequence
+sequence:
+    - name: find
+      description: Find the Mermaid renderers and provide basic research
+      agent: opencode
+      model: gemini/neon
+      prompt: ./_find.md
+      with:
+          output: "./overview.md"
+    - name: metadata
+      description: extract metadata

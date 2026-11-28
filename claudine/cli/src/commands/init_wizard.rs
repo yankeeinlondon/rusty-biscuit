@@ -27,16 +27,16 @@ pub struct InitArgs {
 pub async fn run_initialization() -> Result<()> {
     let _span = info_span!("init_wizard").entered();
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        return run_headless_initialization().await;
+        return run_headless_initialization().await.map(drop);
     }
 
     run_interactive_initialization().await
 }
 
-async fn run_headless_initialization() -> Result<()> {
+/// First-run setup without prompts; returns the configuration path written.
+pub(crate) async fn run_headless_initialization() -> Result<std::path::PathBuf> {
     let config = build_headless_config();
-    write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))?;
-    Ok(())
+    write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))
 }
 
 async fn run_interactive_initialization() -> Result<()> {
@@ -80,7 +80,7 @@ async fn run_interactive_initialization() -> Result<()> {
     log::message("");
     log::message(&format!(
         "  Config: {}",
-        biscuit_file::to_portable_string(&path)
+        biscuit_file::to_forward_slash_string(&path)
     ));
     log::message("  Edit with: claudine config");
     log::message("");
@@ -276,11 +276,13 @@ pub(crate) fn write_with_darkmatter_setup(
         Ok(setup) => {
             // Publishing and registering Claudine is setup's documented
             // default, as quiet as Claudine's own first write (a headless
-            // first run prints nothing); only a failure is reported.
+            // first run prints nothing); only a failure, or a change to what
+            // the user had (a replaced entry, a removed retired file), is
+            // reported.
             let claudine_config = match setup.darkmatter {
                 Ok(handshake) => {
-                    let darkmatter = biscuit_file::to_portable_string(&handshake.darkmatter_config);
-                    let claudine = biscuit_file::to_portable_string(&handshake.claudine_config);
+                    let darkmatter = biscuit_file::to_forward_slash_string(&handshake.darkmatter_config);
+                    let claudine = biscuit_file::to_forward_slash_string(&handshake.claudine_config);
                     match handshake.permissions {
                         // Pointing a file with no block of its own at Claudine's is
                         // the documented default, as quiet as Claudine's own first
@@ -302,8 +304,46 @@ pub(crate) fn write_with_darkmatter_setup(
                     claudine::config::setup::claudine_config_path(&context, scope)?
                 }
             };
-            if let Err(error) = setup.registration {
-                log::warn(&format!("  Claudine was not registered with Darkmatter: {error}"));
+            match &setup.publication {
+                claudine::composition::registration::PublishOutcome::Published { manifest, .. } => log::info(&format!(
+                    "  Published Claudine's host registration at `{}`",
+                    biscuit_file::to_forward_slash_string(manifest)
+                )),
+                outcome => log::info(&format!(
+                    "  Claudine's host registration at `{}` is current",
+                    biscuit_file::to_forward_slash_string(outcome.manifest())
+                )),
+            }
+            match setup.registration {
+                Ok(report) if !report.replaced.is_empty() => log::message(&format!(
+                    "  Darkmatter registration: `{}` now lists `{}` in place of {}",
+                    biscuit_file::to_forward_slash_string(&report.path),
+                    claudine::composition::registration::MANIFEST_REFERENCE,
+                    report.replaced.iter().map(|entry| format!("`{entry}`")).collect::<Vec<_>>().join(", ")
+                )),
+                Ok(_) => {}
+                Err(error) => log::warn(&format!("  Claudine was not registered with Darkmatter: {error}")),
+            }
+            match setup.cleanup {
+                Some(Ok(cleanup)) => {
+                    for path in cleanup.removed {
+                        log::message(&format!(
+                            "  Removed the retired host registration `{}`",
+                            biscuit_file::to_forward_slash_string(&path)
+                        ));
+                    }
+                }
+                Some(Err(failure)) => {
+                    for path in &failure.removed {
+                        log::message(&format!(
+                            "  Removed `{}` of the retired host registration",
+                            biscuit_file::to_forward_slash_string(path)
+                        ));
+                    }
+                    let state = if failure.removed.is_empty() { "was not removed" } else { "was only partly removed" };
+                    log::warn(&format!("  The retired host registration {state}: {}", failure.error));
+                }
+                None => {}
             }
             Ok(claudine_config)
         }
@@ -316,7 +356,14 @@ pub(crate) fn write_with_darkmatter_setup(
             log::warn("  There is no home directory, so Darkmatter's `~/.darkmatter.yaml` was not set up");
             Ok(path)
         }
-        Err(SetupError::Publish(error)) => Err(error.into()),
+        Err(SetupError::Publish { error, changes }) => {
+            if let Some(home) = context.home_dir() {
+                for change in changes.describe(home) {
+                    log::message(&format!("  Before the failure, the publish {change}"));
+                }
+            }
+            Err(error.into())
+        }
         Err(error) => {
             log::warn(&format!("  Darkmatter permissions were not set up: {error}"));
             Ok(claudine::config::setup::claudine_config_path(&context, scope)?)

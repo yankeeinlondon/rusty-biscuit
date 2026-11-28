@@ -158,22 +158,7 @@ const PREFIXES: [(&str, &str); 4] =
 /// `<top>\etc\git-bash.config`, which makes the launcher also edit `MSYS`.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn launcher_layout(found: &std::path::Path) -> Option<Direct> {
-    let is = |name: Option<&std::ffi::OsStr>, expected: &str| name.and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(expected));
-    if !is(found.file_name(), "git.exe") {
-        return None;
-    }
-    let dir = found.parent()?;
-    let named_prefix = if is(dir.file_name(), "bin") {
-        let prefix_dir = dir.parent()?;
-        PREFIXES.iter().find(|(prefix, _)| is(prefix_dir.file_name(), prefix)).map(|(prefix, _)| *prefix)
-    } else {
-        None
-    };
-    let (top, entry) = match named_prefix {
-        Some(_) => (dir.parent()?.parent()?, Entry::Direct),
-        None if is(dir.file_name(), "cmd") || is(dir.file_name(), "bin") => (dir.parent()?, Entry::Launcher),
-        None => return None,
-    };
+    let (top, entry, named_prefix) = installation_top(found)?;
     if top.join("etc").join("git-bash.config").exists() {
         return None;
     }
@@ -197,6 +182,36 @@ fn launcher_layout(found: &std::path::Path) -> Option<Direct> {
         path_prefix.push(";");
     }
     Some(Direct { executable, entry, path_prefix, msystem })
+}
+
+/// The `<top>` of the Git for Windows layout `found` names, by name alone:
+/// a `git.exe` in `<top>\cmd` or `<top>\bin`, or in `<top>\<prefix>\bin`
+/// for a known prefix. Nothing beyond the names is checked.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn installation_top(found: &std::path::Path) -> Option<(&std::path::Path, Entry, Option<&'static str>)> {
+    let is = |name: Option<&std::ffi::OsStr>, expected: &str| name.and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(expected));
+    if !is(found.file_name(), "git.exe") {
+        return None;
+    }
+    let dir = found.parent()?;
+    let named_prefix = if is(dir.file_name(), "bin") {
+        let prefix_dir = dir.parent()?;
+        PREFIXES.iter().find(|(prefix, _)| is(prefix_dir.file_name(), prefix)).map(|(prefix, _)| *prefix)
+    } else {
+        None
+    };
+    match named_prefix {
+        Some(_) => Some((dir.parent()?.parent()?, Entry::Direct, named_prefix)),
+        None if is(dir.file_name(), "cmd") || is(dir.file_name(), "bin") => Some((dir.parent()?, Entry::Launcher, None)),
+        None => None,
+    }
+}
+
+/// The Git for Windows installation directory around `found`, a `git.exe`
+/// found on `PATH` or in an install root, judged by the same launcher
+/// layouts the installation hint uses; `None` for any other file.
+pub(crate) fn installation_root(found: &std::path::Path) -> Option<std::path::PathBuf> {
+    installation_top(found).map(|(top, _, _)| top.to_path_buf())
 }
 
 #[cfg(windows)]

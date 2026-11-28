@@ -21,6 +21,7 @@ use simplified_schema::span::SourceSpan;
 use super::admission::slot_class_report;
 use super::codes::{
     SLOT_APPROVAL_REQUIRED_CODE, SLOT_CANCELED_CODE, SLOT_CYCLE_CODE, SLOT_DENIED_CODE, SLOT_FAILED_CODE,
+    SLOT_NETWORK_DENIED_CODE,
     SLOT_SYNTAX_CODE, is_permission_code, slot_result_code,
 };
 use crate::markdown::compose::expression::data::DataError;
@@ -235,6 +236,7 @@ pub(crate) fn refusal_code(refusal: &GateRefusal) -> &'static str {
         GateRefusal::Denied => SLOT_DENIED_CODE,
         GateRefusal::ApprovalRequired { .. } => SLOT_APPROVAL_REQUIRED_CODE,
         GateRefusal::InvalidPermissions(error) => error.code(),
+        GateRefusal::NetworkDenied => SLOT_NETWORK_DENIED_CODE,
     }
 }
 

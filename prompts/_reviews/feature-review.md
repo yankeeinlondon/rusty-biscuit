@@ -2,7 +2,7 @@
 $schema:
     spec: file(required;eager;match(**/*spec*.md)) -> the specification file providing the basis for this review's findings
     design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
-    iteration: number -> the review's iteration number
+    iteration: number -> the review's iteration number, found from the review files beside the spec
     review: file -> the review file which will be created based on this prompt's execution
     spec-name: string -> the name of the spec (which is really just the spec's folder name)
     next-spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
@@ -10,8 +10,6 @@ $schema:
     human-in-the-loop: string[] -> filled out with review items when it has determined that a human review is required
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
-
-    > **Note:** the caller _can_ pass in the **iteration** number but it should be detected automatically.
 
     There are two special cases in the review cycle that can be activated:
 
@@ -30,13 +28,13 @@ description: |-
 dir: "{{dirname(spec)}}"
 design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
-iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review-iterations') || 0) + 1  : 1   }}"
-review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
-# A sibling of `spec` in whatever form `spec` arrived, as the implement router
-# does. `decrement_file_index(review)` is not used because it re-anchors a
-# relative `review` on this document's directory, and a sequence step passes a
-# repo-relative `dir`.
-previous-review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
+# The latest review file beside the spec, whatever state it is in.
+last-review: "{{ file_exists(dir + '/review-1.md') ? find_last_index(dir + '/review-1.md') : null }}"
+# A review file without `ready` is an attempt that failed before it finished;
+# this run replaces it instead of starting the next iteration.
+iteration: "{{ last-review ? file_index(last-review) + (frontmatter(last-review, 'ready') == null ? 0 : 1) : 1 }}"
+review: "{{ dir + '/review-' + iteration + '.md' }}"
+previous-review: "{{ iteration > 1 ? dir + '/review-' + (iteration - 1) + '.md' : null }}"
 spec-name: "{{ parent_dir(spec) }}"
 next-plan: |-
     {{
@@ -57,6 +55,11 @@ initialize:
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature-or-fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
+    # The spec carries the state the review/fix cycle is driven by; the review
+    # file stays the record of why.
+    - set_frontmatter: ["{{spec}}", "review-iterations", "{{iteration}}"]
+    - set_frontmatter: ["{{spec}}", "ready", "{{ frontmatter(review, 'ready') == true }}"]
+    - set_frontmatter: ["{{spec}}", "human-review", "{{ !is_empty(frontmatter(review, 'human-in-the-loop')) && frontmatter(review, 'human-resolved') != true }}"]
     - when: "!is_empty(frontmatter(review, 'human-in-the-loop'))"
       then:
           - message: |-
@@ -86,7 +89,7 @@ success:
           - message: |-
                 ⚠️  review #{{iteration}} for the _{{feature-or-fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
 
-                {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
+                {{ as_ordered_list( map(frontmatter(review,"findings") || [], f => f.id ? f.id + ' (' + f.priority + '): ' + f.description : f) ) }}
 
                 {{ 
                     frontmatter(review,'human-review') == true
@@ -150,9 +153,11 @@ You are performing a review of the functionality defined by the `{{spec-name}}` 
 ### Previous Finding Verification
 
 This is iteration #{{iteration}} of the review/fix cycle. Read @{{previous-review}}
-and its implementation log (the repair's `### Finding Ledger`) before reviewing
-new work. Completion flags and log summaries are claims to verify against the
-implementation, not evidence.
+before reviewing new work: its `## Repair` section holds the repair's
+`### Finding Ledger`, and each entry of its frontmatter `findings` carries the
+`result` the repair claims. (A review repaired before this form has its ledger
+in `log.md` beside the spec, and no `result`.) Completion flags, results, and
+ledger rows are claims to verify against the implementation, not evidence.
 
 Write a `## Previous Finding Verification` table with these columns: finding ID
 and title, required instances, outcome, verification evidence, and what remains.
@@ -338,11 +343,15 @@ For every high or medium finding:
   a newly found sibling of an earlier finding gets a new ID that names the earlier
   one. For a legacy review without IDs, use its filename plus the finding title
 - classify it in one sentence that names the defect class, not the file
+- state the invariant the finding violates. Where the contract permits,
+  pair a meaning-preserving rewrite with a small input change that must
+  produce a different result. Check both at each relevant decision
 - enumerate every sibling site within the boundary: each parser, reader,
   detector, or projection that handles the same kind of input or makes the
   same kind of decision
-- check each one, using the same reproduction you used for the first (copy a
-  real fixture, change one field, run the shipped CLI or public API)
+- check each one using those probes. Start from the same real fixture where
+  possible, change only the input needed for each probe, and run the shipped
+  CLI or public API
 - report the class as **one finding** with an instance table: child ID
   (`R{{iteration}}-F1.1`, …), site, shape tested, observed result, expected
   result. The repair's finding ledger uses these IDs row for row
@@ -372,7 +381,9 @@ in this directory. If a finding belongs to the same class as an earlier one:
   a sibling the earlier sweep missed, and which sites that fix should have
   swept and did not
 - sweep them all now, within the spec boundary, so this review carries the
-  complete list
+  complete list. Trace the probes through every decision that can accept,
+  reject, or classify the same input. Record the expected and observed results
+  in the instance table
 - set the frontmatter property `recurrence` to `true`; the review loop does not
   stop on it, so the next repair cycle implements exactly the list this review
   carries
@@ -448,11 +459,9 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ### Spec Frontmatter
 
-The spec file which underpins the requirements for this feature review needs to have it's frontmatter properties updated too:
-
-- the spec file is located at: {{spec}}
-- Set the `review-iterations` Frontmatter property to '{{iteration}}'
-- if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
+Do not edit the frontmatter of the spec ({{spec}}). When you finish, this
+prompt copies the review's outcome to it: `review-iterations`, `ready`, and
+whether rulings are waiting on the author (`human-review`).
 
 
 ::block when="iteration == 1 && !is_empty(next-spec)"

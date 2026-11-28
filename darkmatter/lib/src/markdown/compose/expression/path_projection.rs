@@ -17,7 +17,7 @@
 //! - [`make_relative`] — the raw projection. Returns the OS-native string,
 //!   which may carry `\` separators on Windows.
 //! - [`make_portable_relative`] — the same projection rendered through
-//!   [`biscuit_file::to_portable_string`], so committed Markdown is identical
+//!   [`biscuit_file::to_forward_slash_string`], so committed Markdown is identical
 //!   across OSes (spec Risks: "Cross-platform path text drift"). A Windows path
 //!   with no faithful portable spelling keeps its native one, so the portable
 //!   surface can still emit literal backslashes; callers embedding the result in
@@ -131,7 +131,7 @@ pub(crate) fn make_portable_relative(abs: &Path, cwd: &Path) -> String {
     make_portable_relative_in_context(abs, cwd, &biscuit_file::FileResolutionContext::new(cwd))
 }
 
-/// Renders the projection through [`biscuit_file::to_portable_string`],
+/// Renders the projection through [`biscuit_file::to_forward_slash_string`],
 /// preserving the `~/` anchor.
 ///
 /// The prefix policy is applied to the `Path` [`project_in_context`] selects,
@@ -145,9 +145,9 @@ pub(crate) fn make_portable_relative_in_context(
     request_context: &biscuit_file::FileResolutionContext,
 ) -> String {
     match project_in_context(abs, cwd, request_context) {
-        Projection::Bare(path) => biscuit_file::to_portable_string(&path),
+        Projection::Bare(path) => biscuit_file::to_forward_slash_string(&path),
         Projection::HomeRelative(rest) => {
-            format!("~/{}", biscuit_file::to_portable_string(&rest))
+            format!("~/{}", biscuit_file::to_forward_slash_string(&rest))
         }
     }
 }

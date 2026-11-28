@@ -162,6 +162,21 @@ body, or a callback such as `sort="i => i.name"`, the directive's bindings are
 locals (see [The `local` namespace](#the-local-namespace)). An undeclared,
 unreserved root that no enclosing scope binds is a document property.
 
+A frontmatter value can hold a `::map`/`::filter` region too, as a
+template a host composes as a body later (Claudine's inline `prompt:`).
+Frontmatter interpolation does not expand the region, so it has no item to
+bind: an expression in the region's body that reads the item binding is
+left as written for the body composition, with no advisory, while every
+other expression in the value is evaluated as usual:
+
+```yaml
+prompt: |
+  Hello {{ name }}.      # evaluated now
+  ::map items "i => i * 10"
+  - {{ i }}              # left as written: `i` is the collection's
+  ::end-map
+```
+
 ```mermaid
 flowchart TD
     R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>fm ctx env current local"}
@@ -1199,6 +1214,27 @@ rows (`dm.data.row_shape_conflict`). So
 format to make a missing file an ordinary miss; see
 [Loading Data](./loading-data.md#files-that-may-be-missing).
 
+### A read with no result yet is not a failure
+
+Some reads produce no result at all, rather than a failed one. A dry run does
+not send a request that needs network approval (`permissions.network: ask`),
+and it does not read a file that the root `initialize` creates at launch. A
+schema slot's gate can also refuse a read before the file is opened. None of
+these is a read failure, so no wrapper turns one into a value: `try` does not
+use its fallback, and `try_frontmatter` does not answer `{ ok: false }`. The
+construct that holds the expression is left unchecked and keeps its text.
+
+```md
+::block when="try_frontmatter('https://example.com/facts.md').ok"
+Use the facts.
+::end-block
+```
+
+With `network: ask`, a dry run reports this condition as not checked
+because it needs network approval, and it sends no request. With
+`network: deny` the read is refused, `ok` is `false`, and the block is left
+out, which is what a real run does.
+
 ### Falsy values are successes
 
 `try` reacts to failures, not to values. A read that returns `null`, `false`,
@@ -1455,16 +1491,23 @@ file-form ones from `schemas/partials/function-examples/`. Do not edit the
 generated table directly; run `just darkmatter regen-expr-doc` from the
 repository root to refresh it after changing the catalog.
 
-The catalog's other `types:` entries are named helper types that signatures
-use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
-`Name@darkmatter:functions` (see
-[Reserved Darkmatter References](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)).
-`ctx.recent_commits` is declared that way, so it and the return of
-`recent_commits(count)` are the one `recent-commits` type, a `string[]`:
+The catalog's other `types:` entries are named helper types that its
+signatures use: `agentic-cli`, `ip-address`, and `recent-commits`. They are
+local to the catalog. The catalog is a `kind: expression-schema` document, which
+is never an import library, so a schema cannot import them with
+`Name@darkmatter:functions`. A schema that needs the same shape declares it
+itself. `ctx.recent_commits` does that, and a test keeps its declaration equal
+to the catalog's, so the variable and the return of `recent_commits(count)` stay
+the same `string[]`:
 
 ```yaml
 # darkmatter/schemas/partials/context-variables.yaml
-recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …"
+kind: schema
+types:
+    recent-commits: "string[] -> …"
+    context:
+        # …
+        recent_commits: "recent-commits(generated; required) -> …"
 ```
 
 <!-- BEGIN GENERATED FUNCTION TABLE -->

@@ -160,7 +160,7 @@ fn template_defaults_cannot_write_declarations() {
         for sequence in ["[]", "[alpha]"] {
             let error = direct(&dir, &extra, sequence).unwrap_err();
             assert!(
-                matches!(&error, CompositionError::SequenceReservedTemplateKey(found) if found == key),
+                matches!(&error, CompositionError::SequenceReservedTemplateKey { key: found, .. } if found == key),
                 "{key} on {sequence}: {error:?}"
             );
         }
@@ -248,7 +248,7 @@ fn state_violations_name_the_step_and_the_declaring_owner() {
         other => panic!("expected SequenceStateSchemaViolation, got {other:?}"),
     }
     let text = error.to_string();
-    assert!(text.starts_with("sequence step 1 (`red`) failed schema validation at `color`:"), "{text}");
+    assert!(text.starts_with("step 2 (`red`) failed schema validation at `color`:"), "{text}");
     assert!(text.contains("(`$state` of `sequence` in "), "{text}");
 
     // A referenced document's violation names that document, not the referrer.
@@ -495,4 +495,34 @@ fn the_state_validator_judges_every_field_shape_passively() {
             other => panic!("{field}={value:?}: expected a state violation, got {other:?}"),
         }
     }
+}
+
+// -- The formal kind --------------------------------------------------------
+
+/// A YAML file declaring `kind: sequence` with an inline list is judged by
+/// Claudine's prepared formal kind once the runtime grammar has accepted it;
+/// a Markdown document with the same frontmatter, a YAML file claiming no
+/// kind, and a reference source are not.
+#[test]
+fn a_formal_yaml_sequence_is_judged_by_the_prepared_kind() {
+    let dir = TempDir::new().unwrap();
+    assert!(direct(&dir, "description: a summary\n", "[alpha, { name: beta }]").unwrap().is_some());
+    assert!(direct(&dir, "", "[]").unwrap().is_some(), "an empty list is a valid formal sequence");
+
+    let error = direct(&dir, "description: [not, text]\n", "[alpha]").unwrap_err();
+    match &error {
+        CompositionError::SchemaValidation { source_path, message, problems, .. } => {
+            assert_eq!(source_path, &dir.path().join("s.yaml"));
+            assert!(message.contains("`kind: sequence`") && message.contains("/description"), "{message}");
+            assert_eq!(problems, &["/description".to_string()]);
+        }
+        other => panic!("expected SchemaValidation, got {other:?}"),
+    }
+
+    let unclaimed = write(&dir, "plain.yaml", "description: [not, text]\nsequence: [alpha]\n");
+    assert!(resolve_file(&unclaimed).unwrap().is_some(), "a YAML file claiming no kind is not judged by it");
+    let markdown = write(&dir, "doc.md", "---\nkind: sequence\ndescription: [not, text]\nsequence: [alpha]\n---\n");
+    assert!(resolve_file(&markdown).unwrap().is_some(), "a Markdown document is not a formal YAML file");
+    write(&dir, "child.yaml", "kind: sequence\nsequence: [alpha]\n");
+    assert!(direct(&dir, "description: [not, text]\n", "child.yaml").unwrap().is_some(), "a reference keeps the runtime grammar");
 }

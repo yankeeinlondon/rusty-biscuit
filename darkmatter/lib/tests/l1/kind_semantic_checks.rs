@@ -99,6 +99,36 @@ fn a_definition_failure_stops_the_kind_checks() {
     assert_eq!(codes, [ValidationProblemCode::UnknownKey], "{:?}", validation.report.problems);
 }
 
+// ── Namespace files: the preparation a host's registration runs ────────────
+
+/// Claudine's published `loop` namespace, unedited.
+const PUBLISHED_NAMESPACE: &str = include_str!("../../../../claudine/registration/loop.yaml");
+
+#[test]
+fn control_the_published_namespace_is_checked_as_itself() {
+    let validation = validation(PUBLISHED_NAMESPACE);
+    assert_eq!(validation.route, Route::Kind("namespace-schema".into()));
+    assert!(validation.report.valid, "{:?}", validation.report.problems);
+}
+
+#[test]
+fn a_null_namespace_description_is_located_on_the_field() {
+    // Its definition reads the null as absent; registration refuses it.
+    let (problem, _) = kind_check("kind: namespace-schema\nnamespace: thing\ndescription:\n$schema: {}\n");
+    assert!(problem.message.contains("`description`: must not be null"), "{}", problem.message);
+    assert_eq!(problem.line, Some(3), "{problem:?}");
+}
+
+#[test]
+fn an_undeclared_type_in_a_namespace_is_a_declaration_problem_not_a_target_refusal() {
+    let (problem, token) = kind_check("kind: namespace-schema\nnamespace: thing\n$schema:\n    item: Missing\n");
+    assert!(problem.message.contains("unknown named type `Missing`"), "{}", problem.message);
+    assert!(!problem.message.contains("not a valid schema definition"), "{}", problem.message);
+    assert_eq!(problem.line, Some(4), "{problem:?}");
+    assert_eq!(problem.path, "/$schema/item", "at the declaration, not its carrier: {problem:?}");
+    assert!(token.starts_with("Missing"), "{token:?}");
+}
+
 #[test]
 fn a_user_kind_has_no_kind_checks() {
     let fixture = Fixture::new();

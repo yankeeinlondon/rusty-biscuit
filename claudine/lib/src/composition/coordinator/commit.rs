@@ -131,7 +131,7 @@ fn commit_resolved_proxy(
         return Err(ProxyCommitError::Rejected(CompositionError::LifecycleProxyCycle {
             source_path,
             target: request.target().to_string(),
-            chain: chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+            chain: chain.iter().map(|path| biscuit_file::to_forward_slash_string(path)).collect(),
             limit: crate::composition::MAX_PROXY_HOPS,
         }));
     }

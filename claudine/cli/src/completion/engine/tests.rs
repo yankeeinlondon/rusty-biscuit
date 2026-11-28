@@ -429,14 +429,14 @@ fn run_with_context_emits_full_root_menu_on_bare_tab() {
     let got = run_with_context(&a, 1, &test_ctx(true, true, true));
     assert_eq!(got.first().map(String::as_str), Some("compose"));
     assert!(got.contains(&"config".to_string()));
-    assert!(!got.contains(&"init".to_string()));
+    assert!(!got.contains(&"setup".to_string()));
 }
 
 #[test]
-fn run_with_context_includes_init_when_no_configs() {
+fn run_with_context_includes_setup_when_no_configs() {
     let a = argv(&["claudine", ""]);
     let got = run_with_context(&a, 1, &test_ctx(false, false, false));
-    assert!(got.contains(&"init".to_string()));
+    assert!(got.contains(&"setup".to_string()));
 }
 
 #[test]
@@ -479,6 +479,16 @@ fn clap_fallback_completes_providers_format_flag() {
         got.iter().any(|c| c == "--format"),
         "expected --format in candidates, got {got:?}"
     );
+}
+
+#[test]
+fn doctor_is_offered_at_the_root_and_its_options_after_it() {
+    let root = run_with_context(&argv(&["claudine", "do"]), 1, &test_ctx(true, true, true));
+    assert_eq!(root, vec!["doctor"]);
+    let got = run_with_context(&argv(&["claudine", "doctor", "--"]), 2, &test_ctx(true, true, true));
+    for flag in ["--fix", "--json"] {
+        assert!(got.iter().any(|c| c == flag), "expected {flag} in candidates, got {got:?}");
+    }
 }
 
 // -- SetterName classification (schemas Phase 4) -----------------------

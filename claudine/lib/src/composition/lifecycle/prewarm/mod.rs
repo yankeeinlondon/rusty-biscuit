@@ -25,7 +25,7 @@ mod preparer;
 mod sequence;
 mod worker;
 
-pub use classify::PrewarmInputs;
+pub use classify::{PrewarmInputs, resolve_initializer_template};
 pub(crate) use classify::{Classification, DocumentContext, classify};
 pub(crate) use collect::{Phrase, lifecycle_phrases, stack_phrases};
 pub(crate) use key::PrewarmKey;

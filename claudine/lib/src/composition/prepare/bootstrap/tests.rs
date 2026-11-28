@@ -136,7 +136,6 @@ fn bootstrap_reads_the_lifecycle_surface_of_a_body_that_includes_a_missing_file(
         staged.effective_frontmatter["initialize"].to_string().contains("{{log}}"),
         "the lifecycle subtree keeps its authored spans for event time"
     );
-    assert!(staged.deferred_lifecycle_keys.contains(&"initialize".to_string()));
     assert!(!dir.path().join(LOG).exists(), "bootstrap runs no lifecycle effect");
 
     let err = full(CompositionMode::ChainedDocument, &source, options_in(dir.path(), 1))
@@ -354,7 +353,6 @@ Implement phase {{phase}}.
         assert_eq!(staged.selection_hints, prepared.selection_hints);
         assert_eq!(staged.lifecycle, prepared.lifecycle);
         assert!(shell_commands(&staged.lifecycle, LifecycleSignal::Initialize).is_empty());
-        assert_eq!(staged.deferred_lifecycle_keys, prepared.deferred_lifecycle_keys);
         assert_eq!(staged.resolved_path, prepared.resolved_path);
         assert_eq!(staged.source_repo_root, prepared.source_repo_root);
         assert_eq!(staged.input_layers.set_overrides, prepared.input_layers.set_overrides);

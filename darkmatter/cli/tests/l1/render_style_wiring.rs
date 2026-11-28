@@ -289,7 +289,7 @@ fn denying_style_blocks_a_style_file_unknown_key() {
 fn no_expression_or_shell_runs_from_style_input() {
     let fixture = CliProcessFixture::named("style-matrix-no-exec");
     fixture.write_file("cwd/doc.md", "---\n$schema:\n  style:\n    foo: string\n    \"<string>\": unknown\n---\n# Title\n");
-    let sentinel = |name: &str| biscuit_file::to_portable_string(&fixture.cwd().join(name));
+    let sentinel = |name: &str| biscuit_file::to_forward_slash_string(&fixture.cwd().join(name));
     let (file_shell, file_expression, setter_shell, setter_expression) =
         (sentinel("file-shell"), sentinel("file-expression"), sentinel("setter-shell"), sentinel("setter-expression"));
     fixture.write_file(

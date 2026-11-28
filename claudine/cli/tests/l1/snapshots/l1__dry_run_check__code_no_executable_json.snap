@@ -1,0 +1,97 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.yaml",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.no_executable",
+      "severity": "error",
+      "message": "this task has no executable, so it would compose the body of seq.yaml, and a YAML file has no body",
+      "source": {
+        "file": "/work/seq.yaml",
+        "line": 2,
+        "column": 5,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "add an executable such as `prompt: ./metadata.md`",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: provider (no executable)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "this task has no executable, so it would compose the body of seq.yaml, and a YAML file has no body",
+          "source": {
+            "file": "/work/seq.yaml",
+            "line": 2,
+            "column": 5,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: inputs (no executable)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "related": [
+        {
+          "message": "this task has no executable, so it would compose the body of seq.yaml, and a YAML file has no body",
+          "source": {
+            "file": "/work/seq.yaml",
+            "line": 2,
+            "column": 5,
+            "inserted": false
+          }
+        }
+      ],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "metadata",
+          "property": "sequence[0]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 2
+  }
+}

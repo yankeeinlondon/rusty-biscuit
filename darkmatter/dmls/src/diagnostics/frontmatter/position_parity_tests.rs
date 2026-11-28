@@ -162,7 +162,7 @@ fn assert_parity(encoding: PositionEncoding, line_end: &str, strict: bool) {
                 // so the start tells them apart.
                 let matches: Vec<&&Diagnostic> = schema_diagnostics
                     .iter()
-                    .filter(|d| code_of(d) == dmls_code(expected) && d.message == problem.message)
+                    .filter(|d| code_of(d) == dmls_code(expected) && d.message == super::problem_message(problem))
                     .filter(|d| start_byte(sm, &text, d.range.start) == library_offset)
                     .collect();
                 let [diagnostic] = matches.as_slice() else {

@@ -25,7 +25,7 @@
 //!
 //! Every failure raised here is abort-all: `fail_fast` governs *execution*
 //! outcomes, and preflight happens before execution exists. `--dry-run` runs
-//! this identical walk.
+//! its recovering form (`check.rs`), which reports every problem.
 //!
 //! See `claudine/features/2026-07-11-sequence-plus/spec.md` → *Phase 1 — Static
 //! Preflight*.
@@ -43,7 +43,7 @@ use darkmatter::markdown::compose::{ComposeContext, EffectiveState, SharedFrontm
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, SequenceSite};
 use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_in_literals};
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
@@ -53,6 +53,7 @@ use super::task::TaskStage;
 use super::{reserved, source as source_resolution};
 use crate::invocation_context::{InvocationContext, SourceContext};
 
+mod check;
 mod inputs;
 mod reapproval;
 mod shape;
@@ -60,8 +61,11 @@ mod containers;
 pub mod providers;
 
 pub use inputs::{
-    InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
+    FailedOwner, InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
     SequenceInputInventory, discover_sequence_inputs,
+};
+pub use check::{
+    CheckFailure, CheckedTask, LAUNCH_TIME_SEQ_MEMBERS, LoadedDocument, OwnerFailure, RootList, SequenceCheck, SequenceCheckRequest, SiteFrame, TaskSite, check_sequence_tree,
 };
 pub use reapproval::PreflightApproval;
 pub use shape::{
@@ -370,6 +374,7 @@ fn late_value_failure(site: &PreparedShellSite, error: HoleError) -> Composition
     CompositionError::SequenceShellLateValue {
         command: site.authored.clone(),
         task: site.label.clone(),
+        site: Box::new(SequenceSite { property: Some(site.property.clone()), task: Some(site.label.clone()), ..SequenceSite::unlocated() }),
         message,
         source: Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(
             shell_error,
@@ -393,8 +398,11 @@ fn site_source_context(site: &PreparedShellSite) -> biscuit_terminal::errors::So
 }
 
 impl PreflightGraph {
+    /// Captures `path`'s bytes as the walk reads them: in a check, from the
+    /// observation of local files every reader of the check shares.
     fn capture_source(&mut self, path: &Path) {
-        self.authored_sources.entry(path.to_path_buf()).or_insert_with(|| std::fs::read(path).ok());
+        self.authored_sources.entry(path.to_path_buf())
+            .or_insert_with(|| crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec()));
     }
 
     /// Whether every file in `paths` still holds the bytes this graph's walk
@@ -472,7 +480,7 @@ impl PreflightGraph {
     pub fn prepare_whole_document(
         &self, path: &Path, options: crate::composition::PrepareOptions, invocation: Option<&InvocationContext>,
     ) -> Result<super::document::SequenceDocumentPreparation, CompositionError> {
-        let read = std::fs::read(path).ok();
+        let read = crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec());
         let document = self.nested_sources.document(path, read.as_deref())?;
         let root = expect_object(&document.value, "sequence document", path)?;
         let source = source_resolution::whole_document_source(path, root, &document.orders)?;
@@ -492,7 +500,7 @@ impl PreflightGraph {
     /// The document's load error, and [`CompositionError::SequenceInvalid`]
     /// when its root is not a mapping.
     pub fn authored_document(&self, path: &Path) -> Result<Map<String, Value>, CompositionError> {
-        let read = std::fs::read(path).ok();
+        let read = crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec());
         let document = self.nested_sources.document(path, read.as_deref())?;
         Ok(expect_object(&document.value, "sequence document", path)?.clone())
     }
@@ -577,23 +585,27 @@ impl PreflightGraph {
     /// The first [`CompositionError::LifecycleNestedSpanInLiteral`], in
     /// first-encounter document order.
     pub fn validate_prompt_lifecycle_literals(&self) -> Result<(), CompositionError> {
-        for document in &self.prompt_documents {
-            let frontmatter = Value::Object(
-                document
-                    .markdown
-                    .frontmatter()
-                    .as_map()
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            );
-            let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, &document.path) else {
-                continue;
-            };
-            validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, &document.path)?;
-        }
-        Ok(())
+        self.prompt_documents
+            .iter()
+            .try_for_each(|document| validate_lifecycle_literals(&document.markdown, &document.path))
     }
+}
+
+/// [`PreflightGraph::validate_prompt_lifecycle_literals`] for one document:
+/// a nested `{{ … }}` span inside one of its single-pass lifecycle literals.
+/// A lifecycle block that does not parse is left to its own turn.
+///
+/// ## Errors
+///
+/// [`CompositionError::LifecycleNestedSpanInLiteral`].
+pub fn validate_lifecycle_literals(markdown: &Markdown, path: &Path) -> Result<(), CompositionError> {
+    let frontmatter = Value::Object(
+        markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+    );
+    let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, path) else {
+        return Ok(());
+    };
+    validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, path)
 }
 
 
@@ -622,6 +634,7 @@ pub fn reject_non_sequence_kind(source: &ResolvedCompositionSource) -> Result<()
     Err(CompositionError::SequenceUnsupportedConstruct {
         construct: format!("running a `kind: {kind}` document directly"),
         detail: detail.to_string(),
+        site: Box::new(SequenceSite::at(&source.resolved_path, "kind")),
     })
 }
 
@@ -803,7 +816,7 @@ impl std::fmt::Debug for NestedSources {
 
 impl NestedSources {
     fn load(&self, path: &Path) -> Result<Arc<NestedSource>, CompositionError> {
-        let text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
+        let text = crate::composition::read_local_text(path).map_err(|source| CompositionError::MarkdownLoad {
             path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
         })?;
         let key = canonical(path);
@@ -837,7 +850,9 @@ impl NestedSources {
             return Ok(cached.schema.clone());
         }
         let schema = PreparedSequenceSchema::prepare(declaration, source_path, property, resolution)?;
-        let dependencies = schema.dependencies().iter().map(|path| (path.clone(), std::fs::read(path).ok())).collect();
+        let dependencies = schema.dependencies().iter()
+            .map(|path| (path.clone(), crate::composition::read_local_source(path).ok().map(|read| read.bytes.to_vec())))
+            .collect();
         if let Ok(mut entries) = self.schemas.lock() {
             entries.insert(key, Arc::new(PreparedDeclaration {
                 declaration: declaration.clone(), schema: schema.clone(), dependencies,
@@ -994,16 +1009,15 @@ pub(crate) fn prepare_nested_sequence(
     let empty = Map::new();
     let (spec, raw_task) = if whole_document {
         let name = task.origin_path.file_name().map(|name| name.to_string_lossy().into_owned()).ok_or_else(|| {
-            CompositionError::SequenceInvalid("a whole sequence document has no file name".into())
+            CompositionError::sequence_invalid("a whole sequence document has no file name", task.error_site())
         })?;
         let reference = super::grammar::SequenceReference { reference: format!("./{name}"), offset: None, operator: None };
         (super::grammar::SequenceSourceSpec::Reference(reference), &empty)
     } else {
         let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
-            .ok_or_else(|| CompositionError::SequenceInvalid("nested sequence disappeared before preparation".into()))?;
-        let value = raw_task.get("sequence").ok_or_else(|| CompositionError::SequenceInvalid(
-            "nested `sequence:` executable changed before preparation".into(),
-        ))?;
+            .ok_or_else(|| CompositionError::sequence_invalid("nested sequence disappeared before preparation", task.error_site()))?;
+        let value = raw_task.get("sequence").ok_or_else(|| CompositionError::sequence_invalid(
+            "nested `sequence:` executable changed before preparation", task.error_site()))?;
         (super::grammar::classify_source(value)?, raw_task)
     };
     let mut loader = Loader::new(&nested.source, context, resolution.clone());
@@ -1043,10 +1057,9 @@ pub(crate) fn prepare_nested_group(
 ) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
     let nested = sources.load(&task.origin_path)?;
     let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
-        .ok_or_else(|| CompositionError::SequenceInvalid("group disappeared before preparation".into()))?;
-    let value = raw_task.get("group").ok_or_else(|| CompositionError::SequenceInvalid(
-        "group executable changed before preparation".into(),
-    ))?;
+        .ok_or_else(|| CompositionError::sequence_invalid("group disappeared before preparation", task.error_site()))?;
+    let value = raw_task.get("group").ok_or_else(|| CompositionError::sequence_invalid(
+        "group executable changed before preparation", task.error_site()))?;
     let mut loader = Loader::new(&nested.source, context, resolution.clone());
     loader.with_reread_invocation(invocation, &task.origin_path);
     loader.graph.nested_sources = sources.clone();
@@ -1199,7 +1212,18 @@ struct Loader<'a> {
     ///
     /// [`document::owner_values`]: super::document::owner_values
     owner_values: HashMap<PathBuf, Arc<Map<String, Value>>>,
+    /// Set for a check ([`check_sequence_tree`]): each task's failure is
+    /// recorded at it and the walk continues with its siblings. `None` for
+    /// every real run, whose first failure ends the walk.
+    check: Option<Box<check::CheckState>>,
+    /// A check's prompt documents, shared by its discovery passes and its
+    /// walk, so each prompt file is read once per check. `None` for every
+    /// real run.
+    prompt_memo: Option<PromptMemo>,
 }
+
+/// The prompt documents one check has read, by canonical path.
+pub(crate) type PromptMemo = Arc<std::sync::Mutex<HashMap<PathBuf, PromptDocument>>>;
 
 /// Where in the sequence a task being loaded sits.
 #[derive(Clone, Copy)]
@@ -1243,6 +1267,8 @@ impl<'a> Loader<'a> {
             capture_log: Vec::new(),
             refresh: false,
             owner_values: HashMap::new(),
+            check: None,
+            prompt_memo: None,
         }
     }
 
@@ -1291,6 +1317,8 @@ impl<'a> Loader<'a> {
             capture_log: Vec::new(),
             refresh: false,
             owner_values: HashMap::new(),
+            check: None,
+            prompt_memo: None,
         }
     }
 
@@ -1303,12 +1331,17 @@ impl<'a> Loader<'a> {
             values.extend(self.caller_setters.iter().filter(|(key, _)| key.as_str() != "sequence")
                 .map(|(key, value)| (key.clone(), value.clone())));
         }
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+        let removed_reads = crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
             &source_path, crate::composition::lifecycle::bindings::AuthoredDocument {
                 frontmatter: &authored,
                 body: self.source.markdown.content(), body_line_offset: self.source.markdown.frontmatter_line_count(),
             }, Some(&Value::Object(self.caller_setters.clone())), None,
-        )?;
+        );
+        // A check reports these with the root's other refusals, before any
+        // list is read.
+        if !self.checking() {
+            removed_reads?;
+        }
         // The invoking document roots the ancestry, so a task or prompt that
         // references the sequence source itself closes a cycle rather than
         // recursing forever.
@@ -1323,9 +1356,15 @@ impl<'a> Loader<'a> {
         crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &root_late);
         let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
-        let mut lifecycle = parse_lifecycle_config(&authored, &source_path)?;
-        self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
-            Placement { position: TaskPosition::First, in_group: false })?;
+        let mut lifecycle = match parse_lifecycle_config(&authored, &source_path) {
+            Ok(lifecycle) => lifecycle,
+            // A check reported it before reading the list.
+            Err(_) if self.checking() => crate::composition::LifecycleConfig::default(),
+            Err(error) => return Err(error),
+        };
+        let events = self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
+            Placement { position: TaskPosition::First, in_group: false });
+        self.recover_root(events)?;
         self.graph.root_lifecycle = Some(lifecycle);
         // A whole document's rows resolve their references from the file that
         // declares them, which a root `sequence:` reference makes a file other
@@ -1343,31 +1382,40 @@ impl<'a> Loader<'a> {
             self.owner = rows_origin.clone();
         }
         self.seed_steps(entered)?;
+        self.record_root_item_failures(&rows_origin, &plan.source);
         for (index, step) in plan.steps.iter().enumerate() {
-            let label = format!("step {} (`{}`)", index + 1, step.state.id);
-            let property = format!("tasks[{index}]");
+            // A check that set unreadable items aside names each step by its
+            // authored position, and its tasks by their authored paths.
+            let ordinal = self.root_ordinal(index);
+            let label = format!("step {} (`{}`)", ordinal + 1, step.state.id);
+            let property = if self.checking() { format!("sequence[{ordinal}]") } else { format!("tasks[{index}]") };
             self.enter_step(plan, index);
-            let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
             // The root sequence is first, so its first step is; a nested
             // sequence would apply the same rule to its own children.
             let placement = Placement {
                 position: TaskPosition::First.child(index),
                 in_group: false,
             };
-
-            let task = match &step.executable {
-                Some(executable) => Some(self.load_step_task(
+            let seed = check::SiteSeed {
+                slot: check::Slot::Root(ordinal), name: step.name.clone(), file: &rows_origin,
+                property: format!("sequence[{ordinal}]"), item: &step.raw_state,
+                executable: step.executable.as_ref().map(|executable| executable.field),
+                seq: self.step_frontmatter.get("seq").cloned(),
+                row: plan.source.data_row(ordinal),
+            };
+            let task = self.check_task(seed, |loader| {
+                let state = reapproval::early_binding_state(&loader.step_frontmatter, loader.context.clone())?;
+                step.executable.as_ref().map(|executable| loader.load_step_task(
                     executable,
                     &rows_origin,
                     &label,
                     &property,
-                    &plan.authored.at(index),
+                    &plan.authored.at(ordinal),
                     &state,
                     None,
                     placement,
-                )?),
-                None => None,
-            };
+                )).transpose()
+            })?;
 
             self.graph.steps.push(PreflightStep {
                 index,
@@ -1474,8 +1522,33 @@ impl<'a> Loader<'a> {
     /// `property` is the source-rooted semantic path of the task and `authored`
     /// is its JSON Pointer in the *same* document — the two travel together and
     /// are both reset when the walk crosses into another file.
+    ///
+    /// ## Errors
+    ///
+    /// Every failure of the task's expansion. One raised without a site
+    /// (an unresolved reference, a cycle, a catalog miss) is located at the
+    /// task's executable field ([`CompositionError::locate_sequence`]); a
+    /// failure inside a referenced file keeps that file's site.
     #[allow(clippy::too_many_arguments)]
     fn load_task(
+        &mut self,
+        field: ExecutableField,
+        value: &Value,
+        options: &Map<String, Value>,
+        origin: &Path,
+        label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
+        state: &EffectiveState,
+        group_defaults: Option<&GroupDefaults>,
+        placement: Placement,
+    ) -> Result<PreflightTask, CompositionError> {
+        self.load_task_unlocated(field, value, options, origin, label, property, authored, state, group_defaults, placement)
+            .map_err(|error| error.locate_sequence(origin, &property_child(property, field.key()), Some(label)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_task_unlocated(
         &mut self,
         field: ExecutableField,
         value: &Value,
@@ -1503,7 +1576,7 @@ impl<'a> Loader<'a> {
         let mut provider = None;
         let action = match field {
             ExecutableField::Prompt => {
-                let reference = expect_reference(value, "prompt", label)?;
+                let reference = expect_reference(value, field, label, origin, &property_child(property, field.key()))?;
                 let document = self.load_prompt(&reference, origin)?;
                 let with = option_map(options, "with");
                 let prepared = self.record_prompt_reference(&document, &with, origin, state, placement, guard.as_ref());
@@ -1552,7 +1625,7 @@ impl<'a> Loader<'a> {
                 )?))
             }
             ExecutableField::Task => {
-                let reference = expect_reference(value, "task", label)?;
+                let reference = expect_reference(value, field, label, origin, &property_child(property, field.key()))?;
                 self.guard_override = (!when.is_empty()).then(|| (when.clone(), when_property.clone()));
                 let mut task = self.load_external_task(
                     &reference,
@@ -1647,6 +1720,9 @@ impl<'a> Loader<'a> {
         use super::grammar::SequenceSourceSpec;
         let resolution = self.source_context_for(origin)
             .map_or_else(|| self.file_resolution_context.clone(), |context| context.file_resolution_context().clone());
+        // A check's list (inline or referenced) sets unreadable items aside: their authored
+        // positions and failures.
+        let mut recovered_items = None;
         let (plan, child_origin, child_authored, events, entered, frontmatter, inline_schema) = match spec {
             SequenceSourceSpec::Inline(items) => {
                 let list_property = property_child(property, "sequence");
@@ -1676,22 +1752,36 @@ impl<'a> Loader<'a> {
                         // coercion apply as they do for a root template.
                         let keys = super::formal::FormalKeys { template: declarations.template, state_schema: declarations.state };
                         let values = self.owner_template_values(&keys)?;
-                        super::formal::normalize_formal_plan_prepared(
-                            items,
-                            super::formal::FormalOwner {
-                                keys, declaring_path: origin, list_property: &list_property, values: &*values,
-                            },
-                            state_schema.as_ref(), super::model::SequenceSource::Inline, origin, true, &resolution,
-                        )?
+                        let owner = super::formal::FormalOwner {
+                            keys, declaring_path: origin, list_property: &list_property, values: &*values,
+                        };
+                        if self.checking() {
+                            let recovered = super::formal::normalize_formal_plan_recovering(
+                                items.clone(), owner, state_schema.as_ref(), super::model::SequenceSource::Inline,
+                                origin, true, &resolution,
+                            )?;
+                            let failures = recovered.failures.into_iter()
+                                .map(|failure| (failure.index, items.get(failure.index).cloned().unwrap_or(Value::Null), failure.error))
+                                .collect::<Vec<_>>();
+                            recovered_items = Some((recovered.ordinals, failures));
+                            recovered.plan
+                        } else {
+                            super::formal::normalize_formal_plan_prepared(
+                                items, owner, state_schema.as_ref(), super::model::SequenceSource::Inline, origin, true, &resolution,
+                            )?
+                        }
                     }
                 };
                 plan.authored = authored.child("sequence");
                 (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None, inline_schema)
             }
             SequenceSourceSpec::Reference(reference) => {
-                let path = self.resolve_reference(&reference.reference, origin)?;
+                let path = self.resolve_reference(&reference.reference, origin, ExecutableField::Sequence)?;
                 self.enter(&path)?;
-                let (document, order) = self.load_data_document(&path)?;
+                let (document, order) = self.load_data_document(&path, ExecutableField::Sequence)?;
+                if let Some(offset) = &reference.offset {
+                    self.note_loaded_part(&path, offset);
+                }
                 let whole = reference.offset.is_none() && reference.operator.is_none();
                 let formal_root = document.value.as_object().filter(|root| whole && root.contains_key("sequence"));
                 let plan = match (refresh, formal_root) {
@@ -1716,10 +1806,22 @@ impl<'a> Loader<'a> {
                         let mut options = super::SequenceSourceOptions::new(&resolution).with_compose_context(&self.context);
                         if let Some(supplied) = &supplied { options = options.with_caller_layers(supplied); }
                         if let Some(invocation) = self.invocation { options = options.with_invocation(invocation); }
-                        source_resolution::plan_referenced_sequence(
-                            &reference, &path, &document.value, Arc::clone(&document.orders),
-                            origin, &self.step_frontmatter, true, &options,
-                        )?
+                        if self.checking() {
+                            let (recovered, items) = source_resolution::plan_referenced_sequence_recovering(
+                                &reference, &path, &document.value, Arc::clone(&document.orders),
+                                origin, &self.step_frontmatter, true, &options,
+                            )?;
+                            let failures = recovered.failures.into_iter()
+                                .map(|failure| (failure.index, items.get(failure.index).cloned().unwrap_or(Value::Null), failure.error))
+                                .collect::<Vec<_>>();
+                            recovered_items = Some((recovered.ordinals, failures));
+                            recovered.plan
+                        } else {
+                            source_resolution::plan_referenced_sequence(
+                                &reference, &path, &document.value, Arc::clone(&document.orders),
+                                origin, &self.step_frontmatter, true, &options,
+                            )?
+                        }
                     }
                 };
                 // A reference to a whole sequence document brings the
@@ -1733,8 +1835,9 @@ impl<'a> Loader<'a> {
                 } else if document.value.is_array() { order } else { order.child("sequence") };
                 (plan, path, child_authored, events, true, frontmatter, None)
             }
-            _ => return Err(CompositionError::SequenceInvalid(
-                "a nested `sequence:` must be a list or file reference".into(),
+            _ => return Err(CompositionError::sequence_invalid(
+                "a nested `sequence:` must be a list or file reference",
+                SequenceSite::at(origin, &property_child(property, "sequence")).in_task(label),
             )),
         };
         providers::collect_written_keys(&Value::Object(events.clone()), &mut self.written_keys);
@@ -1774,7 +1877,7 @@ impl<'a> Loader<'a> {
         });
         let result = self.load_sequence_children(
             &plan, &mut lifecycle, &child_origin, &child_authored, label, property, entered,
-            state, enclosing.is_some(), placement,
+            state, enclosing.is_some(), placement, recovered_items,
         );
         if let Some((step_frontmatter, step_derived, step_authored, owner)) = enclosing {
             self.step_frontmatter = step_frontmatter;
@@ -1797,26 +1900,63 @@ impl<'a> Loader<'a> {
         &mut self, plan: &SequencePlan, lifecycle: &mut crate::composition::LifecycleConfig, child_origin: &Path,
         child_authored: &AuthoredOrder, label: &str, property: &str, entered: bool,
         state: &EffectiveState, own_state: bool, placement: Placement,
+        recovered_items: Option<RecoveredItems>,
     ) -> Result<Vec<PreflightStep>, CompositionError> {
         let referenced_state;
         let state = if own_state {
             referenced_state = reapproval::early_binding_state(&self.step_frontmatter, state.context().clone())?;
             &referenced_state
         } else { state };
-        self.prepare_container_events(lifecycle, child_origin, label, state, placement)?;
+        // A check records a failed event at the container's task and still
+        // reads its children.
+        let events = self.prepare_container_events(lifecycle, child_origin, label, state, placement);
+        self.recover_in_task(events)?;
+        let child_property = |index: usize| if entered { format!("sequence[{index}]") }
+            else { property_child(property, &format!("sequence[{index}]")) };
+        let (ordinals, failures) = recovered_items.unzip();
+        // A check's unreadable items are recorded in authored order among
+        // the readable ones.
+        let mut failures = failures.unwrap_or_default().into_iter().peekable();
         let mut steps = Vec::with_capacity(plan.steps.len());
         for (index, step) in plan.steps.iter().enumerate() {
-            let child_label = format!("{label} → step {} (`{}`)", index + 1, step.state.id);
-            let child_property = if entered { format!("sequence[{index}]") }
-                else { property_child(property, &format!("sequence[{index}]")) };
-            let task = step.executable.as_ref().map(|executable| self.load_step_task(
+            let ordinal = ordinals.as_ref().and_then(|ordinals| ordinals.get(index).copied()).unwrap_or(index);
+            while let Some((failed, item, error)) = failures.next_if(|(failed, ..)| *failed < ordinal) {
+                self.record_child_item_failure(failed, &item, error, child_origin, &child_property);
+            }
+            let child_label = format!("{label} → step {} (`{}`)", ordinal + 1, step.state.id);
+            let child_property = child_property(ordinal);
+            let seed = check::SiteSeed {
+                slot: check::Slot::SequenceChild(ordinal), name: step.name.clone(), file: child_origin,
+                property: child_property.clone(), item: &step.raw_state,
+                executable: step.executable.as_ref().map(|executable| executable.field),
+                seq: self.checking().then(|| super::build_step_overlay(plan, index).as_set_overrides(None)
+                    .get("seq").cloned()).flatten(),
+                row: plan.source.data_row(ordinal),
+            };
+            let task = self.check_task(seed, |loader| step.executable.as_ref().map(|executable| loader.load_step_task(
                 executable, child_origin, &child_label, &child_property,
-                &child_authored.at(index), state, None,
+                &child_authored.at(ordinal), state, None,
                 Placement { position: placement.position.child(index), in_group: placement.in_group },
-            )).transpose()?;
+            )).transpose())?;
             steps.push(PreflightStep { index, id: step.state.id.clone(), name: step.name.clone(), task });
         }
+        for (failed, item, error) in failures {
+            self.record_child_item_failure(failed, &item, error, child_origin, &child_property);
+        }
         Ok(steps)
+    }
+
+    /// Record the unreadable item at `index` of a nested list.
+    fn record_child_item_failure(
+        &mut self, index: usize, item: &Value, error: CompositionError, origin: &Path,
+        property: &dyn Fn(usize) -> String,
+    ) {
+        let seed = check::SiteSeed {
+            slot: check::Slot::SequenceChild(index), name: check::item_name(item, index), file: origin,
+            property: property(index), item, executable: check::item_executable(item),
+            seq: None, row: None,
+        };
+        self.record_item_failure(seed, error);
     }
 
     /// Expand a `task: <file-ref>` reference into the task it names.
@@ -1833,8 +1973,8 @@ impl<'a> Loader<'a> {
         group_defaults: Option<&GroupDefaults>,
         placement: Placement,
     ) -> Result<PreflightTask, CompositionError> {
-        let path = self.resolve_reference(reference, origin)?;
-        let (document, authored) = self.load_data_document(&path)?;
+        let path = self.resolve_reference(reference, origin, ExecutableField::Task)?;
+        let (document, authored) = self.load_data_document(&path, ExecutableField::Task)?;
         let root = expect_object(&document.value, "task file", &path)?;
 
         expect_kind(root, "task", &path)?;
@@ -1842,7 +1982,7 @@ impl<'a> Loader<'a> {
 
         let nested_label = format!(
             "{label} → task `{}`",
-            biscuit_file::to_portable_string(&path)
+            biscuit_file::to_forward_slash_string(&path)
         );
         self.enter(&path)?;
         let result = self.load_task(
@@ -1906,12 +2046,12 @@ impl<'a> Loader<'a> {
     ) -> Result<PreflightGroup, CompositionError> {
         match value {
             Value::Object(map) => {
-                self.build_group(map, origin, label, property, authored, state, position)
+                self.build_group(map, origin, label, property, authored, state, position, true)
             }
             Value::String(raw) => {
                 let (name, reference) = split_catalog_reference(raw);
-                let path = self.resolve_reference(&reference, origin)?;
-                let (document, document_authored) = self.load_data_document(&path)?;
+                let path = self.resolve_reference(&reference, origin, ExecutableField::Group)?;
+                let (document, document_authored) = self.load_data_document(&path, ExecutableField::Group)?;
                 let root = expect_object(&document.value, "group file", &path)?;
 
                 // A catalog selects one named entry, so the group's authored
@@ -1920,6 +2060,7 @@ impl<'a> Loader<'a> {
                 let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
                         let (index, map) = select_catalog_group(&document, root, &name, &path)?;
+                        self.note_loaded_part(&path, &format!("groups[{index}]"));
                         (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
@@ -1930,7 +2071,7 @@ impl<'a> Loader<'a> {
 
                 let nested_label = format!(
                     "{label} → group `{}`",
-                    biscuit_file::to_portable_string(&path)
+                    biscuit_file::to_forward_slash_string(&path)
                 );
                 self.enter_reference(&path, selected_entry)?;
                 let result = self.build_group(
@@ -1941,6 +2082,7 @@ impl<'a> Loader<'a> {
                     &group_authored,
                     state,
                     position,
+                    false,
                 );
                 self.leave();
                 result
@@ -1952,11 +2094,14 @@ impl<'a> Loader<'a> {
                     "`group:` must be an inline group object or a file reference, got {}",
                     json_type_name(other)
                 ),
+                site: Box::new(SequenceSite::at(origin, property).in_task(label)),
             }),
         }
     }
 
-    /// Validate a group definition and expand its tasks.
+    /// Validate a group definition and expand its tasks. `inline` is a
+    /// group object written in its task, whose legs' grammar the task's
+    /// grammar judged.
     #[allow(clippy::too_many_arguments)]
     fn build_group(
         &mut self,
@@ -1967,6 +2112,7 @@ impl<'a> Loader<'a> {
         authored: &AuthoredOrder,
         state: &EffectiveState,
         position: TaskPosition,
+        inline: bool,
     ) -> Result<PreflightGroup, CompositionError> {
         providers::collect_written_keys(&Value::Object(map.clone()), &mut self.written_keys);
         let name = match map.get("name") {
@@ -1977,6 +2123,7 @@ impl<'a> Loader<'a> {
             group: name.clone(),
             origin: origin.to_path_buf(),
             problem,
+            site: Box::new(SequenceSite::at(origin, property).in_task(label)),
         };
 
         // A group file or catalog entry reaches the group grammar only here;
@@ -1984,7 +2131,7 @@ impl<'a> Loader<'a> {
         super::grammar::group_object_grammar(map, origin, property)?;
 
         if let Some(value) = map.get("execution") {
-            return Err(super::grammar::removed_task_key("execution", value, origin));
+            return Err(super::removed::removed_key(super::removed::RemovedOwner::Group, "execution", value, origin));
         }
         let fail_fast = match map.get("fail_fast") {
             None => true,
@@ -2003,7 +2150,8 @@ impl<'a> Loader<'a> {
                 lifecycle.stacks.loop_gate = block.gate;
                 Box::new(PreflightLoop { config: block.config, location: loop_location })
             });
-        self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
+        let events = self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true });
+        self.recover_in_task(events)?;
         let source_owner;
         let referenced_owner = self.documents.get(origin).cloned();
         let owner = match &referenced_owner {
@@ -2071,38 +2219,52 @@ impl<'a> Loader<'a> {
         let mut tasks = Vec::with_capacity(raw_tasks.len());
         let mut leg_names = std::collections::HashSet::new();
         for (index, raw) in raw_tasks.iter().enumerate() {
-            let task_map = raw.as_object().ok_or_else(|| {
-                invalid(format!(
-                    "task {} must be an object, got {}",
-                    index + 1,
-                    json_type_name(raw)
-                ))
-            })?;
-            let leg_name = task_map.get("name").and_then(Value::as_str)
-                .filter(|name| !name.trim().is_empty())
-                .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
-            if !leg_names.insert(leg_name) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
             let task_property = property_child(property, &format!("tasks[{index}]"));
-            let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
-            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
-            let mut leg = self.load_task(
-                field,
-                &value,
-                &options,
-                origin,
-                &task_label,
-                &task_property,
-                &authored.child("tasks").at(index),
-                state,
-                Some(&defaults),
-                // Legs are not ordered: every leg of a first group is first.
-                Placement {
-                    position,
-                    in_group: true,
-                },
-            )?;
-            leg.name = Some(leg_name.to_string());
-            tasks.push(leg);
+            let seed = check::SiteSeed {
+                slot: check::Slot::Leg(index), name: check::item_name(raw, index), file: origin,
+                property: task_property.clone(), item: raw, executable: check::item_executable(raw),
+                seq: None, row: None,
+            };
+            // A check records a bad leg at the leg and reads its siblings.
+            let leg = self.check_task(seed, |loader| {
+                let task_map = raw.as_object().ok_or_else(|| {
+                    invalid(format!(
+                        "task {} must be an object, got {}",
+                        index + 1,
+                        json_type_name(raw)
+                    ))
+                })?;
+                let leg_name = task_map.get("name").and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
+                if !leg_names.insert(leg_name.to_string()) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
+                // A real run judged an inline group's legs with the task
+                // that holds it; a check judges each one here, at the leg.
+                if inline && loader.checking() {
+                    super::grammar::validate_task_grammar_shallow(task_map, origin, &task_property)?;
+                }
+                let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
+                let task_label = format!("{label} → task {} of group `{name}`", index + 1);
+                let mut leg = loader.load_task(
+                    field,
+                    &value,
+                    &options,
+                    origin,
+                    &task_label,
+                    &task_property,
+                    &authored.child("tasks").at(index),
+                    state,
+                    Some(&defaults),
+                    // Legs are not ordered: every leg of a first group is first.
+                    Placement {
+                        position,
+                        in_group: true,
+                    },
+                )?;
+                leg.name = Some(leg_name.to_string());
+                Ok(Some(leg))
+            })?;
+            tasks.extend(leg);
         }
 
         let group = PreflightGroup {
@@ -2167,6 +2329,7 @@ impl<'a> Loader<'a> {
                     return Err(CompositionError::SequenceWriteBackCollision {
                         group: group.name.clone(), target: path,
                         first: first.clone(), second: owner.clone(),
+                        site: Box::new(SequenceSite::file(&group.origin_path)),
                     });
                 }
                 claimed.insert(path, owner.clone());
@@ -2187,18 +2350,36 @@ impl<'a> Loader<'a> {
     /// A prompt remains a leaf. A referenced document with `sequence:` needs
     /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
-        let path = self.resolve_reference(reference, origin)?;
-        self.capture_source(&path);
-        if let Some(existing) = self.graph.prompt_document(&path) {
-            let _ = existing;
+        let path = self.resolve_reference(reference, origin, ExecutableField::Prompt)?;
+        if self.graph.prompt_document(&path).is_none()
+            && let Some(document) = self.memoized_prompt(&path)
+        {
+            // Another pass of this check read it: its bytes are the
+            // captured source, and its parse the graph's document.
+            if let Some(text) = document.markdown.loaded_text() {
+                self.graph.authored_sources.entry(path.clone()).or_insert_with(|| Some(text.as_bytes().to_vec()));
+            }
+            self.graph.push_prompt_document(document);
+        }
+        if self.graph.prompt_document(&path).is_some() {
+            self.capture_source(&path);
             return Ok(path);
         }
+        // One read is both the captured source and the parsed document, so
+        // the graph never pairs one revision's bytes with another's parse.
+        let read = crate::composition::read_local_source(&path).ok();
+        self.graph.authored_sources.entry(path.clone()).or_insert_with(|| read.as_ref().map(|read| read.bytes.to_vec()));
+        self.capture_log.push(path.clone());
         self.check_cycle(&path)?;
 
         // The referenced document is loaded through the ordinary Markdown load
         // error so a malformed prompt reports the same typed parse failure it
         // would when composed directly, rather than a preflight-shaped string.
-        let markdown = Markdown::try_from(path.as_path()).map_err(|e| {
+        let loaded = match &read {
+            Some(read) => Markdown::from_read_source(&path, read),
+            None => Markdown::try_from(path.as_path()),
+        };
+        let markdown = loaded.map_err(|e| {
             CompositionError::MarkdownLoad {
                 path: path.clone(),
                 source: super::super::error::MarkdownLoadCause::Parse(Box::new(e)),
@@ -2210,18 +2391,24 @@ impl<'a> Loader<'a> {
             return Err(CompositionError::SequenceNestedSequence {
                 path: path.clone(),
                 referenced_from: origin.to_path_buf(),
+                site: Box::new(SequenceSite::unlocated()),
             });
         }
         let inline_compose = matches!(frontmatter.as_map().get("prompt"), Some(Value::String(_)));
         let has_schema = frontmatter.as_map().contains_key("$schema");
 
-        self.graph.push_prompt_document(PromptDocument {
-            path: path.clone(),
-            markdown,
-            inline_compose,
-            has_schema,
-        });
+        let document = PromptDocument { path: path.clone(), markdown, inline_compose, has_schema };
+        if let Some(memo) = &self.prompt_memo {
+            memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path.clone(), document.clone());
+        }
+        self.graph.push_prompt_document(document);
         Ok(path)
+    }
+
+    /// The prompt document at `path` another pass of this check read.
+    fn memoized_prompt(&self, path: &Path) -> Option<PromptDocument> {
+        let memo = self.prompt_memo.as_ref()?;
+        memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(path).cloned()
     }
 
     /// Prepare a task's `shell:` value: one site per command, with the bytes
@@ -2247,6 +2434,7 @@ impl<'a> Loader<'a> {
                             "every `shell` entry must be a string, got {}",
                             json_type_name(other)
                         ),
+                        site: Box::new(scope.error_site()),
                     }),
                 })
                 .collect::<Result<_, _>>()?,
@@ -2258,6 +2446,7 @@ impl<'a> Loader<'a> {
                         "`shell` must be a string or a list of strings, got {}",
                         json_type_name(other)
                     ),
+                    site: Box::new(scope.error_site()),
                 });
             }
         };
@@ -2394,6 +2583,7 @@ impl<'a> Loader<'a> {
                                   command"
                             .to_string(),
                         source: None,
+                        site: Box::new(scope.error_site()),
                     },
                 )?;
                 (command.command.to_string(), command.span, command.conditional)
@@ -2599,6 +2789,7 @@ impl<'a> Loader<'a> {
                         root,
                         task: label.to_string(),
                         source: Some(Box::new(diagnostic.error)),
+                        site: Box::new(scope.error_site()),
                     },
                     None => CompositionError::SequenceShellResolution {
                         command: raw.to_string(),
@@ -2608,6 +2799,7 @@ impl<'a> Loader<'a> {
                             raw,
                             diagnostic.error,
                         ))),
+                        site: Box::new(scope.error_site()),
                     },
                 });
             }
@@ -2617,6 +2809,7 @@ impl<'a> Loader<'a> {
                 command: raw.to_string(),
                 root,
                 task: label.to_string(),
+                site: Box::new(scope.error_site()),
             });
         }
         Ok(())
@@ -2741,6 +2934,7 @@ impl<'a> Loader<'a> {
             task: scope.label.to_string(),
             message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+            site: Box::new(scope.error_site()),
         })?;
         for command in value.commands() {
             self.graph.push_shell_command(DiscoveredCommand {
@@ -2787,6 +2981,7 @@ impl<'a> Loader<'a> {
             task: scope.label.to_string(),
             message,
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+            site: Box::new(scope.error_site()),
         }
     }
 
@@ -2874,6 +3069,13 @@ impl<'a> Loader<'a> {
                 .map(SourceContext::file_resolution_context)
                 .unwrap_or(&self.file_resolution_context)
                 .clone();
+            // A check's value that left something as written (a read of a
+            // missing input, a skipped command) is known only at the task's
+            // turn.
+            let session = crate::composition::passive_scope::current().map(|session| {
+                let mark = session.mark();
+                (session, mark)
+            });
             match reapproval::compose_approval_value(
                 value,
                 origin,
@@ -2885,6 +3087,9 @@ impl<'a> Loader<'a> {
                 // now, binds at the task's turn: the document treats it as late
                 // rather than as a `null` it would refuse.
                 Ok(Ok(Value::Null)) if guard_proves_whole_value(value, &types) => deferred.push(key.clone()),
+                Ok(Ok(_)) if session.as_ref().is_some_and(|(session, mark)| session.mark() > *mark) => {
+                    deferred.push(key.clone());
+                }
                 Ok(Ok(resolved)) => {
                     evaluated.insert(key.clone(), resolved);
                 }
@@ -2909,6 +3114,7 @@ impl<'a> Loader<'a> {
             with_origin: origin.to_path_buf(),
             deferred_with: deferred.clone(),
         };
+        self.note_prepared_with(with, &reference, &deferred);
         let bucket = self.prompt_reference_index
             .entry((reference.path.clone(), reference.position, reference.in_group))
             .or_default();
@@ -2974,79 +3180,105 @@ impl<'a> Loader<'a> {
     /// prediction that reads a key the graph's lifecycle may write to the
     /// launch.
     fn finish(mut self) -> PreflightGraph {
-        let mut written = std::mem::take(&mut self.written_keys);
-        providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()), &mut written);
-        for document in &self.graph.prompt_documents {
-            providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(document.markdown.frontmatter()), &mut written);
-        }
-        fn visit(
-            task: &mut PreflightTask,
-            identity: TaskIdentity,
-            written: &mut HashSet<String>,
-            pass: u8,
-        ) {
-            match pass {
-                0 => {
-                    for stack in [&task.setup, &task.teardown].into_iter().flatten() {
-                        providers::collect_written_keys(stack, written);
-                    }
-                    match &task.action {
-                        PreflightAction::SideEffect { action, .. } => providers::collect_written_keys(action, written),
-                        PreflightAction::Sequence(sequence) => {
-                            if let Some(frontmatter) = &sequence.frontmatter {
-                                providers::collect_written_keys(&Value::Object(frontmatter.clone()), written);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {
-                    task.identity = identity.clone();
-                    if let Some(prediction) = &mut task.provider {
-                        prediction.defer_runtime_written(written);
-                    }
-                }
+        let written = self.runtime_written_keys();
+        fn visit(task: &mut PreflightTask, identity: TaskIdentity, written: &HashSet<String>) {
+            task.identity = identity.clone();
+            if let Some(prediction) = &mut task.provider {
+                prediction.defer_runtime_written(written);
             }
             match &mut task.action {
                 PreflightAction::Sequence(sequence) => {
                     for (index, step) in sequence.steps.iter_mut().enumerate() {
                         if let Some(child) = &mut step.task {
-                            visit(child, identity.sequence_child(index), written, pass);
+                            visit(child, identity.sequence_child(index), written);
                         }
                     }
                 }
                 PreflightAction::Group(group) => {
                     for (index, leg) in group.tasks.iter_mut().enumerate() {
-                        visit(leg, identity.group_leg(index), written, pass);
+                        visit(leg, identity.group_leg(index), written);
                     }
                 }
                 _ => {}
             }
         }
-        for pass in 0..2 {
-            for (index, step) in self.graph.steps.iter_mut().enumerate() {
-                if let Some(task) = &mut step.task {
-                    visit(task, TaskIdentity::root(index), &mut written, pass);
-                }
+        for (index, step) in self.graph.steps.iter_mut().enumerate() {
+            if let Some(task) = &mut step.task {
+                visit(task, TaskIdentity::root(index), &written);
             }
         }
         self.graph.caller_layers = self.caller_layers.take().map(Arc::new);
         self.graph
     }
 
+    /// Every key the walked graph's lifecycle may write before a task
+    /// launches: the root's and every prompt document's events, the
+    /// container events and group objects the walk met, and each task's
+    /// stacks, side effects, and sequence document. A prediction that reads
+    /// one is decided at launch ([`ProviderPrediction::defer_runtime_written`]),
+    /// in a real run's graph and a check's records alike.
+    ///
+    /// [`ProviderPrediction::defer_runtime_written`]: providers::ProviderPrediction::defer_runtime_written
+    pub(super) fn runtime_written_keys(&self) -> HashSet<String> {
+        let mut written = self.written_keys.clone();
+        providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()), &mut written);
+        for document in &self.graph.prompt_documents {
+            providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(document.markdown.frontmatter()), &mut written);
+        }
+        fn visit(task: &PreflightTask, written: &mut HashSet<String>) {
+            for stack in [&task.setup, &task.teardown].into_iter().flatten() {
+                providers::collect_written_keys(stack, written);
+            }
+            match &task.action {
+                PreflightAction::SideEffect { action, .. } => providers::collect_written_keys(action, written),
+                PreflightAction::Sequence(sequence) => {
+                    if let Some(frontmatter) = &sequence.frontmatter {
+                        providers::collect_written_keys(&Value::Object(frontmatter.clone()), written);
+                    }
+                    for child in sequence.steps.iter().filter_map(|step| step.task.as_ref()) {
+                        visit(child, written);
+                    }
+                }
+                PreflightAction::Group(group) => group.tasks.iter().for_each(|leg| visit(leg, written)),
+                _ => {}
+            }
+        }
+        for task in self.graph.steps.iter().filter_map(|step| step.task.as_ref()) {
+            visit(task, &mut written);
+        }
+        written
+    }
+
     /// Resolve a reference authored inside `origin` to an absolute path.
+    ///
+    /// A check notes the reference finding for a failure, which the task
+    /// that authored `field` then reports.
     fn resolve_reference(
         &mut self,
         reference: &str,
         origin: &Path,
+        field: ExecutableField,
     ) -> Result<PathBuf, CompositionError> {
         let source_context = self.source_context_for(origin);
         let file_resolution_context = source_context
             .as_ref()
             .map(SourceContext::file_resolution_context)
             .unwrap_or(&self.file_resolution_context);
-        source_resolution::resolve_sequence_reference(reference, origin, file_resolution_context)
-            .map(|p| canonical(&p))
+        let resolved = source_resolution::resolve_sequence_reference(reference, field, origin, file_resolution_context)
+            .map(|p| canonical(&p));
+        if resolved.is_err() && self.checking() {
+            self.note_unresolved_reference(reference, origin, field);
+        }
+        // A file the run's initializer appends to holds other text by the
+        // time the run reads it: the task is not checked.
+        if let Ok(path) = &resolved
+            && self.checking()
+            && let Some(reason) = source_resolution::changed_reference(path)
+        {
+            self.note_changed_reference(reason);
+            return Err(source_resolution::changed_reference_failure(path));
+        }
+        resolved
     }
 
     /// The invocation's caller inputs with their recorded origins, or the
@@ -3182,16 +3414,21 @@ impl<'a> Loader<'a> {
     /// The returned cursor is rooted at that document, not at the referencing
     /// one: crossing a file boundary replaces both the order source and the
     /// pointer, exactly as it already resets the semantic `property` path.
+    ///
+    /// `field` is the executable that referenced `path`; a read or parse
+    /// failure names its construct.
     fn load_data_document(
         &mut self,
         path: &Path,
+        field: ExecutableField,
     ) -> Result<(Arc<ReferencedDocument>, AuthoredOrder), CompositionError> {
         self.capture_source(path);
+        self.note_loaded_file(path);
         if let Some(document) = self.documents.get(path) {
             return Ok((Arc::clone(document), AuthoredOrder::at_root(Arc::clone(&document.orders))));
         }
         let read = self.graph.authored_sources.get(path).and_then(Option::as_deref);
-        let document = self.graph.nested_sources.document(path, read)?;
+        let document = self.graph.nested_sources.document(path, read).map_err(|error| error.referenced_as(field))?;
         let present = crate::composition::lifecycle::bindings::retired_names_present(&self.caller_setters);
         if !document.checked_under(present) {
             crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&document.value));
@@ -3220,7 +3457,7 @@ impl<'a> Loader<'a> {
                 entry.as_ref().map_or_else(|| path.clone(), |entry| PathBuf::from(format!("{}#{entry}", path.display())))
             }).collect();
             chain.push(entry.map_or_else(|| path.to_path_buf(), |entry| PathBuf::from(format!("{}#{entry}", path.display()))));
-            return Err(CompositionError::SequenceReferenceCycle { chain });
+            return Err(CompositionError::SequenceReferenceCycle { chain, site: Box::new(SequenceSite::unlocated()) });
         }
         Ok(())
     }
@@ -3266,6 +3503,13 @@ struct SiteScope<'s> {
     /// task (its `shell:` command); `None` for its `setup:`/`teardown:` stacks
     /// and for a container's events.
     guard: Option<&'s TaskGuard>,
+}
+
+impl SiteScope<'_> {
+    /// The site of an error in this command: its field, in its task.
+    fn error_site(&self) -> SequenceSite {
+        SequenceSite::at(self.origin, &self.property).in_task(self.label)
+    }
 }
 
 /// A task's `when:` guard, parsed passively, as the values the sequence
@@ -3421,6 +3665,7 @@ fn select_catalog_group<'a>(
                     "a `kind: group-catalog` document must declare a `groups:` list, got {}",
                     other.map_or("nothing", json_type_name)
                 ),
+                site: Box::new(SequenceSite::at(path, "groups")),
             });
         }
     };
@@ -3438,6 +3683,7 @@ fn select_catalog_group<'a>(
     let lookup_failure = |problem: &str| CompositionError::SequenceGroupCatalogLookup {
         name: name.to_string(),
         path: path.to_path_buf(),
+        site: Box::new(SequenceSite::unlocated()),
         problem: problem.to_string(),
         available: groups
             .iter()
@@ -3457,7 +3703,15 @@ fn select_catalog_group<'a>(
 }
 
 /// Parse a task object into its single executable field, that field's value,
-/// and its validated option map.
+/// and its validated option map. `property` is the task's authored path in
+/// `origin` (empty for a `kind: task` file, whose root is the task).
+///
+/// ## Errors
+///
+/// The task grammar's errors, [`CompositionError::SequenceReferenceInvalid`]
+/// at the task for a missing or second executable, and
+/// [`CompositionError::SequenceUnknownTaskField`] at the key for one the
+/// executable's task does not accept, with the nearest field it does.
 fn parse_task_object(
     map: &Map<String, Value>,
     origin: &Path,
@@ -3467,6 +3721,7 @@ fn parse_task_object(
         context: "task".to_string(),
         path: origin.to_path_buf(),
         problem,
+        site: Box::new(SequenceSite::at(origin, property)),
     };
 
     super::grammar::validate_task_grammar(map, origin, property)?;
@@ -3498,10 +3753,15 @@ fn parse_task_object(
             continue;
         }
         if !reserved::is_task_option_key(key) {
-            return Err(invalid(format!(
-                "`{key}` is not a task field; expected one of {}",
-                reserved::TASK_OPTION_KEYS.join(", ")
-            )));
+            let allowed: Vec<String> = allowed.iter().map(|key| (*key).to_string()).collect();
+            let suggestion = darkmatter::catalog::suggest_strings(&allowed, key, 1).first().map(|key| (*key).to_string());
+            return Err(CompositionError::SequenceUnknownTaskField {
+                key: key.clone(),
+                executable: field,
+                allowed,
+                suggestion,
+                site: Box::new(SequenceSite::at(origin, &property_child(property, key))),
+            });
         }
         if !allowed.contains(&key.as_str()) {
             return Err(invalid(format!(
@@ -3526,6 +3786,7 @@ fn expect_kind(
         other => Err(CompositionError::SequenceReferenceInvalid {
             context: format!("`kind: {expected}` document"),
             path: path.to_path_buf(),
+            site: Box::new(SequenceSite::at(path, "kind")),
             problem: match other {
                 Some(Value::String(kind)) => format!("declares `kind: {kind}`"),
                 Some(other) => format!("`kind` must be a string, got {}", json_type_name(other)),
@@ -3546,19 +3807,34 @@ fn expect_object<'a>(
             context: context.to_string(),
             path: path.to_path_buf(),
             problem: format!("root must be an object, got {}", json_type_name(document)),
+            site: Box::new(SequenceSite::file(path)),
         })
 }
 
-fn expect_reference(value: &Value, key: &str, label: &str) -> Result<String, CompositionError> {
+/// `value` as the file reference `field` authors at `property` of
+/// `origin`, in the task labeled `label`.
+///
+/// ## Errors
+///
+/// [`CompositionError::SequenceReferenceInvalid`] at that property when the
+/// value is not a non-empty string.
+fn expect_reference(
+    value: &Value,
+    field: ExecutableField,
+    label: &str,
+    origin: &Path,
+    property: &str,
+) -> Result<String, CompositionError> {
     match value {
         Value::String(s) if !s.trim().is_empty() => Ok(s.trim().to_string()),
         other => Err(CompositionError::SequenceReferenceInvalid {
-            context: format!("`{key}:` in {label}"),
-            path: PathBuf::new(),
+            context: format!("`{}:` in {label}", field.key()),
+            path: origin.to_path_buf(),
             problem: format!(
                 "must be a non-empty file reference, got {}",
                 json_type_name(other)
             ),
+            site: Box::new(SequenceSite::at(origin, property).in_task(label)),
         }),
     }
 }
@@ -3596,6 +3872,11 @@ fn canonical(path: &Path) -> PathBuf {
     biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+
+/// A check's list items set aside: the read items' authored positions, and
+/// each unreadable item's position, value, and failure.
+type RecoveredItems = (Vec<usize>, Vec<(usize, Value, CompositionError)>);
+
 #[cfg(test)]
 mod tests;
 
@@ -3621,3 +3902,7 @@ mod prepared_shell_values_tests;
 #[cfg(test)]
 #[path = "tests/provider_dependencies.rs"]
 mod provider_dependencies_tests;
+
+#[cfg(test)]
+#[path = "tests/check_tree.rs"]
+mod check_tree_tests;

@@ -1,4 +1,4 @@
-//! The `agent-errors` fleet prompt (`docs/research/agent-errors/_research.md`)
+//! The `agent-errors` fleet prompt (`docs/research/providers/agent-errors/_research.md`)
 //! wires the spec-D10 deterministic recovery policy into its lifecycle: one
 //! shared resume budget repairs missing output, research-document gate errors,
 //! and findings; a separate retry budget handles transient provider failures.
@@ -27,7 +27,7 @@ fn fleet_path() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("lib crate lives under the claudine package area")
-        .join("docs/research/agent-errors/_research.md")
+        .join("docs/research/providers/agent-errors/_research.md")
 }
 
 /// Reads the fleet prompt's raw frontmatter as a JSON value (interpolation

@@ -46,7 +46,7 @@ impl HostPattern {
 /// governs consent only: [`fetch`] and [`post`] still refuse non-HTTP(S)
 /// schemes and never follow a redirect, so a caller that follows one must
 /// consult the policy again for the redirect's host.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FetchPolicy {
     allowed: Vec<HostPattern>,
     allow_every_host: bool,

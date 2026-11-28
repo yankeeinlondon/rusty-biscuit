@@ -211,10 +211,18 @@ record this output prints.
 | `expected_type` | for a call argument, the parameter's declared type; for a [contract mismatch](#data-errors), the type the offending value should have had; otherwise `null` |
 | `actual_type` | for a call argument, the argument's type; for a contract mismatch, the kind of value found; otherwise `null` |
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
-| `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
+| `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key), one per iteration frame of the [trail](#trail); otherwise `[]` |
 | `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, and for a `dm.schema.*` problem on a frontmatter property whose value one `load_data` call returned directly, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
 | `grants_needed` | for `dm.schema.slot_approval_required`, the approvals any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file` or `url`; `target` is the file's path or the exact URL; `scope` is `once`, allow for this run, or `persisted`, "always allow" a file by saving it to `permissions.file-read`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
 | `schema_default` | for a `dm.schema.*` problem with a value a schema default supplied (a required property the document left out, filled from its `default(...)`), where that default is declared, as `{ "path", "schema_location", "schema_file" }`: `path` is the dotted property path, `schema_location` the JSON Pointer of the `default` keyword (for example `/properties/doc/default`), and `schema_file` the schema file that declares the default (for a default inside a type imported with `Name@file`, that import's file, not the importing schema), omitted for the document's inline schema or a compiled-in one. No authored text holds such a value, so `source` names the document with a `null` line and column. Absent, not `null`, on every other diagnostic |
+| `related` | other locations involved in the problem, as `{ "message", "source" }`: the other declarations of a host registration conflict, or the finding that stopped a `dm.check.not_checked` record's check. Each `source` carries its own file and coordinates. Omitted when the diagnostic has no related location |
+| `hint` | how to fix the problem, as one sentence, such as `"create renderers/_frontmatter.md before a real run, or correct the reference"`. Omitted when the producer has no fix to suggest |
+| `notes` | supporting lines a person reads under the message, in order, such as each link of a provider selection chain. Unlike `related`, a note has no location of its own. Omitted when empty |
+| `trail` | how the problem was reached, outermost first: the transclusions, `::map`/`::filter` items, and host constructs (such as a Claudine task) on the way to it; see [Trail](#trail). Omitted when there are none, and on commands other than `md compose` and `md render` unless a host frame is in it |
+
+`related` is the field for any other location that explains a problem.
+`notes` is an addition to that record: it holds facts with no location of
+their own, so a reader who only wants locations can ignore it.
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
@@ -228,9 +236,9 @@ result, so transclusion cannot shift it:
 
 | `source` field | Value |
 |---|---|
-| `file` | the resolved path of the file that holds the problem; `null` for stdin |
+| `file` | the resolved path of the file that holds the problem, with `/` separators on every OS (`C:/work/doc.md` on Windows), or the URL of a remote document; `null` for stdin |
 | `line` | the authored line, one-based; `null` when no authored position is proven, as for a document built in memory or a line counted in rewritten text |
-| `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line |
+| `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line. One exception: a frontmatter property that fails schema validation (a `dm.schema.*` validation problem, not a slot record) keeps the validator's UTF-8 byte column (a `😀` before the node counts as 4), as described in [Problem Locations](../topics/schemas/definition.md#problem-locations) |
 | `section` | the composed anchor slug of the innermost heading at or before the problem; absent above the first heading, and on diagnostics that do not compute it |
 | `inserted` | `true` when an expression, a shell step, or a `replace:` value created the reference, so `line` and `column` point at the construct that created it |
 
@@ -238,6 +246,67 @@ A problem inside transcluded content points at the transcluded file, not at the
 `::file` directive that included it. A problem whose producer knows no file falls back
 to the document the command named, with a `null` line and column. See
 [what each family reports](../errors/composition-problems.md#how-a-problem-is-located).
+
+### Trail
+
+A diagnostic records how its problem was reached as one trail of frames,
+outermost first. Three kinds of frame exist:
+
+| Frame | Fields | Written by |
+|---|---|---|
+| `{ "kind": "host", "host", "label", "property", "source" }` | the host's noun for the construct (`"task"`, `"group"`, `"sequence"`), its display label, the authored property path such as `"sequence[1].prompt"`, and, when proven, where the construct is authored | a host, such as Claudine's document check |
+| `{ "kind": "included", "file", "line" }` | the including document and the authored line of its `::file` or `::toc-linking` directive (absent when unknown) | Darkmatter, for a reference problem in a transcluded document |
+| `{ "kind": "iteration", "collection", "position" }` | the source reference as written and the item's original position (a number for an index, a string for a key) | Darkmatter, for a failure inside a `::map` or `::filter` item |
+
+Every diagnostic shows Darkmatter's own frames in two fixed fields:
+`iteration_path` lists the iteration frames (`[]` when there are none), and a
+reference problem's `included_via` lists the included frames (`[]` for a
+problem in the root document). `md compose` (and `md render`) write the
+`trail` field whenever the trail has a frame, holding every frame in order,
+so a problem in a transcluded file or a `::map` item carries both its fixed
+field and its `trail`. Every other command (`md validate refs`, `md graph`,
+`md schema validate`, …) keeps the form it published before trails existed:
+it writes `trail` only when the trail holds a host frame, which `md` never
+pushes, so those commands never write it.
+
+```json
+{
+  "code": "dm.collection.callback_failed",
+  "severity": "error",
+  "message": "… at teams[2]",
+  "iteration_path": [{ "collection": "teams", "position": 2 }],
+  "trail": [
+    { "kind": "host", "host": "task", "label": "metadata", "property": "sequence[1].prompt" },
+    { "kind": "iteration", "collection": "teams", "position": 2 }
+  ]
+}
+```
+
+The record above, reported by a Claudine dry run, carries the task that
+reached the failure. The same failure from `md compose` has the same
+`iteration_path` and a `trail` of only the iteration frame:
+
+```json
+{
+  "code": "dm.collection.callback_failed",
+  "iteration_path": [{ "collection": "teams", "position": 2 }],
+  "trail": [{ "kind": "iteration", "collection": "teams", "position": 2 }]
+}
+```
+
+A missing link in a transcluded file, from `md compose`, has an
+`included_via` step and the matching `included` frame:
+
+```json
+{
+  "code": "dm.reference.missing_hyperlink",
+  "included_via": [{ "file": "/work/docs/root.md", "line": 3 }],
+  "trail": [{ "kind": "included", "file": "/work/docs/root.md", "line": 3 }]
+}
+```
+
+`md validate refs --output json` reports the same problem with the same
+`included_via` and no `trail`.
 
 ### Reference details
 
@@ -258,7 +327,11 @@ listed under [Data errors](#data-errors).
 | `construct` | the construct phrase, such as `"hyperlink"`, `"image"`, or `"::code"` |
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
-| `included_via` | the transclusion trail, outermost first, as `{ "file", "line" }` steps; each `line` is the authored line of the `::file` or `::toc-linking` directive |
+| `included_via` | the transclusion path, outermost first, as `{ "file", "line" }` steps, one per included frame of the [trail](#trail); each `line` is the authored line of the `::file` or `::toc-linking` directive, or `null`. `[]` for a problem in the root document. Written on a reference problem; a failure with no single reference (such as a read-side function's file) omits it |
+| `base` | for a missing document (`dm.reference.missing_document`) or a missing target `md compose` reports, the file or directory the reference was resolved against. `md validate refs` and `md graph --validate` keep their earlier records and never write `base`, `resolved`, `searched`, `suggestions`, or a missing target's `hint` |
+| `resolved` | for a missing document or target, the one path the reference resolved to |
+| `searched` | for a missing document whose reference was looked for in more than one place, or searched recursively (`%`), every path checked, and every directory a recursive search walked, in search order |
+| `suggestions` | up to three existing files near the reference's file name, from the searched directories, in search order. A directory the host's permissions refuse is never read. A name that differs only by case is offered when it is a different file (on a case-sensitive volume, `Notes.md` beside a missing `notes.md`) and never when it is the same directory entry. A suggestion is shown, never used |
 
 ## Which diagnostics, in which order
 
@@ -338,16 +411,20 @@ classified by what failed:
 |---|---|
 | `dm.frontmatter.yaml_parse` | the frontmatter YAML, or its `---` fence, does not parse; located |
 | `dm.input.read_failure` | the input, or a file it needs, cannot be read |
-| `dm.expression.parse_failure` | an expression does not parse |
+| `dm.expression.parse_failure` | an expression does not parse, including a `when=` condition on `::file` or `::block`; located at the directive's opener |
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
 | `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`, `invalid_options`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function; see [Data errors](#data-errors) |
-| `dm.directive.parse_failure` | a `::` directive does not parse |
+| `dm.directive.parse_failure` | a `::` directive does not parse (located at its opener in the file as written; a `::shell-block`'s own option or command is `dm.shell.failure`), a block marker has no partner (located at the marker), or a `prologue`/`epilogue` is not a string or a list of strings (located at its key's line) |
+| `dm.toc_linking.invalid_level`, `dm.toc_linking.invalid_cleanup`, `dm.toc_linking.invalid_filter` | a `::toc-linking` `level=` names no level from `h1` to `h6`, a `cleanup=` names an unknown service, or a `keep=`/`filter=` pattern does not compile; a target chain that resolves nothing is `dm.reference.failure`, and a target that cannot be read `dm.input.read_failure` |
+| `dm.file_links.invalid_depth`, `dm.file_links.missing_source`, `dm.file_links.not_a_directory`, `dm.file_links.invalid_glob` | a `::file-links` `--depth` is not a non-negative integer, the directive is in a document with no source file, a `--dir` target is not a directory, or its glob is invalid, leaves the file tree, or cannot be rooted; a `--dir` target that does not exist is `dm.reference.failure`, and a directory that cannot be read `dm.input.read_failure` |
 | `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
-| `dm.shell.failure` | a shell command fails, times out, or is refused |
-| `dm.transclusion.failure` | a transclusion fails for another reason |
-| `dm.reference.failure` | a file reference does not resolve |
+| `dm.shell.failure` | a shell command fails, times out, or is refused, or a `::shell-block`'s option or command does not parse (located at that line in the file that holds the block) |
+| `dm.reference.missing_transclusion` | a `::file` or `::code` target matches no file; a target that exists but cannot be read is `dm.input.read_failure` |
+| `dm.transclusion.remote_needs_approval` | a remote `::file`, `::code`, or `prologue`/`epilogue` URL was not fetched because `permissions.network` is `ask` and the run did not allow its host (`--allow host=HOST`); no request is sent |
+| `dm.transclusion.failure` | a transclusion fails for another reason (such as a cycle, an unsupported file type, or a URL while remote execution is disabled); a warning under `ignore_invalid: true`, located at the directive or value that wrote the target. A tolerated child failure that has no code of its own (such as a child whose frontmatter does not parse) is reported with this code too, at the including directive |
+| `dm.reference.failure` | a file reference does not resolve or is invalid (such as a bare `@`), from `md compose`, `md validate refs`, and `md graph` alike; a link's or image's record (`[x](@)`, reason `invalid file reference`) names the link's line and column; an inclusion's record names the directive or `prologue`/`epilogue` value that wrote the target, in the file that wrote it (a child's included), and so does the warning when a `::file` tolerates a child's failure |
 | `dm.compose.parameter_binding` | a supplied value does not bind to its parameter |
 | `dm.setter.invalid` | a `key.path=value` setter cannot be applied: its value is an invalid container, its path meets a scalar parent or an index out of range in a document, or a scalar setter overlaps a setter below it. The message names the argument and its path; `source` is null, because a command-line value is in no file |
 | `dm.lifecycle.failure` | a lifecycle event fails (an `error:` action, a failed action) |
@@ -359,7 +436,17 @@ classified by what failed:
 | `dm.config.invalid`, `dm.config.reference` | `~/.darkmatter.yaml` or the repository's `.darkmatter.yaml` does not load, for a command that reads the configuration (`md compose`, `md graph`, `md validate refs`); one record per problem, with the file, line, and column. See [Configuration Files](../topics/configuration.md#how-md-and-claudine-report-configuration) |
 | `dm.config.not_saved` | `md init` has nowhere to write: no home directory can be found. See [`md init`](./init.md#exit-status) |
 | `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
+| `dm.normalization.level_overflow`, `dm.normalization.validation_failed` | heading normalization would push a heading past H6, or a heading structure rule failed; `Markdown::normalize` and `Markdown::relevel` return these too. See [Headings pushed past H6](../errors/composition-problems.md#headings-pushed-past-h6) |
 | `dm.compose.failure` | anything else, on any command |
+
+A `::toc-linking` or `::file-links` failure that `md compose` tolerates (it
+leaves the directive out and continues) is a `warning` with the code from the
+table above, never a generic one.
+
+A heading that composition cannot place within H6 is a `warning` with its own
+code too: `dm.transclusion.heading_overflow` when a `::file` child's heading
+is written as bold text instead, and `dm.normalization.level_overflow` when
+heading normalization is skipped.
 
 A warning whose producer declares no code reports `dm.compose.warning`. These
 warnings belong to the run's output rather than to composition:
@@ -381,6 +468,41 @@ warnings belong to the run's output rather than to composition:
 `dm.host.foreign_document` record with `"severity": "info"`, naming the
 host's own command (see
 [`md compose` of a host's document](../topics/host-registration.md#md-compose-of-a-hosts-document)).
+
+### Finding codes for checks that keep going
+
+A check that reports every problem instead of stopping at the first, such as
+Claudine's passive document check, uses three more codes from the library's
+`darkmatter::findings` module. `md compose` emits two of them:
+
+- `dm.compose.empty_body` as a `warning` whenever the composed body is empty,
+  and as a `warning` when a broken reference stopped the run and a passive
+  composition proves the body *would* be empty (see
+  [the combined report](./compose.md#the-combined-report));
+- `dm.check.not_checked` in that combined report, for a check the stop or an
+  undecided value kept from running.
+
+Both are in the codes [`--deny`](./policy.md) takes on `md compose`:
+`--deny dm.compose.empty_body` fails a run whose body composes to nothing.
+`dm.reference.missing_document` is reported only by a host, so `md` never
+takes it.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `dm.reference.missing_document` | `error` | a document-valued reference, such as a Claudine task's `prompt:`, names a file that does not exist; carries the [reference details](#reference-details) including `base`, `resolved`, `searched`, and `suggestions` |
+| `dm.compose.empty_body` | `warning` in `md`; `error` for a Claudine provider prompt | a document composed (or would compose) to an empty body; `message` says why (no body, a whitespace-only body, every block left out by a false condition, or a body that rendered to nothing), `hint` gives the next step, and `source` is the first excluded block when blocks account for it |
+| `dm.check.not_checked` | `info` | a check could not run, and why, as `"not checked: provider (no executable)"` or, in `md compose`, `"not checked: empty body (…)"` with the reason the body could not be judged; `related` names the finding that stopped it, when it has a location |
+
+```json
+{
+  "code": "dm.check.not_checked",
+  "severity": "info",
+  "message": "not checked: provider (the prompt file could not be read)",
+  "source": null,
+  "related": [{ "message": "the prompt file does not exist",
+                "source": { "file": "/work/renderers/_fleet.yaml", "line": 12, "column": 15, "inserted": false } }]
+}
+```
 
 ### Style input errors
 
@@ -911,10 +1033,11 @@ object has `file` and whichever of the others were proven:
 "data_location": { "file": "/work/p.yaml", "pointer": "/items/0" }
 ```
 
-`source.file` and `data_location.file` can be spelled differently. `source.file`
-is a native path (`C:\work\doc.md` on Windows), while `data_location.file` is
-portable (`C:/work/ports.json`), so a script that compares a data file with its
-`read_set` entry can compare the strings directly.
+`source.file` and `data_location.file` both use `/` separators on every OS
+(`C:/work/ports.json` on Windows). `data_location.file` is also spelled exactly
+as its `read_set` entry, so a script that compares a data file with its
+`read_set` entry can compare the strings directly; `source.file` is the path
+the problem's file resolved to, which need not be canonical.
 
 ### Which value a record points at
 
@@ -1023,9 +1146,8 @@ or the position map cannot prove one:
   example: `b: x` on the next line is reported as `/b` with no position. A
   guessed position is never reported in its place. A parser error in such a
   file keeps the parser's line and column.
-- **A duplicate key** is located at the start of the mapping that holds it, not
-  at the second key: `a: 1` then `a: 2` at the top of a file is line 1,
-  column 1, with no pointer.
+- **A duplicate key** is located at its second spelling: `a: 1` then `a: 2`
+  at the top of a file is line 2, column 1, with no pointer.
 
 These are always located, because they are problems in the YAML itself, not
 contract mismatches:

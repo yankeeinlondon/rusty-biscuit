@@ -354,6 +354,24 @@ pub struct TriggerRegisteredData {
     pub revision: String,
     /// Its triggers, in manifest order; they layer below the roots'.
     pub triggers: Vec<TriggerTraceData>,
+    /// Why the matched triggers cannot be layered as one host layer.
+    pub conflict: Option<TriggerConflictData>,
+}
+
+/// A `dm.host.trigger_conflict` between two of a registered host's matched
+/// triggers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TriggerConflictData {
+    /// The trigger file representing the first declaration.
+    pub first: PathBuf,
+    /// The first trigger's `name` label; `None` when it declares none.
+    pub first_name: Option<String>,
+    pub second: PathBuf,
+    /// The second trigger's `name` label; `None` when it declares none.
+    pub second_name: Option<String>,
+    /// The property; `None` for the payloads' root rules.
+    pub subject: Option<String>,
+    pub reason: String,
 }
 
 impl TriggerRegisteredData {
@@ -366,6 +384,14 @@ impl TriggerRegisteredData {
             manifest: trace.origin.manifest.clone(),
             revision: trace.origin.revision.clone(),
             triggers: trace.triggers.iter().map(TriggerTraceData::from).collect(),
+            conflict: trace.conflict.as_ref().map(|conflict| TriggerConflictData {
+                first: conflict.first.clone(),
+                first_name: conflict.first_name.clone(),
+                second: conflict.second.clone(),
+                second_name: conflict.second_name.clone(),
+                subject: conflict.subject.clone(),
+                reason: conflict.reason.clone(),
+            }),
         }
     }
 }

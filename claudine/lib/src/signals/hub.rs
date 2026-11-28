@@ -328,7 +328,7 @@ mod tests {
     /// The committed claude billing fixture line: error-class AND fires the
     /// no_funds record, so it must never be harvested.
     const BILLING_FIXTURE_LINE: &str =
-        include_str!("../../../docs/research/signals/fixtures/claude/error-billing.jsonl");
+        include_str!("../../../docs/research/providers/signals/fixtures/claude/error-billing.jsonl");
 
     fn unmatched_error_payload(n: usize) -> Value {
         serde_json::json!({ "level": "error", "message": "unrecognized", "n": n })

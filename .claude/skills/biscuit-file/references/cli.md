@@ -52,7 +52,7 @@ Exit codes: `0` = found, `1` = not found (well-formed but no match), `2` = error
 
  `bf reference` can be abbreviated as `bf ref`.
 
-Resolved paths print through `biscuit_file::to_portable_string`, so stdout is
+Resolved paths print through `biscuit_file::to_forward_slash_string`, so stdout is
 `/`-separated on Windows too (`C:/repo/Cargo.toml`). A UNC, device, or
 unreducible verbatim path has no faithful portable spelling and prints
 natively. Assert on the portable form in tests; never on a leading `/`, which

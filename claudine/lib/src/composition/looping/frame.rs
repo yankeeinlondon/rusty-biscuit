@@ -123,16 +123,6 @@ impl LoopBreakSlot {
     }
 }
 
-/// The preview line for a loop a dry run visits once: the body runs one
-/// pass, and the condition, gate, and action are shown, never evaluated.
-pub fn dry_run_loop_note(property: &str, config: &LoopConfig, max: usize) -> String {
-    let condition = match &config.condition {
-        LoopCondition::Until(expr) => format!("until `{expr}`"),
-        LoopCondition::While(expr) => format!("while `{expr}`"),
-    };
-    format!("`{property}` previews one pass (dry-run); repetition is not evaluated: {condition}, max {max}")
-}
-
 /// What the loop does after a pass's gate.
 #[derive(Debug)]
 pub enum LoopDecision {

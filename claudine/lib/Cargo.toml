@@ -62,6 +62,9 @@ renderable = { path = "../../renderable" }
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# The registration inventory's member checks (`src/composition/inventory/walk.rs`),
+# compiled by the library and by `build.rs`.
+serde_yaml_ng = "0.10"
 
 # Date/time
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
@@ -127,6 +130,13 @@ libc = "0.2"
 # file refuses a write. Process-tree ownership is Sniff's.
 windows = { version = "0.62", features = ["Win32_Foundation"] }
 
+[build-dependencies]
+# `build.rs` compiles `src/composition/inventory/walk.rs` and, by path,
+# Simplified Schema's `member_envelope.rs`; Simplified Schema is not a build
+# dependency, so the build check is structural and the generator runs the
+# full member preparation.
+serde_yaml_ng = "0.10"
+
 [dev-dependencies]
 # The setup handshake's interrupted-transfer test fails a replacement through
 # darkmatter's test-only write hooks; dev-dependency features reach tests only.
@@ -163,8 +173,8 @@ features = ["work-counters"]
 # shared engines by `#[path]` and spell those files in their tests. The
 # lifecycle lift-ready guard spells Darkmatter's lifecycle parser slice.
 # `shipped_artifact_is_fresh` spells the Darkmatter, Simplified Schema, and
-# biscuit-hash code that prepares and digests Claudine's bundle and host
-# catalog: a change there can alter Claudine's artifact without changing
+# biscuit-hash code that prepares and digests Claudine's registered payloads
+# and host catalog: a change there can alter Claudine's artifact without changing
 # either lower artifact.
 source-inputs = [
   "biscuit-hash/lib/src/json.rs",
@@ -172,6 +182,10 @@ source-inputs = [
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/src/config/registration.rs",
+  "darkmatter/lib/src/config/registration/bundle.rs",
+  "darkmatter/lib/src/config/registration/manifest.rs",
+  "darkmatter/lib/src/config/registration/namespaces.rs",
   "darkmatter/lib/src/lifecycle/action_shape.rs",
   "darkmatter/lib/src/lifecycle/actions.rs",
   "darkmatter/lib/src/lifecycle/control.rs",
@@ -204,6 +218,7 @@ source-inputs = [
   "simplified-schema/lib/src/numeric.rs",
   "simplified-schema/lib/src/numeric/ingress.rs",
   "simplified-schema/lib/src/resolve.rs",
+  "simplified-schema/lib/src/resolve/bundle.rs",
   "simplified-schema/lib/src/resolve/graph.rs",
   "simplified-schema/lib/src/resolve/recursive.rs",
   "simplified-schema/lib/src/shipped/mod.rs",

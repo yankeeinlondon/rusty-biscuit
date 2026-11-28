@@ -445,8 +445,7 @@ mod yaml_loader_matrix {
         trailing_invalid_content: Append("]\n") => Rejects("not valid YAML");
         second_yaml_document: Append("---\nkind: schema\ntypes: {}\n") => Rejects("not valid YAML");
         crlf_line_endings: Crlf => Tagged;
-        // PINNED: a leading BOM is read as a second YAML document and rejected.
-        byte_order_mark: Prepend("\u{feff}") => Rejects("more than one document");
+        byte_order_mark: Prepend("\u{feff}") => Tagged;
         yaml_scalar_alone: Whole("42\n") => NotSchema;
         yaml_string_alone: Whole("./person.yaml\n") => NotSchema;
         empty_document: Whole("") => NotSchema;
@@ -536,7 +535,7 @@ mod yaml_loader_matrix {
         assert!(
             matches!(
                 &types_only,
-                Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly }) if path.ends_with("types.yaml")
+                Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly, .. }) if path.ends_with("types.yaml")
             ),
             "got {types_only:?}"
         );

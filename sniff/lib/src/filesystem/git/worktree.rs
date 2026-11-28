@@ -82,7 +82,7 @@ pub fn get_current_worktree_info(cwd: &Path) -> Result<Option<(String, String)>,
         .file_name()
         .and_then(|n| n.to_str())
         .map(String::from);
-    let path = biscuit_file::to_portable_string(&canonical);
+    let path = biscuit_file::to_forward_slash_string(&canonical);
 
     match name {
         Some(n) => Ok(Some((n, path))),

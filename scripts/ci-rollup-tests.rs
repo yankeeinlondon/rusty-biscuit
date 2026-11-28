@@ -6055,10 +6055,10 @@ fn an_executing_cell_displays_its_key_digest_producer_and_every_stage_apart() {
     let cell = measured_cell(
         "ubuntu-latest",
         ConsumerTimings {
-            download_seconds: 7,
-            verify_seconds: 3,
-            extract_ms: 800,
-            execute_seconds: 41,
+            download_seconds: Some(7),
+            verify_seconds: Some(3),
+            extract_ms: Some(800),
+            execute_seconds: Some(41),
         },
     );
     assert_eq!(
@@ -6068,10 +6068,10 @@ fn an_executing_cell_displays_its_key_digest_producer_and_every_stage_apart() {
             producer: "ubuntu-latest".to_owned(),
             digest: "fedcba9876543210".to_owned(),
             timings: Some(ConsumerTimings {
-                download_seconds: 7,
-                verify_seconds: 3,
-                extract_ms: 800,
-                execute_seconds: 41,
+                download_seconds: Some(7),
+                verify_seconds: Some(3),
+                extract_ms: Some(800),
+                execute_seconds: Some(41),
             }),
         })
     );
@@ -6091,7 +6091,15 @@ fn an_executing_cell_displays_its_key_digest_producer_and_every_stage_apart() {
 fn a_stage_nothing_measured_renders_absent_rather_than_zero() {
     // A guest that died before its measurements crossed back has no timings.
     // Reporting `0s` would claim its transfer was instant.
-    let cell = measured_cell("wsl2-ubuntu", ConsumerTimings::default());
+    let cell = measured_cell(
+        "wsl2-ubuntu",
+        ConsumerTimings {
+            download_seconds: Some(0),
+            verify_seconds: Some(0),
+            extract_ms: Some(0),
+            execute_seconds: Some(0),
+        },
+    );
     let mut blank = cell.clone();
     blank.build = blank.build.map(|build| CellBuild {
         timings: None,
@@ -6110,6 +6118,31 @@ fn a_stage_nothing_measured_renders_absent_rather_than_zero() {
     );
 }
 
+/// The whole-second clock measures a fast stage as `0`, so a stage missing
+/// from an otherwise measured consumer must stay distinguishable from it: the
+/// status step omits the stage, and the rollup renders it blank beside the
+/// measured zero.
+#[test]
+fn one_unmeasured_stage_renders_absent_beside_a_measured_zero() {
+    let status: ConsumerTimings =
+        serde_json::from_str(r#"{"download_seconds": 0, "extract_ms": 0}"#).unwrap();
+    assert_eq!(
+        status,
+        ConsumerTimings {
+            download_seconds: Some(0),
+            verify_seconds: None,
+            extract_ms: Some(0),
+            execute_seconds: None,
+        }
+    );
+    let summary =
+        render_grid(&rollup_of(vec![measured_cell("wsl2-ubuntu", status)], &["sniff-detection-cli"]));
+    assert!(
+        summary.contains("| 0s | — | 0.0s | — |"),
+        "a measured zero and an unmeasured stage must render differently: {summary}"
+    );
+}
+
 /// One Linux archive, two environments, one digest. The provenance table is
 /// where a reader confirms that the L1 cell and the WSL2 cell ran the same
 /// program while publishing separate results.
@@ -6118,19 +6151,19 @@ fn two_environments_consuming_one_build_each_report_the_same_key_and_digest() {
     let linux = measured_cell(
         "ubuntu-latest",
         ConsumerTimings {
-            download_seconds: 4,
-            verify_seconds: 2,
-            extract_ms: 500,
-            execute_seconds: 30,
+            download_seconds: Some(4),
+            verify_seconds: Some(2),
+            extract_ms: Some(500),
+            execute_seconds: Some(30),
         },
     );
     let guest = measured_cell(
         "wsl2-ubuntu",
         ConsumerTimings {
-            download_seconds: 11,
-            verify_seconds: 9,
-            extract_ms: 4200,
-            execute_seconds: 95,
+            download_seconds: Some(11),
+            verify_seconds: Some(9),
+            extract_ms: Some(4200),
+            execute_seconds: Some(95),
         },
     );
     let summary = render_grid(&rollup_of(vec![linux, guest], &["sniff-detection-cli"]));
@@ -6155,8 +6188,8 @@ fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
         "abc0123456789def".to_owned(),
         BuildStatus {
             stage_seconds: Some(ProducerStageSeconds {
-                queue_seconds: 18,
-                upload_seconds: 26,
+                queue_seconds: Some(18),
+                upload_seconds: Some(26),
             }),
             timings: Some(ProducerTimings {
                 setup_ms: 120,
@@ -6179,6 +6212,33 @@ fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
              184.0s | 26s |"
         ),
         "queue, compile+archive, and upload are each their own column: {summary}"
+    );
+}
+
+/// `publish.cjs` omits `queue_seconds` when it has no plan time to measure
+/// from, while a fast upload is a measured `0`: the two must render apart.
+#[test]
+fn an_owner_stage_it_could_not_measure_is_blank_beside_a_measured_zero() {
+    let mut rollup = rollup_of(
+        vec![measured_cell("ubuntu-latest", ConsumerTimings::default())],
+        &["sniff-detection-cli"],
+    );
+    let stage_seconds: ProducerStageSeconds =
+        serde_json::from_str(r#"{"upload_seconds": 0}"#).unwrap();
+    rollup.builds = build_reports(&BTreeMap::from([(
+        "abc0123456789def".to_owned(),
+        BuildStatus {
+            stage_seconds: Some(stage_seconds),
+            ..build_status("abc0123456789def", "sniff-detection-cli", "success", "produce")
+        },
+    )]));
+
+    let summary = render_grid(&rollup);
+    assert!(
+        summary.contains(
+            "| `abc0123456789def` | `sniff-detection-cli` | ubuntu-latest | success (produce) | — | — | 0s |"
+        ),
+        "an unmeasured queue is blank and a measured zero upload is `0s`: {summary}"
     );
 }
 
@@ -6363,17 +6423,17 @@ fn stage_timings_survive_the_artifacts_the_document_and_a_second_read() {
     assert_eq!(
         executed.timings,
         Some(ConsumerTimings {
-            download_seconds: 7,
-            verify_seconds: 3,
-            extract_ms: 800,
-            execute_seconds: 41,
+            download_seconds: Some(7),
+            verify_seconds: Some(3),
+            extract_ms: Some(800),
+            execute_seconds: Some(41),
         })
     );
     assert_eq!(
         document.builds[0].stage_seconds,
         Some(ProducerStageSeconds {
-            queue_seconds: 18,
-            upload_seconds: 26,
+            queue_seconds: Some(18),
+            upload_seconds: Some(26),
         })
     );
     assert_eq!(

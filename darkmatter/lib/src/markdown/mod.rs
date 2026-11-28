@@ -107,6 +107,15 @@ pub struct Markdown {
     loaded: Option<std::sync::Arc<LoadedSource>>,
     /// See [`Self::with_context_identity`].
     context_identity: Option<std::path::PathBuf>,
+    /// See [`Self::with_frontmatter_authored_in`].
+    frontmatter_origin: Option<std::sync::Arc<AuthoredFrontmatter>>,
+}
+
+/// The file text a generated document's frontmatter was read from.
+#[derive(Debug)]
+pub(crate) struct AuthoredFrontmatter {
+    pub(crate) file: std::path::PathBuf,
+    pub(crate) text: std::sync::Arc<str>,
 }
 
 /// Provenance captured once when a document is parsed from text or a file.
@@ -138,6 +147,7 @@ impl Markdown {
             source: None,
             loaded: None,
             context_identity: None,
+            frontmatter_origin: None,
         }
     }
 
@@ -149,6 +159,7 @@ impl Markdown {
             source: None,
             loaded: None,
             context_identity: None,
+            frontmatter_origin: None,
         }
     }
 
@@ -282,6 +293,31 @@ impl Markdown {
         self
     }
 
+    /// Names `file`, whose text is `text`, as where this document's
+    /// frontmatter was written, for a host that composes a body it generated
+    /// beneath a file's own frontmatter (an inline prompt).
+    ///
+    /// A `prologue:` or `epilogue:` failure is then reported against `file`,
+    /// at the value it wrote when `text` proves that value's position, and
+    /// named by its key, as it is for a document loaded from `file`. The
+    /// body stays generated: nothing else reads `text`. A document with its
+    /// own loaded text locates its frontmatter in that text instead.
+    #[must_use]
+    pub fn with_frontmatter_authored_in(
+        mut self,
+        file: impl Into<std::path::PathBuf>,
+        text: impl Into<std::sync::Arc<str>>,
+    ) -> Self {
+        self.frontmatter_origin =
+            Some(std::sync::Arc::new(AuthoredFrontmatter { file: file.into(), text: text.into() }));
+        self
+    }
+
+    /// See [`Self::with_frontmatter_authored_in`].
+    pub(crate) fn frontmatter_origin(&self) -> Option<&AuthoredFrontmatter> {
+        self.frontmatter_origin.as_deref()
+    }
+
     /// The absolute path of a context this document builds without a file.
     pub(crate) fn unfiled_context_absolute(&self) -> std::path::PathBuf {
         self.context_identity.clone().unwrap_or_else(|| std::path::PathBuf::from("unknown"))
@@ -351,6 +387,13 @@ impl Markdown {
             path.clone(),
             loaded.text.clone(),
         ))
+    }
+
+    /// The context a frontmatter error is reported in: the file as written
+    /// when it was loaded from one, so a key's line is authored, otherwise
+    /// [`source_context_for_errors`](Self::source_context_for_errors).
+    pub(crate) fn frontmatter_error_context(&self) -> biscuit_terminal::errors::SourceContext {
+        self.loaded_source_context_for_errors().unwrap_or_else(|| self.source_context_for_errors())
     }
 
     /// Number of source lines occupied by the frontmatter block, including
@@ -456,10 +499,17 @@ impl Markdown {
     /// leading `---` markers fails to parse. Documents without frontmatter
     /// are still accepted and returned with an empty [`Frontmatter`].
     pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
+        Self::try_from_named_content(content, "unknown")
+    }
+
+    /// [`Self::try_from_content`] for text read from somewhere that is not a
+    /// file (a fetched URL): a frontmatter error names `name` and keeps its
+    /// own code, and publishes no file, since `name` is not an absolute path.
+    pub(crate) fn try_from_named_content(content: impl Into<String>, name: &str) -> MarkdownResult<Self> {
         let content = content.into();
         let ctx = biscuit_terminal::errors::SourceContext::new(
-            std::path::PathBuf::from("unknown"),
-            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from(name),
+            std::path::PathBuf::from(name),
             content.as_str(),
         );
         let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
@@ -1125,15 +1175,56 @@ impl From<&str> for Markdown {
 impl TryFrom<&Path> for Markdown {
     type Error = MarkdownError;
 
+    /// Reads the file through the [`SharedReads`](simplified_schema::resolve::buffers::SharedReads)
+    /// in force on this thread (a dry run's observation), else with one
+    /// open; see [`Markdown::load_observed`].
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        use std::io::Read;
+        Self::load_observed(path, None)
+    }
+}
 
-        // Text and modification time come from one open handle, so the
-        // retained identity cannot pair one revision's bytes with another's mtime.
-        let mut file = std::fs::File::open(path)?;
-        let modified = file.metadata().and_then(|metadata| metadata.modified()).ok();
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
+impl Markdown {
+    /// Loads the document at `path` through `reads` when given, else through
+    /// the [`SharedReads`](simplified_schema::resolve::buffers::SharedReads)
+    /// in force on this thread, else with one
+    /// [`open_source`](simplified_schema::resolve::buffers::open_source).
+    ///
+    /// A dry run's passes and every occurrence of one document share its
+    /// observation, so each reads the bytes the first reader read and the
+    /// file is opened once for the invocation.
+    ///
+    /// ## Errors
+    ///
+    /// [`MarkdownError::FileLoad`] when the file cannot be read or is not
+    /// UTF-8; the frontmatter's parse error otherwise.
+    pub fn load_observed(
+        path: &Path,
+        reads: Option<&simplified_schema::resolve::buffers::SharedReads>,
+    ) -> MarkdownResult<Self> {
+        use simplified_schema::resolve::buffers;
+        let source = match reads.cloned().or_else(buffers::shared_reads) {
+            Some(shared) => shared.read(path)?,
+            None => buffers::open_source(path)?,
+        };
+        Self::from_read_source(path, &source)
+    }
+
+    /// The document at `path` whose bytes and modification time `source`
+    /// holds (one open read both, so the retained identity cannot pair one
+    /// revision's bytes with another's modification time).
+    ///
+    /// ## Errors
+    ///
+    /// [`MarkdownError::FileLoad`] when the bytes are not UTF-8; the
+    /// frontmatter's parse error otherwise.
+    pub fn from_read_source(
+        path: &Path,
+        source: &simplified_schema::resolve::buffers::ReadSource,
+    ) -> MarkdownResult<Self> {
+        let content = std::str::from_utf8(&source.bytes)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8"))?
+            .to_string();
+        let modified = source.modified;
         // Parse with a path-aware context so a frontmatter error names the
         // offending file. `try_from_content` would build an "unknown" context,
         // and `with_source` only runs on success — so without this the path is

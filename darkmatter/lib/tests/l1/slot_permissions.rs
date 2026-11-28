@@ -31,6 +31,7 @@ use simplified_schema::SchemaError;
 use crate::slot_support::{git, user_permissions, write_user_permissions};
 
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+const NETWORK_DENIED: &str = "dm.schema.slot_network_denied";
 const OS_LIST: &str = "- macOS\n- Linux\n- Windows\n";
 
 /// A temp home holding `schemas/sandbox.yaml` (reading `../data/os.yaml`)
@@ -313,7 +314,7 @@ fn a_listing_returns_only_permitted_files_and_never_asks() {
     home.write("data/b.yaml", OS_LIST);
     let config = home.permissions(&["~/data/os.yaml"]);
     let handler = Answering::new(Some((GrantDecision::Allow, GrantScope::Once)));
-    let entry = |name: &str| Value::String(biscuit_file::to_portable_string(&home.path(&format!("data/{name}"))));
+    let entry = |name: &str| Value::String(biscuit_file::to_forward_slash_string(&home.path(&format!("data/{name}"))));
 
     let session = home.session(&DataRuntime::new(), Arc::clone(&config)).with_handler(handler.clone());
     assert_eq!(home.os(session), Ok(json!([entry("os.yaml")])));
@@ -426,6 +427,9 @@ mod remote {
 
     /// URL reads follow the network consent and approvals for this run;
     /// nothing persists a URL, and a retired site approval is ignored.
+    /// `network: ask` leaves an unconsented URL to approval (asking a
+    /// handler); `network: deny` refuses it without asking, though an
+    /// approval or host for this run still allows it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_url_read_follows_network_consent_and_approvals_for_this_run() {
         let server = MockServer::start().await;
@@ -440,7 +444,8 @@ mod remote {
             move || {
                 let home = Home::reading(&format!("load_data(\"{url}\", \"string[]\")"));
                 let config = home.permissions(&[]);
-                let session = || home.session(&DataRuntime::new(), Arc::clone(&config));
+                let session = || home.session(&DataRuntime::new(), Arc::clone(&config)).with_network(NetworkPermission::Ask);
+                let denying = || home.session(&DataRuntime::new(), Arc::clone(&config));
                 let once = |target: GrantTarget| {
                     session().with_run_grants([Grant { decision: GrantDecision::Allow, target, scope: GrantScope::Once }])
                 };
@@ -463,6 +468,18 @@ mod remote {
                         let choices: Vec<_> = handler.asked().iter().flat_map(|request| request.choices.clone()).collect();
                         Ok(json!(choices.iter().map(|grant| format!("{:?}/{:?}", grant.decision, grant.scope)).collect::<Vec<_>>()))
                     },
+                    {
+                        let handler = Answering::new(None);
+                        let refused = home.os(denying().with_handler(handler.clone()));
+                        assert!(handler.asked().is_empty(), "`deny` never asks");
+                        refused
+                    },
+                    home.os(denying().with_run_grants([Grant {
+                        decision: GrantDecision::Allow,
+                        target: GrantTarget::Url(url.clone()),
+                        scope: GrantScope::Once,
+                    }])),
+                    home.os(denying().with_allowed_hosts(vec!["127.0.0.1".into()])),
                 ]
             }
         })
@@ -477,7 +494,10 @@ mod remote {
         assert_eq!(outcomes[4], fetched, "network: allow");
         assert_eq!(outcomes[5], refused, "unanswered");
         assert_eq!(outcomes[6], Ok(json!(["Allow/Once", "Deny/Once"])), "a URL is offered for this run only");
+        assert_eq!(outcomes[7], Err(vec![NETWORK_DENIED.to_string()]), "`deny` refuses without asking");
+        assert_eq!(outcomes[8], fetched, "`deny` with the exact URL approved for this run");
+        assert_eq!(outcomes[9], fetched, "`deny` with --allow host=");
         let requests = server.received_requests().await.expect("recorded");
-        assert_eq!(requests.len(), 3, "a refused read never reaches the network");
+        assert_eq!(requests.len(), 5, "a refused read never reaches the network");
     }
 }

@@ -97,6 +97,19 @@ impl ExecutableField {
         }
     }
 
+    /// What a person calls the executable's target in a diagnostic, such as
+    /// `prompt file`; [`key`](Self::key) is the authored property name.
+    pub fn noun(self) -> &'static str {
+        match self {
+            ExecutableField::Prompt => "prompt file",
+            ExecutableField::Shell => "shell command",
+            ExecutableField::SideEffect => "side effect",
+            ExecutableField::Group => "group",
+            ExecutableField::Task => "task file",
+            ExecutableField::Sequence => "sequence",
+        }
+    }
+
     /// Resolve a frontmatter key to its executable variant, if it is one.
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
@@ -180,6 +193,9 @@ pub enum SequenceSource {
     DataFile {
         /// Absolute path to the resolved source file.
         path: PathBuf,
+        /// The authored property of the selected list in the file (`rows`
+        /// for `-> rows`); empty for the file's root list.
+        list: String,
     },
     /// A whole-value `{{ … }}` expression in the invoking frontmatter.
     Expression,
@@ -208,10 +224,21 @@ impl SequenceSource {
         matches!(self, Self::DataFile { .. } | Self::Expression | Self::Shell)
     }
 
+    /// Where item `index` of a data selection was written: the data file and
+    /// the item's property in it (`[1]`, `rows[1]`). `None` for any other
+    /// source, whose items are written where they resolve. The operators
+    /// reshape items one for one, so the index is the authored one.
+    pub fn data_row(&self, index: usize) -> Option<(PathBuf, String)> {
+        match self {
+            Self::DataFile { path, list } => Some((path.clone(), format!("{list}[{index}]"))),
+            _ => None,
+        }
+    }
+
     /// The resolved file this source was read from, when it was a file at all.
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
-            Self::External { path } | Self::DataFile { path } => Some(path),
+            Self::External { path } | Self::DataFile { path, .. } => Some(path),
             Self::Inline | Self::Expression | Self::Shell => None,
         }
     }

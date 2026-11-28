@@ -95,4 +95,4 @@ LM Studio, llama.cpp, and vLLM have no launch command — start the server and p
 - [llamacpp.md](./llamacpp.md) — `llama-server`, no config file, public `/health` + `/models`
 - [vllm.md](./vllm.md) — GPU throughput engine, single model, `0.0.0.0` bind, `VLLM_PORT` trap
 
-Authoritative research (cite for depth): `claudine/docs/research/local_runners/<runner>.md`.
+Authoritative research (cite for depth): `claudine/docs/research/local-ai/local_runners/<runner>.md`.

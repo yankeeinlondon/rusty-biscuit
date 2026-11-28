@@ -50,7 +50,7 @@ fn value(dir: &Path, expression: &str) -> Result<Value, String> {
 
 fn portable(dir: &Path, relative: &str) -> Value {
     let canonical = std::fs::canonicalize(dir.join(relative)).expect("fixture exists");
-    json!(biscuit_file::to_portable_string(&canonical))
+    json!(biscuit_file::to_forward_slash_string(&canonical))
 }
 
 /// Paths as the function reports them, canonicalized so a symlinked temp
@@ -63,7 +63,7 @@ fn canonical_list(value: Value) -> Value {
             .iter()
             .map(|path| {
                 let path = std::fs::canonicalize(path.as_str().expect("path string")).expect("match exists");
-                json!(biscuit_file::to_portable_string(&path))
+                json!(biscuit_file::to_forward_slash_string(&path))
             })
             .collect(),
     )

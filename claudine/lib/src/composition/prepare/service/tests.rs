@@ -1123,7 +1123,7 @@ fn a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused() {
     let as_authored =
         crate::composition::lifecycle::parse_lifecycle_config_with_orders(&authored, &source.resolved_path, None, None)
             .expect("the document parses");
-    assert!(prepared.launch_schema.is_some() && prepared.deferred_lifecycle_keys == ["loop"]);
+    assert!(prepared.launch_schema.is_some());
     assert_eq!(prepared.effective_frontmatter["loop"], authored["loop"], "no default is written into the block");
     assert_eq!(prepared.lifecycle, as_authored);
     let darkmatter::lifecycle::actions::LifecycleNode::Action(action) = &prepared.lifecycle.stacks.loop_gate[0] else {

@@ -95,11 +95,11 @@ fn full_fixture() -> Fixture {
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
     for topic in RESEARCH_TOPICS {
-        copy_dir(&format!("docs/research/{topic}"));
+        copy_dir(&format!("docs/research/providers/{topic}"));
     }
     // Signals corpus + committed tables (docs only — fixture existence is
     // not checked at generate time, so fixtures/ stays uncopied).
-    copy_dir("docs/research/signals");
+    copy_dir("docs/research/providers/signals");
     copy_area_file(&area, "lib/src/signals/generated.rs");
     copy_area_file(&area, "lib/src/model_catalog/families_generated.rs");
     copy_area_file(&area, "lib/src/stream/providers/vocabulary.rs");
@@ -133,7 +133,7 @@ fn single_provider_fixture(slug: &str) -> Fixture {
     copy_dir_where(&area, "docs/providers/facts", keep);
     copy_dir_where(&area, "docs/providers/overrides", keep);
     for topic in RESEARCH_TOPICS {
-        copy_dir_where(&area, &format!("docs/research/{topic}"), keep);
+        copy_dir_where(&area, &format!("docs/research/providers/{topic}"), keep);
     }
     copy_area_file(&area, &format!("lib/src/provider/{slug}/data.rs"));
     copy_workspace_file(dir.path(), "unchained-ai/artifacts/models-catalog.json");
@@ -477,7 +477,7 @@ fn scaffold_unwired_slug_errors_before_writing() {
 fn validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout() {
     const REVISION_TWO: &str = include_str!("../fixtures/agent-cli-r2/codex.md");
     let fixture = single_provider_fixture("codex");
-    let doc = fixture.path().join("docs/research/agent-cli/codex.md");
+    let doc = fixture.path().join("docs/research/providers/agent-cli/codex.md");
     fs::write(&doc, REVISION_TWO).unwrap();
 
     // The single-provider library check is what `check codex` runs for the

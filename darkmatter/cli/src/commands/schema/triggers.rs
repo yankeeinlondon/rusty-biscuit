@@ -16,7 +16,10 @@ use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::output::stderr_terminal;
 use crate::request::MdRequest;
+use darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE;
+use darkmatter::markdown::compose::report_diagnostics::schema_error_diagnostics;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, RegisteredTrace};
+use simplified_schema::HostTriggerConflict;
 use simplified_schema::roots::{InvalidSchemasDir, SchemaSearchRoot, SchemaRootKind, SchemaRootState};
 use simplified_schema::triggers::{InvalidTriggerFinding, TriggerTrace, TriggerTraceEntry, trace_registry};
 use std::path::Path;
@@ -27,6 +30,11 @@ use std::path::Path;
 /// In a formatted output each skipped trigger's `dm.schema.invalid_trigger`
 /// warning is written to stderr and stdout lists only its source; a data output
 /// carries both.
+///
+/// A registered host whose matched triggers conflict fails the run (exit 1):
+/// the trace still lists every match, names the conflict with both trigger
+/// files, and a data output carries its `dm.host.trigger_conflict` record,
+/// the refusal `md schema validate` and `md compose` give the document.
 pub fn run_triggers(file: &Path, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
     let skeleton = TriggersData {
         file: Some(file.display().to_string()),
@@ -82,7 +90,12 @@ fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Res
     data.registered = registered.as_ref().map(TriggerRegisteredData::new);
     let document = opened.path().to_path_buf();
     let prose = prose_document(&trace_markdown(&document, &trace, &findings, registered.as_ref()));
-    let diagnostics = findings.iter().map(finding_diagnostic).collect();
+    let mut diagnostics: Vec<_> = findings.iter().map(finding_diagnostic).collect();
+    let conflict = registered.as_ref().and_then(|registered| registered.conflict.clone());
+    if let Some(conflict) = &conflict {
+        let error = simplified_schema::SchemaError::HostTriggerConflict(Box::new(conflict.clone()));
+        diagnostics.extend(schema_error_diagnostics(&error, &document).unwrap_or_default());
+    }
     // The warning itself (with its reason) goes to stderr like every other
     // command's; the trace names only which triggers were skipped, so the
     // warning is not delivered twice.
@@ -91,7 +104,8 @@ fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Res
     }
     let value = CommandValue::new(data, prose)
         .with_terminal(move |options| trace_report(&document, &trace, &findings, registered.as_ref(), options));
-    Ok(Completed::success(value).with_diagnostics(diagnostics))
+    let completed = if conflict.is_some() { Completed::failure(value) } else { Completed::success(value) };
+    Ok(completed.with_diagnostics(diagnostics))
 }
 
 fn row(out: &mut String, terminal: &Terminal, content: String) {
@@ -152,6 +166,12 @@ fn trace_report(
             ));
             for trigger in &registered.triggers {
                 terminal_trigger(&mut out, &terminal, trigger);
+            }
+            if let Some(conflict) = &registered.conflict {
+                row(&mut out, &terminal, format!(
+                    "- <red>conflict</red> <dim>[{HOST_TRIGGER_CONFLICT_CODE}]</dim>: {}",
+                    Prose::escape_text_outside_code_spans(&conflict_text(conflict))
+                ));
             }
         }
     }
@@ -236,6 +256,9 @@ fn trace_markdown(
             ));
             for trigger in &registered.triggers {
                 markdown_trigger(&mut out, trigger);
+            }
+            if let Some(conflict) = &registered.conflict {
+                out.push_str(&format!("- conflict {}: {}\n", code_span(HOST_TRIGGER_CONFLICT_CODE), conflict_text(conflict)));
             }
         }
     }
@@ -332,6 +355,18 @@ fn trigger_label(trigger: &TriggerTraceEntry) -> String {
         Some(name) => format!("{name} ({})", trigger.source),
         None => trigger.source.to_string(),
     }
+}
+
+/// The conflict's sentence, both triggers in code spans, each by its label
+/// beside its file when it declares a `name`.
+fn conflict_text(conflict: &HostTriggerConflict) -> String {
+    let subject = conflict.subject.as_deref().map_or_else(|| "the root rules".to_string(), code_span);
+    format!(
+        "{} and {} conflict on {subject}: {}",
+        code_span(&conflict.first_label()),
+        code_span(&conflict.second_label()),
+        conflict.reason
+    )
 }
 
 fn escaped(path: &Path) -> String {

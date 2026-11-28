@@ -22,8 +22,8 @@ fn compose_dry_run_refuses_a_composed_key_naming_start() {
         .unwrap();
 
     let stderr = stderr(&output);
-    assert!(!output.status.success(), "{stderr}");
-    assert!(stderr.contains("renamed lifecycle event"), "{stderr}");
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("lifecycle event `composed` is named `start` by this host"), "{stderr}");
     assert!(stderr.contains("`start:`"), "{stderr}");
 }
 

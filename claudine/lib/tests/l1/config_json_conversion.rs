@@ -36,19 +36,22 @@ fn read(path: &Path) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-/// A failed conversion names `config.json`, keeps its bytes, and writes no YAML.
-fn assert_refused(cell: &str, text: &str) {
+/// A failed conversion names `config.json`, keeps its bytes, and writes no
+/// YAML. Returns the problems' pointers.
+fn assert_refused(cell: &str, text: &str) -> Vec<String> {
     let scope = Scope::new();
     std::fs::write(scope.json(), text).unwrap();
-    match load_claudine_config(Some(&scope.yaml()), None) {
+    let pointers = match load_claudine_config(Some(&scope.yaml()), None) {
         Err(ClaudineError::ConfigConversion { problems }) => {
             assert!(problems.iter().all(|problem| problem.file.as_deref() == Some(scope.json().as_path())), "{cell}: {problems:?}");
+            problems.into_iter().map(|problem| problem.pointer).collect()
         }
         other => panic!("{cell}: expected a conversion error, got {other:?}"),
-    }
+    };
     assert_eq!(read(&scope.json()), text.as_bytes(), "{cell}: the source is untouched");
     assert!(!scope.yaml().exists() && !scope.backup().exists(), "{cell}: nothing was published");
     assert_eq!(entries(&scope.dir), ["config.json"], "{cell}: no YAML, backup, receipt, or temporary file is left");
+    pointers
 }
 
 /// The names in `dir`, sorted.
@@ -144,6 +147,20 @@ fn malformed_legacy_files_are_refused_and_kept() {
     assert_refused("flat action missing a field", "{ actions: { session_start: [{ type: \"bash\" }] } }");
     assert_refused("flat route unknown provider", "{ messenger: { configurations: { a: { provider: \"telegram\" } } } }");
     assert_refused("not JSON5", "{ logging: ");
+}
+
+/// The converted candidate meets the ordinary validator, so a
+/// document-level rule is judged beside an upgraded flat entry and beside a
+/// schema refusal alike.
+#[test]
+fn a_converted_candidate_is_judged_by_the_document_rules() {
+    let both_patterns = "exit_expressions: [{ pattern: \"a\", patterns: [\"b\"] }]";
+    let flat = format!("{{ {both_patterns}, actions: {{ session_start: [{{ type: \"bash\", command: \"x\" }}] }} }}");
+    assert_eq!(assert_refused("flat action beside both patterns", &flat), ["/exit_expressions/0"]);
+    let typo = format!("{{ {both_patterns}, logging: \"yes\" }}");
+    let mut pointers = assert_refused("schema refusal beside both patterns", &typo);
+    pointers.sort();
+    assert_eq!(pointers, ["/exit_expressions/0", "/logging"]);
 }
 
 #[test]

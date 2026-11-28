@@ -88,7 +88,7 @@ url = { version = "2.5", optional = true }
 # Windows `\\?\` verbatim-prefix stripping (no-op on every other target).
 # Unconditional: it serves the resolver's root boundary (`simplify_root`, behind
 # `file-reference`) *and* the unfeatured path→text boundary
-# (`to_portable_string`), which must build with no default features.
+# (`to_forward_slash_string`), which must build with no default features.
 dunce = "1"
 
 # Remote fetch

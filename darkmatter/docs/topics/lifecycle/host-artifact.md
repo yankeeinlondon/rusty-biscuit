@@ -6,7 +6,7 @@ Darkmatter's, decide which globals each event may read, and accept verbs the
 `blocked`, it adds `success`, `failure`, and `loop`, and its stacks may
 `say`, `retry`, or `proxy`. The editor (DMLS) cannot run the host's Rust
 registration, so the host writes that registration down as data: a **host
-lifecycle artifact**, a JSON file beside the host's global catalog. DMLS reads
+lifecycle artifact**, a JSON file in the host's registration bundle. DMLS reads
 it and types every lifecycle expression with the host's events and verbs,
 through the same library walk the host's runtime uses.
 
@@ -35,84 +35,69 @@ frontmatter, `say` is a verb `md` ignores, and both calls warn.
 
 ## Where the artifact lives
 
-The artifact is named after its catalog: `<catalog stem>.lifecycle.json`
-beside the catalog file. Claudine's are `claudine/schemas/globals.yaml` and
-`claudine/schemas/globals.lifecycle.json`. DMLS finds host catalogs in a
-document's schema roots (`SCHEMAS_DIR`, package, package area, `base_dir()`,
-`~/schemas`, in that order), so a Claudine prompt anywhere in the `claudine/` package area
-gets Claudine's lifecycle.
+The artifact is one member of a host's [registration bundle](../host-registration.md):
+the manifest's `lifecycle` field names it, and its digest is listed with
+every other member. A document gets the host's lifecycle only when a usable
+registered host's trigger matches it, wherever the document lives. Nothing in
+a schema root names a host: a `globals.lifecycle.json` found there (an older
+host install left one beside a `globals.yaml`) is an ordinary file.
 
 ```mermaid
 flowchart LR
     R["Host's Rust registration<br/>(EventRegistry + parse options)"] -->|lifecycle_artifact| A["globals.lifecycle.json"]
-    C["globals.yaml<br/>(host catalog)"] -->|BLAKE3 hash| A
-    A -->|HostLifecycleProfile::from_artifact| P["Rebuilt registry<br/>and parse options"]
+    N["namespace-schema files<br/>(and the libraries they import)"] -->|namespace_catalog_hash| A
+    A -->|HostLifecycleProfile::from_artifact_at| P["Rebuilt registry<br/>and parse options"]
     P -->|lifecycle_call_checks| D["DMLS diagnostics"]
     R -->|lifecycle_call_checks| L["Host's launch check"]
 ```
 
-The first host catalog in the document's schema roots whose artifact is
-usable decides the document's host. A catalog file name in an earlier root
-shadows the same name in a later one, as it does for globals.
-
-Discovery in the schema roots is the fallback for a host that is **not
-registered**. A registered host's documents get their lifecycle from the
-artifact its registration names instead, wherever the document lives (see
-below).
-
 ## Shipping it with a host registration
 
-A host makes its documents typed outside its own package area by
-[registering](../host-registration.md) a `darkmatter-host` manifest. The
-manifest's `globals` names the host's global catalog and its `lifecycle`
-names this artifact, both as local files beside the manifest:
-
 ```yaml
-# ~/.acme/darkmatter-host.yaml
+# ~/.acme/registration/manifest.yaml
 kind: darkmatter-host
-format_version: 1
+format_version: 3
 host: acme
 # …
-globals: ./schemas/globals.yaml
-lifecycle: ./schemas/globals.lifecycle.json
+files:
+    - ./schemas/run.yaml           # kind: namespace-schema
+    - ./functions/project.yaml     # kind: expression-schema (optional; companion derived)
+lifecycle: ./globals.lifecycle.json
+# digests: one per listed member, lifecycle, and derived .facts.json companion
 ```
 
-The loader holds the artifact to the same rules as above, and two more: the
-artifact's recorded host must equal the manifest's `host`, and a stale,
-missing, or refused artifact refuses the **whole** registration with a
+Lifecycle scope — event names, allowed actions, and which globals each event
+sees — lives exclusively in this artifact. Callable catalogs
+(`expression-schema` and `mutation-schema`) disallow `when` and never add
+lifecycle action keys or alter event availability; host-defined actions are
+not supported in host registrations.
+
+The loader holds the artifact to the rules [below](#reading-it), and two
+more: the artifact's recorded host must equal the manifest's `host`, and a
+stale, missing, or refused artifact refuses the **whole** registration with a
 `dm.host.registration` warning (no partial lifecycle, globals, or triggers
 are used). See
 [How a registration loads](../host-registration.md#how-a-registration-loads).
 
-Claudine publishes its manifest itself on every launch, from the catalog and
-artifact compiled into its binary, so the files the manifest names always
-match the running release:
-
-- Every release's files go into an **immutable revision directory** named
-  after the host version and a BLAKE3 digest of the files' contents
-  (`~/.claudine/darkmatter-host/0.1.0-<digest>/schemas/`). The directory is
-  written under a staging name and renamed into place whole, and a directory
-  with a final name is never written to again.
-- The **stable manifest**, `~/.claudine/darkmatter-host.yaml`, names one
-  revision. It is replaced atomically and **last**, only after the revision's
-  files read back byte for byte, so a reader never pairs a new trigger with
-  an old catalog or artifact.
-- An existing revision whose files differ from the expected bytes is left
-  alone and the release is published under the next suffixed name
-  (`<version>-<digest>-2`). Old revisions are kept for readers still holding
-  an older manifest.
-- When the manifest already names a revision that verifies, nothing is
-  written.
+Claudine publishes its artifact with the rest of its registration, from the
+files compiled into its binary, to one tree at fixed paths:
+`~/.claudine/registrations/darkmatter/manifest.yaml` and, beside it,
+`globals.lifecycle.json` and `schemas/…`. It publishes during `claudine setup`
+and when `claudine registrations publish` runs (Claudine's `just install`
+calls it); no other `claudine` command touches the files. A publish replaces
+only the members whose bytes changed and writes the manifest last, so a
+reader that meets a publish in progress finds a member that does not match
+its digest and refuses the host for that read rather than pairing a new
+trigger with an old artifact. See
+[The published host registration](../../../../claudine/docs/topics/schemas.md#the-published-host-registration)
+in Claudine's documentation.
 
 ```mermaid
 flowchart TD
-    L[Claudine launch] --> C{manifest names a revision<br/>whose files match?}
+    P[claudine setup, or<br/>claudine registrations publish] --> C{every member already<br/>matches the inventory?}
     C -- yes --> N[write nothing]
-    C -- no --> S[write the revision into<br/>a staging directory]
-    S --> R[rename it into place,<br/>or reuse an identical one]
-    R --> V{every file reads back<br/>byte for byte?}
-    V -- no --> F[fail: the old manifest<br/>and revisions stay in force]
-    V -- yes --> M[replace the stable manifest<br/>atomically, last]
+    C -- no --> W[replace each changed member,<br/>remove members no longer listed]
+    W --> M[replace the manifest, last]
 ```
 
 ## What the artifact records
@@ -122,10 +107,18 @@ flowchart TD
 | `events` | Darkmatter's five events (each with the host's spelling as `name`), then the host's own in registration order, with `position` and `role`, the admitted action types, and the event's globals view (`scope` and each declaration's `root`, `description`, and `availability`) |
 | `outcome_pair` | The host's success and failure alternatives and the explicit-error downgrades, or `null` |
 | `host_globals` | The late globals the host adds after `err` and `timing` (Claudine's `loop` and `group`) |
-| `global_catalog` | Whether the host types those globals with the catalog beside the artifact |
+| `global_catalog` | Whether the host types those globals with its namespace catalog. Registration requires every `host_globals` name to be a namespace the bundle declares either way (see [Reading it](#reading-it)) |
 | `unknown_verbs` | `"reject"`, `"ignore"`, or `{ "ignore_unprovided": [verbs] }` |
 | `effects` | The effect names the host accepts in a literal `effect` operand |
-| `catalog_hash`, `format_version` | The BLAKE3 hash of the catalog's bytes, and the format (`1`) |
+| `catalog_hash`, `format_version` | The hash of the namespace catalog the artifact was generated for, and the format (`2`) |
+
+`catalog_hash` is `config::registration::namespaces::namespace_catalog_hash`
+of a map from each namespace file, and each bundled file its preparation
+read, to the BLAKE3 digest of its bytes (`namespaces::member_digest`), keyed
+by bundle-relative path. Editing a namespace file, or a library one imports,
+makes the artifact stale. An artifact whose `format_version` is `1` (the
+earlier format, which hashed a single catalog file) is refused; the host
+regenerates and republishes it.
 
 An availability is `"available"`, `"execution-dependent"`, or
 `{ "unavailable": { "code": "claudine.event-has-no-error", "parameters": {} } }`.
@@ -138,85 +131,86 @@ lookup falls back to.
 ## Writing it from a host
 
 The host passes its parse options (which hold its registry), the effect names
-it knows, and the catalog's text to one call:
+it knows, and the namespace catalog's hash to one call:
 
 ```rust
+use std::collections::BTreeMap;
+use darkmatter::config::registration::namespaces::{member_digest, namespace_catalog_hash};
+
+let digests = BTreeMap::from([("schemas/run.yaml".to_string(), member_digest(RUN_NAMESPACE.as_bytes()))]);
 let text = darkmatter::lifecycle::host_profile::lifecycle_artifact(
     &parse_options,             // the host's LifecycleParseOptions
     playa::SoundEffect::all_names(),
-    HOST_CATALOG_TEXT,          // the catalog's bytes
+    &namespace_catalog_hash(&digests),
 );
 ```
 
-Commit the result beside the catalog, and add a test that compares it with
-the committed file. Claudine's is
-`claudine/lib/tests/l1/host_catalog.rs::lifecycle_artifact`, and
-`just regen-lifecycle-artifact` in `claudine/` rewrites the file. Regenerate it
-whenever the catalog, the registration, or the effect catalog changes.
+`namespaces::prepare_catalog` returns the same map and hash after preparing
+the namespace files, so a host can generate both from one preparation.
+Commit the result in the bundle, and add a test that compares it with the
+committed file. The root `just shipped-schemas` rewrites Claudine's, after
+loading the candidate against the namespace files' current hash. Regenerate
+it whenever a namespace file, a library it imports,
+the registration, or the effect catalog changes.
 
 ## Reading it
 
-`HostLifecycleProfile::from_artifact(catalog, path, text, artifact)` rebuilds
-the registry through the same registration calls a host makes (`rename`,
-`register`, `register_outcome_pair`, `declare_host_global`, `validate`), so a
-registration the artifact cannot carry fails exactly as it would in the host.
+`HostLifecycleProfile::from_artifact_at(catalog, catalog_hash, path, artifact)`
+rebuilds the registry through the same registration calls a host makes
+(`rename`, `register`, `register_outcome_pair`, `declare_host_global`,
+`validate`), so a registration the artifact cannot carry fails exactly as it
+would in the host. The registration loader calls it with the prepared
+namespace catalog and its hash, from the artifact's verified bytes;
+`RegisteredHostProfile::lifecycle()` is the result.
 `profile.parse_options(None)` gives the host's `LifecycleParseOptions`, and
 `profile.registry()` its `EventRegistry`; pass both to
-`parse_lifecycle_config_with` and `lifecycle_call_checks`.
-`schemas::catalog::host_lifecycle_profiles(context)` does the discovery for a
-document. Reading is passive: nothing in a profile runs.
-
-Discovery is a lazy iterator. It lists each root's directory when it reaches
-it and reads a candidate's catalog and artifact only when it visits that
-candidate, so a caller that stops at the first usable profile (as DMLS does)
-reads nothing after it:
-
-```rust
-let first = host_lifecycle_profiles(&context).find_map(|found| found.profile.ok());
-```
-
-The profile is built from the catalog bytes that were hashed against the
-artifact, never from a second read. It owns everything it loaded (its
-registry, catalog, host-global names, and ignored verbs), so dropping the last
-holder of the profile or its registry releases them.
-
-The process keeps one observation per catalog path: the catalog's content
-hash, the artifact as read (absent, unreadable with its reason, or its exact
-text), and the result. A visit with the same bytes reuses it without parsing,
-whether the result is a profile, an artifact's refusal reason, or "not a host
-catalog"; different bytes replace it. A refusal keeps only its reason. A
-catalog that is found removed, unreadable, or no longer loading loses its
-entry. A path in a root no request visits again keeps its entry until the
-process exits.
-
-```mermaid
-flowchart LR
-    A[visit candidate:<br/>read catalog + artifact] --> B{same hash and<br/>artifact as cached?}
-    B -- yes --> C[reuse the cached result]
-    B -- no --> D[build from the bytes read]
-    D --> E[replace the path's entry]
-    E --> F[old profile released once<br/>no caller holds it]
-```
+`parse_lifecycle_config_with` and `lifecycle_call_checks`. Reading is
+passive: nothing in a profile runs. The profile owns everything it loaded
+(its registry, catalog, host-global names, and ignored verbs), so dropping
+the last holder of the profile or its registry releases them.
 
 The reader is strict. Each of these makes the whole profile unusable, with a
 reason naming the file:
 
 - the file is absent or unreadable;
 - it is not strict JSON (a duplicate key or trailing content counts);
-- `catalog_hash` is not the hash of the catalog beside it, so the catalog
-  changed after the artifact was written (regenerate it);
-- `format_version` is unknown, or a field is missing, unknown, or of the
+- `catalog_hash` is not the hash of the namespace catalog that was loaded,
+  so a namespace file changed after the artifact was written (regenerate it);
+- `format_version` is not `2`, or a field is missing, unknown, or of the
   wrong type;
+- `global_catalog` is `true` and a `host_globals` name is not a declared
+  namespace;
 - the registration is refused, such as an outcome alternative naming an event
   the artifact does not list.
 
+Registration adds one rule on top of the reader: every root the artifact
+binds must be declared. That covers each event's declaration `root` and
+every `host_globals` name, whatever `global_catalog` says. A root is
+declared when it is one of Darkmatter's own globals (`err`, `timing`) or a
+namespace one of the bundle's `namespace-schema` files declares. Anything
+else, such as a typo, refuses the registration with a `dm.host.registration`
+warning located at that string in the artifact:
+
+```json
+{ "availability": "available", "description": "Observed durations.", "root": "typo_root" }
+```
+
+gives "the lifecycle artifact `…/globals.lifecycle.json` binds `typo_root` at
+`/events/0/globals/declarations/1/root`, which neither Darkmatter nor any
+namespace of the host's catalog declares", at the line and column of
+`"typo_root"`. `md`, `md schema validate`, and DMLS all see the same refusal
+because they read the same loaded registrations. A host can run the same
+check on an artifact before it publishes it with
+`darkmatter::lifecycle::host_profile::undeclared_root(text, &catalog)`;
+Claudine's generator does this.
+
 ## What the editor does without a usable artifact
 
-DMLS then analyzes the document's stacks as the `md` host's and puts one
-`dm.lifecycle.incomplete_analysis` warning at the top of the document, per
-host catalog, with the reason. It never claims a narrowing it cannot prove: a
-host-only event is plain frontmatter and is checked unguarded, and a verb `md`
-ignores contributes no guarded surface.
+A registration whose artifact is unusable is refused as a whole, so DMLS
+analyzes the documents its triggers would have matched as `md` documents and
+reports the registration's `dm.host.registration` warning. It never claims a
+narrowing it cannot prove: a host-only event is plain frontmatter and is
+checked unguarded, and a verb `md` ignores contributes no guarded surface.
 
 ## Limits
 

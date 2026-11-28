@@ -107,7 +107,7 @@ pub enum LifecycleError {
     /// the side effect as raw text.
     #[error(
         "lifecycle property `{property}` nests `{nested}` inside the string literal {literal} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleNestedSpanInLiteral {
         /// The prompt file whose lifecycle frontmatter holds the literal.
@@ -130,7 +130,7 @@ pub enum LifecycleError {
     /// before any lifecycle event or expression runs, in every branch.
     #[error(
         "lifecycle `{property}` calls a function with an argument that can never bind ({source_path}): {source}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleCallRejected {
         /// The prompt file whose lifecycle frontmatter holds the call.
@@ -161,7 +161,7 @@ pub enum LifecycleError {
     /// the old spelling never runs.
     #[error(
         "`{path}` uses the removed `{removed}` grammar ({source_path}); {replacement}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     RemovedGrammar {
         /// The document that holds the removed spelling.
@@ -180,7 +180,7 @@ pub enum LifecycleError {
     /// a misplaced `no_error`, and so on).
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleStackInvalidShape {
         /// The prompt file whose lifecycle frontmatter held the malformed stack.
@@ -200,7 +200,7 @@ pub enum LifecycleError {
     /// [`LifecycleStackInvalidShape`]: LifecycleError::LifecycleStackInvalidShape
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWhenExpressionInvalid {
         /// The prompt file whose lifecycle frontmatter held the condition.
@@ -217,7 +217,7 @@ pub enum LifecycleError {
     /// A bare lifecycle action list item failed to parse (an empty verb).
     #[error(
         "invalid lifecycle action `{raw}` in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionInvalidShortForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -234,7 +234,7 @@ pub enum LifecycleError {
     /// type, or missing required parameter.
     #[error(
         "invalid lifecycle action `{action}` in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionInvalidLongForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -256,7 +256,7 @@ pub enum LifecycleError {
     /// A lifecycle action verb is not recognized at parse time.
     #[error(
         "unknown lifecycle action `{verb}` in `{property}` ({source_path}){rewrite}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleUnknownVerb {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -276,7 +276,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle action `{verb}` in `{property}` received an object value where a scalar or array is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationPositional {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -291,7 +291,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle `{property}.{path}` uses the removed positional `set` form ({source_path}); \
          use `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetPositionalRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -308,7 +308,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle `{property}.{path}` must be a mapping, got {actual} ({source_path}); \
          use `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetNotMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -327,7 +327,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle `{property}.{path}` has invalid destination key `{key}`: {message} \
          ({source_path}); use literal non-empty keys in `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleSetInvalidKey {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -349,7 +349,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle action `{verb}` parameter `{param}` in `{property}` received an object value where a scalar is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationParameter {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -367,7 +367,7 @@ pub enum LifecycleError {
     /// `null`).
     #[error(
         "`{at}` must be a mapping, got {actual} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithNotMapping {
@@ -388,7 +388,7 @@ pub enum LifecycleError {
     /// (`with: "{{ payload }}"`) rather than explicit keys.
     #[error(
         "`{at}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithWholeMapping {
@@ -406,7 +406,7 @@ pub enum LifecycleError {
     /// frontmatter properties and are never interpolated.
     #[error(
         "`{at}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path),
+        source_path = biscuit_file::to_forward_slash_string(source_path),
         at = with_property_path(property, path)
     )]
     LifecycleWithDynamicKey {
@@ -429,7 +429,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle action `{verb}` in `{property}` does not accept a `with` overlay; \
          `with` is only valid on `proxy`, `retry`, and `prep` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWithUnsupported {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -443,7 +443,7 @@ pub enum LifecycleError {
     /// A positional lifecycle action received the wrong number of arguments.
     #[error(
         "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleWrongArity {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -463,7 +463,7 @@ pub enum LifecycleError {
     #[error(
         "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
          Use the short form (`verb: value`) or the long form instead: {rewrite}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleShortFormRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -483,7 +483,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle expression function `{verb}` in `{property}` does not support long form; \
          use the positional array form (`{verb}: [...]`) ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleExpressionFunctionKeyValueUnsupported {
         /// The prompt file whose frontmatter held the action.
@@ -498,7 +498,7 @@ pub enum LifecycleError {
     /// a lifecycle control outside its placement matrix.
     #[error(
         "lifecycle action `{action}` is not valid in the `{event}` event ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionPlacement {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -515,7 +515,7 @@ pub enum LifecycleError {
     /// Darkmatter spelling (`composed:` where the host says `start:`).
     #[error(
         "lifecycle event `{authored}` is named `{replacement}` by this host; write `{replacement}:` instead ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleRenamedEvent {
         /// The prompt file whose frontmatter holds the key.
@@ -530,7 +530,7 @@ pub enum LifecycleError {
     #[error(
         "lifecycle dictionary `{property}` has more than one flow-control directive; \
          at most one is allowed per dictionary ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleMultipleLifecycleActions {
         /// The prompt file whose lifecycle frontmatter held the dictionary.
@@ -543,7 +543,7 @@ pub enum LifecycleError {
     /// the same list.
     #[error(
         "flow-control directive `{property}` must be the last item in its list ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleActionOrder {
         /// The prompt file whose lifecycle frontmatter held the list.
@@ -556,7 +556,7 @@ pub enum LifecycleError {
     /// such as a negative `retry` count or a `proxy` without its target.
     #[error(
         "lifecycle action `{action}` in `{property}` has invalid arguments ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
+        source_path = biscuit_file::to_forward_slash_string(source_path)
     )]
     LifecycleInvalidArgs {
         /// The prompt file whose lifecycle frontmatter held the action.

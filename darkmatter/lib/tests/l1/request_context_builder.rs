@@ -67,7 +67,7 @@ fn an_opening_reference_outside_the_request_repository_is_rejected() {
     let base = RequestSnapshot::new(&repo)
         .with_home(Some(root.join("home")))
         // Exported spelling: a verbatim `\\?\` value cannot anchor `{{VAR}}/…`.
-        .with_env(HashMap::from([("NOTES".to_string(), biscuit_file::to_portable_string(&notes))]));
+        .with_env(HashMap::from([("NOTES".to_string(), biscuit_file::to_forward_slash_string(&notes))]));
 
     // Control: the same snapshot without an opening reference builds.
     let control = build_resolution_context(&base).unwrap();
@@ -188,7 +188,7 @@ fn an_expression_and_a_file_reference_read_the_same_snapshot_environment() {
             "value=[{{{{ env.{NAME} }}}}] agent=[{{{{ ctx.agent }}}}] title=[{{{{ markdown_title(\"{{{{{NAME}}}}}/target.md\") }}}}]\n"
         ),
     );
-    let fixtures_text = biscuit_file::to_portable_string(&fixtures);
+    let fixtures_text = biscuit_file::to_forward_slash_string(&fixtures);
     let snapshot = RequestSnapshot::new(&request_dir).with_env(HashMap::from([
         (NAME.to_string(), fixtures_text.clone()),
         ("AGENT".to_string(), "snapshot-agent".to_string()),
@@ -218,7 +218,7 @@ fn a_transcluded_variable_reference_reads_the_snapshot_environment() {
     let document = root.join("work").join("doc.md");
     write(&document, &format!("::file \"{{{{{NAME}}}}}/target.md\"\n"));
     let snapshot = RequestSnapshot::new(root.join("work"))
-        .with_env(HashMap::from([(NAME.to_string(), biscuit_file::to_portable_string(&fixtures))]));
+        .with_env(HashMap::from([(NAME.to_string(), biscuit_file::to_forward_slash_string(&fixtures))]));
     let options = ComposeOptions::new()
         .with_source_file(&document)
         .with_fail_fast(true)
@@ -267,7 +267,7 @@ fn an_environment_only_replacement_enters_a_document_under_another_map() {
     write(&work.join("child.md"), &format!("child=[{{{{ env.{NAME} }}}}]\n"));
     write(&work.join("second.md"), &body);
     let map = |dir: &str| {
-        HashMap::from([(NAME.to_string(), biscuit_file::to_portable_string(&root.join(dir)))])
+        HashMap::from([(NAME.to_string(), biscuit_file::to_forward_slash_string(&root.join(dir)))])
     };
     let home = root.join("home");
     let snapshot = RequestSnapshot::new(&work).with_home(Some(home.clone())).with_env(map("fixtures-a"));
@@ -275,7 +275,7 @@ fn an_environment_only_replacement_enters_a_document_under_another_map() {
     let first = ComposeRequest::prepare(ComposeOptions::new().with_source_file(work.join("first.md")), &snapshot)
         .unwrap();
     let (composed, _) = Markdown::try_from(work.join("first.md").as_path()).unwrap().compose_with(&first).unwrap();
-    let a = biscuit_file::to_portable_string(&root.join("fixtures-a"));
+    let a = biscuit_file::to_forward_slash_string(&root.join("fixtures-a"));
     let content = composed.content();
     assert!(content.contains(&format!("value=[{a}] title=[Title A]")), "{content}");
     assert!(content.contains(&format!("child=[{a}]")), "the transclusion reads map A: {content}");
@@ -286,7 +286,7 @@ fn an_environment_only_replacement_enters_a_document_under_another_map() {
     assert_eq!(&context_b.clone().with_env(map("fixtures-a")), first.resolution_context());
     assert_eq!(context_b.home_dir(), Some(home.as_path()));
     assert_eq!(context_b.repository_root(), Some(repo.as_path()));
-    assert_eq!(context_b.launch_magic_scope(), first.resolution_context().launch_magic_scope());
+    assert_eq!(context_b.launch_scope(), first.resolution_context().launch_scope());
     // The same repository, so the second document keeps the request's
     // configuration snapshot.
     let second = ComposeRequest::with_context(
@@ -297,7 +297,7 @@ fn an_environment_only_replacement_enters_a_document_under_another_map() {
     )
     .unwrap();
     let (composed, _) = Markdown::try_from(work.join("second.md").as_path()).unwrap().compose_with(&second).unwrap();
-    let b = biscuit_file::to_portable_string(&root.join("fixtures-b"));
+    let b = biscuit_file::to_forward_slash_string(&root.join("fixtures-b"));
     assert!(composed.content().contains(&format!("value=[{b}] title=[Title B]")), "{}", composed.content());
     assert_eq!(second.options().context().env(), &map("fixtures-b"));
     // The first request is untouched by entering the second document.

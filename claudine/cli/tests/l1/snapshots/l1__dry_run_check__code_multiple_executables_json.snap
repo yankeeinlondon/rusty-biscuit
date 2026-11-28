@@ -1,0 +1,75 @@
+---
+source: claudine/cli/tests/l1/dry_run_check.rs
+expression: envelope
+---
+{
+  "file": "/work/seq.yaml",
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "composition.multiple_executables",
+      "severity": "error",
+      "message": "this task names more than one executable: `shell`, `prompt`",
+      "source": {
+        "file": "/work/seq.yaml",
+        "line": 2,
+        "column": 5,
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "hint": "keep exactly one executable per task, and move the others into their own tasks",
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "both",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: provider (more than one executable)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "both",
+          "property": "sequence[0]"
+        }
+      ]
+    },
+    {
+      "code": "dm.check.not_checked",
+      "severity": "info",
+      "message": "not checked: inputs (more than one executable)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": [],
+      "trail": [
+        {
+          "kind": "host",
+          "host": "task",
+          "label": "both",
+          "property": "sequence[0]"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0,
+    "info": 2
+  }
+}

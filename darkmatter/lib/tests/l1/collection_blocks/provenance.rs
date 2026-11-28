@@ -388,7 +388,7 @@ fn check(name: &str, kind: CollectionKind) {
         assert!(span.end > start && span.end <= start + line.len(), "command extent {span:?}, {what}");
         assert!(line.starts_with(&document[span]), "authored command slice, {what}");
     }
-    assert_eq!(record.iteration_path.to_string(), typed_path, "record path, {what}");
+    assert_eq!(record.iteration_path().to_string(), typed_path, "record path, {what}");
     assert!(record.message.ends_with(&format!(" at {typed_path}")), "{}: {what}", record.message);
 }
 
@@ -443,7 +443,8 @@ fn the_shared_record_carries_typed_frames_and_the_authored_span() {
     for kind in [CollectionKind::Map, CollectionKind::Filter] {
         let error = fail(case, kind);
         let record = the_record(&error);
-        let [frame] = record.iteration_path.frames() else { panic!("{record:?}") };
+        let path = record.iteration_path();
+        let [frame] = path.frames() else { panic!("{record:?}") };
         assert_eq!((frame.collection.as_str(), &frame.position), ("data", &IterationPosition::Index(1)));
         let span = record.span.clone().expect("the callback's authored span");
         assert!(span.start > 0 && span.start < span.end, "{span:?}");
@@ -472,7 +473,7 @@ fn a_child_failure_under_a_repeated_file_joins_the_parent_and_child_paths() {
         let error = compose_with_options(&root, &document, |options| options).expect_err("the child fails");
         let record = the_record(&error);
         assert_eq!(record.code, "dm.collection.callback_failed", "{kind:?}: {error:?}");
-        assert_eq!(record.iteration_path.to_string(), "data[1] → d[0]", "{kind:?}: {record:?}");
+        assert_eq!(record.iteration_path().to_string(), "data[1] → d[0]", "{kind:?}: {record:?}");
         let source = record.source.as_ref().expect("the child's own site");
         assert_eq!(source.file.as_deref().and_then(Path::file_name), Some("bad.md".as_ref()), "{kind:?}");
         assert_eq!(source.line, Some(6), "{kind:?}");
@@ -488,7 +489,7 @@ fn a_static_failure_is_reported_once_with_no_iteration() {
         let error = compose_with_options(&root, &document, |options| options).expect_err("an untyped source");
         let records = error_diagnostics(&error);
         assert_eq!(records.len(), 1, "{kind:?}: {records:#?}");
-        assert!(records[0].iteration_path.is_empty(), "{kind:?}: {records:?}");
+        assert!(records[0].iteration_path().is_empty(), "{kind:?}: {records:?}");
         assert!(!records[0].message.contains(" at names["), "{kind:?}: {records:?}");
         assert!(!matches!(error, MarkdownError::InIteration(_)), "{kind:?}");
     }

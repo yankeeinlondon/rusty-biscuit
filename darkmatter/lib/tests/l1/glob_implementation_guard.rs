@@ -7,18 +7,20 @@
 //! Two checks, because neither alone sees every glob library:
 //!
 //! - **Source.** Each package's `src/` is read under the production-scope rule
-//!   of `source_scan::production_sources` (comments, literals, and test-only
-//!   code blanked) and searched on identifier boundaries for the crate names and
-//!   matcher types in [`GLOB_LIBRARY_IDENTIFIERS`], plus `Glob::` (globset's
-//!   constructor path; a bare `Glob` is an enum variant in `FileLinksMode` and
-//!   Claudine's `PathSegment`).
+//!   of `source_scan::production_sources_where` (comments, literals, and
+//!   test-only code blanked; a file whose raw text holds none of the
+//!   identifiers is not blanked) and searched on identifier boundaries for
+//!   the crate names and matcher types in [`GLOB_LIBRARY_IDENTIFIERS`], plus
+//!   `Glob::` (globset's constructor path; a bare `Glob` is an enum variant in
+//!   `FileLinksMode` and Claudine's `PathSegment`).
 //! - **Manifest.** Each package's normal, build, and target dependencies may
 //!   name a crate from [`GLOB_CRATES`] only as [`SCANNED`] lists. This is what
 //!   catches the `glob` crate: its name is also biscuit-file's own
 //!   `file_reference::glob` module, so the source check cannot search for it.
 //!
 //! The `ignore` crate is admitted as a directory walker (`WalkBuilder`, used by
-//! DMLS's workspace discovery and Claudine's completion walks); its glob
+//! DMLS's workspace discovery, Claudine's completion walks, and Darkmatter's
+//! missing-reference basename search); its glob
 //! matchers (`OverrideBuilder`, `GitignoreBuilder`, `TypesBuilder`) are not.
 //! Other packages' allowlisted files are declared in this package's
 //! `[package.metadata.ci.tests] source-inputs`, so changing one runs this test.
@@ -31,7 +33,7 @@ mod source_scan;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use source_scan::{ident_offsets, line_at, production_sources};
+use source_scan::{ident_offsets, line_at, production_sources_where};
 
 /// A package the guard scans, by repository-relative path.
 struct ScannedPackage {
@@ -43,7 +45,7 @@ struct ScannedPackage {
 
 const SCANNED: &[ScannedPackage] = &[
     ScannedPackage { src: "biscuit-file/lib/src", manifest: "biscuit-file/lib/Cargo.toml", glob_dependencies: &["globset"] },
-    ScannedPackage { src: "darkmatter/lib/src", manifest: "darkmatter/lib/Cargo.toml", glob_dependencies: &["globset"] },
+    ScannedPackage { src: "darkmatter/lib/src", manifest: "darkmatter/lib/Cargo.toml", glob_dependencies: &["globset", "ignore"] },
     // The schema language Darkmatter's `match(...)` and file-format checks
     // moved into; it matches through `GlobReference` only.
     ScannedPackage {
@@ -129,6 +131,17 @@ fn glob_library_hits(text: &str) -> Vec<(usize, &'static str)> {
     hits
 }
 
+/// Whether a file's raw text could hold a [`glob_library_hits`] hit once
+/// sanitized, so the guard blanks only the few files that could (`Glob` alone,
+/// because a comment may separate it from its `::`).
+fn may_hold_glob_library(raw: &str) -> bool {
+    // `contains` rules out most files more cheaply than `ident_offsets` alone.
+    GLOB_LIBRARY_IDENTIFIERS
+        .iter()
+        .chain(&["Glob"])
+        .any(|ident| raw.contains(ident) && !ident_offsets(raw, ident).is_empty())
+}
+
 /// Every source problem under `root` against `allowlist`.
 fn check_sources(root: &Path, packages: &[ScannedPackage], allowlist: &[(&str, usize, &str)]) -> Vec<String> {
     let allowed: BTreeMap<&str, usize> = allowlist.iter().map(|&(path, count, _)| (path, count)).collect();
@@ -136,7 +149,7 @@ fn check_sources(root: &Path, packages: &[ScannedPackage], allowlist: &[(&str, u
     let mut problems = Vec::new();
     let mut found = BTreeSet::new();
     for package in packages {
-        for (relative, text) in production_sources(&root.join(package.src)) {
+        for (relative, text) in production_sources_where(&root.join(package.src), may_hold_glob_library) {
             let hits = glob_library_hits(&text);
             if hits.is_empty() {
                 continue;
@@ -249,6 +262,12 @@ fn the_guard_catches_planted_violations_and_honors_the_scope_rule() {
     write("a/src/planted.rs", "fn p() { let _ = GlobBuilder::new(\"*.md\"); }\n");
     write("a/src/kept.rs", "use globset::{Glob, GlobSetBuilder};\nfn k() { Glob::new(\"*\"); }\n");
     write("a/src/moved.rs", "use globset::GlobMatcher;\n");
+    // Test-only modules declared by files that name no glob library: one in
+    // the declaring module's directory, one reached through `#[path]`.
+    write("a/src/outer.rs", "#[cfg(test)]\nmod fixtures;\n");
+    write("a/src/outer/fixtures/deep.rs", "fn d() { let _ = GlobBuilder::new(\"*\"); }\n");
+    write("a/src/inner/pointer.rs", "#[cfg(test)]\n#[path = \"far/far.rs\"]\nmod far;\n");
+    write("a/src/inner/far/far.rs", "fn f() { let _ = GlobBuilder::new(\"*\"); }\n");
     write(
         "a/Cargo.toml",
         "[package]\nname = \"a\"\n\n[dependencies]\nglobset = \"0.4\"\nwalker = { package = \"ignore\", version = \"0.4\" }\n\n\

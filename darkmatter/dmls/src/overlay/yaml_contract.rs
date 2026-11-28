@@ -20,8 +20,10 @@
 //! declaration (its authored `kind` and root `$schema`,
 //! [`LoadedYamlDocument::declaration_key`]), its context, and its kind
 //! registry's version; and, only when its preparation depends on the whole
-//! text (the `schema` / `yaml-schema` kinds, whose checks read files), the
-//! text. A data
+//! text, the text: the `schema` / `yaml-schema` kinds, whose checks read
+//! files, and the callable catalog kinds (`expression-schema`,
+//! `mutation-schema`), whose callable semantics are judged while the contract
+//! is prepared. A data
 //! edit of any other document therefore keeps the key, and the contract
 //! judges the new data with no file read, resolution, or compilation.
 //!
@@ -48,6 +50,7 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use biscuit_hash::xx_hash_bytes;
+use darkmatter::config::registration::RegisteredHosts;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, Route, YamlContract, YamlValidation};
 use simplified_schema::yaml_documents::LoadedYamlDocument;
@@ -55,6 +58,7 @@ use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::resolve::observed;
 use simplified_schema::{SchemaError, parse_selected_standalone_schema_document};
 
+use super::hosts::InstalledHosts;
 use super::references::SchemaReferenceFacts;
 use crate::config_contracts::ConfigurationFile;
 use crate::context::DocumentResolution;
@@ -80,7 +84,15 @@ pub(super) struct PreparedYaml {
     /// The files a root-`$schema` contract's named types import; empty on
     /// the kind route.
     pub(super) named_types: Arc<NamedTypeCatalog>,
+    /// The text of each other file a failed callable catalog's related
+    /// locations name, keyed as the (resolved) error names it, so its
+    /// diagnostic ranges them without reading.
+    pub(super) catalog_sources: CatalogSources,
 }
+
+/// The text of each file a [`SchemaError::CallableCatalog`]'s related
+/// locations name, other than the catalog itself.
+pub type CatalogSources = Arc<HashMap<PathBuf, Arc<str>>>;
 
 /// One document's installed preparation and what it read.
 struct Entry {
@@ -129,6 +141,7 @@ pub(super) struct ContractJob {
     key: u64,
     context: FileResolutionContext,
     kinds: Option<InstalledKinds>,
+    hosts: Option<Arc<RegisteredHosts>>,
     workspace_roots: Vec<PathBuf>,
     sources: SourceBuffers,
     epoch: u64,
@@ -146,6 +159,7 @@ pub(super) struct PreparedJob {
     schema_references: Arc<SchemaReferenceFacts>,
     standalone: Option<StandaloneNamedTypes>,
     named_types: Arc<NamedTypeCatalog>,
+    catalog_sources: CatalogSources,
     deps: Vec<(PathBuf, u64)>,
     probes: Vec<(PathBuf, bool)>,
     folders: Vec<WatchedFolder>,
@@ -162,6 +176,7 @@ impl YamlContracts {
         context: &FileResolutionContext,
         generation: u64,
         kinds: Option<&InstalledKinds>,
+        hosts: Option<&InstalledHosts>,
     ) -> Option<u64> {
         let text_hash = xx_hash_bytes(text.as_bytes());
         let declaration = match self.declarations.get(path) {
@@ -177,6 +192,8 @@ impl YamlContracts {
         bytes.extend_from_slice(&file_resolution_context_identity(context).to_le_bytes());
         bytes.extend_from_slice(&generation.to_le_bytes());
         bytes.extend_from_slice(&kinds.map_or(0, |kinds| kinds.version).to_le_bytes());
+        // A changed registration can change which definition claims a kind.
+        bytes.extend_from_slice(&hosts.map_or(0, |hosts| hosts.version).to_le_bytes());
         Some(xx_hash_bytes(&bytes))
     }
 
@@ -207,6 +224,7 @@ impl YamlContracts {
         key: u64,
         context: &FileResolutionContext,
         kinds: Option<InstalledKinds>,
+        hosts: Option<Arc<RegisteredHosts>>,
         workspace_roots: &[PathBuf],
         sources: &SourceBuffers,
     ) -> Option<ContractJob> {
@@ -221,6 +239,7 @@ impl YamlContracts {
             key,
             context: context.clone(),
             kinds,
+            hosts,
             workspace_roots: workspace_roots.to_vec(),
             sources: sources.clone(),
             epoch: self.epoch,
@@ -257,6 +276,7 @@ impl YamlContracts {
                 schema_references: job.schema_references,
                 standalone: job.standalone,
                 named_types: job.named_types,
+                catalog_sources: job.catalog_sources,
             }),
             deps: job.deps,
             probes: job.probes,
@@ -342,8 +362,9 @@ impl OverlayCache {
             return StandaloneNamedTypes::default();
         };
         let kinds = super::schema::trigger_boundary(path, workspace_roots).and_then(|_| self.triggers.lookup_kinds(path));
+        let hosts = self.hosts.lookup(context);
         self.contracts
-            .key(text, path, context, resolution.generation(), kinds.as_ref())
+            .key(text, path, context, resolution.generation(), kinds.as_ref(), hosts.as_ref())
             .and_then(|key| self.contracts.lookup(path, key))
             .and_then(|prepared| prepared.standalone.clone())
             .unwrap_or_default()
@@ -356,13 +377,23 @@ impl OverlayCache {
 fn declaration_part(text: &str, path: &Path, text_hash: u64) -> Option<u64> {
     let loaded = LoadedYamlDocument::load(text, path).ok()?;
     // The kinds whose checks read files are exactly the schema-document
-    // kinds whose named types are resolved here.
-    let whole_text = loaded.kind_checks_read_files();
+    // kinds whose named types are resolved here; a callable catalog's
+    // preparation judges its whole text.
+    let whole_text = loaded.kind_checks_read_files() || is_callable_catalog(&loaded);
     let mut bytes = loaded.declaration_key().to_le_bytes().to_vec();
     if whole_text {
         bytes.extend_from_slice(&text_hash.to_le_bytes());
     }
     Some(xx_hash_bytes(&bytes))
+}
+
+/// Whether `loaded` claims a callable catalog kind (`expression-schema`,
+/// `mutation-schema`).
+fn is_callable_catalog(loaded: &LoadedYamlDocument) -> bool {
+    matches!(
+        loaded.loaded().value.get("kind").and_then(serde_yaml_ng::Value::as_str),
+        Some("expression-schema" | "mutation-schema")
+    )
 }
 
 /// Whether a change at `path` affects `entry`. A failed preparation is
@@ -390,11 +421,18 @@ impl ContractJob {
     /// state.
     pub(super) fn run(self) -> PreparedJob {
         work_counters::record_yaml_preparation();
-        let Self { path, text, key, context, kinds, workspace_roots, sources, epoch, seq } = self;
-        let (prepared, observed) = buffers::with(&sources, || {
-            observed::collect(|| prepare(&path, &text, &context, kinds, &workspace_roots))
+        let Self { path, text, key, context, kinds, hosts, workspace_roots, sources, epoch, seq } = self;
+        let (prepared, mut observed) = buffers::with(&sources, || {
+            observed::collect(|| prepare(&path, &text, &context, kinds, hosts, &workspace_roots))
         });
-        let Prepared { contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
+        let Prepared { mut contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
+        let mut catalog_sources = CatalogSources::default();
+        if let Err(error) = &contract
+            && let Some((resolved, texts)) = resolve_catalog_related(error, &path, &context, &workspace_roots, &sources, &mut observed)
+        {
+            contract = Err(Arc::new(resolved));
+            catalog_sources = Arc::new(texts);
+        }
         deps.extend(observed.read);
         let mut probes = schema_references.probes();
         for (probe, existed) in &mut probes {
@@ -423,11 +461,61 @@ impl ContractJob {
             schema_references,
             standalone,
             named_types,
+            catalog_sources,
             deps,
             probes,
             folders,
         }
     }
+}
+
+/// Resolves a catalog's related locations to editor files when their source
+/// matches. An embedded declaration without a matching file keeps its
+/// embedded source identity for a textual diagnostic.
+fn resolve_catalog_related(
+    error: &SchemaError,
+    path: &Path,
+    context: &FileResolutionContext,
+    workspace_roots: &[PathBuf],
+    sources: &SourceBuffers,
+    observed: &mut observed::Observed,
+) -> Option<(SchemaError, HashMap<PathBuf, Arc<str>>)> {
+    let SchemaError::CallableCatalog { path: catalog, message, span, related } = error else {
+        return None;
+    };
+    let mut texts = HashMap::new();
+    let related = related
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            let embedded = darkmatter::markdown::compose::expression::catalog::embedded_catalog_source(&entry.file);
+            let file = if entry.file.is_absolute() {
+                entry.file.clone()
+            } else {
+                let path = biscuit_file::PathIdentity::new(path);
+                let workspace = workspace_roots.iter()
+                    .filter(|root| path.starts_with(&biscuit_file::PathIdentity::new(root)))
+                    .max_by_key(|root| root.components().count());
+                context.repository_root().or(workspace.map(PathBuf::as_path)).unwrap_or(context.cwd()).join(&entry.file)
+            };
+            if file != path && file != *catalog && !texts.contains_key(&file) {
+                let text = sources.get(&file).cloned().or_else(|| work_counters::read_to_string(&file).ok().map(Arc::from));
+                if text.is_some() || present(&file, sources) {
+                    observed.read.insert(file.clone());
+                }
+                observed.searched.insert(file.clone());
+                if let Some(text) = text.filter(|text| embedded.is_none_or(|embedded| &**text == embedded)) {
+                    texts.insert(file.clone(), text);
+                } else {
+                    return entry;
+                }
+            }
+            entry.file = file;
+            entry
+        })
+        .collect();
+    let resolved = SchemaError::CallableCatalog { path: catalog.clone(), message: message.clone(), span: span.clone(), related };
+    Some((resolved, texts))
 }
 
 /// What [`prepare`] produced, before its reads are hashed.
@@ -445,6 +533,7 @@ fn prepare(
     text: &str,
     context: &FileResolutionContext,
     kinds: Option<InstalledKinds>,
+    hosts: Option<Arc<RegisteredHosts>>,
     workspace_roots: &[PathBuf],
 ) -> Prepared {
     let mut prepared = Prepared {
@@ -475,11 +564,17 @@ fn prepare(
     }
     let registry = kinds.map_or_else(darkmatter::markdown::schemas::shipped_kind_registry, |kinds| kinds.registry);
     let schema_roots = registry.roots().search_paths().to_vec();
-    let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
+    let mut schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
+    // Registered `kind: yaml-schema` definitions: the lowest kind tier.
+    if let Some(hosts) = hosts.filter(|hosts| !hosts.is_empty()) {
+        schemas = schemas.with_registered_hosts(hosts);
+    }
     let contract = schemas.prepare_yaml_contract(&loaded).map_err(Arc::new);
+    // A callable catalog whose semantics failed is still claimed by its
+    // kind: its root `$schema`, if any, is never a fallback contract.
     let kind_route = match &contract {
         Ok(Some(contract)) => matches!(contract.route(), Route::Kind(_)),
-        Err(error) => matches!(**error, SchemaError::KindSelection { .. }),
+        Err(error) => matches!(**error, SchemaError::KindSelection { .. } | SchemaError::CallableCatalog { .. }),
         Ok(None) => false,
     };
     match &contract {
@@ -547,4 +642,28 @@ fn watched_folders<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<WatchedF
                 .flatten(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A document's contract is keyed by the installed registrations'
+    /// version, so an install that changes them re-prepares it even when
+    /// nothing else invalidated the contract.
+    #[test]
+    fn the_contract_key_follows_the_installed_registrations_version() {
+        let fixture = crate::host_fixtures::Fixture::new();
+        let hosts = fixture.hosts(&[&format!("../host/{}", crate::host_fixtures::MANIFEST_NAME)]);
+        let installed = |version| InstalledHosts { hosts: Arc::clone(&hosts), version, load_error: None };
+        let path = fixture.path("work/team.yaml");
+        let context = fixture.context().for_source(&path);
+        let mut contracts = YamlContracts::default();
+        let mut key = |hosts: Option<&InstalledHosts>| contracts.key("kind: roster\n", &path, &context, 1, None, hosts).expect("loads");
+
+        let (none, first, again, second) = (key(None), key(Some(&installed(1))), key(Some(&installed(1))), key(Some(&installed(2))));
+        assert_ne!(none, first);
+        assert_eq!(first, again);
+        assert_ne!(first, second);
+    }
 }

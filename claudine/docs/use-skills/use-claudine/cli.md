@@ -99,8 +99,8 @@ They take every wrapper switch above, plus:
 | `--exclude <P>` | remove a provider from automatic selection (repeatable) |
 | `--no-interactive` | force non-interactive |
 | `--set '<JSON5 object>'` | override frontmatter (once; setters beat it) |
-| `--dry-run` | print the composed body to stdout, and the resolved frontmatter plus a summary table to stderr. Launches nothing and fires no lifecycle event, but **`$(…)` expansions still run** |
-| `--dry-run-shell` | with `--dry-run`, also run sequence `shell:` tasks for real |
+| `--dry-run` | check the document and print each composed prompt to stdout, with every problem found on stderr. Runs nothing (no provider, command, lifecycle event, question, or write); exits `2` on any error or warning, else `0` |
+| `--json` | with `--dry-run`, print one JSON report (`file`, `outcome`, `diagnostics`, `summary`) on stdout instead |
 | `--max-iterations <N>` | loop cap override |
 | `--on-rate-limit pause\|abort\|continue` | rate-limit policy for loops (`abort` exits 75) |
 
@@ -146,6 +146,52 @@ They take every wrapper switch above, plus:
 | `claudine logs [today\|week\|sessions\|tools\|errors\|trends\|session <id>…] [--json]` | query the logs in `~/.claudine/logs/` |
 | `claudine context [--values\|--expressions\|--side-effects]` | the `ctx.*` variables (with current values), the expression functions, and the side-effect verbs available to documents |
 | `claudine errors [--json]` | every diagnostic code, and what it means |
+| `claudine doctor [--fix] [--json]` | check the whole setup in one run; see below |
+
+### Checking the setup: `claudine doctor`
+
+`claudine doctor` reports seven rows, always in this order: `config`,
+`registration`, `darkmatter-permissions`, `repo-config`,
+`stray-config-keys`, `tts`, `path`. Each row has a `severity` (`ok`,
+`info`, `warn`, `error`) and remedies for what it found. It works with a
+missing or broken configuration, never prompts, and without `--fix`
+writes, creates, converts, or deletes none of your files: not Claudine's
+or Darkmatter's configuration, not the published registration, and
+nothing in your home or user profile (no default config, no `config.json`
+conversion, no registration refresh). The one exception is on native
+Windows: each PowerShell probe of the `path` row gets a private folder in
+the system temporary directory for PowerShell's startup cache, deleted
+when the probe ends. It makes no network request and plays no sound.
+Reports never show configuration values or permission contents.
+
+- Exit status: `0` when no row is an `error` (warnings are fine), `1` when
+  any error remains (including a failed repair), `2` for a usage error.
+- `--json` prints one array of `{id, severity, summary, detail, fixable}`
+  objects; branch on `id`, `severity`, and `fixable`, not on the wording.
+- `--fix` repairs only two rows: `registration` (republishes Claudine's
+  format 3 schema bundle under `~/.claudine/registrations/darkmatter/` —
+  upgrading an older format 1 or format 2 installation in place, writing
+  `manifest.yaml` last, and restoring missing or modified members including
+  any derived `expression-facts` companion — writes the `register` entry in
+  an existing `~/.darkmatter.yaml` and drops any entry still naming the
+  format 1 manifest, even after its file was deleted, then removes the
+  format 1 `~/.claudine/darkmatter-host*` files) and
+  `darkmatter-permissions` (moves an inline `permissions` block from
+  `~/.darkmatter.yaml` into Claudine's file, as `claudine setup` does). The
+  exit status reflects the state after the repairs, and a second `--fix`
+  changes nothing. Everything else needs a manual fix; a missing
+  configuration's remedy is `claudine setup`.
+- `path` is an `error` when this process cannot find `claudine` on `PATH`.
+  On native Windows it also asks each installed PowerShell, Git Bash/MSYS2,
+  and Cygwin (without their startup files, 2 s limit); those results are
+  at most `warn`.
+- `tts` is an `error` only when hook speech is on (`tts: true` or an
+  object) and no provider is available; it checks prerequisites, not a
+  working voice.
+
+```bash
+claudine doctor --json | jq -r '.[] | select(.severity == "error") | .id'
+```
 
 ## Environment variables you may set
 
@@ -161,7 +207,7 @@ They take every wrapper switch above, plus:
 ## Files
 
 - `~/.claudine/config.yaml`, and a repo `.claudine/config.yaml` (YAML,
-  validated against `claudine/schemas/claudine-config.yaml`; a legacy
+  validated against `claudine/registration/claudine-config.yaml`; a legacy
   `config.json` is converted on the next load)
 - `~/.claudine/logs/`, `~/.claudine/mcp/`, and `~/.claudine/overlays/`
 - `~/.claudine/system-prompt.md` and a repo `system-prompt.md`

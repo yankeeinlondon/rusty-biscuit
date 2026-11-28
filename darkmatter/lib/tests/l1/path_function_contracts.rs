@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReferenceError, FileResolutionContext, to_portable_string};
+use biscuit_file::{FileReferenceError, FileResolutionContext, to_forward_slash_string};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, evaluate, parse,
@@ -106,7 +106,7 @@ fn text(value: impl Into<String>) -> Expect {
 }
 
 fn portable(path: &Path) -> Expect {
-    Expect::Text(to_portable_string(path))
+    Expect::Text(to_forward_slash_string(path))
 }
 
 fn check(context: &FileResolutionContext, row: &str, function: &str, reference: &str, expect: &Expect) {
@@ -519,7 +519,7 @@ fn caller_file_siblings_stay_beside_the_caller_file() {
         Markdown::try_from(prompt).unwrap().compose_with(&request).unwrap().0.content().to_string()
     };
 
-    let dir = to_portable_string(&case_dir);
+    let dir = to_forward_slash_string(&case_dir);
     for (row, prompt) in [("11", &in_repo), ("11b", &external)] {
         let line = |content: &str, key: &str| -> String {
             content
@@ -552,7 +552,7 @@ fn windows_absolute_inputs_keep_a_portable_drive_anchor() {
     assert!(native.contains('\\'), "fixture must use a native spelling: {native}");
     check(&context, "win", "absolute", &native, &Expect::Native(spec.clone()));
     check(&context, "win", "dirname", &native, &portable(spec.parent().unwrap()));
-    let dirname = to_portable_string(spec.parent().unwrap());
+    let dirname = to_forward_slash_string(spec.parent().unwrap());
     assert!(!dirname.contains('\\') && dirname.contains(':'), "{dirname}");
 }
 

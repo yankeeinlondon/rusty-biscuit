@@ -35,7 +35,7 @@ fn file_link_uses_encoded_url_and_portable_label() {
     assert!(link.contains("a%20b%23%25.md"), "expected encoded URL: {link}");
     assert!(
         link.contains(&biscuit_terminal::components::prose::Prose::escape_text(
-            &biscuit_file::to_portable_string(&path)
+            &biscuit_file::to_forward_slash_string(&path)
         )),
         "expected escaped portable label: {link}"
     );
@@ -622,6 +622,7 @@ fn sequence_missing_properties_status_block_lists_each_step() {
                 pointer_paths: Vec::new(),
             },
         ],
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let block = err.status_block(&Terminal::default());
     let rendered = block.render(&Terminal::default());
@@ -640,6 +641,7 @@ fn sequence_missing_properties_display_includes_failure_count() {
     let err = CompositionError::SequenceMissingProperties {
         failure_count: 3,
         failures: Vec::new(),
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let rendered = err.to_string();
     assert!(rendered.contains("3 step(s) or document(s)"), "got: {rendered}");
@@ -1035,7 +1037,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.md");
     let executable = std::env::current_exe().expect("test executable path should be available");
-    let executable = biscuit_file::to_portable_string(&executable);
+    let executable = biscuit_file::to_forward_slash_string(&executable);
     let command = format!("\"{executable}\" --definitely-invalid-libtest-option");
     let approved_command = format!("{executable} --definitely-invalid-libtest-option");
     let content = format!(
@@ -1074,9 +1076,12 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         config_snapshot: None,
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
+        passive: None,
+        allow_missing_transclusions: false,
         invocation_context: None,
         document_epoch: None,
         loop_values: None,
+        slot_session: None,
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -1546,6 +1551,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
         (FileRefFailure::FoundElsewhere, "found_elsewhere"),
         (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
         (FileRefFailure::RemoteDenied, "remote_denied"),
+        (FileRefFailure::RemoteNeedsApproval, "remote_needs_approval"),
     ] {
         let err = file_ref_compose_error(FileReferenceDiagnostic {
             function: "frontmatter",
@@ -1863,7 +1869,7 @@ fn phase_11_family_dispatch_routes_to_family_renderers() {
         ),
         (
             // sequence / loop family
-            CompositionError::SequenceInteractiveRejected(PathBuf::from("prompts/seq.md")),
+            CompositionError::SequenceInteractiveRejected { path: PathBuf::from("prompts/seq.md"), site: Box::new(crate::composition::SequenceSite::unlocated()) },
             "⤫ CompositionError: interactive rejected for sequence",
         ),
     ];
@@ -2580,6 +2586,7 @@ fn sequence_task_prompt_launch_carries_the_wrapper_diagnostic_facets() {
         path: PathBuf::from("tasks/review.md"),
         message: "could not resolve provider binary".to_string(),
         snapshot: Some(Box::new(carried_snapshot())),
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
 
     let CompositionError::SequenceTaskPromptLaunch { snapshot, .. } = &err else {
@@ -2618,12 +2625,14 @@ fn carrying_a_snapshot_does_not_change_the_rendered_prose() {
         path: PathBuf::from("tasks/review.md"),
         message: "boom".to_string(),
         snapshot: None,
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let launch_with = CompositionError::SequenceTaskPromptLaunch {
         task: "review".to_string(),
         path: PathBuf::from("tasks/review.md"),
         message: "boom".to_string(),
         snapshot: Some(Box::new(carried_snapshot())),
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     assert_eq!(launch_with.to_string(), launch_without.to_string());
 }
@@ -3378,9 +3387,39 @@ fn composed_body_empty_lists_each_override_on_its_own_row() {
         source_path: PathBuf::from("prompts/run.md"),
         mode: super::super::types::CompositionMode::ChainedDocument,
         provided_overrides: vec!["topic".into(), "tone".into()],
+        cause: darkmatter::findings::EmptyBodyCause::EmptyRendered,
     };
     let rows = display_rows(&err);
     assert_rows_follow(&rows, "Provided overrides:", &["- `topic`", "- `tone`"]);
+}
+
+/// The block names what the composition proved, never a guess: each excluded
+/// block by its line and condition, and the cause's own next step.
+#[test]
+fn composed_body_empty_names_each_excluded_block_and_claims_nothing_else() {
+    let err = CompositionError::ComposedBodyEmpty {
+        source_path: PathBuf::from("prompts/run.md"),
+        mode: super::super::types::CompositionMode::ChainedDocument,
+        provided_overrides: Vec::new(),
+        cause: darkmatter::findings::EmptyBodyCause::ExcludedBlocks {
+            blocks: vec![darkmatter::findings::ExcludedBlock { line: 4, condition: "review".into() }],
+        },
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "Every block of the body was left out because its condition was false:",
+        &["- line 4: `review`"],
+    );
+    let whitespace = CompositionError::ComposedBodyEmpty {
+        source_path: PathBuf::from("prompts/run.md"),
+        mode: super::super::types::CompositionMode::ChainedDocument,
+        provided_overrides: Vec::new(),
+        cause: darkmatter::findings::EmptyBodyCause::Whitespace,
+    };
+    let rows = display_rows(&whitespace);
+    assert!(rows.iter().any(|row| row.contains("contains only whitespace")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("when")), "{rows:#?}");
 }
 
 #[test]
@@ -3464,6 +3503,7 @@ fn sequence_missing_properties_keeps_each_step_description_and_property_row() {
             sequence_step(1, vec![property("topic"), property("tone")], Vec::new()),
             sequence_step(2, vec![property("audience")], Vec::new()),
         ],
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let rows = display_rows(&err);
     assert_rows_follow(
@@ -3503,6 +3543,7 @@ fn sequence_missing_properties_heads_a_document_entry_by_its_file_and_container(
             document("sequence[1].sequence", "prompts/child.yaml"),
             sequence_step(1, vec![property("topic")], Vec::new()),
         ],
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let rows = display_rows(&err);
     assert!(
@@ -3529,6 +3570,7 @@ fn sequence_missing_properties_lists_each_pointer_on_its_own_row() {
             Vec::new(),
             vec!["/topic".into(), "/tone".into()],
         )],
+        site: Box::new(crate::composition::SequenceSite::unlocated()),
     };
     let rows = display_rows(&err);
     assert_rows_follow(
@@ -3649,4 +3691,118 @@ fn lifecycle_renamed_event_is_a_lifecycle_authoring_error_naming_the_replacement
     let prose = rendered.replace(['┃', '`'], " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(prose.contains("renamed lifecycle event"), "{prose}");
     assert!(prose.contains("Rename the failed: key to blocked:"), "{prose}");
+}
+
+mod check_failed {
+    use super::*;
+    use crate::composition::lifecycle_context::{LifecycleErrorInfo, LifecycleErrorInfoExt};
+    use crate::diagnostics::{DiagnosticSnapshot, select_effective_diagnostic};
+    use darkmatter::findings::{Diagnostic as Finding, FindingSink, Severity as FindingSeverity, Subject};
+
+    /// A report whose first row is not the cause, as when a later task's
+    /// failure is the one the real run returns.
+    fn report() -> darkmatter::findings::FindingReport {
+        let mut sink = FindingSink::new();
+        let subject = sink.register_subject(Subject::document("seq.md", Some(PathBuf::from("seq.md"))));
+        sink.push(subject, Finding::actionable("composition.missing_properties", FindingSeverity::Error, "`topic` has no value", "pass `topic=…`"));
+        sink.finish()
+    }
+
+    /// Causes of each shape the selector treats differently: a plain
+    /// semantic error, one behind a transparent wrapper, and one with a
+    /// registered cause of its own.
+    fn causes() -> Vec<CompositionError> {
+        vec![
+            CompositionError::FileNotFound("./missing.md".to_string()),
+            CompositionError::FileNotFound("./missing.md".to_string()).already_emitted(),
+            CompositionError::SequenceInteractiveRejected { path: PathBuf::from("seq.md"), site: Box::new(crate::composition::SequenceSite::unlocated()) },
+        ]
+    }
+
+    #[test]
+    fn every_err_field_and_the_snapshot_are_the_causes() {
+        for cause in causes() {
+            let expected = DiagnosticSnapshot::select(&cause).expect("the cause is registered");
+            let expected_info = LifecycleErrorInfo::from_composition_error(&cause);
+            let expected_erased = LifecycleErrorInfo::from_error_or_action("sequence", &cause);
+            let expected_text = cause.to_string();
+            let wrapped = CompositionError::check_failed(cause, report());
+
+            assert_eq!(DiagnosticSnapshot::select(&wrapped).as_ref(), Some(&expected), "{wrapped:?}");
+            assert_eq!(wrapped.to_string(), expected_text);
+            let info = LifecycleErrorInfo::from_composition_error(&wrapped);
+            assert_eq!((info.kind, info.variant, info.msg, info.snapshot), (expected_info.kind, expected_info.variant, expected_info.msg, expected_info.snapshot));
+            let erased = LifecycleErrorInfo::from_error_or_action("sequence", &wrapped);
+            assert_eq!((erased.kind, erased.variant, erased.msg, erased.snapshot), (expected_erased.kind, expected_erased.variant, expected_erased.msg, expected_erased.snapshot));
+        }
+    }
+
+    /// The cause is not stored a second time as its own `err.cause`.
+    #[test]
+    fn the_stored_cause_chain_gains_no_entry() {
+        let cause = CompositionError::FileNotFound("./missing.md".to_string());
+        let wrapped = CompositionError::check_failed(cause, report());
+        assert!(DiagnosticSnapshot::select(&wrapped).unwrap().cause.is_none());
+        let selected = select_effective_diagnostic(&wrapped).and_then(|selected| selected.diagnostic()).unwrap();
+        assert!(crate::diagnostics::next_registered_cause(selected).is_none());
+    }
+
+    #[test]
+    fn the_report_is_kept_once_and_the_first_one_wins() {
+        let wrapped = CompositionError::check_failed(CompositionError::FileNotFound("a.md".into()), report());
+        let empty = darkmatter::findings::FindingSink::new().finish();
+        let rewrapped = CompositionError::check_failed(wrapped, empty);
+        assert_eq!(rewrapped.check_report().map(|report| report.diagnostics().len()), Some(1));
+        assert!(matches!(rewrapped.checked_cause(), CompositionError::FileNotFound(_)));
+    }
+}
+
+/// The innermost layer that knows a site decides it: `locate_sequence`
+/// fills an unlocated site and leaves a located one as it was.
+#[test]
+fn locate_sequence_fills_only_what_the_site_does_not_know() {
+    let unlocated = CompositionError::SequenceEmpty { site: Box::new(SequenceSite::unlocated()) };
+    let located = unlocated.locate_sequence(Path::new("seq.md"), "sequence[0].sequence", Some("child"));
+    assert_eq!(
+        located.sequence_site(),
+        Some(&SequenceSite::at(Path::new("seq.md"), "sequence[0].sequence").in_task("child"))
+    );
+
+    // An outer caller does not move it.
+    let relocated = located.locate_sequence(Path::new("outer.md"), "sequence[3]", Some("outer"));
+    assert_eq!(relocated.sequence_site().and_then(|site| site.file.as_deref()), Some(Path::new("seq.md")));
+    assert_eq!(relocated.sequence_site().and_then(|site| site.task.as_deref()), Some("child"));
+
+    // A known property without a file takes the caller's file and keeps
+    // its own property; an empty caller property names the whole file.
+    let mut site = SequenceSite { property: Some("sequence[1].name".into()), ..SequenceSite::unlocated() };
+    site.fill(Path::new("rows.yaml"), "", None);
+    assert_eq!(site, SequenceSite::at(Path::new("rows.yaml"), "sequence[1].name"));
+    let whole = CompositionError::SequenceEmpty { site: Box::new(SequenceSite::unlocated()) }.locate_sequence(Path::new("rows.yaml"), "", None);
+    assert_eq!(whole.sequence_site(), Some(&SequenceSite::file(Path::new("rows.yaml"))));
+
+    // Control: an error with no site is returned unchanged.
+    let other = CompositionError::FileNotFound("x.md".into()).locate_sequence(Path::new("seq.md"), "sequence", None);
+    assert!(other.sequence_site().is_none());
+    assert!(matches!(other, CompositionError::FileNotFound(_)));
+}
+
+/// `referenced_as` names the construct a read or parse failure is about only
+/// when the reading layer did not know it.
+#[test]
+fn referenced_as_names_an_unknown_construct_only() {
+    use crate::composition::sequence::model::ExecutableField;
+    let read = || CompositionError::SequenceSourceRead {
+        field: None,
+        path: PathBuf::from("t.yaml"),
+        site: Box::new(SequenceSite::unlocated()),
+        source: std::io::Error::new(std::io::ErrorKind::NotFound, "gone"),
+    };
+    let named = read().referenced_as(ExecutableField::Task);
+    assert!(named.to_string().starts_with("could not read task file `t.yaml`"), "{named}");
+    let kept = read().referenced_as(ExecutableField::Task).referenced_as(ExecutableField::Group);
+    assert!(kept.to_string().starts_with("could not read task file"), "{kept}");
+
+    // Control: unnamed, the noun is the plain "file".
+    assert!(read().to_string().starts_with("could not read file `t.yaml`"), "{}", read());
 }

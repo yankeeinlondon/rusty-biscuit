@@ -1,6 +1,6 @@
 //! The seam where a generated reference becomes text.
 //!
-//! [`try_portable_string`] is a presentation helper: it converts lossily and
+//! [`try_forward_slash_string`] is a presentation helper: it converts lossily and
 //! turns a Unix backslash into a slash. A generated reference must instead
 //! read back as exactly the names it was built from, in exactly the reference
 //! form intended, so every spelling produced here is re-parsed and compared
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use super::path_identity::PathIdentity;
 use crate::file_reference::parse;
 use crate::file_reference::{FileReferenceKind, TemplateSegment};
-use crate::try_portable_string;
+use crate::try_forward_slash_string;
 
 /// Why a target cannot be written as the requested reference text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,16 +107,20 @@ pub(crate) fn render_reference(lead: Lead<'_>, names: &[OsString]) -> Result<Str
     }
 
     let joined: PathBuf = names.iter().collect();
-    let tail = try_portable_string(&joined).ok_or(TextRejection::ChangesComponents)?;
-    // Compared with the names themselves, not with an identity of `joined`:
-    // that identity would collapse a literal verbatim `..` just as the
-    // rendered text does, and so prove nothing.
-    let reparsed = PathIdentity::new(Path::new(&tail));
-    if !reparsed.is_unanchored() || reparsed.components() != names {
-        return Err(TextRejection::ChangesComponents);
-    }
+    // Compare against the original names: an identity of `joined` would
+    // also normalize a literal verbatim `..` before the comparison.
+    let faithful = |tail: &str| {
+        let reparsed = PathIdentity::new(Path::new(tail));
+        reparsed.is_unanchored() && reparsed.components() == names
+    };
+    let forward = try_forward_slash_string(&joined).ok_or(TextRejection::ChangesComponents)?;
+    let tail = if faithful(&forward) {
+        forward.as_str()
+    } else {
+        joined.to_str().filter(|tail| faithful(tail)).ok_or(TextRejection::ChangesComponents)?
+    };
 
-    let text = lead.spell(&tail);
+    let text = lead.spell(tail);
     check_grammar(&text, lead.expected_kind(), lead)?;
     Ok(text)
 }
@@ -135,16 +139,19 @@ pub(crate) fn render_reference(lead: Lead<'_>, names: &[OsString]) -> Result<Str
 /// parse back as a literal absolute path.
 pub(crate) fn render_absolute(path: &Path) -> Result<String, TextRejection> {
     let native = path.to_str().ok_or(TextRejection::Unrenderable)?;
-    let text = match try_portable_string(path) {
-        Some(text) => text,
-        None if is_legacy_unc(path) => native.to_string(),
+    let identity = PathIdentity::new(path);
+    let forward = try_forward_slash_string(path);
+    let text = match forward.as_deref() {
+        Some(text) if PathIdentity::new(Path::new(text)) == identity => text,
+        Some(_) => native,
+        None if is_legacy_unc(path) => native,
         None => return Err(TextRejection::NoPortableSpelling),
     };
-    if PathIdentity::new(Path::new(&text)) != PathIdentity::new(path) {
+    if PathIdentity::new(Path::new(text)) != identity {
         return Err(TextRejection::ChangesComponents);
     }
-    check_grammar(&text, FileReferenceKind::Absolute, Lead::Bare)?;
-    Ok(text)
+    check_grammar(text, FileReferenceKind::Absolute, Lead::Bare)?;
+    Ok(text.to_string())
 }
 
 /// Parse `text` and require the expected kind, no recursive modifier, and no
@@ -182,7 +189,7 @@ fn is_legacy_unc(path: &Path) -> bool {
     )
 }
 
-/// Off Windows [`try_portable_string`] never declines, so this is unreachable.
+/// Off Windows [`try_forward_slash_string`] never declines, so this is unreachable.
 #[cfg(not(windows))]
 fn is_legacy_unc(_path: &Path) -> bool {
     false

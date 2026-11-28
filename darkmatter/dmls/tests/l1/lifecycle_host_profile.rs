@@ -1,58 +1,56 @@
-//! DMLS types a document's lifecycle stacks under its host: the lifecycle
-//! artifact beside a host catalog in the document's schema roots
-//! (`claudine/schemas/globals.lifecycle.json` beside `globals.yaml`) gives the
-//! host's events, renames, per-event globals, and verbs, and the library's one
-//! scoped walk (`darkmatter::lifecycle::lifecycle_call_checks`) narrows each
-//! call by the `when` items around it, ending a fact at a write. Without a
-//! usable artifact, the `md` host's lifecycle is analyzed and the document
-//! says the analysis is incomplete.
+//! DMLS types a document's lifecycle stacks under its registered host: the
+//! lifecycle artifact of the host whose trigger matches the document (here
+//! the frozen Claudine artifact, in an explicitly registered format 3
+//! bundle, [`crate::claudine_host`]) gives the host's events,
+//! renames, per-event globals, and verbs, and the library's one scoped walk
+//! (`darkmatter::lifecycle::lifecycle_call_checks`) narrows each call by the
+//! `when` items around it, ending a fact at a write. A bundle whose artifact
+//! is absent, stale, or refused registers no host, so the document is
+//! analyzed under the `md` host's lifecycle.
 //!
 //! Every row runs a real stdio session with `[expressions] strict = true`,
 //! where a call on a possibly-null `count` is a `dm.expression.uncertain_call`
 //! warning: a guarded call is silent and a call after a write warns. Each
-//! shipped-artifact row is also compared with the library walk under the
-//! profile the committed artifact rebuilds, which Claudine's
-//! `host_catalog::lifecycle_artifact` tests prove equal to composition's.
+//! registered-host row is also compared with the library walk under the
+//! profile the registration load builds from the same bundle.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use darkmatter::lifecycle::host_profile::HostLifecycleProfile;
 use darkmatter::lifecycle::md_host;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::host::FactsArtifact;
 use darkmatter::markdown::schemas::DarkmatterSchemas;
-use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
 use serde_json::{Value, json};
 
-use crate::claudine_schema_discovery::{Fixture, initialize_params, open, uri_of, write};
+use crate::claudine_host::{self, ARTIFACT, artifact_for, namespace, namespaces};
+use crate::claudine_schema_discovery::{initialize_params, open, uri_of, write};
 use crate::common::{LspFixture, LspWorkspace};
 
-const GLOBALS: &str = include_str!("../../../../claudine/schemas/globals.yaml");
-const ARTIFACT: &str = include_str!("../../../../claudine/schemas/globals.lifecycle.json");
 const CALL_CODES: [&str; 2] = ["dm.expression.uncertain_call", "dm.expression.incompatible_call"];
-const INCOMPLETE: &str = "dm.lifecycle.incomplete_analysis";
 const STRICT: &str = "[expressions]\nstrict = true\n";
 
-/// What sits beside the host catalog.
+/// The registered bundle's lifecycle artifact.
 #[derive(Clone, Copy, Debug)]
 enum Artifact {
-    /// The committed artifact.
+    /// The committed artifact, addressed to the bundle's namespaces.
     Shipped,
-    /// No artifact.
+    /// No artifact: the member the manifest lists is missing.
     Absent,
-    /// The committed artifact beside an edited catalog.
+    /// The artifact beside an edited (and re-addressed) `seq` namespace, so
+    /// its catalog hash is stale.
     Stale,
-    /// The committed artifact without its `success` event.
+    /// The artifact without its `success` event.
     LackingEvent,
 }
 
 /// The host a row's documents are opened under.
 #[derive(Clone, Copy, Debug)]
 enum Host {
-    /// Claudine's schema bundle and host catalog in the package area, with
-    /// `artifact` beside the catalog.
+    /// The registered Claudine-shaped bundle with `artifact`; every document
+    /// carries the trigger's marker.
     Claudine(Artifact),
-    /// A repository with no host catalog.
+    /// A repository with no registration.
     Md,
 }
 
@@ -179,7 +177,7 @@ rows! {
         &["min(count, 6)"],
     )];
 
-    /// R1-F1.6: without a host catalog, the `md` host's five events.
+    /// R1-F1.6: without a registered host, the `md` host's five events.
     md_events_narrow_until_a_write: Host::Md =>
         guard_write_cases(&["initialize", "composed", "failed", "cancelled", "finalize"], &["stdout"]);
 
@@ -200,24 +198,15 @@ rows! {
     /// R1-F1.8: `prep`, `break`, and `defer`.
     host_only_flow_operands_take_the_guarded_scope: Host::Claudine(Artifact::Shipped) => operand_cases(6..9);
 
-    /// Without the artifact, a Claudine event is plain frontmatter to the
-    /// `md` host: nothing is narrowed, and the document says so.
+    /// A bundle whose artifact is absent, stale, or refused registers no
+    /// host: a Claudine event is plain frontmatter to the `md` host, and
+    /// nothing is narrowed.
     an_absent_artifact_falls_back_and_is_reported: Host::Claudine(Artifact::Absent) =>
         vec![Case { parity: false, ..case(guard_write("success", "stdout"), &["min(count, 5)", "min(count, 6)"]) }];
     a_stale_artifact_falls_back_and_is_reported: Host::Claudine(Artifact::Stale) =>
         vec![Case { parity: false, ..case(guard_write("success", "stdout"), &["min(count, 5)", "min(count, 6)"]) }];
     an_artifact_lacking_an_event_falls_back_and_is_reported: Host::Claudine(Artifact::LackingEvent) =>
         vec![Case { parity: false, ..case(guard_write("success", "stdout"), &["min(count, 5)", "min(count, 6)"]) }];
-}
-
-/// The reason text each unusable artifact is reported with.
-fn incomplete_reason(artifact: Artifact) -> Option<&'static str> {
-    match artifact {
-        Artifact::Shipped => None,
-        Artifact::Absent => Some("is absent"),
-        Artifact::Stale => Some("regenerate the artifact"),
-        Artifact::LackingEvent => Some("refuses"),
-    }
 }
 
 /// The committed artifact with its `success` event removed.
@@ -230,64 +219,67 @@ fn lacking_success() -> String {
     serde_json::to_string_pretty(&root).unwrap()
 }
 
+/// The bundle a row registers.
+fn bundle_for(artifact: Artifact) -> crate::host_fixtures::Bundle {
+    let bundle = claudine_host::bundle();
+    match artifact {
+        Artifact::Shipped => bundle,
+        Artifact::Absent => {
+            let mut bundle = bundle;
+            bundle.members.remove(&bundle.lifecycle.clone());
+            bundle
+        }
+        Artifact::Stale => {
+            let edited = namespace("seq").replace("The step's one-based position.", "Edited.");
+            bundle.with_file("schemas/seq.yaml", &edited)
+        }
+        Artifact::LackingEvent => {
+            bundle.with_member("schemas/globals.lifecycle.json", &artifact_for(&lacking_success(), &namespaces(&namespace("seq"))))
+        }
+    }
+}
+
 fn check(host: Host, cases: Vec<Case>) {
     let workspace = LspWorkspace::new();
-    let (mut session, documents) = match host {
-        Host::Claudine(artifact) => {
-            let fixture = Fixture::new(workspace.path());
-            let schemas = fixture.repo().join("claudine/schemas");
-            let catalog = match artifact {
-                Artifact::Stale => GLOBALS.replace("The one-based iteration.", "Edited."),
-                _ => GLOBALS.to_string(),
-            };
-            write(&schemas.join("globals.yaml"), &catalog);
-            match artifact {
-                Artifact::Absent => {}
-                Artifact::LackingEvent => write(&schemas.join("globals.lifecycle.json"), &lacking_success()),
-                Artifact::Shipped | Artifact::Stale => write(&schemas.join("globals.lifecycle.json"), ARTIFACT),
-            }
-            write(&fixture.repo().join(".dmls.toml"), STRICT);
-            let mut session = LspFixture::start_with_snapshot(&workspace, fixture.snapshot());
-            session.initialize(initialize_params(&fixture.repo()));
-            let documents: Vec<PathBuf> = (0..cases.len())
-                .map(|index| fixture.document(&format!("doc{index}.md"), &cases[index].text))
-                .collect();
-            (session, documents)
-        }
-        Host::Md => {
-            let root = workspace.path();
-            for dir in [".git/objects", ".git/refs/heads"] {
-                std::fs::create_dir_all(root.join(dir)).unwrap();
-            }
-            write(&root.join(".git/HEAD"), "ref: refs/heads/main\n");
-            write(&root.join(".dmls.toml"), STRICT);
-            let mut session = LspFixture::start(&workspace);
-            session.initialize(initialize_params(root));
-            let documents: Vec<PathBuf> = (0..cases.len())
-                .map(|index| {
-                    let path = root.join(format!("doc{index}.md"));
-                    write(&path, &cases[index].text);
-                    path
-                })
-                .collect();
-            (session, documents)
-        }
-    };
-    for (case, path) in cases.iter().zip(&documents) {
+    let root = workspace.path();
+    match host {
+        Host::Claudine(artifact) => claudine_host::install(root, &bundle_for(artifact)),
+        Host::Md => crate::registered_host_views::repository(root, &[]),
+    }
+    write(&root.join(".dmls.toml"), STRICT);
+    let mut session = LspFixture::start(&workspace);
+    session.initialize(initialize_params(root));
+    let texts: Vec<String> = cases
+        .iter()
+        .map(|case| match host {
+            Host::Claudine(_) => claudine_host::marked(&case.text),
+            Host::Md => case.text.clone(),
+        })
+        .collect();
+    let documents: Vec<PathBuf> = texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let path = root.join(format!("doc{index}.md"));
+            write(&path, text);
+            path
+        })
+        .collect();
+    for ((case, text), path) in cases.iter().zip(&texts).zip(&documents) {
         let uri = uri_of(path);
-        open(&session, &uri, &case.text);
+        open(&session, &uri, text);
         let diagnostics = latest_diagnostics(&mut session, &uri);
-        let label = format!("{host:?}\n{}", case.text);
+        let label = format!("{host:?}\n{text}");
 
-        let expected: Vec<u64> = case.warns.iter().map(|needle| line_of(&case.text, needle)).collect();
+        let expected: Vec<u64> = case.warns.iter().map(|needle| line_of(text, needle)).collect();
         assert_eq!(call_lines(&diagnostics), expected, "{label}\n{diagnostics:#?}");
         if case.parity {
-            assert_eq!(library_lines(host, &case.text), expected, "the library walk disagrees: {label}");
+            assert_eq!(library_lines(host, text), expected, "the library walk disagrees: {label}");
         } else if matches!(host, Host::Claudine(Artifact::Shipped)) {
             let error = darkmatter::lifecycle::parse_lifecycle_config_with(
-                &frontmatter_of(&case.text),
+                &frontmatter_of(text),
                 Path::new("doc.md"),
-                &shipped_profile().parse_options(None),
+                &registered_profile().parse_options(None),
             )
             .expect_err("Claudine refuses a Darkmatter spelling");
             assert!(error.to_string().contains("blocked") || error.to_string().contains("start"), "{error}");
@@ -298,21 +290,6 @@ fn check(host: Host, cases: Vec<Case>) {
                 .filter(|diagnostic| diagnostic["code"].as_str().is_some_and(|code| code.starts_with("dm.expression.")))
                 .collect();
             assert!(expression.is_empty(), "{label}\n{expression:#?}");
-        }
-        let incomplete: Vec<&str> = diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic["code"] == json!(INCOMPLETE))
-            .map(|diagnostic| diagnostic["message"].as_str().unwrap())
-            .collect();
-        match host {
-            Host::Claudine(artifact) => match incomplete_reason(artifact) {
-                None => assert!(incomplete.is_empty(), "{label}\n{incomplete:#?}"),
-                Some(reason) => {
-                    assert_eq!(incomplete.len(), 1, "{label}\n{diagnostics:#?}");
-                    assert!(incomplete[0].contains("globals.lifecycle.json") && incomplete[0].contains(reason), "{}", incomplete[0]);
-                }
-            },
-            Host::Md => assert!(incomplete.is_empty(), "{label}\n{incomplete:#?}"),
         }
     }
     session.shutdown();
@@ -344,17 +321,17 @@ fn call_lines(diagnostics: &[Value]) -> Vec<u64> {
     lines
 }
 
-/// The profile the committed artifact rebuilds for the shipped catalog.
-fn shipped_profile() -> HostLifecycleProfile {
-    let path = "claudine/schemas/globals.yaml";
-    let catalog = GlobalCatalog::from_documents(
-        path,
-        &[(path, GLOBALS)],
-        &[GlobalRequirement::shape("seq"), GlobalRequirement::shape("loop"), GlobalRequirement::shape("group")],
-    )
-    .expect("the shipped catalog loads");
-    HostLifecycleProfile::from_artifact(std::sync::Arc::new(catalog), Path::new(path), GLOBALS, FactsArtifact::Text(ARTIFACT))
-        .expect("the committed artifact reads")
+/// The lifecycle profile the registration load builds from the valid
+/// bundle, loaded once.
+fn registered_profile() -> Arc<HostLifecycleProfile> {
+    static PROFILE: OnceLock<Arc<HostLifecycleProfile>> = OnceLock::new();
+    Arc::clone(PROFILE.get_or_init(|| {
+        let fixture = crate::host_fixtures::Fixture::new();
+        fixture.install_bundle("claudine", &claudine_host::bundle());
+        let loaded = fixture.load_references(&[&format!("../claudine/{}", crate::host_fixtures::MANIFEST_NAME)]);
+        assert!(loaded.diagnostics.is_empty(), "{:#?}", loaded.diagnostics);
+        Arc::clone(loaded.profiles[0].lifecycle())
+    }))
 }
 
 fn frontmatter_of(text: &str) -> Value {
@@ -371,7 +348,7 @@ fn library_lines(host: Host, text: &str) -> Vec<u64> {
     let schema = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .effective_for(&markdown)
         .expect("the schema resolves");
-    let profile = matches!(host, Host::Claudine(_)).then(shipped_profile);
+    let profile = matches!(host, Host::Claudine(_)).then(registered_profile);
     let (config, registry) = match &profile {
         Some(profile) => (
             darkmatter::lifecycle::parse_lifecycle_config_with(&frontmatter, Path::new("doc.md"), &profile.parse_options(None)),

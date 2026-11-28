@@ -34,6 +34,15 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   `FileStore` is allowlisted (exact counts) to the remote transport cache, and
   the deleted symbols may not reappear. Update its allowlist deliberately when
   a transport-cache file legitimately changes its `FileStore` uses.
+- `md compose` attaches its shared remote runtime before the reference
+  check with `with_shared_remote_fetch_under(&remote_config)` (built under
+  the `--allow host=HOST` config and cache root, while the reference check
+  keeps the default `remote_read_config`, so it takes no ICMP grant); the
+  reference check, a combined report's passive composition (through
+  `without_store`), pre-flight, and composition fetch each URL once
+  (`cli/tests/l1/compose_shared_observations.rs`). A dry run's passes share
+  runtimes through `PassiveObservations` (see requests.md, "Data runtime and
+  read set").
 - Configuring a cache root mutates nothing. `FileStore::at` only records the
   path and creates directories inside the write that needs them. A missing root
   stays missing and an existing one stays byte-identical unless an artifact is

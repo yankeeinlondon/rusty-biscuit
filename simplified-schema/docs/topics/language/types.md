@@ -48,7 +48,7 @@ For a practical introduction with worked examples, see
 
 | Type         | Accepts                                                                                                | Notes                                                                                                                                                                           |
 |--------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `string`     | Any YAML string scalar.                                                                                | Constraints: `min`, `max`, `not-empty`, `pattern`, `suggest`, `default`, `required`.                                                                                              |
+| `string`     | Any YAML string scalar.                                                                                | Constraints: `min`, `max`, `not-empty`, `no-coerce`, `pattern`, `suggest`, `default`, `required`.                                                                                 |
 | `date`       | ISO-8601 date `YYYY-MM-DD`.                                                                            | JSON Schema `format: date`.                                                                                                                                                     |
 | `datetime`   | An ISO 8601 datetime `YYYY-MM-DDThh:mm[:ss[.ms]]` (a space may replace `T`) with an **optional** offset (`Z` or `±HH:MM`); a value with an offset must be RFC 3339, seconds included. | JSON Schema `format: darkmatter-datetime` (the built-in `date-time` requires an offset). See [Custom Vocabulary](../custom-vocabulary.md). |
 | `time`       | A time of day `hh:mm`, `hh:mm:ss`, or `hh:mm:ss.ms` with an **optional** offset (`Z` or `±HH:MM`); with an offset, seconds are required (`14:30` is valid, `14:30Z` is not). | JSON Schema `format: darkmatter-time` (the built-in `time` requires an offset). See [Custom Vocabulary](../custom-vocabulary.md). |
@@ -146,11 +146,27 @@ is deliberately capped at these authored presentations:
 - implicit scalar-key block and flow mappings;
 - explicit scalar-key block mapping pairs, including compact mapping items in
   block sequences; and
-- mapping-value anchors and scalar aliases used by the shipped schema corpus.
+- anchors, standard YAML tags, and aliases on mapping values and on block or
+  flow sequence items.
 
 Serializers often produce indentless lists, and editors may wrap values onto
 continuation lines. Each presentation has the same meaning as its
 conventionally indented or single-line equivalent.
+
+YAML comments can follow a value or appear inside a flow collection. For
+example, `label: string # Display label` declares a string. A hash within a
+quoted value or attached to plain scalar text is part of the value.
+
+For example, these type definitions describe a label and a result that accepts
+either a label or a number. The alias refers to the anchored string type.
+
+```yaml
+types:
+  Label: &label string
+  Result: [*label, !!str number]
+```
+
+A diagnostic in the aliased arm marks the `*label` token.
 
 **Indentless sequences.** Wherever the grammar accepts a sequence, its items
 may sit at the parent key's column. The list ends at the next line at that
@@ -241,8 +257,7 @@ outside the v1 source-map and DMLS contract; a schema file that uses one fails
 to load with `could not project SimplifiedSchema expression spans through YAML
 source`. Every non-comment line of a schema value must belong to a presentation
 the grammar recognizes, so an unrecognized one fails rather than being skipped.
-Frontmatter lookup is more tolerant and also follows tags and comments
-inside a flow collection; that does not extend to schema documents. Authors should
+Frontmatter lookup also follows tags. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.
@@ -578,8 +593,17 @@ $schema:
 | `max(n)`       | Maximum length.                                                                                   | `maxLength`             |
 | `not-empty`    | Disallow empty / all-whitespace.                                                                  | `pattern: "\\S"`        |
 | `pattern(re)`  | ECMA-262 regex compiled with `jsonschema::PatternOptions::regex()` (ReDoS-safe, linear-time).     | `pattern`               |
+| `no-coerce`    | Accept only text as written: a native number or boolean is a type mismatch, never converted.      | `x-darkmatter-no-coerce: true` (annotation) |
 | `default(s)`   | Default string.                                                                                   | `default`               |
 | `required`     | Property is required.                                                                             | parent `required` entry |
+
+`no-coerce` is for a string whose meaning a converted number or boolean would
+fake, such as a file reference: with `source: string(no-coerce)`, `source: 42`
+and `source: true` are type errors, while `source: "42"` and `source: ./a.md`
+are accepted. Strict validation already refuses a non-string, so the
+constraint changes only [conversion](../conversion.md#conversion-rules). In a
+union, the other options keep their own conversions. It is valid only on
+`string`; `alphanumeric` never converts a number or boolean anyway.
 
 A value must satisfy every pattern. When an atom has more than one pattern-producing constraint (for example `not-empty` with a `pattern(...)`, or several `pattern(...)` constraints), each lowers to its own `allOf` entry instead of a single `pattern` keyword.
 

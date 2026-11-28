@@ -45,7 +45,7 @@ fn package<'a>(report: &'a Value, path: &str) -> &'a Value {
 }
 
 fn root(path: &Path) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap())
+    biscuit_file::to_forward_slash_string(&biscuit_file::canonicalize_simplified(path).unwrap())
 }
 
 #[test]

@@ -24,7 +24,7 @@ fn outcome(patterns: &[&str], fx: &Fixture) -> Outcome {
                 .matches
                 .iter()
                 .map(|path| {
-                    biscuit_file::to_portable_string(path.strip_prefix(&fx.root).unwrap())
+                    biscuit_file::to_forward_slash_string(path.strip_prefix(&fx.root).unwrap())
                 })
                 .collect(),
         ),

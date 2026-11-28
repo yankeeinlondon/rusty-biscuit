@@ -39,7 +39,7 @@ use simplified_schema::resolve::buffers::SourceBuffers;
 use super::analysis::{AnalysisIdentity, CrossSnapshotSchema, FrontmatterAnalysis};
 use super::references::SchemaReferenceFacts;
 use super::registry::InstalledKinds;
-use super::yaml_contract::PreparedYaml;
+use super::yaml_contract::{CatalogSources, PreparedYaml};
 use super::{FileFailures, FrontmatterAst, NamedTypeCatalog, OverlayCache, SchemaBundle, file_failures, suggestions};
 use crate::context::DocumentResolution;
 use crate::work_counters;
@@ -61,7 +61,9 @@ pub enum YamlDocumentOutcome {
     /// schema-dependent request.
     Pending,
     /// Selecting or preparing the schema failed: an ambiguous, reserved, or
-    /// unavailable `kind`, or a root `$schema` that does not resolve.
+    /// unavailable `kind`, a callable catalog whose callable semantics fail
+    /// ([`SchemaError::CallableCatalog`], its related files resolved), or a
+    /// root `$schema` that does not resolve.
     Failed(Arc<SchemaError>),
     /// The document was judged against its selected schema.
     Validated(Arc<YamlValidation>),
@@ -72,9 +74,16 @@ pub enum YamlDocumentOutcome {
 pub struct YamlDocumentOverlay {
     /// What judging the current buffer produced.
     pub outcome: YamlDocumentOutcome,
+    /// The text of each other file a failed callable catalog's related
+    /// locations name, read when the failure was prepared.
+    pub(crate) catalog_sources: CatalogSources,
 }
 
 impl YamlDocumentOverlay {
+    fn new(outcome: YamlDocumentOutcome) -> Self {
+        Self { outcome, catalog_sources: CatalogSources::default() }
+    }
+
     /// The validated document, when a schema was selected and prepared.
     pub fn validation(&self) -> Option<&YamlValidation> {
         match &self.outcome {
@@ -85,10 +94,12 @@ impl YamlDocumentOverlay {
 
     /// Whether the document's `kind` or its location as a configuration
     /// file selected its schema, so its root `$schema` (if any) is data
-    /// rather than a reference.
+    /// rather than a reference. A kind that failed to select, or a callable
+    /// catalog that failed its callable checks, keeps the claim.
     pub fn kind_route(&self) -> bool {
         matches!(self.validation().map(|validation| &validation.route), Some(Route::Kind(_) | Route::Configuration))
-            || matches!(&self.outcome, YamlDocumentOutcome::Failed(error) if matches!(**error, SchemaError::KindSelection { .. }))
+            || matches!(&self.outcome, YamlDocumentOutcome::Failed(error)
+                if matches!(**error, SchemaError::KindSelection { .. } | SchemaError::CallableCatalog { .. }))
     }
 }
 
@@ -139,7 +150,10 @@ impl OverlayCache {
         let prepared = resolution
             .context()
             .ok()
-            .and_then(|context| self.contracts.key(text, path, context, resolution.generation(), kinds.as_ref()))
+            .and_then(|context| {
+                let hosts = self.hosts.lookup(context);
+                self.contracts.key(text, path, context, resolution.generation(), kinds.as_ref(), hosts.as_ref())
+            })
             .and_then(|key| self.contracts.lookup(path, key))
             .cloned();
         let context_key = match resolution.context() {
@@ -188,7 +202,7 @@ fn build(
             // while the buffer is mid-edit; nothing is validated.
             return match last_good {
                 Some(previous) => YamlState {
-                    overlay: Arc::new(YamlDocumentOverlay { outcome: error }),
+                    overlay: Arc::new(YamlDocumentOverlay::new(error)),
                     stale: true,
                     // Located in the last text that loaded.
                     suggestions: Vec::new(),
@@ -199,10 +213,10 @@ fn build(
         }
     };
     if resolution.context().is_err() {
-        return parsed_state(YamlDocumentOutcome::Unvalidated, None, revision, text, key, shared);
+        return parsed_state(YamlDocumentOverlay::new(YamlDocumentOutcome::Unvalidated), None, revision, text, key, shared);
     }
     let Some(prepared) = prepared else {
-        return parsed_state(YamlDocumentOutcome::Pending, None, revision, text, key, shared);
+        return parsed_state(YamlDocumentOverlay::new(YamlDocumentOutcome::Pending), None, revision, text, key, shared);
     };
     let outcome = match (&prepared.contract, &prepared.validation) {
         (Err(error), _) => YamlDocumentOutcome::Failed(Arc::clone(error)),
@@ -219,7 +233,8 @@ fn build(
         YamlDocumentOutcome::Failed(error) => file_failures(error),
         _ => FileFailures::default(),
     };
-    let mut state = parsed_state(outcome, bundle, revision, text, key, shared);
+    let overlay = YamlDocumentOverlay { outcome, catalog_sources: Arc::clone(&prepared.catalog_sources) };
+    let mut state = parsed_state(overlay, bundle, revision, text, key, shared);
     state.file_failures = failures;
     state.schema_references = Arc::clone(&prepared.schema_references);
     state.named_types = Arc::clone(&prepared.named_types);
@@ -288,14 +303,13 @@ fn bundle(validation: &YamlValidation) -> SchemaBundle {
 /// The state of a document that loaded: its tree, parsed with `$schema` as
 /// data when its `kind` selected (or failed to select) the schema.
 fn parsed_state(
-    outcome: YamlDocumentOutcome,
+    overlay: YamlDocumentOverlay,
     bundle: Option<Arc<SchemaBundle>>,
     revision: Option<i32>,
     text: &str,
     key: u64,
     shared: &Arc<CrossSnapshotSchema>,
 ) -> YamlState {
-    let overlay = YamlDocumentOverlay { outcome };
     let ast = FrontmatterAst::parse_yaml_document(text, overlay.kind_route()).ast.map(Arc::new);
     let analysis = analysis(revision, text, key, bundle.as_ref(), ast.as_ref(), shared);
     let suggestions = ast.as_deref().map(|ast| suggestions::yaml_document_lints(text, ast)).unwrap_or_default();
@@ -321,7 +335,7 @@ fn empty_state(
     shared: &Arc<CrossSnapshotSchema>,
 ) -> YamlState {
     YamlState {
-        overlay: Arc::new(YamlDocumentOverlay { outcome }),
+        overlay: Arc::new(YamlDocumentOverlay::new(outcome)),
         ast: None,
         stale: false,
         bundle: None,

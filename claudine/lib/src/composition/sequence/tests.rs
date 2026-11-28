@@ -9,7 +9,7 @@ fn resolve_sequence_reference(
     raw: &str,
     source_path: &Path,
 ) -> Result<std::path::PathBuf, CompositionError> {
-    resolve_sequence_reference_in_context(raw, source_path, &crate::test_support::context_for(source_path))
+    resolve_sequence_reference_in_context(raw, ExecutableField::Sequence, source_path, &crate::test_support::context_for(source_path))
 }
 use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
 use serde_json::Value;
@@ -120,7 +120,7 @@ fn inline_object_step_missing_name_fails() {
     let source = make_source(&dir, &[("sequence", json!([{"color": "red"}]))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceStepNameMissing { index: 0 }),
+        matches!(err, CompositionError::SequenceStepNameMissing { index: 0, .. }),
         "got: {err}"
     );
 }
@@ -157,7 +157,7 @@ fn invalid_sequence_type_fails() {
     let source = make_source(&dir, &[("sequence", json!(42))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceInvalid(_)),
+        matches!(err, CompositionError::SequenceInvalid { .. }),
         "got: {err}"
     );
 }
@@ -301,7 +301,7 @@ sequence:
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "seq"),
+        matches!(err, CompositionError::SequenceReservedTemplateKey { key: ref k, .. } if k == "seq"),
         "got: {err}"
     );
 }
@@ -646,7 +646,7 @@ fn tilde_reference_expands_against_home_directory() {
     let request_context = FileResolutionContext::new(source_path.parent().unwrap())
         .with_home_dir(&home_dir);
     let resolved =
-        resolve_sequence_reference_in_context("~/steps.yaml", &source_path, &request_context)
+        resolve_sequence_reference_in_context("~/steps.yaml", ExecutableField::Sequence, &source_path, &request_context)
             .unwrap();
 
     assert_eq!(resolved, home_dir.join("steps.yaml"));
@@ -703,7 +703,7 @@ fn explicit_dot_slash_is_source_relative_only() {
     assert!(
         matches!(
             err,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceReferenceResolution {
                 source: SequenceLoadCause::NotFound { .. },
                 ..
             }
@@ -750,17 +750,17 @@ fn rooted_magic_payload_is_rejected_across_file_sequence_and_transclusion_surfac
         let sequence_error = resolve_sequence_reference(raw, &source_path).unwrap_err();
         assert!(matches!(
             sequence_error,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceReferenceResolution {
                 source: SequenceLoadCause::Reference(FileReferenceError::InvalidSyntax(_)),
                 ..
             }
         ));
 
         let contextual_sequence_error =
-            resolve_sequence_reference_in_context(raw, &source_path, &request_context).unwrap_err();
+            resolve_sequence_reference_in_context(raw, ExecutableField::Sequence, &source_path, &request_context).unwrap_err();
         assert!(matches!(
             contextual_sequence_error,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceReferenceResolution {
                 source: SequenceLoadCause::Reference(FileReferenceError::InvalidSyntax(_)),
                 ..
             }
@@ -780,7 +780,7 @@ fn rooted_magic_payload_is_rejected_across_file_sequence_and_transclusion_surfac
             transclusion_error,
             MarkdownError::Transclusion(inner)
                 if matches!(
-                    inner.as_ref(),
+                    inner.without_site(),
                     TransclusionError::FileReference(FileReferenceError::InvalidSyntax(_))
                 )
         ));
@@ -804,7 +804,7 @@ fn missing_environment_variable_surface_is_preserved() {
     assert!(
         matches!(
             error,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceReferenceResolution {
                 source: SequenceLoadCause::Reference(_),
                 ..
             }
@@ -878,7 +878,7 @@ fn external_malformed_yaml_carries_typed_yaml_cause() {
     assert!(
         matches!(
             err,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceSourceParse {
                 source: SequenceLoadCause::Yaml(_),
                 ..
             }
@@ -909,7 +909,7 @@ fn external_missing_file_reference_yields_not_found() {
     assert!(
         matches!(
             err,
-            CompositionError::SequenceExternalLoad {
+            CompositionError::SequenceReferenceResolution {
                 source: SequenceLoadCause::NotFound { .. },
                 ..
             }
@@ -1074,7 +1074,7 @@ fn object_step_extracts_state_and_rejects_reserved_state_key() {
     assert!(
         matches!(
             err,
-            CompositionError::SequenceReservedStateKey { index: 0, ref key } if key == "id"
+            CompositionError::SequenceReservedStateKey { index: 0, ref key, .. } if key == "id"
         ),
         "authoring the generated `id` key must be rejected, got: {err:?}"
     );
@@ -1115,7 +1115,7 @@ fn with_is_rejected_on_every_executable_but_prompt() {
         assert!(
             matches!(
                 &err,
-                CompositionError::SequenceInvalidTaskField { index: 0, field, executable: got }
+                CompositionError::SequenceInvalidTaskField { index: 0, field, executable: got, .. }
                     if field == "with" && got == executable
             ),
             "`with` on a {executable} task must be rejected, got: {err:?}"
@@ -1348,7 +1348,7 @@ mod clean_break {
         assert!(
             matches!(
                 error,
-                CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`sequence:`")
+                CompositionError::SequenceExternalWrongType { problem: ref msg, .. } if msg.contains("`sequence:`")
             ),
             "the rejection must name the replacement property, got: {error}",
         );
@@ -1564,7 +1564,7 @@ mod grammar_tests {
     #[test]
     fn non_list_non_string_values_are_rejected() {
         let error = classify_source(&json!(42)).unwrap_err();
-        assert!(matches!(error, CompositionError::SequenceInvalid(_)), "got: {error}");
+        assert!(matches!(error, CompositionError::SequenceInvalid { .. }), "got: {error}");
     }
 
     // -- negative suffix syntax --------------------------------------------
@@ -1621,7 +1621,7 @@ mod grammar_tests {
     fn an_unknown_operator_is_rejected() {
         let error = classify_source(&json!("t.yaml::shuffle(a)")).unwrap_err();
         assert!(
-            matches!(error, CompositionError::SequenceUnknownOperator(ref v) if v == "shuffle"),
+            matches!(error, CompositionError::SequenceUnknownOperator { operator: ref v, .. } if v == "shuffle"),
             "got: {error}"
         );
     }
@@ -1638,7 +1638,8 @@ mod grammar_tests {
                 matches!(
                     error,
                     CompositionError::SequenceOperatorArity {
-                        operator: ref o, expected: e, found: f
+                        operator: ref o, expected: e, found: f,
+                        ..
                     } if o == operator && e == expected && f == found
                 ),
                 "`{raw}` got: {error}"
@@ -1772,7 +1773,7 @@ mod source_resolution {
         assert!(
             matches!(
                 error,
-                CompositionError::SequenceOffsetNotAList { ref path, ref found }
+                CompositionError::SequenceOffsetNotAList { ref path, ref found, .. }
                     if path == "colors.data" && found == "string"
             ),
             "got: {error}"
@@ -1877,7 +1878,7 @@ mod source_resolution {
         let source = make_source(&dir, &[("sequence", json!([1, 2]))], "Prompt");
         let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
         assert!(
-            matches!(error, CompositionError::SequenceInvalid(_)),
+            matches!(error, CompositionError::SequenceInvalid { .. }),
             "an authored numeric step is a typo, got: {error}"
         );
     }
@@ -1888,7 +1889,7 @@ mod source_resolution {
     fn formal_documents_stay_strict() {
         let error = plan_from("s.yaml", "sequence:\n  - color: red\n", "s.yaml").unwrap_err();
         assert!(
-            matches!(error, CompositionError::SequenceStepNameMissing { index: 0 }),
+            matches!(error, CompositionError::SequenceStepNameMissing { index: 0, .. }),
             "got: {error}"
         );
     }
@@ -1913,7 +1914,7 @@ mod source_resolution {
     fn null_items_are_rejected_even_leniently() {
         let error = plan_from("d.json", "[\"ok\", null]", "d.json").unwrap_err();
         assert!(
-            matches!(error, CompositionError::SequenceNullItem { index: 1 }),
+            matches!(error, CompositionError::SequenceNullItem { index: 1, .. }),
             "got: {error}"
         );
     }
@@ -1934,7 +1935,7 @@ mod source_resolution {
     fn a_root_that_is_neither_a_list_nor_a_sequence_is_rejected() {
         let error = plan_from("d.yaml", "description: nothing here\n", "d.yaml").unwrap_err();
         assert!(
-            matches!(error, CompositionError::SequenceExternalWrongType(_)),
+            matches!(error, CompositionError::SequenceExternalWrongType { .. }),
             "got: {error}"
         );
     }
@@ -2046,7 +2047,7 @@ mod dynamic_sources {
             darkmatter::markdown::literal_token::encode("./steps.yaml"),
         ] {
             let error = classify_source(&json!(raw)).unwrap_err();
-            assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+            assert!(matches!(error, CompositionError::SequenceInvalid { .. }), "{error}");
         }
     }
 
@@ -2183,6 +2184,7 @@ mod dynamic_sources {
                     status: "exit status: 1".to_string(),
                     stderr: "boom".to_string(),
                 },
+                site: Box::new(crate::composition::SequenceSite::unlocated()),
             })
         };
         let error = resolve_sequence_plan_with(
@@ -2699,7 +2701,7 @@ mod task_guards_and_container_loops {
         let data = std::path::PathBuf::from("/work/tasks.jsonl");
         let error = normalize::normalize_plan_at(
             &[json!({"name": "a", "shell": "x", "when": ""})],
-            SequenceSource::DataFile { path: data.clone() }, &origin(), true, "",
+            SequenceSource::DataFile { path: data.clone(), list: String::new() }, &origin(), true, "",
         ).unwrap_err();
         assert!(
             matches!(&error, CompositionError::TaskWhenInvalid { source_path, property, .. } if source_path == &data && property == "[0].when"),
@@ -2720,7 +2722,7 @@ mod json_duplicate_keys {
 
     fn duplicate(error: CompositionError) -> (String, String, Option<usize>) {
         match error {
-            CompositionError::SequenceExternalLoad { source: SequenceLoadCause::DuplicateKey { key, path, line }, .. } => (key, path, line),
+            CompositionError::SequenceSourceParse { source: SequenceLoadCause::DuplicateKey { key, path, line }, .. } => (key, path, line),
             other => panic!("expected a duplicate-key load error, got {other}"),
         }
     }
@@ -2732,6 +2734,37 @@ mod json_duplicate_keys {
             assert_eq!((key.as_str(), path.as_str(), line), ("a", "<root>", None), "{file}");
             let (key, path, _) = duplicate(load(file, r#"{"sequence": [{"name": "x"}, {"group": {"name": "g", "name": "h"}}]}"#).unwrap_err());
             assert_eq!((key.as_str(), path.as_str()), ("name", "sequence[1].group"), "{file}");
+        }
+    }
+
+    /// Each failure names the operation that failed: a read, or the parse
+    /// stage, and a JSON document's repeated key carries its property path.
+    #[test]
+    fn a_load_failure_names_the_operation_that_failed() {
+        use crate::composition::error::SourceParseStage as Stage;
+        let stage = |error: CompositionError| match error {
+            CompositionError::SequenceSourceParse { stage, site, .. } => (stage, site.property),
+            other => panic!("expected a parse failure, got {other:?}"),
+        };
+        assert_eq!(stage(load("d.yaml", "a: [1, 2\n").unwrap_err()), (Stage::Yaml, None));
+        assert_eq!(stage(load("d.json5", "{ a: 1 } trailing").unwrap_err()), (Stage::Json5, None));
+        assert_eq!(stage(load("d.jsonl", "{\"a\": 1}\nnot json\n").unwrap_err()), (Stage::JsonLine, None));
+        assert_eq!(
+            stage(load("d.json", r#"{"sequence": [{"name": "x", "name": "y"}]}"#).unwrap_err()),
+            (Stage::DuplicateKey, Some("sequence[0].name".to_string()))
+        );
+        // A repeated key on one line of a line-delimited file has no
+        // document path: the line number locates it.
+        assert_eq!(stage(load("d.jsonl", "{\"a\": 1, \"a\": 2}\n").unwrap_err()), (Stage::DuplicateKey, None));
+
+        let dir = TempDir::new().unwrap();
+        assert!(
+            matches!(data::load_document(dir.path()), Err(CompositionError::SequenceSourceRead { field: None, .. })),
+            "a directory is a read failure, not a parse failure"
+        );
+        // Control: a well-formed document of each kind loads.
+        for (file, text) in [("d.yaml", "a: [1, 2]\n"), ("d.json5", "{ a: 1 }"), ("d.jsonl", "{\"a\": 1}\n")] {
+            load(file, text).unwrap_or_else(|error| panic!("{file}: {error}"));
         }
     }
 
@@ -2823,10 +2856,11 @@ mod robustness_matrix {
     /// The index an item-shape error names.
     fn item_index(error: &CompositionError) -> usize {
         match error {
-            CompositionError::SequenceNullItem { index } => *index,
-            CompositionError::SequenceInvalid(message) => {
-                let rest = message.strip_prefix("step at index ").unwrap_or_else(|| panic!("{message}"));
-                rest.split_whitespace().next().unwrap().parse().unwrap()
+            CompositionError::SequenceNullItem { index, .. } => *index,
+            CompositionError::SequenceInvalid { message, .. } => {
+                let rest = message.strip_prefix("step ").unwrap_or_else(|| panic!("{message}"));
+                let step: usize = rest.split_whitespace().next().unwrap().parse().unwrap();
+                step - 1
             }
             other => panic!("expected an item-shape error, got {other:?}"),
         }
@@ -2840,7 +2874,7 @@ mod robustness_matrix {
         assert!(resolve(&dir, json!([])).unwrap().unwrap().steps.is_empty());
         for value in [json!(null), json!(true), json!(4.5), json!({ "name": "a" })] {
             let error = resolve(&dir, value.clone()).unwrap_err();
-            assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{value}: {error:?}");
+            assert!(matches!(error, CompositionError::SequenceInvalid { .. }), "{value}: {error:?}");
         }
     }
 
@@ -2928,7 +2962,7 @@ mod loader_matrix {
                 "direct: {text}"
             );
             assert!(
-                matches!(data::load_document_from_text(&path, text), Err(CompositionError::SequenceExternalLoad { source: SequenceLoadCause::Yaml(_), .. })),
+                matches!(data::load_document_from_text(&path, text), Err(CompositionError::SequenceSourceParse { source: SequenceLoadCause::Yaml(_), .. })),
                 "referenced: {text}"
             );
         }
@@ -2981,7 +3015,7 @@ mod loader_matrix {
         let source = make_source(&dir, &[("sequence", json!("child.yaml"))], "Prompt");
         let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
         assert!(
-            matches!(&error, CompositionError::SequenceExternalLoad { context, source: SequenceLoadCause::Yaml(_) } if context.contains("child.yaml")),
+            matches!(&error, CompositionError::SequenceSourceParse { path, source: SequenceLoadCause::Yaml(_), .. } if path.ends_with("child.yaml")),
             "{error:?}"
         );
     }
@@ -2994,7 +3028,7 @@ mod loader_matrix {
         for file in ["d.json", "d.json5"] {
             let path = write(&dir, file, "{\"sequence\": [\"a\"]} trailing\n");
             assert!(
-                matches!(data::load_document(&path), Err(CompositionError::SequenceExternalLoad { source: SequenceLoadCause::Json5(_), .. })),
+                matches!(data::load_document(&path), Err(CompositionError::SequenceSourceParse { source: SequenceLoadCause::Json5(_), .. })),
                 "{file}"
             );
             let path = write(&dir, file, "// lead\n{\"sequence\": [\"a\", /* inline */ \"b\",],}\n");

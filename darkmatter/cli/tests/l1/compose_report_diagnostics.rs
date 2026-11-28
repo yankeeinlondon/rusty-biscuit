@@ -170,8 +170,9 @@ fn other_families_report_their_positions_and_no_reference_details() {
     }
 }
 
-/// Warnings and a failure holding no file of its own reach the envelope with
-/// the document's name, and a policy stop reports the same records.
+/// Warnings reach the envelope with the document's name, a policy stop
+/// reports the same records, and an inclusion's target failure names the
+/// document and line of the directive that wrote the target.
 #[test]
 fn warnings_and_a_typeless_failure_name_the_document() {
     let fixture = CliProcessFixture::named("report_document_fallback");
@@ -192,7 +193,9 @@ fn warnings_and_a_typeless_failure_name_the_document() {
             })
             .collect()
     };
-    assert_eq!(sources(&warned), [(7, Some(1)), (5, None)], "{warned:#}");
+    // The body composes to nothing, so the empty-body warning names the
+    // excluded block that accounts for it.
+    assert_eq!(sources(&warned), [(7, Some(1)), (5, None), (7, Some(1))], "{warned:#}");
 
     let output = fixture
         .command()
@@ -204,7 +207,7 @@ fn warnings_and_a_typeless_failure_name_the_document() {
     assert_eq!(output.status.code(), Some(1), "{blocked:#}");
     assert_eq!(sources(&blocked), [(7, Some(1))], "the stop is before the undeclared read is judged: {blocked:#}");
 
-    // The typed error names only its target, not the document that wrote it.
+    // The typed target failure names the directive that wrote the target.
     fixture.write_file("cwd/picture.png", "x");
     let (status, failed) = report(&fixture, &fixture.write_file("cwd/includes.md", "::file ./picture.png\n"));
     assert_eq!(status, Some(1), "{failed:#}");
@@ -213,13 +216,13 @@ fn warnings_and_a_typeless_failure_name_the_document() {
     };
     assert_eq!(record["code"], "dm.transclusion.failure", "{record:#}");
     assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), "includes.md", "{record:#}");
-    assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
+    assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&1.into(), &1.into()), "{record:#}");
 }
 
 /// A `::toc-linking` or `::file-links` failure names the document holding
 /// the directive: a transcluded child's names the child, not the composed
 /// root, whether it fails the run or the child's `::file` tolerates it, and
-/// the root's names the root.
+/// the root's names the root; each names the directive's authored line.
 #[test]
 fn a_toc_or_file_links_failure_names_the_document_holding_it() {
     let fixture = CliProcessFixture::named("report_toc_file_links_document");
@@ -241,7 +244,9 @@ fn a_toc_or_file_links_failure_names_the_document_holding_it() {
             };
             assert_eq!(record["severity"], severity, "{name}: {record:#}");
             assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), owner.as_str(), "{name}: {record:#}");
-            assert_eq!(record["source"]["line"], Value::Null, "{name}: {record:#}");
+            // The directive's line in its own file (R11-F2; this asserted a
+            // null line while the parser's line counted the current body).
+            assert_eq!(record["source"]["line"], 5, "{name}: {record:#}");
         }
     }
 }
@@ -309,12 +314,13 @@ fn in_a_repository(fixture: &CliProcessFixture) {
     std::fs::create_dir_all(fixture.cwd().join(".git/refs/heads")).unwrap();
 }
 
-/// A hyperlink leaving the repository is a resolution error, so
-/// `validate_references` returns `Err` after its graph is built. Composition
-/// never resolves a hyperlink: a check that read `Err` as clean let this
-/// document through with status 0.
+/// A hyperlink leaving the repository is a resolution error, which the check
+/// reports as that link's located `invalid file reference` issue; it refuses
+/// the run with status 1 (composition never resolves a hyperlink, so nothing
+/// else would), and the warning the check's preparation found first is still
+/// delivered.
 #[test]
-fn a_reference_check_that_cannot_run_fails_the_run() {
+fn an_unresolvable_link_refuses_the_run_and_keeps_the_earlier_warning() {
     for (path, lifecycle) in PATHS {
         let fixture = CliProcessFixture::named("report_check_failure");
         in_a_repository(&fixture);
@@ -331,12 +337,34 @@ fn a_reference_check_that_cannot_run_fails_the_run() {
         assert_eq!(report["document"], Value::Null, "{path}");
         assert_eq!(codes(&report), ["dm.expression.uncertain_call", "dm.reference.failure"], "the earlier warning survives; {path}: {report:#}");
         assert_eq!(report["diagnostics"][1]["failure"], "invalid-reference", "{path}: {report:#}");
+        let line = 8 + lifecycle.lines().count();
+        assert_eq!(report["diagnostics"][1]["source"]["line"], line, "{path}: {report:#}");
 
         let output = fixture.command().arg("compose").arg(&document).output().unwrap();
         let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
         assert_eq!(output.status.code(), Some(1), "{path}: {stderr}");
         assert!(output.stdout.is_empty(), "{path}: no document");
-        assert!(stderr.contains("file reference failure"), "{path}: {stderr}");
+        assert!(stderr.contains("invalid file reference in hyperlink"), "{path}: {stderr}");
+        assert!(stderr.contains(&format!("doc.md:{line}:1")), "{path}: {stderr}");
+    }
+}
+
+/// Any refused check delivers its preparation's warnings, composition never
+/// running to report them: a missing link target keeps the earlier warning
+/// too.
+#[test]
+fn a_refused_check_keeps_the_earlier_warning() {
+    for (path, lifecycle) in PATHS {
+        let fixture = CliProcessFixture::named("report_check_refused_warning");
+        let document = fixture.write_file(
+            "cwd/doc.md",
+            &format!("---\n{WARNS}{lifecycle}---\n{{{{ min(label, 5) }}}}\n\n[out](./gone.md)\n"),
+        );
+
+        let (status, report) = report(&fixture, &document);
+
+        assert_eq!(status, Some(1), "{path}: {report:#}");
+        assert_eq!(codes(&report), ["dm.expression.uncertain_call", "dm.reference.missing_hyperlink"], "{path}: {report:#}");
     }
 }
 
@@ -395,9 +423,10 @@ fn the_check_runs_no_shell_directive() {
 }
 
 /// A reference the file-reference grammar rejects: the graph build fails with
-/// a typed error that holds no file, on a document the command opened itself.
-/// The prologue resolves to `{{ title }}.md` (a literal token), as composition
-/// resolves it, before the grammar reads it.
+/// composition's typed target failure, which names the document and the
+/// `prologue` value that wrote the target (line 3, column 11), never a null
+/// line. The prologue resolves to `{{ title }}.md` (a literal token), as
+/// composition resolves it, before the grammar reads it.
 const UNPARSEABLE_PROLOGUE: &str = "---\ntitle: x\nprologue: \"{{{ title }}}.md\"\n---\n# Top\n";
 
 fn failure_source(fixture: &CliProcessFixture, args: &[&str], document: &Path) -> Value {
@@ -410,25 +439,46 @@ fn failure_source(fixture: &CliProcessFixture, args: &[&str], document: &Path) -
 }
 
 #[test]
-fn validate_refs_names_its_document_on_a_failure_with_no_file() {
+fn validate_refs_names_the_value_of_an_unparseable_prologue() {
     let fixture = CliProcessFixture::named("report_validate_refs_fallback");
     let document = fixture.write_file("doc.md", UNPARSEABLE_PROLOGUE);
 
     let source = failure_source(&fixture, &["validate", "refs"], &document);
 
     assert_eq!(file_of(&source["file"]).file_name().unwrap(), "doc.md");
-    assert_eq!(source["line"], Value::Null);
-    assert_eq!(source["column"], Value::Null);
+    assert_eq!(source["line"], 3);
+    assert_eq!(source["column"], 11);
 }
 
 #[test]
-fn graph_names_its_document_on_a_failure_with_no_file() {
+fn graph_names_the_value_of_an_unparseable_prologue() {
     let fixture = CliProcessFixture::named("report_graph_fallback");
     let document = fixture.write_file("doc.md", UNPARSEABLE_PROLOGUE);
 
     let source = failure_source(&fixture, &["graph"], &document);
 
     assert_eq!(file_of(&source["file"]).file_name().unwrap(), "doc.md");
-    assert_eq!(source["line"], Value::Null);
-    assert_eq!(source["column"], Value::Null);
+    assert_eq!(source["line"], 3);
+    assert_eq!(source["column"], 11);
+}
+
+/// A failure whose typed error holds no file of its own takes the document
+/// the command opened (`with_document_fallback` through the sink), with no
+/// line: a chain of inclusions deeper than the transclusion limit (16), whose
+/// depth error names only the limit.
+#[test]
+fn reference_commands_name_their_document_on_a_failure_with_no_file() {
+    let fixture = CliProcessFixture::named("report_reference_fallback");
+    let mut document = fixture.write_file("n18.md", "# End\n");
+    for depth in (0..18).rev() {
+        document = fixture.write_file(format!("n{depth}.md"), &format!("# N{depth}\n\n::file ./n{}.md\n", depth + 1));
+    }
+
+    for args in [&["validate", "refs"][..], &["graph"][..]] {
+        let source = failure_source(&fixture, args, &document);
+
+        assert_eq!(file_of(&source["file"]).file_name().unwrap(), "n0.md", "{args:?}: {source:#}");
+        assert_eq!(source["line"], Value::Null, "{args:?}: {source:#}");
+        assert_eq!(source["column"], Value::Null, "{args:?}: {source:#}");
+    }
 }

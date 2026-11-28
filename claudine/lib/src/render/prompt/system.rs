@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::to_forward_slash_string;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -52,10 +52,10 @@ fn resolve_display_label(
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
         (Some(rel), Some(true)) => {
-            format!("{NERD_FONT_REPO_GLYPH}/{}", to_portable_string(rel))
+            format!("{NERD_FONT_REPO_GLYPH}/{}", to_forward_slash_string(rel))
         }
-        (Some(rel), _) => format!("./{}", to_portable_string(rel)),
-        (None, _) => to_portable_string(absolute),
+        (Some(rel), _) => format!("./{}", to_forward_slash_string(rel)),
+        (None, _) => to_forward_slash_string(absolute),
     }
 }
 

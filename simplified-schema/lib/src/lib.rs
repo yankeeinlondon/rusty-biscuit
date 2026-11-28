@@ -54,6 +54,7 @@ pub mod format;
 pub mod frontmatter_shape;
 pub mod json_shape;
 pub mod mapping_orders;
+pub mod member_envelope;
 pub mod numeric;
 pub mod origin;
 pub mod outcome;
@@ -96,12 +97,13 @@ pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use defaults::{AppliedDefault, DefaultPlan, DefaultPreparation};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
-    CompositionTargetKind, CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
+    CompositionTargetKind, CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, HostTriggerConflict, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
 };
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
     nested_property_shape_with_definitions, property_def_at_path, property_def_at_path_with_definitions,
+    root_union_property_shape,
 };
 pub use json_shape::shape_from_json_schema;
 pub use mapping_orders::MappingOrders;
@@ -123,7 +125,7 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 pub use simplified::alias_search_work;
 pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, CompositionOperand, Constraint, DRAFT_2020_12, DecodedScalar,
-    Extends, InlineSpread, ObjectComposition,
+    Extends, InlineSpread, KeyDeclarations, ObjectComposition,
     DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
@@ -137,7 +139,8 @@ pub use simplified::{
     is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
     is_union_arm_path, lint_suggestions, locate_composition_operand_cursor,
     locate_composition_operand_cursor_in_scalar, locate_schema_declaration_cursor,
-    locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
+    locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_carrier_definition_failure,
+    locate_standalone_definition_failure,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
     parse_namespace_schema_document, parse_type_definition_value,
@@ -153,7 +156,8 @@ pub use validate::{
 pub use validation::{
     CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
     SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_KIND_CHECK_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
-    SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, ValidationProblem, ValidationProblemCode,
+    SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, SCHEMA_REMOVED_KEY_CODE, SCHEMA_NEAR_MISS_KEY_CODE,
+    REMOVED_KEYS_ANNOTATION, ADVISE_UNKNOWN_KEYS_ANNOTATION, ValidationProblem, ValidationProblemCode,
     ValidationProblemKind, authored_node_at,
 };
 

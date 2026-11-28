@@ -1,6 +1,7 @@
 //! Contracts for `scripts/shipped_schemas.py`, the root `just shipped-schemas`
 //! coordinator that regenerates the three shipped schema artifacts
-//! (Simplified Schema, Darkmatter, Claudine) in dependency order.
+//! (Simplified Schema, Darkmatter, Claudine) in dependency order, and
+//! Claudine's lifecycle artifact beside them.
 //!
 //! Its observable contract: every artifact is generated and accepted before
 //! any file is replaced, each generator over the lower candidates emitted
@@ -49,20 +50,30 @@ const ARTIFACTS: [(&str, &str); 3] = [
 /// nothing printed) when a lower candidate differs from the lower it "built
 /// over" (`fake/<package>.over-<owner>.json`, else `fake/<owner>.json`) or
 /// when `fake/<package>.refuse` exists; otherwise it prints
-/// `fake/<package>.json`.
+/// `fake/<package>.json`. Given `--lifecycle-output <path>` (only Claudine
+/// is), it first writes `fake/<package>.lifecycle.json` there, unless
+/// `fake/<package>.lifecycle.skip` exists.
 const FAKE_GENERATOR: &str = r#"import sys
 from pathlib import Path
 ORDER = ["simplified-schema", "darkmatter", "claudine"]
 package, rest = sys.argv[1], sys.argv[2:]
 fake = Path.cwd() / "fake"
 lowers = {}
+lifecycle = None
 while rest:
+    if rest[0] == "--lifecycle-output" and len(rest) >= 2:
+        lifecycle = Path(rest[1])
+        rest = rest[2:]
+        continue
     if rest[0] != "--lower" or len(rest) < 2:
         print(f"unexpected arguments {rest}", file=sys.stderr)
         sys.exit(2)
     owner, _, path = rest[1].partition("=")
     lowers[owner] = Path(path).read_bytes()
     rest = rest[2:]
+if (lifecycle is not None) != (package == "claudine"):
+    print(f"{package} was given lifecycle output {lifecycle}", file=sys.stderr)
+    sys.exit(2)
 if sorted(lowers) != sorted(ORDER[:ORDER.index(package)]):
     print(f"{package} was given lowers {sorted(lowers)}", file=sys.stderr)
     sys.exit(2)
@@ -79,8 +90,14 @@ for owner, candidate in lowers.items():
 if (fake / f"{package}.refuse").exists():
     print(f"freshly generated {package} is refused", file=sys.stderr)
     sys.exit(1)
+if lifecycle is not None and not (fake / f"{package}.lifecycle.skip").exists():
+    lifecycle.write_bytes((fake / f"{package}.lifecycle.json").read_bytes())
 sys.stdout.buffer.write((fake / f"{package}.json").read_bytes())
 "#;
+
+/// Claudine's lifecycle artifact, which its generator emits beside its
+/// shipped artifact.
+const LIFECYCLE: &str = "claudine/lib/generated/globals.lifecycle.json";
 
 /// A scratch tree holding the three checked-in artifacts and the stand-in.
 struct Tree {
@@ -100,6 +117,8 @@ impl Tree {
             let lowers: Vec<&str> = ARTIFACTS[..index].iter().map(|(owner, _)| *owner).collect();
             fs::write(fake.join(format!("{owner}.json")), artifact(owner, &lowers, "fresh")).unwrap();
         }
+        fs::write(directory.path().join(LIFECYCLE), "previous lifecycle\n").unwrap();
+        fs::write(fake.join("claudine.lifecycle.json"), "{\"catalog_hash\": \"fresh\"}\n").unwrap();
         Self { directory }
     }
 
@@ -123,18 +142,26 @@ impl Tree {
             .expect("the coordinator spawns")
     }
 
+    /// Every output file: the three shipped artifacts, then the lifecycle
+    /// artifact.
     fn artifacts(&self) -> Vec<Vec<u8>> {
-        ARTIFACTS.iter().map(|(_, path)| fs::read(self.root().join(path)).unwrap()).collect()
+        ARTIFACTS.iter().map(|(_, path)| *path).chain([LIFECYCLE]).map(|path| fs::read(self.root().join(path)).unwrap()).collect()
     }
 
     fn previous(&self) -> Vec<Vec<u8>> {
-        ARTIFACTS.iter().map(|(owner, _)| format!("previous {owner}\n").into_bytes()).collect()
+        ARTIFACTS
+            .iter()
+            .map(|(owner, _)| format!("previous {owner}\n").into_bytes())
+            .chain([b"previous lifecycle\n".to_vec()])
+            .collect()
     }
 
     fn leftovers(&self) -> Vec<PathBuf> {
         ARTIFACTS
             .iter()
-            .map(|(_, path)| self.root().join(format!("{path}.tmp")))
+            .map(|(_, path)| *path)
+            .chain([LIFECYCLE])
+            .map(|path| self.root().join(format!("{path}.tmp")))
             .filter(|temporary| temporary.exists())
             .collect()
     }
@@ -163,10 +190,15 @@ fn a_successful_run_replaces_every_artifact_and_a_repeat_is_a_no_op() {
     let tree = Tree::new();
     let first = tree.run(&script);
     assert!(first.status.success(), "{}", stderr(&first));
-    let expected: Vec<Vec<u8>> =
-        ARTIFACTS.iter().map(|(owner, _)| fs::read(tree.fake(&format!("{owner}.json"))).unwrap()).collect();
+    let expected: Vec<Vec<u8>> = ARTIFACTS
+        .iter()
+        .map(|(owner, _)| format!("{owner}.json"))
+        .chain(["claudine.lifecycle.json".to_string()])
+        .map(|name| fs::read(tree.fake(&name)).unwrap())
+        .collect();
     assert_eq!(tree.artifacts(), expected);
     assert!(String::from_utf8_lossy(&first.stdout).contains("regenerated claudine/lib/generated/shipped.json"));
+    assert!(String::from_utf8_lossy(&first.stdout).contains(&format!("regenerated {LIFECYCLE}")));
 
     let second = tree.run(&script);
     assert!(second.status.success(), "{}", stderr(&second));
@@ -238,5 +270,26 @@ fn a_lower_candidate_other_than_the_one_a_generator_built_over_replaces_nothing(
         );
         assert_eq!(tree.artifacts(), tree.previous(), "{owner} over {lower}");
         assert!(tree.leftovers().is_empty(), "{owner} over {lower}");
+    }
+}
+
+#[test]
+fn a_missing_or_malformed_lifecycle_candidate_replaces_nothing() {
+    let script = repo_root().join("scripts/shipped_schemas.py");
+    for (case, setup, expected) in [
+        ("missing", None, "wrote no lifecycle candidate"),
+        ("not JSON", Some("lifecycle\n"), "is not JSON"),
+        ("no catalog hash", Some("{\"format_version\": 2}\n"), "no `catalog_hash`"),
+    ] {
+        let tree = Tree::new();
+        match setup {
+            None => fs::write(tree.fake("claudine.lifecycle.skip"), "").unwrap(),
+            Some(text) => fs::write(tree.fake("claudine.lifecycle.json"), text).unwrap(),
+        }
+        let output = tree.run(&script);
+        assert_eq!(output.status.code(), Some(1), "{case}");
+        assert!(stderr(&output).contains(expected), "{case}: {}", stderr(&output));
+        assert_eq!(tree.artifacts(), tree.previous(), "{case}");
+        assert!(tree.leftovers().is_empty(), "{case}");
     }
 }

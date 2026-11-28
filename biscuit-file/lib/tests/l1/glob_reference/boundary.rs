@@ -51,7 +51,7 @@ fn unbound_roots_may_lie_outside_the_repository() {
 
     assert_eq!(listed(&["~/notes/*.md"], &ctx), std::slice::from_ref(&note));
     assert_eq!(listed(&["@notes/*.md"], &ctx), [note]);
-    let absolute = format!("{}/*.md", biscuit_file::to_portable_string(&outside_dir));
+    let absolute = format!("{}/*.md", biscuit_file::to_forward_slash_string(&outside_dir));
     assert_eq!(listed(&[absolute.as_str()], &ctx), std::slice::from_ref(&outside));
     assert_eq!(listed(&["vault:*.md"], &ctx), [vault]);
     assert_eq!(listed(&["{{OUT}}/*.md"], &ctx), [outside]);

@@ -42,7 +42,7 @@ impl Catalog {
         };
         capture().map(Some).map_err(|error: String| format!(
             "cannot capture package catalog for {}: {error}; check the repository and package manifests",
-            biscuit_file::to_portable_string(scan_root),
+            biscuit_file::to_forward_slash_string(scan_root),
         ))
     }
 }
@@ -85,7 +85,7 @@ impl<'a> Grouping<'a> {
                     path: if package.relative.is_empty() {
                         ".".to_string()
                     } else {
-                        biscuit_file::to_portable_string(Path::new(&package.relative))
+                        biscuit_file::to_forward_slash_string(Path::new(&package.relative))
                     },
                 }),
                 stats: Stats::default(),

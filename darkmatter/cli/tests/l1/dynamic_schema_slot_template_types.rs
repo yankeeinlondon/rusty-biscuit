@@ -107,7 +107,11 @@ fn assert_unavailable(fixture: &CliProcessFixture, record: &Value, code: &str, f
     assert_eq!(record["problems"], json!([]), "{record:#}");
     assert!(record.get("slots").is_none(), "{record:#}");
     assert_eq!(diagnostic_codes(record), [code], "{record:#}");
-    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(canonical(fixture, file)), "{record:#}");
+    assert_eq!(
+        record["diagnostics"][0]["source"]["file"],
+        json!(biscuit_file::to_forward_slash_string(std::path::Path::new(&canonical(fixture, file)))),
+        "{record:#}"
+    );
     assert_eq!(record["diagnostics"][0]["source"]["line"], json!(line), "{record:#}");
 }
 

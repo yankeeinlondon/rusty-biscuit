@@ -92,14 +92,6 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
             text: include_str!("../../../../darkmatter/schemas/partials/md-lifecycle.yaml"),
         },
         EmbeddedDocument {
-            path: "darkmatter/schemas/partials/functions.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/functions.yaml"),
-        },
-        EmbeddedDocument {
-            path: "darkmatter/schemas/partials/mutations.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/mutations.yaml"),
-        },
-        EmbeddedDocument {
             path: "content-policy/schemas/content-policy.yaml",
             text: include_str!("../../../../content-policy/schemas/content-policy.yaml"),
         },
@@ -149,44 +141,49 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
 
     // Every type of every partial resolves through the reserved namespace,
     // which names the shipped documents and never a file.
-    let (mut resolved_types, mut function_types) = (0, 0);
+    // The callable catalogs (`functions.yaml`, `mutations.yaml`) are not
+    // partials: they are never import sources, so they are not supplied.
+    let mut resolved_types = 0;
     for document in &DOCUMENTS[1..DOCUMENTS.len() - 1] {
         let stem = document.path.rsplit('/').next().and_then(|file| file.strip_suffix(".yaml")).expect("a partial stem");
         let names = type_names(document.text);
         assert!(!names.is_empty(), "{} declares no types", document.path);
         for name in names {
             let probe = single("probe", YamlValue::String(format!("{name}@darkmatter:{stem}")));
-            match prepare_embedded_inline_schema(&probe, "host/probe.yaml", &[], "", SHIPPED) {
-                Ok(_) => resolved_types += 1,
-                // A function type resolves but describes a callable, so it
-                // keeps its located lowering error rather than typing a value.
-                Err(error) if error.to_string().contains("`function` type is description-only") => function_types += 1,
-                Err(error) => panic!("`{name}@darkmatter:{stem}`: {error}"),
-            }
+            prepare_embedded_inline_schema(&probe, "host/probe.yaml", &[], "", SHIPPED)
+                .unwrap_or_else(|error| panic!("`{name}@darkmatter:{stem}`: {error}"));
+            resolved_types += 1;
         }
     }
     assert!(resolved_types > 20, "only {resolved_types} partial types resolved");
-    assert!(function_types > 0, "the function catalogs declare function types");
 }
 
 #[test]
 fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
     const BUNDLE: &str = "claudine";
     const DOCUMENTS: &[EmbeddedDocument<'static>] = &[
-        EmbeddedDocument { path: "claudine/action.yaml", text: include_str!("../../../../claudine/schemas/action.yaml") },
-        EmbeddedDocument { path: "claudine/claudine.yaml", text: include_str!("../../../../claudine/schemas/claudine.yaml") },
-        EmbeddedDocument { path: "claudine/document.yaml", text: include_str!("../../../../claudine/schemas/document.yaml") },
+        EmbeddedDocument { path: "claudine/action.yaml", text: include_str!("../../../../claudine/registration/action.yaml") },
+        EmbeddedDocument { path: "claudine/composition.yaml", text: include_str!("../../../../claudine/registration/composition.yaml") },
         EmbeddedDocument {
-            path: "claudine/inline-compose.yaml",
-            text: include_str!("../../../../claudine/schemas/inline-compose.yaml"),
+            path: "claudine/content-policy.yaml",
+            text: include_str!("../../../../claudine/registration/content-policy.yaml"),
         },
-        EmbeddedDocument { path: "claudine/lifecycle.yaml", text: include_str!("../../../../claudine/schemas/lifecycle.yaml") },
-        EmbeddedDocument { path: "claudine/linking.yaml", text: include_str!("../../../../claudine/schemas/linking.yaml") },
+        EmbeddedDocument { path: "claudine/document.yaml", text: include_str!("../../../../claudine/registration/document.yaml") },
         EmbeddedDocument {
-            path: "claudine/sequence-types.yaml",
-            text: include_str!("../../../../claudine/schemas/sequence-types.yaml"),
+            path: "claudine/inline-composition.yaml",
+            text: include_str!("../../../../claudine/registration/inline-composition.yaml"),
         },
-        EmbeddedDocument { path: "claudine/sequence.yaml", text: include_str!("../../../../claudine/schemas/sequence.yaml") },
+        EmbeddedDocument {
+            path: "claudine/lifecycle-events.yaml",
+            text: include_str!("../../../../claudine/registration/lifecycle-events.yaml"),
+        },
+        EmbeddedDocument { path: "claudine/linking.yaml", text: include_str!("../../../../claudine/registration/linking.yaml") },
+        EmbeddedDocument { path: "claudine/sequence.yaml", text: include_str!("../../../../claudine/registration/sequence.yaml") },
+        EmbeddedDocument {
+            path: "claudine/sequence-document.yaml",
+            text: include_str!("../../../../claudine/registration/sequence-document.yaml"),
+        },
+        EmbeddedDocument { path: "claudine/shared.yaml", text: include_str!("../../../../claudine/registration/shared.yaml") },
     ];
     // Claudine's documents name Darkmatter's shipped partials through the
     // reserved namespace, so the host's shipped sources come too.
@@ -198,10 +195,6 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
         EmbeddedDocument {
             path: "darkmatter/schemas/partials/md-lifecycle.yaml",
             text: include_str!("../../../../darkmatter/schemas/partials/md-lifecycle.yaml"),
-        },
-        EmbeddedDocument {
-            path: "darkmatter/schemas/partials/functions.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/functions.yaml"),
         },
         EmbeddedDocument {
             path: "darkmatter/schemas/partials/context-variables.yaml",
@@ -227,6 +220,16 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
                     prepare_embedded_schema_in(&target, DOCUMENTS, BUNDLE, SHIPPED)
                         .unwrap_or_else(|error| panic!("{} payload {target}: {error}", document.path));
                 }
+                // A root union (a registered trigger's payload form): an
+                // embedded inline schema cannot be one, so each arm resolves
+                // on its own.
+                YamlValue::Sequence(arms) => {
+                    assert!(arms.len() > 1, "{}: a root union has several arms", document.path);
+                    for arm in arms {
+                        prepare_embedded_inline_schema(arm, document.path, DOCUMENTS, BUNDLE, SHIPPED)
+                            .unwrap_or_else(|error| panic!("{} payload arm {arm:?}: {error}", document.path));
+                    }
+                }
                 payload => {
                     prepare_embedded_inline_schema(payload, document.path, DOCUMENTS, BUNDLE, SHIPPED)
                         .unwrap_or_else(|error| panic!("{} payload: {error}", document.path));
@@ -246,23 +249,23 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
                 .unwrap_or_else(|error| panic!("the types of {}: {error}", document.path));
         }
     }
-    assert_eq!(triggers, 3, "claudine.yaml, inline-compose.yaml, and sequence.yaml are triggers");
+    assert_eq!(triggers, 3, "composition.yaml, inline-composition.yaml, and sequence-document.yaml are triggers");
 }
 
 #[test]
 fn consumer_sidecars_resolve_from_supplied_sources() {
     const DOCUMENTS: &[EmbeddedDocument<'static>] = &[
         EmbeddedDocument {
-            path: "claudine/docs/research/model-config/_schema.yaml",
-            text: include_str!("../../../../claudine/docs/research/model-config/_schema.yaml"),
+            path: "claudine/docs/research/providers/model-config/_schema.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/model-config/_schema.yaml"),
         },
         EmbeddedDocument {
-            path: "claudine/docs/research/agent-cli/_schema.yaml",
-            text: include_str!("../../../../claudine/docs/research/agent-cli/_schema.yaml"),
+            path: "claudine/docs/research/providers/agent-cli/_schema.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/agent-cli/_schema.yaml"),
         },
         EmbeddedDocument {
-            path: "claudine/docs/research/agent-cli/_types.yaml",
-            text: include_str!("../../../../claudine/docs/research/agent-cli/_types.yaml"),
+            path: "claudine/docs/research/providers/agent-cli/_types.yaml",
+            text: include_str!("../../../../claudine/docs/research/providers/agent-cli/_types.yaml"),
         },
         EmbeddedDocument {
             path: "claudine/docs/research/_types.yaml",
@@ -284,8 +287,8 @@ fn consumer_sidecars_resolve_from_supplied_sources() {
     assert_parses_passively(DOCUMENTS);
 
     for path in [
-        "claudine/docs/research/model-config/_schema.yaml",
-        "claudine/docs/research/agent-cli/_schema.yaml",
+        "claudine/docs/research/providers/model-config/_schema.yaml",
+        "claudine/docs/research/providers/agent-cli/_schema.yaml",
         "messenger/docs/research/platforms/_schema.yaml",
         "messenger/docs/research/implementation/_schema.yaml",
     ] {

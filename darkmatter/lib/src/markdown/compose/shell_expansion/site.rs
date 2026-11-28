@@ -245,6 +245,14 @@ impl<'a> TemplateSite<'a> {
         })
     }
 
+    fn skipped_in_dry_run(&self) -> ShellExpansionError {
+        ShellExpansionError::SkippedInDryRun {
+            ctx: Box::new(self.ctx.clone()),
+            command: self.authored().to_string(),
+            origin: self.origin().clone(),
+        }
+    }
+
     fn blacklisted(&self, reason: String) -> ShellExpansionError {
         ShellExpansionError::Blacklisted {
             ctx: Box::new(self.ctx.clone()),
@@ -294,6 +302,10 @@ pub(crate) fn prepare_site(
     // approval of it counts.
     if let Some(reason) = check_template_blacklist(&shape) {
         return Err(site.blacklisted(reason));
+    }
+    // A dry run asks for no approval: the command would be skipped anyway.
+    if options.is_dry_run() {
+        return Err(site.skipped_in_dry_run());
     }
 
     if let Some(approved) = &options.pre_approved_commands {

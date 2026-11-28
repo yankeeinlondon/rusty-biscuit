@@ -8,7 +8,7 @@ use biscuit_terminal::output::WidthRequest;
 use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::Diagnostic;
-use darkmatter::markdown::compose::report_diagnostics::reference_issue_diagnostic;
+use darkmatter::markdown::compose::report_diagnostics::reference_issue_legacy_diagnostic;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
 use darkmatter::markdown::output::command::{CommandValue, GraphNotation, GraphNotationData, code_document};
 use darkmatter::markdown::reference::ReferenceGraphOptions;
@@ -17,13 +17,15 @@ use darkmatter::markdown::reference::validate::{
 };
 use tracing::{info, instrument};
 
-/// The error issues of a failed `report`, as run diagnostics.
+/// The error issues of a failed `report`, as run diagnostics in their legacy
+/// projection: `md validate refs` and `md graph --validate` keep the record
+/// bytes they published before missing targets carried resolver evidence.
 pub(crate) fn report_failure_diagnostics(report: &ReferenceValidationReport) -> Vec<Diagnostic> {
     report
         .issues
         .iter()
         .filter(|issue| issue.severity == ReferenceSeverity::Error)
-        .map(reference_issue_diagnostic)
+        .map(reference_issue_legacy_diagnostic)
         .collect()
 }
 

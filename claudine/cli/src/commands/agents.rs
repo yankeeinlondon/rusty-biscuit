@@ -126,7 +126,7 @@ fn render_detail(term: &Terminal, agent: &AgentInfo) {
 
     let name_line = Prose::new(format!(
         r#"<a href="{}"><b>{}</b></a> {badge}"#,
-        biscuit_file::to_portable_string(&agent.agent_file_path),
+        biscuit_file::to_forward_slash_string(&agent.agent_file_path),
         agent.name,
     ));
     log::data(&name_line.render(term));
@@ -271,13 +271,13 @@ fn render_exceptions(
                                 let label = if e.missing_properties.is_empty() {
                                     format!(
                                         r#"<b><a href="{}">{}</a></b>"#,
-                                        biscuit_file::to_portable_string(&e.agent_file_path),
+                                        biscuit_file::to_forward_slash_string(&e.agent_file_path),
                                         e.name
                                     )
                                 } else {
                                     format!(
                                         r#"<b><a href="{}">{}</a></b> (<i>missing the properties {}</i>)"#,
-                                        biscuit_file::to_portable_string(&e.agent_file_path),
+                                        biscuit_file::to_forward_slash_string(&e.agent_file_path),
                                         e.name,
                                         props_markup
                                     )
@@ -289,7 +289,7 @@ fn render_exceptions(
                             for e in entries {
                                 let label = format!(
                                     r#"<b><a href="{}">{}</a></b> (<i>contains tab characters in YAML indentation</i>)"#,
-                                    biscuit_file::to_portable_string(&e.agent_file_path),
+                                    biscuit_file::to_forward_slash_string(&e.agent_file_path),
                                     e.name
                                 );
                                 detail_list.add(Prose::new(label));
@@ -299,7 +299,7 @@ fn render_exceptions(
                             for e in entries {
                                 let label = format!(
                                     r#"<a href="{}"><b>{}</b></a> (<i>specifies <orange>model</orange></i>)"#,
-                                    biscuit_file::to_portable_string(&e.agent_file_path),
+                                    biscuit_file::to_forward_slash_string(&e.agent_file_path),
                                     e.name
                                 );
                                 detail_list.add(Prose::new(label));

@@ -22,7 +22,7 @@ pub use clean::{
 pub use data::{
     CodeBlockData, CodeRange, ComparisonData, DetectData, DetectedFile, EditData, GraphNotation, GraphNotationData, HashData, HashMode, HashValueData,
     IgnorePolicyData, RemovedData, SetData, TriggerConditionData, TriggerFindingData, TriggerRootData, TriggerShadowData,
-    TriggerRegisteredData, TriggerTraceData, TriggersData, ValidateData,
+    TriggerConflictData, TriggerRegisteredData, TriggerTraceData, TriggersData, ValidateData,
 };
 pub use schema_about::{AboutData, AboutDetail, AboutEntry, AboutSection};
 pub use value::{CommandValue, code_document, empty_document, prose_document, terminal_fold};

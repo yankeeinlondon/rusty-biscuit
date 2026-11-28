@@ -25,7 +25,8 @@ pub use types::*;
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::transclusion::{
-    BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
+    BlockOptions, DirectiveKind, InclusionSite, TransclusionError, frontmatter_value_is_inline, parse_directives,
+    parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
 use std::path::PathBuf;
@@ -36,22 +37,69 @@ fn resolve_transclusion_target(
     source: &ComposeSource,
     options: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Option<PathBuf>, ReferenceError> {
+    lookup_local_target(raw_target, source, options).map(|lookup| match lookup {
+        TargetLookup::Found(path) => Some(path),
+        TargetLookup::Missing(_) => None,
+    })
+}
+
+/// A local target's lookup: its file, or no file.
+enum TargetLookup {
+    Found(PathBuf),
+    /// No file: the resolver's evidence for a confirmed no-match, `None` for
+    /// a document with no file or a remote target, which have no local
+    /// candidate.
+    Missing(Option<Box<biscuit_file::DetailedResolution>>),
+}
+
+/// [`resolve_transclusion_target`], keeping the resolver's evidence when the
+/// target is missing.
+fn lookup_local_target(
+    raw_target: &str,
+    source: &ComposeSource,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> Result<TargetLookup, ReferenceError> {
     let ComposeSource::File(source_path) = source else {
-        return Ok(None);
+        return Ok(TargetLookup::Missing(None));
     };
     let context = crate::markdown::compose::context::options::source_file_context(
         options.resolution_context(),
         source_path,
-        options.source_derivation,
+        &options.source_derivation,
         options.source_opening.as_ref(),
     );
     let reference = biscuit_file::FileReference::new(raw_target)?;
-    match reference.resolve_detailed(&context).into_convenience() {
+    let detailed = reference.resolve_detailed(&context);
+    if matches!(detailed.outcome(), biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch)) {
+        return Ok(TargetLookup::Missing(Some(Box::new(detailed))));
+    }
+    match detailed.into_convenience() {
+        Ok(Some(path)) => Ok(TargetLookup::Found(path)),
+        Ok(None) => Ok(TargetLookup::Missing(None)),
         // A remote target has no local file to follow; the validator checks it
         // as a URL.
-        Err(error) if error.resolution_failure() == biscuit_file::ResolutionFailure::UnsupportedRemote => Ok(None),
-        resolved => Ok(resolved?),
+        Err(error) if error.resolution_failure() == biscuit_file::ResolutionFailure::UnsupportedRemote => {
+            Ok(TargetLookup::Missing(None))
+        }
+        Err(error) => Err(error.into()),
     }
+}
+
+/// `error`, the resolution failure of an inclusion's target, at the
+/// inclusion `site`: composition's own typed failure
+/// ([`TransclusionError::Located`]), so the graph, validation, the local
+/// query, and composition report the same code and place. Any other error, or
+/// one with no site (a document with no file), is unchanged.
+pub(crate) fn at_inclusion(error: ReferenceError, site: Option<InclusionSite>) -> ReferenceError {
+    if site.is_none() {
+        return error;
+    }
+    let failure = match error {
+        ReferenceError::FileReference(source) => TransclusionError::FileReference(source),
+        ReferenceError::Io(source) => TransclusionError::Io(source),
+        other => return other,
+    };
+    ReferenceError::Compose(Box::new(failure.at_inclusion(site).into()))
 }
 
 #[allow(dead_code)]
@@ -63,10 +111,10 @@ fn source_file_for_error(source: &ComposeSource) -> PathBuf {
     }
 }
 
+/// The trimmed text of one-based `line`; empty for the unknown line `0`.
 fn directive_text_at_line(content: &str, line: usize) -> String {
-    content
-        .lines()
-        .nth(line.saturating_sub(1))
+    line.checked_sub(1)
+        .and_then(|index| content.lines().nth(index))
         .unwrap_or_default()
         .trim()
         .to_string()
@@ -79,12 +127,14 @@ fn map_reference_parse_error(err: crate::markdown::compose::TransclusionError) -
             line,
             message,
             caret_col,
+            authored,
         } => ReferenceError::ParseDirective {
             ctx: ctx.clone(),
             line,
             message,
             directive_text: directive_text_at_line(&ctx.content, line),
             caret_col,
+            authored,
         },
         other => {
             // This is a fallback for errors that aren't ParseDirective but
@@ -116,6 +166,13 @@ pub fn extract_document_references(content: &str) -> ReferenceSet {
 impl Markdown {
     /// Returns `true` if this document contains any transclusion directives
     /// (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).
+    ///
+    /// Counts only inclusions whose parser succeeds: one malformed inclusion
+    /// hides the valid ones its parser would have returned beside it (every
+    /// body `::file`/`::code`/`::url`, every `::toc-linking`, every
+    /// `::file-links`, or both frontmatter fields). Use
+    /// [`transclusions_with_options`](Self::transclusions_with_options) or a
+    /// reference graph to see the parse error.
     pub fn has_transclusions(&self) -> bool {
         // Check block directives
         if let Ok(directives) = parse_directives(self.content(), self.source_context_for_errors())
@@ -157,10 +214,32 @@ impl Markdown {
     /// This is a local query that does not follow transclusions recursively.
     /// For recursive traversal, use [`transclusion_graph()`](Self::transclusion_graph).
     ///
+    /// Every target, body or `prologue`/`epilogue`, resolves from the
+    /// document's file as the request admits it, and every origin names that
+    /// file: its own source, or the request's file when it has none.
+    ///
     /// The request's context is reused for every target, so later CWD, HOME,
     /// or environment changes cannot alter the result. Invalid references and
     /// I/O failures are returned; only a typed no-match produces
-    /// `resolved_target: None`.
+    /// `resolved_target: None` for a file target. `resolved_target` is a
+    /// lookup, not an admission: `::file ./notes.txt` resolves to the existing
+    /// file even though composition, the graphs, and validation refuse a
+    /// non-Markdown inclusion. A `prologue`/`epilogue`
+    /// value composition emits as inline Markdown (prose, a Markdown link,
+    /// multiline or empty text) is listed with its text as `raw_target` and
+    /// `resolved_target: None`; no file resolution is attempted for it. A
+    /// `::toc-linking` entry lists its authored chain and is not resolved.
+    ///
+    /// ## Errors
+    ///
+    /// A malformed inclusion of any kind is the error composition raises for
+    /// it, never an empty result: a body directive or `prologue`/`epilogue`
+    /// that is not a string or list of strings is
+    /// [`MarkdownError::Reference`](crate::markdown::MarkdownError::Reference)
+    /// holding [`ReferenceError::ParseDirective`], an invalid `::toc-linking` or
+    /// `::file-links` is [`MarkdownError::TocLinking`](crate::markdown::MarkdownError::TocLinking)
+    /// or [`MarkdownError::FileLinks`](crate::markdown::MarkdownError::FileLinks).
+    /// An omitted field and `[]` list nothing.
     pub fn transclusions_with_options(
         &self,
         request: &crate::markdown::compose::ComposeRequest,
@@ -169,12 +248,27 @@ impl Markdown {
     }
 
     fn transclusions_in(&self, options: &crate::markdown::compose::ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>> {
-        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        // Targets resolve from, and origins name, the document's file as the
+        // request admits it (`ComposeRequest::admitted_document`), as
+        // composition and the reference graph resolve them; every inclusion
+        // form reads the same admitted source.
+        let admitted = options.admitted_document(self);
+        let document_source = admitted.source().clone().unwrap_or(ComposeSource::Unknown);
+        let rooted = options.clone().with_root_source(&document_source);
+        let options = &rooted;
+        let source = match document_source {
+            ComposeSource::File(_) => options.source.clone(),
+            other => other,
+        };
         let mut refs = Vec::new();
 
+        // The parsers count lines in the body as it is held; a failure names
+        // the line in the file as written when the body still matches it.
+        let origin = || crate::markdown::compose::body_origin::BodyOrigin::capture(&admitted);
+
         // Block directives (::file, ::code, ::url)
-        let directives = parse_directives(self.content(), self.source_context_for_errors())
-            .map_err(map_reference_parse_error)?;
+        let directives = parse_directives(admitted.content(), admitted.source_context_for_errors())
+            .map_err(|error| map_reference_parse_error(error.at_authored_directive(&admitted, origin().as_ref(), 0)))?;
 
         for directive in &directives {
             let kind = match directive.kind {
@@ -186,7 +280,15 @@ impl Markdown {
             // Fill resolved_target using FileReference semantics (rec #4)
             let resolved_target = match &kind {
                 TransclusionRefKind::File | TransclusionRefKind::Code => {
-                    resolve_transclusion_target(&directive.raw_target, &source, options)?
+                    resolve_transclusion_target(&directive.raw_target, &source, options)
+                        .map_err(|error| {
+                            let site = crate::markdown::compose::site_scope::DirectiveSite::of_span(
+                                &admitted,
+                                origin().as_ref(),
+                                &directive.span,
+                            );
+                            at_inclusion(error, InclusionSite::of_directive(&admitted, &site))
+                        })?
                         .map(|path| path.to_string_lossy().to_string())
                 }
                 TransclusionRefKind::Url => {
@@ -217,97 +319,106 @@ impl Markdown {
         }
 
         // ::toc-linking directives
-        if let Ok(toc_directives) =
-            crate::markdown::compose::toc_linking::parse_directives(self.content())
-        {
-            for td in &toc_directives {
-                refs.push(TransclusionRef {
-                    kind: TransclusionRefKind::TocLinking,
-                    raw_target: td.targets.join(" | "),
-                    resolved_target: None,
-                    options: TransclusionRefOptions::default(),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: td.line,
-                        span: td.span.clone(),
-                        syntax: ReferenceSyntax::DirectiveTocLinking,
-                        authored: None,
-                        section: None,
-                    },
-                });
-            }
+        let toc_directives = crate::markdown::compose::toc_linking::parse_directives(admitted.content())
+            .map_err(|error| error.with_document(admitted.error_document()).at_authored_line(&admitted, origin().as_ref()))?;
+        for td in &toc_directives {
+            refs.push(TransclusionRef {
+                kind: TransclusionRefKind::TocLinking,
+                raw_target: td.targets.join(" | "),
+                resolved_target: None,
+                options: TransclusionRefOptions::default(),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: td.line,
+                    span: td.span.clone(),
+                    syntax: ReferenceSyntax::DirectiveTocLinking,
+                    authored: None,
+                    section: None,
+                },
+            });
         }
 
         // ::file-links directives
-        if let Ok(file_links_directives) =
-            crate::markdown::compose::file_links::parse_file_links_directives(self.content())
-        {
-            for fd in &file_links_directives {
-                let raw_target = match &fd.mode {
-                    crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
-                    crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
-                        format!("{} --depth {}", path, depth)
-                    }
-                };
-                refs.push(TransclusionRef {
-                    kind: TransclusionRefKind::FileLinks,
-                    raw_target,
-                    resolved_target: None,
-                    options: TransclusionRefOptions::default(),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: fd.line,
-                        span: fd.span.clone(),
-                        syntax: ReferenceSyntax::DirectiveFileLinks,
-                        authored: None,
-                        section: None,
-                    },
-                });
-            }
+        let file_links_directives =
+            crate::markdown::compose::file_links::parse_file_links_directives(admitted.content())
+                .map_err(|error| error.with_document(admitted.error_document()).at_authored_line(&admitted, origin().as_ref()))?;
+        for fd in &file_links_directives {
+            let raw_target = match &fd.mode {
+                crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
+                crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
+                    format!("{} --depth {}", path, depth)
+                }
+            };
+            refs.push(TransclusionRef {
+                kind: TransclusionRefKind::FileLinks,
+                raw_target,
+                resolved_target: None,
+                options: TransclusionRefOptions::default(),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: fd.line,
+                    span: fd.span.clone(),
+                    syntax: ReferenceSyntax::DirectiveFileLinks,
+                    authored: None,
+                    section: None,
+                },
+            });
         }
 
-        // Frontmatter prologue/epilogue
-        if let Ok(fm_refs) = parse_frontmatter_refs(
-            self.frontmatter().as_map(),
-            self.source_context_for_errors(),
-        ) {
-            for prologue in &fm_refs.prologue {
-                let resolved_target = resolve_transclusion_target(prologue, &source, options)?
-                    .map(|path| path.to_string_lossy().to_string());
-                refs.push(TransclusionRef {
-                    kind: TransclusionRefKind::Prologue,
-                    raw_target: prologue.clone(),
-                    resolved_target,
-                    options: TransclusionRefOptions::default(),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: 0, // frontmatter doesn't have meaningful line numbers
-                        span: 0..0,
-                        syntax: ReferenceSyntax::FrontmatterPrologue,
-                        authored: None,
-                        section: None,
-                    },
-                });
-            }
+        // Frontmatter prologue/epilogue: an omitted field or `[]` lists
+        // nothing, any other non-string shape is an error.
+        let fm_refs = parse_frontmatter_refs(admitted.frontmatter().as_map(), admitted.frontmatter_error_context())
+            .map_err(map_reference_parse_error)?;
+        for (index, prologue) in fm_refs.prologue.iter().enumerate() {
+            let resolved_target = if frontmatter_value_is_inline(prologue) {
+                None
+            } else {
+                resolve_transclusion_target(prologue, &source, options)
+                    .map_err(|error| {
+                        at_inclusion(error, InclusionSite::of_frontmatter_value(&admitted, "prologue", index, prologue))
+                    })?
+                    .map(|path| path.to_string_lossy().to_string())
+            };
+            refs.push(TransclusionRef {
+                kind: TransclusionRefKind::Prologue,
+                raw_target: prologue.clone(),
+                resolved_target,
+                options: TransclusionRefOptions::default(),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: 0, // frontmatter doesn't have meaningful line numbers
+                    span: 0..0,
+                    syntax: ReferenceSyntax::FrontmatterPrologue,
+                    authored: None,
+                    section: None,
+                },
+            });
+        }
 
-            for epilogue in &fm_refs.epilogue {
-                let resolved_target = resolve_transclusion_target(epilogue, &source, options)?
-                    .map(|path| path.to_string_lossy().to_string());
-                refs.push(TransclusionRef {
-                    kind: TransclusionRefKind::Epilogue,
-                    raw_target: epilogue.clone(),
-                    resolved_target,
-                    options: TransclusionRefOptions::default(),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: 0,
-                        span: 0..0,
-                        syntax: ReferenceSyntax::FrontmatterEpilogue,
-                        authored: None,
-                        section: None,
-                    },
-                });
-            }
+        for (index, epilogue) in fm_refs.epilogue.iter().enumerate() {
+            let resolved_target = if frontmatter_value_is_inline(epilogue) {
+                None
+            } else {
+                resolve_transclusion_target(epilogue, &source, options)
+                    .map_err(|error| {
+                        at_inclusion(error, InclusionSite::of_frontmatter_value(&admitted, "epilogue", index, epilogue))
+                    })?
+                    .map(|path| path.to_string_lossy().to_string())
+            };
+            refs.push(TransclusionRef {
+                kind: TransclusionRefKind::Epilogue,
+                raw_target: epilogue.clone(),
+                resolved_target,
+                options: TransclusionRefOptions::default(),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: 0,
+                    span: 0..0,
+                    syntax: ReferenceSyntax::FrontmatterEpilogue,
+                    authored: None,
+                    section: None,
+                },
+            });
         }
 
         Ok(refs)
@@ -320,6 +431,13 @@ impl Markdown {
     /// accepted by [`validate_references_with_graph`](Self::validate_references_with_graph),
     /// which requires a `Full`-mode graph; use [`reference_graph`](Self::reference_graph)
     /// when the graph will feed prebuilt-graph validation.
+    ///
+    /// ## Errors
+    ///
+    /// Fails with composition's error for any malformed inclusion in a
+    /// document the graph visits (a body directive, `::toc-linking`,
+    /// `::file-links`, or a `prologue`/`epilogue` that is not a string or list
+    /// of strings), as [`reference_graph`](Self::reference_graph) does.
     pub fn transclusion_graph(
         &self,
         options: ReferenceGraphOptions,
@@ -333,6 +451,13 @@ impl Markdown {
     /// private provenance, so it is eligible for prebuilt-graph validation via
     /// [`validate_references_with_graph`](Self::validate_references_with_graph)
     /// when built from the same document and `options.compose`.
+    ///
+    /// ## Errors
+    ///
+    /// A malformed inclusion in any visited document fails the build with the
+    /// error composition raises for it (`MarkdownError::Transclusion`,
+    /// `TocLinking`, or `FileLinks`), so no graph, flattened reference list,
+    /// or validation report exists for a document composition would reject.
     pub fn reference_graph(
         &self,
         options: ReferenceGraphOptions,

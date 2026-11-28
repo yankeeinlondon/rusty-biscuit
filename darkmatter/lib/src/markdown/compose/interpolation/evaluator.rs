@@ -304,6 +304,12 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             .map_or_else(Vec::new, |roots| roots.borrow().iter().skip(mark).cloned().collect())
     }
 
+    /// The dry run's passive session, when this evaluator's lookup belongs to
+    /// one.
+    pub(crate) fn passive_session(&self) -> Option<&crate::markdown::compose::passive::PassiveSession> {
+        self.state.resolution_context_ref().and_then(|context| context.passive.as_ref())
+    }
+
     /// Takes the recorded missing roots, leaving none.
     pub(crate) fn take_missing_roots(&self) -> Vec<MissingRoot> {
         self.missing_roots.as_ref().map(RefCell::take).unwrap_or_default()
@@ -391,6 +397,12 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                     };
                 }
             };
+            if let Err(error) = crate::markdown::compose::passive::check_read(self.state, name, &binding) {
+                return EvalResult::Error {
+                    error,
+                    original: expr.to_string(),
+                };
+            }
             if let Some(roots) = &self.missing_roots {
                 observe_missing(name, &binding, AbsenceScope::default(), &mut *roots.borrow_mut());
             }

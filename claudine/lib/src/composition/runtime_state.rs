@@ -173,7 +173,7 @@ impl RuntimeState {
         {
             let error = super::error::CompositionError::LifecycleProxyCycle {
                 source_path: source.to_path_buf(), target: authored.into(),
-                chain: inner.proxy_chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+                chain: inner.proxy_chain.iter().map(|path| biscuit_file::to_forward_slash_string(path)).collect(),
                 limit: super::lifecycle::control::MAX_PROXY_HOPS,
             };
             inner.proxy_chain.truncate(before);

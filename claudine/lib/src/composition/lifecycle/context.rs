@@ -127,6 +127,9 @@ impl LifecycleErrorInfoExt for LifecycleErrorInfo {
     }
 
     fn from_composition_error(err: &CompositionError) -> Self {
+        // A check failure is its cause in every `err.*` field, `variant`
+        // included.
+        let err = err.checked_cause();
         let mut info = Self::from_selection_with(
             &ClaudineDiagnostics,
             "CompositionError",

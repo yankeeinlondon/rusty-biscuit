@@ -63,6 +63,45 @@ A missing target of any other kind (a CSS, script, or font import, a `<video>`,
 `<audio>`, `<source>`, or `<iframe>`) has no recovery: `md compose` stops on it even
 with `--allow all`.
 
+The three `missing-*` recoveries cover a target that is **absent**: a
+well-formed path that names no file (`failure: no-match`). A target that is
+broken in any other way always fails the command, whatever is allowed:
+
+| Target | Reported as | With the matching `--allow` |
+|---|---|---|
+| `[Guide](./gone.md)`, `![Logo](./gone.png)`, `::file ./gone.md` | `dm.reference.missing_*`, `failure: no-match` | recovered |
+| `prologue: ./gone.md`, or `./gone.md` as one entry of an `epilogue` list | `dm.reference.missing_transclusion`, `failure: no-match` | recovered: the entry is left out and the other entries are still included |
+| `prologue: ./notes.txt` (the file exists but cannot be transcluded) | `dm.transclusion.failure` | fails, status 1 |
+| `[Guide](@)`, `[Guide](<@>)`, `![Logo](@)`, the same in a `prologue` or `epilogue` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+| a path under a directory `md` cannot read | `dm.reference.failure`, `failure: io` | fails, status 1 |
+| `[Guide](http://[bad)` | `dm.reference.failure`, reason `malformed URL` | fails, status 1 |
+| `::file @`, `::code @`, `::url @`, `prologue: "@"` | `dm.reference.failure`, `failure: invalid-reference` | fails, status 1 |
+
+A document can also tolerate an inclusion it cannot make. When its
+frontmatter sets `ignore_invalid: true`, a `dm.transclusion.failure` row
+above becomes a warning with that code, at the value or directive that wrote
+it: `prologue: ./notes.txt` or `::file ./notes.txt` is left out and reported,
+and the document's other inclusions still compose. `--deny
+dm.transclusion.failure` makes it stop the run again.
+The setting does not change the reference check's rows. An absent target
+(`failure: no-match`) still needs `--allow missing-transclusions`, and an
+invalid one (`::file @`) still fails the command.
+
+```yaml
+---
+ignore_invalid: true
+prologue: [./notes.txt, ./intro.md]   # notes.txt is left out with a warning
+---
+```
+
+```sh
+md compose doc.md --allow missing-hyperlinks   # [Guide](./gone.md): composes, reports the miss
+md compose doc.md --allow missing-hyperlinks   # [Guide](@): fails, status 1, no document
+```
+
+A refused run writes no document, and in a document with lifecycle events
+it stops before `composed` runs.
+
 A recovered problem is still reported, carrying its code: on stderr in a Markdown
 run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
 allowance the problem fails the command.
@@ -96,7 +135,7 @@ also allows schema slot reads of URLs on it; see
 | Identifier | What stops |
 |---|---|
 | `baseline-schema` | the built-in Darkmatter baseline frontmatter schema (and `BASELINE_SCHEMA`) |
-| `schema-triggers` | schema-trigger discovery and bare-name schema-root lookup |
+| `schema-triggers` | schema-trigger discovery (a bare `$schema` name or `Name@file` import is still looked up in the schema roots) |
 | `collection-blocks` | the `::map` and `::filter` directive stage (`md compose` only) |
 
 A disabled feature produces no diagnostics, and `--deny` does not turn it back
@@ -147,6 +186,19 @@ expressions, shell commands, or transcluded children run. The warning keeps
 its `warning` severity and names the trigger, never the document.
 `md schema validate` and `md clean` report the same warning but take no
 `--deny`, so there it never blocks.
+
+The codes of a `::toc-linking` or `::file-links` failure that `md compose`
+tolerates as a warning (`dm.toc_linking.*`, `dm.file_links.*`, and
+`dm.reference.failure` or `dm.input.read_failure` for a `--dir` that is missing
+or cannot be read) are among them too: denying one makes that failure stop the
+run. See
+[Telling directive failures apart](../errors/composition-problems.md#telling-directive-failures-apart).
+
+So are `dm.transclusion.heading_overflow`, for a `::file` child's heading
+written as bold text because it would land past H6, and
+`dm.normalization.level_overflow`, for heading normalization skipped for the
+same reason. See
+[Headings pushed past H6](../errors/composition-problems.md#headings-pushed-past-h6).
 
 `--allow` never takes a diagnostic code, and some problems cannot be allowed
 at all: a call proven wrong, a parse error, or an unavailable global always
@@ -325,7 +377,10 @@ command rules either:
 - **`--allow host=HOST` is the only flag that affects a slot read.** On
   `md compose` it also allows a slot's `http` and `https` reads on that host
   for the run, unless the read was denied for this run. (The configured
-  `network: allow` allows every such read the same way.) No other `--allow`,
+  `network: allow` allows every such read the same way; under
+  `network: deny` any other URL read is refused with
+  `dm.schema.slot_network_denied` without asking, and only under
+  `network: ask` is it asked about.) No other `--allow`,
   `--deny`, or `--disable` identifier governs a slot, and no
   `dm.schema.slot_*` code is a recovery or one of the codes `--deny` takes, so
   `--deny dm.schema.slot_denied` is a usage error and `--allow all` recovers

@@ -72,7 +72,7 @@ cd claudine && just install            # builds and installs `claudine` from the
 claudine skills                        # first run sets up ~/.claudine/config.yaml (interactive on a TTY)
 claudine claude 'summarize this repo'  # wrapped, non-interactive
 claudine codex -i                      # wrapped, interactive
-claudine compose @prompts/review.md target=src --dry-run   # see the composed prompt; launches nothing
+claudine compose @prompts/review.md target=src --dry-run   # see the composed prompt and any problems; runs nothing
 claudine compose @prompts/review.md target=src --codex     # run it with Codex
 ```
 
@@ -109,13 +109,17 @@ You are in {{ ctx.repo }} on branch {{ ctx.branch }}.
   Binaries built before 2026-11-08 left those three out of `claudine -h` and
   listed a nonexistent `budget` command.
 - **There is no `claudine init`.** Setup runs on the first command that needs
-  config. Change settings later with `claudine config`.
+  config; `claudine setup` reruns it without prompting and keeps your
+  settings (run it or `claudine doctor --fix` when `md` warns about an older
+  format 1 or format 2 `darkmatter-host` manifest). Change settings later with
+  `claudine config`.
 - **On a terminal, `compose` always opens a provider picker** unless you
   pass `--provider`/`--claude`/…. Frontmatter `agent:` only sets its
   default. Without a terminal, `agent:` decides.
-- **`--dry-run` still runs `$(…)` composition expansions**, with real
-  effects. It skips the provider, the lifecycle events, and sequence
-  `shell:`/`side_effect:` tasks.
+- **`--dry-run` on `compose`/`inline-compose`/`sequence` runs nothing** —
+  no `$(…)`, `::shell`, lifecycle event, provider, or task — and exits `2`
+  when it finds any error or warning (including "no provider" without a
+  terminal). `--dry-run-shell` was removed.
 - **Frontmatter `yolo: true` turns on the provider's permission bypass**, but
   doesn't approve shell commands. Only `--yolo` or `CLAUDINE_YOLO` does
   that.

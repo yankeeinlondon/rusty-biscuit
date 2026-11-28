@@ -32,7 +32,55 @@ fingerprint, like `shell_working_directory`. See
 `darkmatter/docs/topics/compose-requests.md` ("One environment per document").
 A file source (root or child) outside the request's tree is admitted
 trusted-external when only that derivation validates (`source_derivation_for`,
-applied to the root in `ComposeRequest::assemble`). The schema stage validates
+applied to the root in `ComposeRequest::assemble` through
+`ComposeOptions::admit_source_in`, which first joins a relative root path to
+the request directory). A root learned later goes through the same
+admission: `ComposeRequest::with_source_file`/`with_root_source` (graph,
+validators, `transclusions_with_options`) admit it, keeping the request's
+own admitted derivation for an equal absolute path; `rooted_at(document)`
+gives a source-less request the `Markdown`'s source (pipeline root entry,
+`extended_for` so pre-flight sees it, `effective_schema_for`); and
+`root_document` makes a relative `Markdown` source absolute, because schema
+preparation reads the document's own path. Every public root entry point
+(the three compose APIs, `collect_effects` behind `compose_preflight` and both
+command collectors, the approval and slot-approval entries,
+`effective_schema_for`, both graph builders, fresh and prebuilt validation,
+`transclusions_with_options`) first calls `admitted_document(document)`: that
+plus, for a source-less `Markdown` (not one with `with_context_identity`),
+the request's admitted file path, attached without re-reading the buffer.
+A generated body beneath a file's frontmatter (Claudine's inline prompt)
+names that file and its text with `with_frontmatter_authored_in`, read only
+by `InclusionSite::of_frontmatter_value` and the graph's `prologue`/`epilogue`
+`value_location`, so a section failure keeps its key and authored position.
+Never decide file identity from the raw `Markdown` source at a root; never
+call `admitted_document` for `as_markdown` content or inside the pipeline
+(nested content composes against the root source without being that file).
+A request directory reuses the
+options' repository observation (`request_repository_for`) only when it is
+that directory's nearest checkout, never by containment. A source whose nearest Git checkout
+(`compose::nearest_repository_root`, `biscuit_file::find_git_root`: the
+closest `.git` directory or file, so a submodule or a checkout nested inside
+the request's tree counts) is not the repository the request's context names
+(`compose::names_another_repository`, canonical comparison) is admitted
+`SourceDerivation::OwnRepository(Arc<context>)`; containment under a root is
+never the test: a
+context built at its directory from that repository's observation, derived
+by the public `derive_in_own_repository` (trusted external from the built
+context, the request's launch `@` scope copied on), and returned by
+`source_file_context` whatever request context a consumer passes, so
+composition, pre-flight, the reference graph, TOC and fragment targets, and
+`prepare_schemas` read one answer. Discovery happens only there, through the
+request's `SourceRepositories` memo (`Arc` on `ComposeRequest`, kept by
+`derive`/`map_options`/clones): the nearest root once per source directory
+(seeded with the request directory's), and one `RepositoryObservation` per
+exact checkout root, never looked up by "contains", so visit order cannot
+change a source's repository; a lookup, discovery, or build failure keeps the
+ordinary derivation. The configuration
+snapshot (permissions) stays the request's. `MdRequest::document_context`
+applies the same nearest-root rule and calls the same
+`derive_in_own_repository` for a directly opened document; it
+differs only in choosing the *request* context for a root, where there is no
+enclosing request to derive from. The schema stage validates
 in the source's derived context (`source_file_resolution_context`), and
 `resolve_ctx::document_file_context` recognizes that context by canonical
 directory, not spelling (`/var` vs `/private/var`); re-deriving it with
@@ -40,7 +88,14 @@ directory, not spelling (`/var` vs `/private/var`); re-deriving it with
 Unit tests use `crate::markdown::compose::test_request(options)` /
 `test_request_in(options, context)`; `lib/tests/l1` uses
 `crate::request_support::{request, request_at, request_in, configured,
-user_config, context_at, cwd_context}`.
+user_config, context_at, cwd_context}`. Unlike `prepare`,
+`ComposeRequest::with_context` does not re-anchor `ComposeOptions::new()`'s
+empty anchor, so it discovers the request's repository at the process
+directory (the whole monorepo under nextest, ~70 ms per request on Linux and
+seconds on Windows); both `request_in` helpers anchor such options on the
+context's request directory first. A test calling `with_context` directly
+anchors its options itself (`ComposeOptions::for_document`, or a context
+captured at its fixture).
 
 **Configuration snapshot.** A request always holds one
 `Arc<config::load::ConfigSnapshot>` (`ComposeRequest::config_snapshot()`;
@@ -125,6 +180,35 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 `same_instance`, the observation log (`read_mark`, `observations_since`),
 `memo_generation`, and `record_entry` (cache replay into the read set).
 
+A dry run's `PassiveSession` carries `PassiveObservations` (`passive.rs`):
+one `DataRuntime`, one `simplified_schema::resolve::buffers::SharedReads`
+(`local_reads()`: every local source's bytes, keyed by `SourceBuffers::key`,
+first read wins, failures not kept), and one `RemoteFetchRuntime` per authorization
+(`RemoteFetchRuntime::authorizes_like`: policy, `network`, concurrency,
+freshness, cache-only, store). `with_passive_session` attaches its data
+runtime when none is attached, `build_remote_fetch_runtime` returns the held
+runtime for its policy, an already attached runtime is kept as
+`RemoteFetchRuntime::without_store` (its slot map shared, nothing persisted),
+and `SlotSession::for_request` (or `with_passive_observations`) fetches slot
+URLs through the held runtime for the grants' policy. A host checking one
+invocation in several passes gives each `session.sharing_observations()`
+(fresh deferrals, same observations); Claudine's `document_check::Check::session`
+and `SequenceCheckRequest::session` do. Authorization is per read: the
+runtime's own policy check and the slot gate run before any memo is consulted.
+Local readers in a dry run read through `local_reads()`: `RunLocalCache`
+(`with_shared_reads`, set from the session by the root pipeline and
+`graph.rs::make_cache`) for document and heading loads, `passive::read_local_source`
+for `::code`, `Markdown::load_observed` in pre-flight collect, and the
+thread scope (`buffers::enter_shared_reads`, entered by
+`run_compose_pipeline_node`, `build_graph_inner`, and `validate`) for schema
+files (`buffers::read` consults it after guards) and `Markdown::try_from`,
+which reads through the scope in force. `verify_descendants` opens afresh.
+The one open is `buffers::open_source` (counted per path by
+`simplified_schema::work_counters::source_opens`; `md`'s `test-fixtures`
+seam `MD_TEST_SOURCE_OPENS`, `cli/src/source_open_log.rs`, logs each).
+Tests: `lib/tests/l1/passive_shared_observations.rs`,
+`cli/tests/l1/compose_shared_observations.rs`.
+
 A `SlotSession` owns one `DataRuntime` too (`SlotSession::new(data)`, or the
 request's via `options.data_runtime()`), and `observe_properties` (DMLS
 property observation) runs every property of one pass over that runtime and
@@ -158,7 +242,7 @@ every surface").
   unnameable input is refused). Frontmatter interpolation always excludes
   `$schema` (`with_schema_excluded`): only the slot resolver evaluates slots.
   `ExpressionError::SlotReadRefused` is never recovered (`try_frontmatter`
-  re-raises it). With no gate nothing changes.
+  re-raises it, with every `withholds_result()` failure). With no gate nothing changes.
 
 - **Memo shape** (`runtime.rs`): contracts are prepared once per document
   context and written text. Three layers share one generation: a raw source

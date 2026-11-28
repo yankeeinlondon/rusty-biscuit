@@ -104,7 +104,7 @@ enum AgentErrorsCommand {
         /// Provider slug (the research document stem).
         slug: String,
         /// Outcome-report path (default:
-        /// `docs/research/agent-errors/.findings/<slug>.md`).
+        /// `docs/research/providers/agent-errors/.findings/<slug>.md`).
         #[arg(long)]
         findings: Option<PathBuf>,
     },
@@ -426,7 +426,7 @@ fn run_generate(
     }
     // Older generator fixtures predate steering research. Once an area owns
     // the topic, every generation must pass its deterministic gate first.
-    if area.join("docs/research/steering").is_dir() {
+    if area.join("docs/research/providers/steering").is_dir() {
         let steering = match slug {
             Some(slug) => vec![claudine_gen::check_steering(
                 area,
@@ -514,7 +514,7 @@ fn prompt_decision(term: &Terminal, path: &std::path::Path) -> Decision {
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| biscuit_file::to_portable_string(path));
+            .unwrap_or_else(|| biscuit_file::to_forward_slash_string(path));
         print!("{}", report::prompt(term, &name));
         let _ = std::io::stdout().flush();
         let mut line = String::new();

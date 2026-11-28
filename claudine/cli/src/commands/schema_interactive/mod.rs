@@ -24,15 +24,14 @@
 use std::io;
 use std::path::Path;
 
-use biscuit_file::{FileReference, to_portable_string};
+use biscuit_file::{FileReference, to_forward_slash_string};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
     CompositionError, CompositionMode, DroppedOptional, FileDetail, InteractiveSchemaOptions,
     InteractiveShape, MissingProperty, PreValidatedSchema, ResolvedCompositionSource, TextFormat,
-    build_schema_status_report_for_mode, extract_markdown_detail, pre_validate_schema,
-    pre_validate_schema_for_mode,
+    build_schema_status_report_for_mode, extract_markdown_detail, pre_validate_schema_for_mode,
 };
 use biscuit_tui::prelude::*;
 
@@ -45,7 +44,7 @@ mod status;
 mod supplied;
 
 pub use status::render_status_report;
-pub(crate) use supplied::resolve_supplied_file_inputs;
+pub(crate) use supplied::{resolve_supplied_file_inputs, supplied_file_candidates};
 use status::escape_prose;
 
 /// Resolve [`InteractiveSchemaOptions`] from the user config plus
@@ -73,7 +72,7 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
 /// Pre-prepare schema validation with interactive collection of missing
 /// required values when allowed.
 ///
-/// Wraps [`pre_validate_schema`]. On `MissingProperties` and when
+/// Wraps [`pre_validate_schema_for_mode`]. On `MissingProperties` and when
 /// `interactive.allowed()` is `true`:
 ///
 /// 1. Properties with no [`InteractiveShape`] short-circuit to
@@ -88,11 +87,12 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
 ///
 /// Use BEFORE the pre-flight phase so all schema-related errors surface
 /// as typed [`CompositionError`] rather than Darkmatter's raw
-/// `MarkdownError::SchemaValidationFailed`.
+/// `MarkdownError::SchemaValidationFailed`. A `$schema` template resolves
+/// through `slot_session`, the session the composition then takes.
 ///
 /// ## Errors
 ///
-/// Returns the typed `CompositionError` from [`pre_validate_schema`] when
+/// Returns the typed `CompositionError` from [`pre_validate_schema_for_mode`] when
 /// validation cannot be satisfied (including after interactive
 /// collection). User cancellation of the prompt bubbles back as the
 /// original `MissingProperties` error so the CLI shows the non-TTY
@@ -108,6 +108,7 @@ pub fn pre_validate_with_interactive_collection(
     defer_schema_verdict: bool,
     mode: CompositionMode,
     trigger_findings: &claudine::composition::TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let first = pre_validate_schema_for_mode(
         source,
@@ -116,6 +117,7 @@ pub fn pre_validate_with_interactive_collection(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     );
     let Err(err) = first else {
         return first;
@@ -147,6 +149,7 @@ pub fn pre_validate_with_interactive_collection(
             file_ref_fallback_dir,
             file_resolution_context,
             trigger_findings,
+            slot_session,
         );
     }
 
@@ -181,6 +184,7 @@ pub fn pre_validate_with_interactive_collection(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     ) {
         render_status_report(&report, term);
     }
@@ -201,6 +205,7 @@ pub fn pre_validate_with_interactive_collection(
         file_resolution_context,
         mode,
         trigger_findings,
+        slot_session,
     )
 }
 
@@ -208,7 +213,7 @@ pub fn pre_validate_with_interactive_collection(
 /// provided value as a partial: walk the property's `match(...)` glob from the
 /// launch area, filter by the provided substring, and drive a confirmation
 /// dialog (single match) or chooser (multiple). On selection, rewrite the
-/// property override and re-run [`pre_validate_schema`] once.
+/// property override and re-run [`pre_validate_schema_for_mode`] once.
 ///
 /// This is the residual path: a caller-supplied partial is normally completed
 /// earlier by `resolve_supplied_file_inputs`, which reaches only shapes whose
@@ -219,6 +224,7 @@ pub fn pre_validate_with_interactive_collection(
 /// interactive, when zero candidates match the partial, or when the user
 /// declines / cancels — so the caller renders the actionable "no existing file
 /// matched reference" text just as before.
+#[allow(clippy::too_many_arguments)]
 fn resolve_unresolved_file_reference(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
@@ -227,6 +233,7 @@ fn resolve_unresolved_file_reference(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     trigger_findings: &claudine::composition::TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let CompositionError::UnresolvedFileReference {
         ref property,
@@ -256,12 +263,14 @@ fn resolve_unresolved_file_reference(
     let mut collected = serde_json::Map::new();
     collected.insert(property.clone(), resolved);
     let merged = merge_overrides(set_overrides, collected);
-    pre_validate_schema(
+    pre_validate_schema_for_mode(
         source,
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
         file_resolution_context,
+        CompositionMode::ChainedDocument,
         trigger_findings,
+        slot_session,
     )
 }
 
@@ -403,13 +412,7 @@ fn merge_overrides(
 /// behavior is auditable on every run.
 pub fn emit_dropped_optional_warnings(drops: &[DroppedOptional]) {
     for drop in drops {
-        log::warn(&format!(
-            "dropped optional schema property `{property}` (from {source}, at {stage}): {reason}",
-            property = drop.property,
-            source = drop.source.label(),
-            stage = drop.stage.label(),
-            reason = drop.reason,
-        ));
+        log::warn(&drop.message());
     }
 }
 
@@ -734,7 +737,7 @@ fn extract_file_detail(path: &Path) -> FileDetail {
         .file_stem()
         .and_then(|s| s.to_str())
         .map(str::to_string)
-        .unwrap_or_else(|| to_portable_string(path));
+        .unwrap_or_else(|| to_forward_slash_string(path));
     FileDetail {
         badge: "FILE".to_string(),
         name,
@@ -750,16 +753,16 @@ fn path_label(path: &Path, ctx: &ScopeContext) -> String {
         && let Ok(rel) = path.strip_prefix(root)
         && !rel.as_os_str().is_empty()
     {
-        return to_portable_string(rel);
+        return to_forward_slash_string(rel);
     }
     if let Some(home) = &ctx.home
         && path.starts_with(home)
         && let Ok(rel) = path.strip_prefix(home)
         && !rel.as_os_str().is_empty()
     {
-        return format!("~/{}", to_portable_string(rel));
+        return format!("~/{}", to_forward_slash_string(rel));
     }
-    to_portable_string(path)
+    to_forward_slash_string(path)
 }
 
 /// The chosen candidate as a resolved absolute path, resolved through the
@@ -775,7 +778,7 @@ fn resolve_file_value(path: &Path, ctx: &ScopeContext) -> io::Result<serde_json:
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("file not found: {}", to_portable_string(path)),
+                format!("file not found: {}", to_forward_slash_string(path)),
             )
         })?;
     Ok(serde_json::Value::String(resolved.display().to_string()))
