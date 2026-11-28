@@ -15,7 +15,7 @@ rules and the backend-proof bracket are in the `rust-testing` skill's
 | `TmuxHarness` | `tmux` on `PATH`. |
 | `WezTermHarness` | `wezterm` on `PATH`, `WEZTERM_UNIX_SOCKET` set, and `wezterm cli list` answering promptly. A slow answer counts only when `wezterm` is a required backend. |
 | `KittyHarness` | `kitty` on `PATH` and `KITTY_LISTEN_ON` set. |
-| `KittyInstance` (macOS) | `can_launch()`: `kitty`, `open`, `screencapture`. No host Kitty needed. |
+| `KittyInstance` (macOS) | `can_launch()`: `kitty`, `open`, `screencapture`, and the GUI (`Aqua`) session, so `false` over SSH. No host Kitty needed. |
 | `AppleTerminalHarness` | macOS, not CI, and `osascript` can reach Terminal.app. |
 | `cliclick` (L3, macOS) | `cliclick` on `PATH` only; also gate on `cliclick::accessibility_trusted()`, which checks platform and permission. |
 | `xdotool` (L3, Linux) | Linux, `xdotool`, and `DISPLAY` set; Wayland skips. |

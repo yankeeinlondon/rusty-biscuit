@@ -444,7 +444,7 @@ required tooling is missing — the test then skips rather than fails.
 | `TmuxHarness` | `tmux` on `$PATH`. **Nothing else** — fully self-contained. |
 | `WezTermHarness` | `wezterm` on `$PATH`, `WEZTERM_UNIX_SOCKET` set, **and** `wezterm cli list` answering within 5 s. A later answer (a busy or hung GUI) counts as available only when `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm`, where "unavailable" would fail the test anyway. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
-| `KittyInstance::can_launch()` | macOS, with `kitty`, `open`, and `screencapture` on `$PATH`. |
+| `KittyInstance::can_launch()` | macOS, with `kitty`, `open`, and `screencapture` on `$PATH`, in the logged-in GUI (`Aqua`) session; `false` over SSH. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, and `osascript` can address Terminal.app. |
 | `cliclick` (Level 3, macOS) | `cliclick` on `$PATH`. Gate *additionally* on `cliclick::accessibility_trusted()` — cliclick can be installed yet have every event dropped by the WindowServer when the runner lacks macOS Accessibility trust. |
 | `xdotool` (Level 3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland has no reachable XTEST equivalent, so a Wayland session reports unavailable and skips. |

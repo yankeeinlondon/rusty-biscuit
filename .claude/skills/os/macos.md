@@ -306,6 +306,15 @@ no longer watches files, so its user docs no longer describe fseventsd.
 
 ## Host conditions that look like repo failures
 
+- **A GUI backend over SSH has no window server.** A process started over
+  SSH (a push or `just test-l2` on `BUILD_MACOS`) runs in launchd's
+  `Background` session (`launchctl managername`); only the desktop login's
+  `Aqua` session can open a window. `KittyInstance::can_launch()` checks for
+  `Aqua`, so the private-Kitty tests skip there instead of failing with "the
+  private kitty instance never answered on its socket". A `gh` login on
+  that host is in the login keychain, which is locked to SSH sessions ("User
+  interaction is not allowed"): a push from there needs `GH_TOKEN` in the
+  push process's environment, passed on stdin, never written to the host.
 - **`ld: library 'git2' not found` after `brew upgrade libgit2`.**
   `libgit2-sys` links Homebrew's library and records its versioned Cellar path
   in its build-script output. Builds made before the upgrade fail to link, and
