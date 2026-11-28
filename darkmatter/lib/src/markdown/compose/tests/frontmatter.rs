@@ -324,15 +324,17 @@ fn transcluded_bare_sidecar_rejection_is_a_transclusion_warning() {
     // A tolerated child failure no other code describes keeps the
     // tolerated-transclusion code.
     assert_eq!(warning.code.as_deref(), Some(crate::markdown::compose::report_diagnostics::TRANSCLUSION_FAILURE_CODE));
-    let schema_name = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
-    assert!(
+    // The child arrives at its canonical path while the request's context
+    // keeps the temp directory as written; on macOS (`/var` for
+    // `/private/var`) the schema is named in the context's spelling.
+    let canonical = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
+    let named = |path: &std::path::Path| {
         warning.message.contains(&format!(
             "`{}` is not a valid schema definition: it has no `$schema` property",
-            schema_name.display()
-        )),
-        "got: {}",
-        warning.message
-    );
+            path.display()
+        ))
+    };
+    assert!(named(&schema_path) || named(&canonical), "got: {}", warning.message);
 }
 
 // ── DM1: exclude-keys integration tests ───────────────────────────
